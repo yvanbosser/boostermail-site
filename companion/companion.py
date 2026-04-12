@@ -1,0 +1,822 @@
+"""
+EasyMail Companion — Service local Windows
+Enrichit le plugin Outlook avec des fonctionnalités locales impossibles depuis un plugin web :
+1. Classement PJ : copier des fichiers vers n'importe quel dossier (local, NAS, OneDrive sync, OVH, serveur monté)
+2. Recherche rapide : interroger l'index Windows Search pour le contexte B/C (<100ms)
+
+Tourne en tray Windows, écoute sur localhost:5051.
+Ne nécessite PAS Outlook COM — utilise Windows Search via ADODB.
+
+Sécurité :
+- Écoute UNIQUEMENT sur 127.0.0.1 (pas 0.0.0.0)
+- CORS : autorise uniquement l'origine EasyMail (https://localhost:3443)
+- Path traversal : vérification normcase/realpath avant chaque opération filesystem
+"""
+
+import os
+import sys
+import json
+import base64
+import shutil
+import logging
+from datetime import datetime
+
+from flask import Flask, jsonify, request, Response
+
+# --- Configuration ---
+
+COMPANION_PORT = 5051
+ALLOWED_ORIGIN = 'https://localhost:3443'
+VERSION = '1.0.0'
+
+# --- Logging ---
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [companion] %(levelname)s — %(message)s')
+logger = logging.getLogger('companion')
+
+# --- App Flask ---
+
+app = Flask(__name__)
+
+
+# =============================================================================
+# CORS — Autorise uniquement l'origine EasyMail
+# =============================================================================
+
+@app.after_request
+def _add_cors(response):
+    origin = request.headers.get('Origin', '')
+    if origin == ALLOWED_ORIGIN:
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return response
+
+
+@app.route('/<path:path>', methods=['OPTIONS'])
+@app.route('/', methods=['OPTIONS'])
+def _options_preflight(**kwargs):
+    return '', 204
+
+
+# =============================================================================
+# SÉCURITÉ — Validation des chemins (anti path-traversal)
+# =============================================================================
+
+def _validate_path(path, allowed_root=None):
+    """
+    Valide un chemin filesystem. Empêche le path traversal.
+
+    Args:
+        path: Chemin à valider
+        allowed_root: Si fourni, le chemin doit être sous cette racine
+
+    Returns:
+        Chemin normalisé et vérifié
+
+    Raises:
+        ValueError si le chemin est dangereux
+    """
+    if not path:
+        raise ValueError("Chemin vide")
+
+    # Normaliser
+    normalized = os.path.normcase(os.path.realpath(os.path.abspath(path)))
+
+    # Vérifier le path traversal
+    if '..' in path.replace('\\', '/').split('/'):
+        raise ValueError(f"Path traversal détecté : {path}")
+
+    # Vérifier la racine si spécifiée
+    if allowed_root:
+        root_normalized = os.path.normcase(os.path.realpath(os.path.abspath(allowed_root)))
+        if not normalized.startswith(root_normalized):
+            raise ValueError(f"Chemin hors de la racine autorisée : {path}")
+
+    return normalized
+
+
+# =============================================================================
+# GET /status — Détection du Companion par le dialog
+# =============================================================================
+
+@app.route('/status')
+def status():
+    """Endpoint de détection. Le dialog teste au lancement."""
+    return jsonify({
+        "status": "ok",
+        "version": VERSION,
+        "platform": "windows",
+    })
+
+
+# =============================================================================
+# GET /folders — Scan arborescence filesystem
+# =============================================================================
+
+@app.route('/folders')
+def folders():
+    """
+    Scanne l'arborescence filesystem à partir d'une racine.
+    Query params :
+        root : chemin racine (ex: C:\\Users\\yvanb\\OneDrive\\Desktop\\2. Professionnel)
+        max_depth : profondeur max (défaut 5)
+    """
+    root = request.args.get('root', '')
+    try:
+        max_depth = min(int(request.args.get('max_depth', 5)), 8)
+    except (ValueError, TypeError):
+        max_depth = 5
+
+    if not root:
+        return jsonify({"error": "Paramètre root requis"}), 400
+
+    try:
+        root_path = _validate_path(root)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    if not os.path.isdir(root_path):
+        return jsonify({"error": f"Dossier introuvable : {root}"}), 404
+
+    result = []
+
+    def _scan(dir_path, rel_prefix='', depth=0):
+        if depth > max_depth:
+            return
+        try:
+            entries = sorted(os.listdir(dir_path), key=str.lower)
+        except PermissionError:
+            return
+        except OSError:
+            return
+
+        for name in entries:
+            full_path = os.path.join(dir_path, name)
+            if not os.path.isdir(full_path):
+                continue
+            # Skip dossiers cachés et système
+            if name.startswith('.') or name.startswith('$'):
+                continue
+
+            rel_path = f"{rel_prefix}/{name}" if rel_prefix else name
+            result.append({
+                'path': rel_path,
+                'full_path': full_path,
+                'name': name,
+                'depth': depth,
+            })
+            _scan(full_path, rel_path, depth + 1)
+
+    _scan(root_path)
+    logger.info(f"Scan folders: {root} → {len(result)} dossiers (depth {max_depth})")
+    return jsonify({"folders": result})
+
+
+# =============================================================================
+# POST /copy — Copie un fichier vers un dossier
+# =============================================================================
+
+@app.route('/copy', methods=['POST'])
+def copy_file():
+    """
+    Copie un fichier vers un dossier local.
+    Body JSON :
+        file_content : contenu en base64
+        filename : nom du fichier destination
+        dest_folder : chemin du dossier destination
+    """
+    data = request.get_json() or {}
+    file_content_b64 = data.get('file_content', '')
+    filename = os.path.basename(data.get('filename', ''))  # Sanitize
+    dest_folder = data.get('dest_folder', '')
+
+    if not file_content_b64 or not filename or not dest_folder:
+        return jsonify({"error": "file_content, filename et dest_folder requis"}), 400
+
+    # Limite taille fichier (10 Mo en base64 ≈ 7.5 Mo réel)
+    if len(file_content_b64) > 10 * 1024 * 1024:
+        return jsonify({"error": "Fichier trop volumineux (max 10 Mo)"}), 413
+
+    try:
+        dest_path = _validate_path(dest_folder)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    if not os.path.isdir(dest_path):
+        return jsonify({"error": f"Dossier destination introuvable : {dest_folder}"}), 404
+
+    full_dest = os.path.join(dest_path, filename)
+
+    try:
+        content = base64.b64decode(file_content_b64)
+        # Écriture en mode exclusif (évite race condition entre os.path.exists et open)
+        try:
+            with open(full_dest, 'xb') as f:  # 'xb' = exclusif binaire, échoue si existe
+                f.write(content)
+        except FileExistsError:
+            # Incrémenter le compteur et réessayer
+            name, ext = os.path.splitext(os.path.basename(full_dest))
+            for counter in range(1, 100):
+                alt_path = os.path.join(dest_path, f"{name} ({counter}){ext}")
+                try:
+                    with open(alt_path, 'xb') as f:
+                        f.write(content)
+                    full_dest = alt_path
+                    break
+                except FileExistsError:
+                    continue
+        logger.info(f"Fichier copié : {full_dest} ({len(content)} octets)")
+        return jsonify({
+            "success": True,
+            "path": full_dest,
+            "filename": os.path.basename(full_dest),
+        })
+    except Exception as e:
+        logger.error(f"Erreur copie fichier : {e}")
+        return jsonify({"success": False, "error": str(e)[:200]}), 500
+
+
+# =============================================================================
+# GET /search — Recherche dans l'index Windows Search (ADODB)
+# =============================================================================
+
+def _search_windows(query, search_type='all', sender=None, max_results=30):
+    """
+    Recherche dans l'index Windows Search via ADODB COM.
+    Ne nécessite PAS Outlook COM — utilise l'index Windows Search.
+
+    Args:
+        query: Mots-clés de recherche
+        search_type: 'email', 'file', ou 'all'
+        sender: Filtre par expéditeur (optionnel)
+        max_results: Nombre max de résultats
+    """
+    # Validation stricte
+    if not isinstance(max_results, int) or max_results < 1:
+        max_results = 30
+    max_results = min(max_results, 100)
+
+    try:
+        import win32com.client
+    except ImportError:
+        return {"error": "pywin32 non installé (pip install pywin32)", "results": []}
+
+    try:
+        conn = win32com.client.Dispatch("ADODB.Connection")
+        conn.Open("Provider=Search.CollatorDSO;Extended Properties='Application=Windows'")
+        conn.CommandTimeout = 10  # Timeout 10s pour éviter les blocages
+
+        # Construire la requête SQL
+        where_clauses = []
+
+        if search_type == 'email':
+            where_clauses.append("System.Kind = 'email'")
+        elif search_type == 'file':
+            where_clauses.append("System.Kind = 'document'")
+
+        if query:
+            # Échapper les guillemets simples dans la query
+            safe_query = query.replace("'", "''")
+            where_clauses.append(f"FREETEXT('{safe_query}')")
+
+        if sender:
+            safe_sender = sender.replace("'", "''")
+            where_clauses.append(f"CONTAINS(System.Message.SenderAddress, '{safe_sender}')")
+
+        where = ' AND '.join(where_clauses) if where_clauses else '1=1'
+
+        sql = f"""
+            SELECT TOP {min(max_results, 100)}
+                System.ItemName,
+                System.Message.SenderAddress,
+                System.Message.DateReceived,
+                System.Search.AutoSummary,
+                System.ItemUrl
+            FROM SystemIndex
+            WHERE {where}
+            ORDER BY System.Message.DateReceived DESC
+        """
+
+        rs = win32com.client.Dispatch("ADODB.Recordset")
+        rs.Open(sql, conn)
+
+        results = []
+        while not rs.EOF and len(results) < max_results:
+            try:
+                results.append({
+                    'subject': str(rs.Fields("System.ItemName").Value or ''),
+                    'sender': str(rs.Fields("System.Message.SenderAddress").Value or ''),
+                    'date': str(rs.Fields("System.Message.DateReceived").Value or ''),
+                    'summary': str(rs.Fields("System.Search.AutoSummary").Value or '')[:500],
+                    'url': str(rs.Fields("System.ItemUrl").Value or ''),
+                })
+            except Exception:
+                pass
+            rs.MoveNext()
+
+        rs.Close()
+        conn.Close()
+
+        logger.info(f"Windows Search: '{query}' type={search_type} → {len(results)} résultats")
+        return {"results": results}
+
+    except Exception as e:
+        logger.error(f"Erreur Windows Search : {e}")
+        return {"error": str(e)[:200], "results": []}
+
+
+@app.route('/search')
+def search():
+    """
+    Recherche dans l'index Windows Search.
+    Query params :
+        q : mots-clés (obligatoire)
+        type : 'email', 'file', ou 'all' (défaut 'email')
+        from : filtre par expéditeur (optionnel)
+        max_results : nombre max (défaut 30, max 100)
+    """
+    query = request.args.get('q', '')
+    search_type = request.args.get('type', 'email')
+    sender = request.args.get('from', '')
+    try:
+        max_results = min(int(request.args.get('max_results', 30)), 100)
+    except (ValueError, TypeError):
+        max_results = 30
+
+    if not query and not sender:
+        return jsonify({"error": "Paramètre q ou from requis", "results": []}), 400
+
+    result = _search_windows(query, search_type, sender, max_results)
+    return jsonify(result)
+
+
+# =============================================================================
+# OUTLOOK COM/APPLESCRIPT — Lecture mail sélectionné + injection réponse
+# Phase 3 — P11, P22, P23, P31, P44, P45
+# =============================================================================
+
+import platform
+
+_outlook_app = None  # Singleton COM Outlook (Windows uniquement)
+
+
+def _get_outlook():
+    """Retourne le singleton Outlook COM. Windows uniquement.
+    (B47) Si Outlook a été fermé puis rouvert, l'objet COM est périmé.
+    On vérifie sa validité et on le recrée si nécessaire."""
+    global _outlook_app
+    if platform.system() != 'Windows':
+        return None
+
+    # Vérifier si le singleton existant est encore valide
+    if _outlook_app is not None:
+        try:
+            # Test rapide : accéder à une propriété simple
+            _ = _outlook_app.Name
+        except Exception:
+            logger.warning("Outlook COM périmé (Outlook fermé/rouvert ?), reconnexion...")
+            _outlook_app = None
+
+    if _outlook_app is None:
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+            import win32com.client
+            _outlook_app = win32com.client.Dispatch("Outlook.Application")
+            logger.info("Outlook COM initialisé")
+        except Exception as e:
+            logger.error(f"Impossible d'initialiser Outlook COM : {e}")
+            return None
+    return _outlook_app
+
+
+@app.route('/current_selection')
+def current_selection():
+    """
+    Retourne les données du mail actuellement sélectionné dans Outlook.
+    Windows : COM ActiveExplorer.Selection (même logique que outlook_com.py du proto).
+    Mac Legacy : AppleScript selected objects.
+    Mac New Outlook : retourne unavailable (fallback Graph API côté backend).
+    """
+    if platform.system() == 'Windows':
+        return _current_selection_com()
+    elif platform.system() == 'Darwin':
+        return _current_selection_applescript()
+    else:
+        return jsonify({"status": "unavailable", "reason": "unsupported_os"})
+
+
+def _current_selection_com():
+    """Lit le mail sélectionné via COM (Windows)."""
+    outlook = _get_outlook()
+    if not outlook:
+        return jsonify({"status": "unavailable", "reason": "com_init_failed"})
+
+    try:
+        explorer = outlook.ActiveExplorer()
+        if not explorer or explorer.Selection.Count == 0:
+            return jsonify({"status": "no_selection"})
+
+        item = explorer.Selection.Item(1)
+
+        # Lire les propriétés (même format que outlook_com.py)
+        subject = getattr(item, 'Subject', '') or ''
+        sender_name = getattr(item, 'SenderName', '') or ''
+        sender_email = getattr(item, 'SenderEmailAddress', '') or ''
+        # Si l'adresse est un format Exchange (X500/EX), résoudre en SMTP
+        if sender_email and ('/' in sender_email or sender_email.upper().startswith('/O=')):
+            try:
+                sender_email = item.Sender.GetExchangeUser().PrimarySmtpAddress or sender_email
+            except Exception:
+                try:
+                    # Fallback : PropertyAccessor pour l'adresse SMTP
+                    PR_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E"
+                    sender_email = item.PropertyAccessor.GetProperty(PR_SMTP_ADDRESS) or sender_email
+                except Exception:
+                    pass  # Garder l'adresse X500 brute comme dernier recours
+
+        body_html = getattr(item, 'HTMLBody', '') or ''
+        message_id = getattr(item, 'InternetMessageId', '') or ''  # Note : pas EntryID
+        has_attachments = getattr(item, 'Attachments', None) is not None and item.Attachments.Count > 0
+        received = getattr(item, 'ReceivedTime', '')
+        to_field = getattr(item, 'To', '') or ''
+        cc_field = getattr(item, 'CC', '') or ''
+
+        return jsonify({
+            "status": "ok",
+            "subject": subject,
+            "from_name": sender_name,
+            "from_email": sender_email,
+            "body": body_html,
+            "message_id": message_id,
+            "has_attachments": has_attachments,
+            "to": to_field,
+            "cc": cc_field,
+            "date": str(received) if received else '',
+        })
+
+    except Exception as e:
+        logger.error(f"current_selection COM error: {e}")
+        return jsonify({"status": "error", "reason": str(e)})
+
+
+def _current_selection_applescript():
+    """Lit le mail sélectionné via AppleScript (Mac Legacy)."""
+    import subprocess
+    script = '''
+    tell application "Microsoft Outlook"
+        set selectedMsgs to selected objects
+        if (count of selectedMsgs) > 0 then
+            set msg to item 1 of selectedMsgs
+            set msgSubject to subject of msg
+            set msgSender to sender of msg
+            set msgContent to content of msg
+            set msgId to message id of msg
+            return msgSubject & "|||" & (address of msgSender) & "|||" & (name of msgSender) & "|||" & msgContent & "|||" & msgId
+        else
+            return "NO_SELECTION"
+        end if
+    end tell
+    '''
+    try:
+        result = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=5)
+        output = result.stdout.strip()
+
+        if output == 'NO_SELECTION' or not output:
+            return jsonify({"status": "no_selection"})
+
+        parts = output.split('|||')
+        if len(parts) >= 5:
+            return jsonify({
+                "status": "ok",
+                "subject": parts[0],
+                "from_email": parts[1],
+                "from_name": parts[2],
+                "body": parts[3],
+                "message_id": parts[4],
+                "has_attachments": False,
+                "to": "",
+                "cc": "",
+                "date": "",
+            })
+        return jsonify({"status": "error", "reason": "parse_error"})
+
+    except subprocess.TimeoutExpired:
+        return jsonify({"status": "unavailable", "reason": "applescript_timeout"})
+    except FileNotFoundError:
+        return jsonify({"status": "unavailable", "reason": "applescript_not_supported"})
+    except Exception as e:
+        return jsonify({"status": "error", "reason": str(e)})
+
+
+@app.route('/inject_reply', methods=['POST'])
+def inject_reply():
+    """
+    Injecte la réponse HTML dans le compose Outlook.
+    Windows : COM. Mac Legacy : AppleScript. Mac New : unavailable.
+    (P45) 2 cas : compose déjà ouvert (ActiveInspector) ou pas ouvert (item.Reply + Display).
+    """
+    data = request.get_json(silent=True) or {}
+    html_body = data.get('html_body', '')
+    mode = data.get('mode', 'reply')
+    compose_already_open = data.get('compose_already_open', True)
+    to_addr = data.get('to', '')
+    cc_addr = data.get('cc', '')
+    subject = data.get('subject', '')
+
+    if not html_body:
+        return jsonify({"status": "error", "reason": "html_body requis"}), 400
+
+    if platform.system() == 'Windows':
+        return _inject_reply_com(html_body, mode, compose_already_open, to_addr, cc_addr, subject)
+    elif platform.system() == 'Darwin':
+        return _inject_reply_applescript(html_body)
+    else:
+        return jsonify({"status": "unavailable", "reason": "unsupported_os"})
+
+
+def _inject_reply_com(html_body, mode, compose_already_open, to_addr, cc_addr, subject):
+    """Injecte la réponse via COM (Windows)."""
+    outlook = _get_outlook()
+    if not outlook:
+        return jsonify({"status": "unavailable", "reason": "com_init_failed"})
+
+    try:
+        if compose_already_open:
+            # Cas 1 : le compose est déjà ouvert (l'utilisateur a cliqué Répondre dans Outlook)
+            inspector = outlook.ActiveInspector()
+            if not inspector:
+                return jsonify({"status": "error", "reason": "no_active_inspector"})
+            item = inspector.CurrentItem
+            item.HTMLBody = html_body + item.HTMLBody
+        else:
+            # Cas 2 : le compose n'est pas ouvert (l'utilisateur a cliqué dans la popup PyQt)
+            explorer = outlook.ActiveExplorer()
+            if not explorer or explorer.Selection.Count == 0:
+                return jsonify({"status": "error", "reason": "no_selection"})
+
+            selected = explorer.Selection.Item(1)
+
+            if mode == 'reply':
+                compose = selected.Reply()
+            elif mode == 'reply_all':
+                compose = selected.ReplyAll()
+            elif mode == 'forward':
+                compose = selected.Forward()
+            else:
+                compose = selected.Reply()
+
+            compose.HTMLBody = html_body + compose.HTMLBody
+
+            # (P12) Forward : ajouter les destinataires
+            if mode == 'forward' and to_addr:
+                for addr in to_addr.replace(';', ',').split(','):
+                    addr = addr.strip()
+                    if addr:
+                        compose.Recipients.Add(addr)
+
+            # (P19, B30) Reply All : ajouter CC supplémentaires (vérifier doublons)
+            # B30 fix : résoudre les adresses X500/Exchange en SMTP avant comparaison
+            if cc_addr:
+                existing_cc = set()
+                for i in range(1, compose.Recipients.Count + 1):
+                    r = compose.Recipients.Item(i)
+                    if r.Type == 2:  # olCC
+                        addr_resolved = r.Address or ''
+                        # Résoudre X500 → SMTP si possible
+                        if addr_resolved and ('/' in addr_resolved or addr_resolved.upper().startswith('/O=')):
+                            try:
+                                addr_resolved = r.AddressEntry.GetExchangeUser().PrimarySmtpAddress or addr_resolved
+                            except Exception:
+                                try:
+                                    PR_SMTP = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E"
+                                    addr_resolved = r.AddressEntry.PropertyAccessor.GetProperty(PR_SMTP) or addr_resolved
+                                except Exception:
+                                    pass
+                        existing_cc.add(addr_resolved.lower())
+                for addr in cc_addr.replace(';', ',').split(','):
+                    addr = addr.strip()
+                    if addr and addr.lower() not in existing_cc:
+                        recip = compose.Recipients.Add(addr)
+                        recip.Type = 2  # olCC
+
+            if subject and mode == 'forward':
+                compose.Subject = subject
+
+            compose.Display()
+
+        return jsonify({"status": "ok"})
+
+    except Exception as e:
+        logger.error(f"inject_reply COM error: {e}")
+        return jsonify({"status": "error", "reason": str(e)})
+
+
+def _inject_reply_applescript(html_body):
+    """Injecte la réponse via AppleScript (Mac Legacy)."""
+    import subprocess
+    import tempfile
+
+    # Écrire le HTML dans un fichier temporaire pour éviter les problèmes
+    # d'échappement (guillemets, newlines, caractères spéciaux dans le HTML)
+    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8')
+    tmp.write(html_body)
+    tmp.close()
+    tmp_path = tmp.name
+
+    script = f'''
+    set htmlFile to POSIX file "{tmp_path}"
+    set newHTML to read htmlFile as «class utf8»
+    tell application "Microsoft Outlook"
+        set theMsg to current item of front window
+        set html content of theMsg to newHTML & html content of theMsg
+    end tell
+    '''
+    try:
+        result = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            return jsonify({"status": "ok"})
+        return jsonify({"status": "error", "reason": result.stderr.strip()})
+    except Exception as e:
+        return jsonify({"status": "error", "reason": str(e)})
+    finally:
+        # (B31) Toujours supprimer le fichier temp, même si AppleScript timeout ou échoue
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+@app.route('/detect_compose')
+def detect_compose():
+    """
+    Détecte si un compose (Répondre/Transférer/Nouveau) est ouvert dans Outlook.
+    Utilise ActiveInspector — si un Inspector est ouvert, c'est un compose.
+    Contournement pour le LaunchEvent OnNewMessageCompose qui nécessite un admin deploy.
+    Appelé en polling par la popup PyQt/extension (toutes les 1-2s).
+    """
+    if platform.system() != 'Windows':
+        return jsonify({"compose_open": False, "reason": "windows_only"})
+
+    outlook = _get_outlook()
+    if not outlook:
+        return jsonify({"compose_open": False, "reason": "com_init_failed"})
+
+    try:
+        inspector = outlook.ActiveInspector()
+        if not inspector:
+            return jsonify({"compose_open": False})
+
+        item = inspector.CurrentItem
+        if not item:
+            return jsonify({"compose_open": False})
+
+        # Vérifier que c'est un compose (pas juste un mail ouvert en lecture)
+        # Un compose a la propriété Sent = False
+        is_sent = getattr(item, 'Sent', True)
+        if is_sent:
+            return jsonify({"compose_open": False})
+
+        # C'est un compose ! Déterminer le mode depuis le sujet
+        subject = getattr(item, 'Subject', '') or ''
+        mode = 'new'
+        subject_lower = subject.lower()
+        if subject_lower.startswith('re:') or subject_lower.startswith('re :'):
+            mode = 'reply'
+        elif subject_lower.startswith('fw:') or subject_lower.startswith('fwd:') or \
+             subject_lower.startswith('tr:') or subject_lower.startswith('tr :'):
+            mode = 'forward'
+
+        # Destinataires
+        to_field = getattr(item, 'To', '') or ''
+
+        return jsonify({
+            "compose_open": True,
+            "subject": subject,
+            "mode": mode,
+            "to": to_field,
+        })
+
+    except Exception as e:
+        logger.error(f"detect_compose error: {e}")
+        return jsonify({"compose_open": False, "reason": str(e)})
+
+
+@app.route('/prefetch_sender')
+def prefetch_sender():
+    """
+    Recherche mails par expéditeur via COM (Mode Perf. Réduite, P44).
+    Fallback quand Graph API n'est pas disponible.
+    """
+    email = request.args.get('email', '')
+    try:
+        max_results = min(int(request.args.get('max', 20)), 50)
+    except (ValueError, TypeError):
+        max_results = 20
+
+    if not email:
+        return jsonify({"status": "error", "reason": "email requis", "results": []}), 400
+
+    if platform.system() != 'Windows':
+        return jsonify({"status": "unavailable", "reason": "windows_only", "results": []})
+
+    outlook = _get_outlook()
+    if not outlook:
+        return jsonify({"status": "unavailable", "reason": "com_init_failed", "results": []})
+
+    try:
+        ns = outlook.GetNamespace("MAPI")
+        inbox = ns.GetDefaultFolder(6)  # olFolderInbox
+        items = inbox.Items
+        items.Sort("[ReceivedTime]", True)
+
+        # Filtre DASL par expediteur (audit C1 : sanitiser les guillemets)
+        safe_email = email.replace("'", "").replace('"', '').replace('\\', '')
+        filter_str = f"@SQL=\"urn:schemas:httpmail:fromemail\" LIKE '%{safe_email}%'"
+        restricted = items.Restrict(filter_str)
+
+        results = []
+        for i in range(1, min(restricted.Count + 1, max_results + 1)):
+            item = restricted.Item(i)
+            results.append({
+                'subject': getattr(item, 'Subject', ''),
+                'from_email': email,
+                'date': str(getattr(item, 'ReceivedTime', '')),
+                'body_preview': (getattr(item, 'Body', '') or '')[:200],
+            })
+
+        return jsonify({"status": "ok", "results": results})
+
+    except Exception as e:
+        logger.error(f"prefetch_sender COM error: {e}")
+        return jsonify({"status": "error", "reason": str(e), "results": []})
+
+
+@app.route('/prefetch_subject')
+def prefetch_subject():
+    """
+    Recherche mails par sujet via COM (Mode Perf. Réduite, P44).
+    Fallback quand Graph API n'est pas disponible.
+    """
+    keywords = request.args.get('keywords', '')
+    try:
+        max_results = min(int(request.args.get('max', 20)), 50)
+    except (ValueError, TypeError):
+        max_results = 20
+
+    if not keywords:
+        return jsonify({"status": "error", "reason": "keywords requis", "results": []}), 400
+
+    if platform.system() != 'Windows':
+        return jsonify({"status": "unavailable", "reason": "windows_only", "results": []})
+
+    outlook = _get_outlook()
+    if not outlook:
+        return jsonify({"status": "unavailable", "reason": "com_init_failed", "results": []})
+
+    try:
+        ns = outlook.GetNamespace("MAPI")
+        inbox = ns.GetDefaultFolder(6)
+        items = inbox.Items
+        items.Sort("[ReceivedTime]", True)
+
+        # Filtre DASL par sujet
+        safe_kw = keywords.replace("'", "''")
+        filter_str = f"@SQL=\"urn:schemas:httpmail:subject\" LIKE '%{safe_kw}%'"
+        restricted = items.Restrict(filter_str)
+
+        results = []
+        for i in range(1, min(restricted.Count + 1, max_results + 1)):
+            item = restricted.Item(i)
+            results.append({
+                'subject': getattr(item, 'Subject', ''),
+                'from_email': getattr(item, 'SenderEmailAddress', ''),
+                'date': str(getattr(item, 'ReceivedTime', '')),
+                'body_preview': (getattr(item, 'Body', '') or '')[:200],
+            })
+
+        return jsonify({"status": "ok", "results": results})
+
+    except Exception as e:
+        logger.error(f"prefetch_subject COM error: {e}")
+        return jsonify({"status": "error", "reason": str(e), "results": []})
+
+
+# =============================================================================
+# DÉMARRAGE
+# =============================================================================
+
+if __name__ == '__main__':
+    print(f"\n{'='*50}")
+    print(f"  EasyMail Companion v{VERSION}")
+    print(f"  Port : {COMPANION_PORT}")
+    print(f"  URL  : http://localhost:{COMPANION_PORT}")
+    print(f"  CORS : {ALLOWED_ORIGIN}")
+    print(f"{'='*50}\n")
+
+    app.run(
+        host='127.0.0.1',  # UNIQUEMENT localhost
+        port=COMPANION_PORT,
+        debug=False,  # Pas de debug en production
+    )

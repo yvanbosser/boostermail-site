@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EasyMail — Divisez par 2 votre temps de gestion des mails</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body { font-family: 'Inter', -apple-system, sans-serif; color: #1a1a2e; background: #fff; overflow-x: hidden; }
+
+        /* ─── NAV ─── */
+        nav {
+            position: fixed; top: 0; width: 100%; z-index: 100;
+            background: rgba(255,255,255,0.92); backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+            padding: 16px 40px; display: flex; align-items: center; justify-content: space-between;
+        }
+        .nav-logo { font-size: 20px; font-weight: 800; color: #1a1a2e; text-decoration: none; }
+        .nav-logo span { color: #4361ee; }
+        .nav-links { display: flex; gap: 32px; align-items: center; }
+        .nav-links a { text-decoration: none; color: #555; font-size: 14px; font-weight: 500; transition: color 0.2s; }
+        .nav-links a:hover { color: #4361ee; }
+        .btn-primary {
+            background: #4361ee; color: white !important; padding: 10px 24px; border-radius: 8px;
+            font-weight: 600; font-size: 14px; text-decoration: none; transition: all 0.2s;
+            box-shadow: 0 2px 12px rgba(67,97,238,0.3);
+        }
+        .btn-primary:hover { background: #3651d4; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(67,97,238,0.4); }
+
+        /* ─── HERO ─── */
+        .hero {
+            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            padding: 120px 40px 80px; text-align: center;
+            background: linear-gradient(180deg, #f8f9ff 0%, #fff 100%);
+            position: relative;
+        }
+        .hero::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(ellipse at 30% 20%, rgba(67,97,238,0.06) 0%, transparent 60%),
+                        radial-gradient(ellipse at 70% 80%, rgba(114,9,183,0.04) 0%, transparent 60%);
+        }
+        .hero-content { position: relative; max-width: 800px; }
+        .hero-badge {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: #eef0ff; color: #4361ee; font-size: 13px; font-weight: 600;
+            padding: 8px 16px; border-radius: 20px; margin-bottom: 32px;
+        }
+        .hero h1 { font-size: 56px; font-weight: 900; line-height: 1.1; margin-bottom: 24px; letter-spacing: -1.5px; }
+        .hero h1 .highlight {
+            background: linear-gradient(135deg, #4361ee, #7209b7); -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .hero p { font-size: 20px; color: #555; line-height: 1.6; max-width: 600px; margin: 0 auto 40px; }
+        .hero-cta { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+        .btn-large {
+            padding: 16px 36px; border-radius: 12px; font-size: 16px; font-weight: 700;
+            text-decoration: none; transition: all 0.3s;
+        }
+        .btn-large.primary { background: #4361ee; color: white; box-shadow: 0 4px 24px rgba(67,97,238,0.35); }
+        .btn-large.primary:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(67,97,238,0.45); }
+        .btn-large.secondary { background: white; color: #1a1a2e; border: 2px solid #e0e0e0; }
+        .btn-large.secondary:hover { border-color: #4361ee; color: #4361ee; }
+
+        .hero-stats {
+            display: flex; gap: 48px; justify-content: center; margin-top: 64px;
+            padding-top: 40px; border-top: 1px solid rgba(0,0,0,0.06);
+        }
+        .hero-stat { text-align: center; }
+        .hero-stat .number { font-size: 36px; font-weight: 800; color: #4361ee; }
+        .hero-stat .label { font-size: 13px; color: #888; margin-top: 4px; }
+
+        /* ─── PROMISE ─── */
+        .promise {
+            padding: 100px 40px; text-align: center;
+            background: #1a1a2e; color: white;
+        }
+        .promise h2 { font-size: 40px; font-weight: 800; margin-bottom: 20px; line-height: 1.2; }
+        .promise p { font-size: 20px; color: rgba(255,255,255,0.7); max-width: 700px; margin: 0 auto; line-height: 1.6; }
+        .promise .accent { color: #a78bfa; font-weight: 700; }
+
+        /* ─── FEATURES / PILLARS ─── */
+        .pillars { padding: 100px 40px; max-width: 1200px; margin: 0 auto; }
+        .section-header { text-align: center; margin-bottom: 64px; }
+        .section-header .tag {
+            display: inline-block; font-size: 12px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 2px; color: #4361ee; margin-bottom: 16px;
+        }
+        .section-header h2 { font-size: 40px; font-weight: 800; line-height: 1.2; }
+        .section-header p { font-size: 18px; color: #777; margin-top: 16px; max-width: 600px; margin-left: auto; margin-right: auto; }
+
+        .pillars-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        .pillar-card {
+            background: #f8f9ff; border-radius: 20px; padding: 40px;
+            border: 1px solid rgba(67,97,238,0.08); transition: all 0.3s;
+            position: relative; overflow: hidden;
+        }
+        .pillar-card:hover { transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,0.08); }
+        .pillar-card.featured { background: linear-gradient(135deg, #4361ee, #3a0ca3); color: white; }
+        .pillar-card.featured .pillar-desc { color: rgba(255,255,255,0.8); }
+        .pillar-card.featured .pillar-tag { background: rgba(255,255,255,0.2); color: white; }
+        .pillar-icon { font-size: 40px; margin-bottom: 20px; }
+        .pillar-tag {
+            display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 1.5px; color: #4361ee; background: rgba(67,97,238,0.1);
+            padding: 4px 10px; border-radius: 4px; margin-bottom: 16px;
+        }
+        .pillar-title { font-size: 24px; font-weight: 700; margin-bottom: 12px; }
+        .pillar-desc { font-size: 15px; color: #666; line-height: 1.7; }
+        .pillar-features { list-style: none; margin-top: 20px; }
+        .pillar-features li { font-size: 14px; padding: 6px 0; display: flex; align-items: center; gap: 8px; }
+        .pillar-features li::before { content: '✓'; color: #4361ee; font-weight: 700; }
+        .pillar-card.featured .pillar-features li::before { color: #a78bfa; }
+
+        /* ─── FLOW ─── */
+        .flow { padding: 100px 40px; background: #f8f9ff; }
+        .flow-steps { display: flex; gap: 0; max-width: 1000px; margin: 0 auto; position: relative; }
+        .flow-steps::before {
+            content: ''; position: absolute; top: 40px; left: 60px; right: 60px; height: 3px;
+            background: linear-gradient(90deg, #4361ee, #7209b7, #4361ee);
+            border-radius: 2px;
+        }
+        .flow-step { flex: 1; text-align: center; position: relative; padding: 0 12px; }
+        .flow-step-num {
+            width: 80px; height: 80px; border-radius: 50%;
+            background: white; border: 3px solid #4361ee;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 28px; font-weight: 800; color: #4361ee;
+            margin: 0 auto 20px; position: relative; z-index: 2;
+            box-shadow: 0 4px 16px rgba(67,97,238,0.15);
+        }
+        .flow-step.active .flow-step-num { background: #4361ee; color: white; }
+        .flow-step h4 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+        .flow-step p { font-size: 13px; color: #777; line-height: 1.5; }
+
+        /* ─── COMPARISON ─── */
+        .comparison { padding: 100px 40px; max-width: 900px; margin: 0 auto; }
+        .comparison table { width: 100%; border-collapse: collapse; }
+        .comparison th { text-align: left; padding: 16px 20px; font-size: 14px; font-weight: 600; border-bottom: 2px solid #eee; }
+        .comparison th:first-child { width: 30%; }
+        .comparison th.em { color: #4361ee; background: rgba(67,97,238,0.04); border-radius: 8px 8px 0 0; }
+        .comparison td { padding: 14px 20px; font-size: 14px; border-bottom: 1px solid #f0f0f0; }
+        .comparison td.em { background: rgba(67,97,238,0.02); font-weight: 600; }
+        .comparison .check { color: #22c55e; font-weight: 700; font-size: 18px; }
+        .comparison .cross { color: #ef4444; font-size: 18px; }
+        .comparison .partial { color: #f59e0b; font-size: 14px; }
+
+        /* ─── TESTIMONIAL / QUOTE ─── */
+        .quote-section {
+            padding: 80px 40px; text-align: center;
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            color: white;
+        }
+        .quote-mark { font-size: 60px; color: #4361ee; line-height: 1; margin-bottom: 16px; }
+        .quote-text { font-size: 28px; font-weight: 600; max-width: 700px; margin: 0 auto 24px; line-height: 1.4; }
+        .quote-author { font-size: 14px; color: rgba(255,255,255,0.5); }
+
+        /* ─── PRICING ─── */
+        .pricing { padding: 100px 40px; text-align: center; }
+        .pricing-cards { display: flex; gap: 24px; max-width: 800px; margin: 48px auto 0; justify-content: center; }
+        .pricing-card {
+            background: white; border: 2px solid #eee; border-radius: 20px; padding: 40px;
+            flex: 1; max-width: 360px; transition: all 0.3s;
+        }
+        .pricing-card.popular { border-color: #4361ee; box-shadow: 0 8px 40px rgba(67,97,238,0.15); transform: scale(1.04); }
+        .pricing-card .plan-name { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #888; }
+        .pricing-card.popular .plan-name { color: #4361ee; }
+        .pricing-card .price { font-size: 48px; font-weight: 900; margin: 16px 0; }
+        .pricing-card .price span { font-size: 16px; font-weight: 400; color: #888; }
+        .pricing-card .plan-desc { font-size: 14px; color: #777; margin-bottom: 24px; }
+        .pricing-card ul { list-style: none; text-align: left; margin-bottom: 32px; }
+        .pricing-card ul li { font-size: 14px; padding: 8px 0; border-bottom: 1px solid #f5f5f5; display: flex; align-items: center; gap: 8px; }
+        .pricing-card ul li::before { content: '✓'; color: #4361ee; font-weight: 700; font-size: 16px; }
+        .pricing-btn {
+            display: block; width: 100%; padding: 14px; border-radius: 10px; font-size: 15px;
+            font-weight: 700; text-decoration: none; text-align: center; transition: all 0.2s;
+        }
+        .pricing-btn.outline { border: 2px solid #ddd; color: #333; background: white; }
+        .pricing-btn.outline:hover { border-color: #4361ee; color: #4361ee; }
+        .pricing-btn.filled { background: #4361ee; color: white; border: none; }
+        .pricing-btn.filled:hover { background: #3651d4; }
+
+        /* ─── CTA FINAL ─── */
+        .cta-final {
+            padding: 100px 40px; text-align: center;
+            background: linear-gradient(135deg, #4361ee, #7209b7);
+            color: white;
+        }
+        .cta-final h2 { font-size: 40px; font-weight: 800; margin-bottom: 20px; }
+        .cta-final p { font-size: 18px; opacity: 0.85; max-width: 500px; margin: 0 auto 40px; }
+        .btn-white {
+            background: white; color: #4361ee; padding: 16px 40px; border-radius: 12px;
+            font-size: 16px; font-weight: 700; text-decoration: none;
+            display: inline-block; transition: all 0.3s;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+        .btn-white:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+
+        /* ─── FOOTER ─── */
+        footer {
+            padding: 40px; text-align: center; font-size: 13px; color: #aaa;
+            border-top: 1px solid #f0f0f0;
+        }
+        footer a { color: #4361ee; text-decoration: none; }
+
+        /* ─── RESPONSIVE ─── */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 36px; }
+            .pillars-grid { grid-template-columns: 1fr; }
+            .flow-steps { flex-direction: column; gap: 24px; }
+            .flow-steps::before { display: none; }
+            .hero-stats { flex-direction: column; gap: 24px; }
+            .pricing-cards { flex-direction: column; align-items: center; }
+            .pricing-card.popular { transform: scale(1); }
+            nav { padding: 12px 20px; }
+            .nav-links { gap: 16px; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+    <a href="#" class="nav-logo">Easy<span>Mail</span></a>
+    <div class="nav-links">
+        <a href="#features">Fonctionnalités</a>
+        <a href="#compare">Comparatif</a>
+        <a href="#pricing">Tarifs</a>
+        <a href="#cta" class="btn-primary">Essai gratuit</a>
+    </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+    <div class="hero-content">
+        <div class="hero-badge">🚀 Propulsé par Claude AI (Anthropic)</div>
+        <h1>Divisez par 2 votre <span class="highlight">temps de gestion</span> des mails</h1>
+        <p>EasyMail rédige vos emails dans votre style, détecte vos engagements et relance automatiquement jusqu'à obtenir une réponse.</p>
+        <div class="hero-cta">
+            <a href="#cta" class="btn-large primary">Démarrer gratuitement</a>
+            <a href="#features" class="btn-large secondary">Voir comment ça marche</a>
+        </div>
+        <div class="hero-stats">
+            <div class="hero-stat">
+                <div class="number">&lt;5s</div>
+                <div class="label">Réponse générée</div>
+            </div>
+            <div class="hero-stat">
+                <div class="number">100%</div>
+                <div class="label">Votre style, votre ton</div>
+            </div>
+            <div class="hero-stat">
+                <div class="number">0</div>
+                <div class="label">Sujet oublié</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- PROMISE -->
+<section class="promise">
+    <h2>EasyMail ne vous aide pas à écrire des emails.</h2>
+    <p>Il s'assure que chaque échange aboutit. Chaque engagement est suivi. Chaque relance part <span class="accent">au bon moment</span>.</p>
+</section>
+
+<!-- 4 PILLARS -->
+<section class="pillars" id="features">
+    <div class="section-header">
+        <div class="tag">Fonctionnalités</div>
+        <h2>4 piliers, un seul objectif :<br>zéro sujet perdu</h2>
+    </div>
+    <div class="pillars-grid">
+        <div class="pillar-card">
+            <div class="pillar-icon">🧠</div>
+            <div class="pillar-tag">Rédaction</div>
+            <div class="pillar-title">Vos mails, votre style</div>
+            <div class="pillar-desc">EasyMail apprend votre façon d'écrire sur vos 800 derniers emails. Chaque réponse est unique, adaptée au correspondant et au contexte.</div>
+            <ul class="pillar-features">
+                <li>Style appris automatiquement</li>
+                <li>Ton adapté par correspondant</li>
+                <li>Analyse des pièces jointes</li>
+                <li>Anti-hallucination intégré</li>
+            </ul>
+        </div>
+        <div class="pillar-card featured">
+            <div class="pillar-icon">🎯</div>
+            <div class="pillar-tag">Pilotage</div>
+            <div class="pillar-title">Suivi intelligent des engagements</div>
+            <div class="pillar-desc">Détection automatique des échéances et engagements dans vos mails. Relance au bon moment, avec le bon ton. Boucle fermée jusqu'à réponse.</div>
+            <ul class="pillar-features">
+                <li>Détection automatique des délais</li>
+                <li>Relance progressive et contextuelle</li>
+                <li>Clôture auto à réception de réponse</li>
+                <li>Tableau de bord des échéances</li>
+            </ul>
+        </div>
+        <div class="pillar-card">
+            <div class="pillar-icon">⚡</div>
+            <div class="pillar-tag">Vitesse</div>
+            <div class="pillar-title">Réponse prête avant vous</div>
+            <div class="pillar-desc">Grâce à la pré-génération intelligente, votre réponse est prête dès que vous ouvrez un mail. Streaming en temps réel, latence quasi invisible.</div>
+            <ul class="pillar-features">
+                <li>Pré-génération spéculative</li>
+                <li>Streaming instantané</li>
+                <li>3 niveaux de profondeur (R/S/H)</li>
+                <li>Contexte enrichi automatiquement</li>
+            </ul>
+        </div>
+        <div class="pillar-card">
+            <div class="pillar-icon">🧩</div>
+            <div class="pillar-tag">Organisation</div>
+            <div class="pillar-title">Classement automatique</div>
+            <div class="pillar-desc">Vos mails et pièces jointes se classent tout seuls dans vos dossiers Outlook et Windows. Le système apprend vos préférences.</div>
+            <ul class="pillar-features">
+                <li>Classement mails dans Outlook</li>
+                <li>Classement PJ dans l'explorateur</li>
+                <li>Apprentissage continu des dossiers</li>
+                <li>Suggestion intelligente de PJ</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<!-- FLOW -->
+<section class="flow">
+    <div class="section-header">
+        <div class="tag">Comment ça marche</div>
+        <h2>Du mail reçu à la réponse obtenue</h2>
+        <p>EasyMail pilote chaque échange de bout en bout</p>
+    </div>
+    <div class="flow-steps">
+        <div class="flow-step">
+            <div class="flow-step-num">1</div>
+            <h4>Mail reçu</h4>
+            <p>EasyMail analyse le contexte, l'historique et le profil du correspondant</p>
+        </div>
+        <div class="flow-step">
+            <div class="flow-step-num">2</div>
+            <h4>Réponse générée</h4>
+            <p>Dans votre style exact, avec le bon ton et toutes les infos pertinentes</p>
+        </div>
+        <div class="flow-step active">
+            <div class="flow-step-num">3</div>
+            <h4>Suivi activé</h4>
+            <p>Échéances détectées, engagements trackés, relances programmées</p>
+        </div>
+        <div class="flow-step">
+            <div class="flow-step-num">4</div>
+            <h4>Classé</h4>
+            <p>Mail et PJ rangés automatiquement dans les bons dossiers</p>
+        </div>
+    </div>
+</section>
+
+<!-- COMPARISON -->
+<section class="comparison" id="compare">
+    <div class="section-header">
+        <div class="tag">Comparatif</div>
+        <h2>EasyMail vs la concurrence</h2>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th></th>
+                <th class="em">EasyMail</th>
+                <th>Copilot</th>
+                <th>Gmail + Gemini</th>
+                <th>Superhuman</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Rédaction IA</strong></td>
+                <td class="em"><span class="check">●</span> Excellent</td>
+                <td><span class="partial">●</span> Bon</td>
+                <td><span class="partial">●</span> Correct</td>
+                <td><span class="cross">●</span> Faible</td>
+            </tr>
+            <tr>
+                <td><strong>Style personnalisé</strong></td>
+                <td class="em"><span class="check">●</span> Appris sur vos mails</td>
+                <td><span class="cross">●</span> Générique</td>
+                <td><span class="cross">●</span> Générique</td>
+                <td><span class="cross">●</span> Non</td>
+            </tr>
+            <tr>
+                <td><strong>Suivi des engagements</strong></td>
+                <td class="em"><span class="check">●</span> Automatique</td>
+                <td><span class="cross">●</span> Non</td>
+                <td><span class="cross">●</span> Non</td>
+                <td><span class="cross">●</span> Non</td>
+            </tr>
+            <tr>
+                <td><strong>Relance intelligente</strong></td>
+                <td class="em"><span class="check">●</span> Progressive</td>
+                <td><span class="cross">●</span> Non</td>
+                <td><span class="cross">●</span> Non</td>
+                <td><span class="cross">●</span> Non</td>
+            </tr>
+            <tr>
+                <td><strong>Classement auto</strong></td>
+                <td class="em"><span class="check">●</span> Mails + PJ</td>
+                <td><span class="cross">●</span> Non</td>
+                <td><span class="cross">●</span> Non</td>
+                <td><span class="cross">●</span> Non</td>
+            </tr>
+            <tr>
+                <td><strong>Apprentissage continu</strong></td>
+                <td class="em"><span class="check">●</span> Style + contacts</td>
+                <td><span class="cross">●</span> Limité</td>
+                <td><span class="cross">●</span> Non</td>
+                <td><span class="cross">●</span> Non</td>
+            </tr>
+            <tr>
+                <td><strong>Vitesse perçue</strong></td>
+                <td class="em"><span class="check">●</span> &lt;5 secondes</td>
+                <td><span class="partial">●</span> 5-10s</td>
+                <td><span class="partial">●</span> 3-8s</td>
+                <td><span class="check">●</span> Instant</td>
+            </tr>
+        </tbody>
+    </table>
+</section>
+
+<!-- QUOTE -->
+<section class="quote-section">
+    <div class="quote-mark">"</div>
+    <div class="quote-text">Votre produit ne vaut pas pour ce qu'il fait.<br>Il vaut pour ce qu'il empêche :<br><em>oublier, perdre, ne pas relancer.</em></div>
+</section>
+
+<!-- PRICING -->
+<section class="pricing" id="pricing">
+    <div class="section-header">
+        <div class="tag">Tarifs</div>
+        <h2>Simple, transparent</h2>
+        <p>14 jours d'essai gratuit, sans engagement</p>
+    </div>
+    <div class="pricing-cards">
+        <div class="pricing-card">
+            <div class="plan-name">Essentiel</div>
+            <div class="price">15€<span>/mois</span></div>
+            <div class="plan-desc">Pour les indépendants et petites équipes</div>
+            <ul>
+                <li>Rédaction IA illimitée</li>
+                <li>Style personnalisé</li>
+                <li>50 profils contacts</li>
+                <li>Classement automatique</li>
+                <li>Support email</li>
+            </ul>
+            <a href="#" class="pricing-btn outline">Commencer l'essai</a>
+        </div>
+        <div class="pricing-card popular">
+            <div class="plan-name">Professionnel</div>
+            <div class="price">25€<span>/mois</span></div>
+            <div class="plan-desc">Pour ceux qui ne veulent rien laisser passer</div>
+            <ul>
+                <li>Tout de Essentiel, plus :</li>
+                <li>Suivi d'engagements illimité</li>
+                <li>Relances intelligentes</li>
+                <li>Contacts illimités</li>
+                <li>Classement PJ Windows</li>
+                <li>Support prioritaire</li>
+            </ul>
+            <a href="#" class="pricing-btn filled">Commencer l'essai</a>
+        </div>
+    </div>
+</section>
+
+<!-- CTA FINAL -->
+<section class="cta-final" id="cta">
+    <h2>Prêt à ne plus rien oublier ?</h2>
+    <p>Essayez EasyMail gratuitement pendant 14 jours. Aucune carte bancaire requise.</p>
+    <a href="#" class="btn-white">Démarrer mon essai gratuit →</a>
+</section>
+
+<!-- FOOTER -->
+<footer>
+    <p>© 2026 EasyMail — Propulsé par <a href="https://anthropic.com" target="_blank">Claude AI</a> · <a href="#">Mentions légales</a> · <a href="#">Contact</a></p>
+</footer>
+
+</body>
+</html>

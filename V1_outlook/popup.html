@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EasyMail</title>
+    <!-- (B13) Chargement conditionnel Office.js : uniquement en mode taskpane -->
+    <script>
+    (function() {
+        var params = new URLSearchParams(window.location.search);
+        var container = params.get('container') || 'taskpane';
+        if (container === 'taskpane') {
+            var s = document.createElement('script');
+            s.src = 'https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js';
+            document.head.appendChild(s);
+        }
+        // En mode pyqt/extension, Office.js n'est PAS charge (inutile + 200ms gagne)
+    })();
+    </script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #fff; margin: 0; padding: 0; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+
+        /* Header */
+        .tp-header {
+            padding: 8px 12px;
+            background: #0F6CBD;
+            color: #fff;
+            display: flex; align-items: center; justify-content: space-between;
+            flex-shrink: 0;
+            height: 36px;
+        }
+        .tp-logo { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 5px; }
+        .tp-header-nav { display: flex; align-items: center; gap: 2px; }
+        .tp-header-nav-btn { background: none; border: none; color: rgba(255,255,255,0.8); font-size: 13px; cursor: pointer; padding: 2px 5px; border-radius: 4px; position: relative; }
+        .tp-header-nav-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+        .tp-header-right { display: flex; align-items: center; gap: 6px; }
+        .tp-status { font-size: 8px; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 8px; color: #fff; }
+        .tp-status.ok::before { content: '\25cf '; color: #4caf50; }
+        .tp-status.error::before { content: '\25cf '; color: #ff5722; }
+
+        /* Navigation */
+        .tp-nav {
+            display: flex;
+            border-bottom: 1px solid #eee;
+            background: #fff;
+            flex-shrink: 0;
+        }
+        .tp-nav-btn {
+            flex: 1; padding: 8px 4px;
+            border: none; background: none;
+            font-size: 9px; color: #666; cursor: pointer;
+            display: flex; flex-direction: column; align-items: center; gap: 2px;
+            position: relative;
+        }
+        .tp-nav-btn:hover { color: #0078d4; background: #f0f7ff; }
+        .tp-nav-icon { font-size: 14px; }
+        .tp-nav-badge {
+            position: absolute; top: 3px; right: calc(50% - 16px);
+            background: #e81123; color: #fff; font-size: 7px; font-weight: 700;
+            min-width: 14px; height: 14px; border-radius: 7px;
+            display: flex; align-items: center; justify-content: center;
+            padding: 0 3px;
+        }
+        .tp-nav-badge.hidden { display: none; }
+
+        /* Contenu — remplit tout l'espace sous le header */
+        .tp-content { flex: 1; overflow: hidden; margin: 0; padding: 0; display: flex; flex-direction: column; }
+
+        /* Contact */
+        .tp-contact { padding: 4px 10px; border-bottom: 1px solid #eee; background: #fff; }
+        .tp-contact-row { display: flex; align-items: center; gap: 8px; }
+        .tp-avatar { width: 24px; height: 24px; border-radius: 50%; background: #0F6CBD; color: #fff; font-size: 10px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .tp-contact-info { flex: 1; }
+        .tp-contact-name { font-size: 11px; font-weight: 600; color: #333; }
+        .tp-contact-org { font-size: 9px; color: #999; }
+        .tp-contact-tags { display: flex; gap: 3px; flex-wrap: wrap; margin-top: 6px; }
+        .tp-tag { padding: 1px 6px; border-radius: 8px; font-size: 8px; font-weight: 600; }
+        .tp-tag.green { background: #e8f5e9; color: #2e7d32; }
+        .tp-tag.orange { background: #fff3e0; color: #e65100; }
+
+        /* Sections */
+        .tp-section { padding: 8px 12px; border-bottom: 1px solid #eee; }
+        .tp-section-title { font-size: 8px; color: #999; text-transform: uppercase; font-weight: 600; margin-bottom: 5px; letter-spacing: 0.5px; }
+
+        /* PJ */
+        .tp-pj-item { display: flex; align-items: center; gap: 5px; padding: 4px 6px; background: #fff; border: 1px solid #f0f0f0; border-radius: 4px; margin-bottom: 3px; font-size: 9px; color: #555; }
+        .tp-pj-icon { color: #e65100; font-size: 10px; }
+        .tp-pj-size { color: #ccc; margin-left: auto; font-size: 8px; }
+        .tp-pj-empty { font-size: 9px; color: #bbb; font-style: italic; }
+
+        /* Echeance */
+        .tp-ech-item { padding: 6px 8px; background: #fffde7; border-left: 3px solid #ffc107; border-radius: 3px; font-size: 9px; color: #795548; }
+        .tp-ech-date { font-weight: 600; color: #e65100; }
+        .tp-ech-empty { font-size: 9px; color: #bbb; font-style: italic; }
+
+        /* Classement */
+        .tp-cls-item { padding: 6px 8px; background: #f0f7ff; border-left: 3px solid #0078d4; border-radius: 3px; font-size: 9px; color: #0078d4; display: flex; align-items: center; gap: 4px; }
+        .tp-cls-btn { padding: 2px 8px; border-radius: 3px; font-size: 8px; border: 1px solid #0078d4; background: #fff; color: #0078d4; cursor: pointer; margin-left: auto; }
+        .tp-cls-btn:hover { background: #e3f2fd; }
+
+        /* 4 lignes homogenes — chacune prend 25% de l'espace disponible */
+        .tp-row { flex: 1; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-bottom: 1px solid #f0f0f0; margin: 0; }
+        .tp-row-btn { flex: 1; background: none; border: none; font-size: 11px; color: #555; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 2px 0; }
+        .tp-row-btn:hover { color: #0F6CBD; }
+
+        /* Bouton principal */
+        .tp-main-btn { flex: 1; padding: 7px 10px; border: none; border-radius: 6px; background: linear-gradient(135deg, #0F6CBD, #005a9e); color: #fff; font-size: 11px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; }
+        .tp-main-btn:hover { background: linear-gradient(135deg, #005a9e, #004578); }
+        .tp-main-btn:disabled { background: #ccc; cursor: not-allowed; }
+
+        /* Actions secondaires */
+        .tp-sec-btn { flex: 1; padding: 4px 3px; border: 1px solid #e0e0e0; border-radius: 5px; background: #fff; font-size: 8px; color: #666; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+        .tp-sec-btn:hover { border-color: #0F6CBD; color: #0F6CBD; }
+        .tp-sec-icon { font-size: 12px; }
+
+        /* Loading + Empty */
+        .tp-loading { padding: 20px; text-align: center; font-size: 11px; color: #999; }
+        .tp-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; }
+        .tp-empty-icon { font-size: 32px; color: #ddd; margin-bottom: 8px; }
+        .tp-empty-text { font-size: 11px; color: #999; }
+
+        /* Prefetch indicator */
+        .tp-prefetch { padding: 4px 12px; background: #e3f2fd; font-size: 8px; color: #0078d4; text-align: center; display: none; }
+        .tp-prefetch.active { display: block; }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="tp-header">
+        <div class="tp-logo">BoosterMail</div>
+    </div>
+
+    <!-- Prefetch indicator -->
+    <div class="tp-prefetch" id="prefetchBar">Chargement contexte...</div>
+
+    <!-- Contenu principal (scrollable) -->
+    <div class="tp-content" id="mainContent">
+        <!-- Wizard Setup (12n) -->
+        <div id="setupWizard" style="display:none; padding: 16px;">
+            <div style="text-align:center; margin-bottom: 16px;">
+                <div style="font-size: 24px;">&#x2709;</div>
+                <div style="font-size: 14px; font-weight: 700; color: #0F6CBD;">Bienvenue sur BoosterMail</div>
+                <div style="font-size: 10px; color: #888; margin-top: 4px;" id="setupPlatformInfo"></div>
+            </div>
+
+            <!-- Etape 1 : Connexion Microsoft -->
+            <div id="setupStepAuth" style="display:none;">
+                <div style="font-size: 12px; font-weight: 600; margin-bottom: 6px;">Etape 1/3 — Connexion Microsoft</div>
+                <p style="font-size:11px; color:#555; margin-bottom:12px;">Connectez votre compte Microsoft pour acceder a vos mails.</p>
+                <button id="setupBtnAuth" style="width:100%; padding:10px; background:#0F6CBD; color:#fff; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer;">Se connecter a Microsoft</button>
+                <div id="setupAuthWaiting" style="display:none; text-align:center; margin-top:12px;">
+                    <div style="font-size:10px; color:#0F6CBD;">&#x23F3; Connexion en cours... Finalisez dans votre navigateur.</div>
+                </div>
+                <div id="setupAuthDone" style="display:none; text-align:center; margin-top:12px;">
+                    <div style="font-size:11px; color:#107c10; font-weight:600;">&#x2705; Connecte !</div>
+                </div>
+            </div>
+
+            <!-- Etape 2 : Analyse du style -->
+            <div id="setupStepStyle" style="display:none;">
+                <div style="font-size: 12px; font-weight: 600; margin-bottom: 6px;">Etape 2/3 — Analyse de votre style</div>
+                <p style="font-size:11px; color:#555; margin-bottom:12px;">BoosterMail analyse vos mails pour apprendre votre facon d'ecrire.</p>
+                <div id="onboardingProgress" style="display:none;">
+                    <div style="background:#eee; border-radius:4px; height:6px; margin-bottom:8px;">
+                        <div id="onboardingBar" style="background:#0F6CBD; height:6px; border-radius:4px; width:0%; transition:width 0.3s;"></div>
+                    </div>
+                    <div id="onboardingText" style="font-size:10px; color:#888; text-align:center;">Analyse en cours...</div>
+                </div>
+                <button id="setupStartOnboarding" style="width:100%; padding:10px; background:#0F6CBD; color:#fff; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer;">Analyser mes mails</button>
+            </div>
+
+            <!-- Etape 3 : Activation bouton Outlook -->
+            <div id="setupStepButton" style="display:none;">
+                <div style="font-size: 12px; font-weight: 600; margin-bottom: 6px;">Etape 3/3 — Activation du suivi</div>
+                <p style="font-size:11px; color:#555; margin-bottom:8px;">Pour que BoosterMail detecte automatiquement vos mails :</p>
+                <div style="background:#f0f6ff; border-left:3px solid #0F6CBD; padding:10px 12px; border-radius:0 6px 6px 0; margin-bottom:12px;">
+                    <div style="font-size:11px; font-weight:600; color:#333;" id="setupButtonInstruction">
+                        <!-- Rempli dynamiquement selon la plateforme -->
+                    </div>
+                </div>
+                <p style="font-size:10px; color:#888;">Cette operation est necessaire une seule fois.</p>
+                <button id="setupSkipButton" style="width:100%; padding:8px; background:#fff; color:#999; border:1px solid #ddd; border-radius:6px; font-size:10px; cursor:pointer; margin-top:8px;">Je le ferai plus tard (non recommande)</button>
+            </div>
+
+            <!-- Termine -->
+            <div id="setupDone" style="display:none; text-align:center;">
+                <div style="font-size:32px; margin-bottom:8px;">&#x2705;</div>
+                <div style="font-size:14px; font-weight:600; color:#333;">BoosterMail est pret !</div>
+                <p style="font-size:10px; color:#888; margin-top:6px;">Selectionnez un mail pour commencer.</p>
+            </div>
+        </div>
+
+        <!-- Etat : premiere utilisation (activation Office.js) -->
+        <div id="firstUseState" style="display:none; padding:16px; text-align:center;">
+            <div style="font-size:28px; margin-bottom:8px;">&#x1f680;</div>
+            <div style="font-size:13px; font-weight:700; color:#0F6CBD; margin-bottom:12px;">Premiere utilisation detectee</div>
+            <div style="font-size:11px; color:#555; line-height:1.6; text-align:left; margin-bottom:16px;">
+                <div id="firstUseInstruction" style="background:#f0f6ff; border-left:3px solid #0F6CBD; padding:10px 12px; border-radius:0 6px 6px 0; margin-bottom:8px;">
+                    <!-- Rempli dynamiquement par _showFirstUseState() -->
+                </div>
+                <p style="color:#888; font-size:10px;">Cette operation est necessaire une seule fois. Lors de vos prochaines sessions, tout sera automatique.</p>
+            </div>
+            <div id="firstUseSpinner" style="font-size:10px; color:#0F6CBD;">
+                &#x23F3; En attente de l'activation...
+            </div>
+        </div>
+
+        <!-- Etat : pas de mail selectionne -->
+        <div class="tp-empty" id="emptyState">
+            <div class="tp-empty-icon">&#x2709;</div>
+            <div class="tp-empty-text">Selectionnez un mail pour commencer</div>
+        </div>
+
+        <!-- Etat : mail charge — 4 lignes de hauteur homogene -->
+        <div id="mailContent" style="display:none; flex:1; flex-direction:column;">
+            <!-- Ligne 1 : Logos echeances / contacts / profil -->
+            <div class="tp-row">
+                <button class="tp-row-btn" id="navEcheances" title="Echeances">&#x1f4c5; Echeances<span class="tp-nav-badge hidden" id="echeanceBadge"></span></button>
+                <button class="tp-row-btn" id="navContacts" title="Contacts">&#x1f464; Contacts</button>
+                <button class="tp-row-btn" id="navProfil" title="Profil">&#x2699; Profil</button>
+            </div>
+            <!-- Ligne 2 : Contact / email du mail selectionne -->
+            <div class="tp-row" id="contactSection">
+                <div class="tp-avatar" id="contactAvatar">?</div>
+                <div class="tp-contact-name" id="contactName">—</div>
+                <div class="tp-contact-org" id="contactOrg" style="display:none;"></div>
+                <div class="tp-contact-tags" id="contactTags" style="display:none;"></div>
+            </div>
+            <!-- Ligne 3 : Bouton principal -->
+            <div class="tp-row">
+                <button class="tp-main-btn" id="btnRepondre">&#x2728; Repondre avec BoosterMail</button>
+            </div>
+            <!-- Ligne 4 : Actions secondaires -->
+            <div class="tp-row">
+                <button class="tp-sec-btn" id="btnRepTous"><span class="tp-sec-icon">&#x21A9;</span>Rep. tous</button>
+                <button class="tp-sec-btn" id="btnTransferer"><span class="tp-sec-icon">&#x21AA;</span>Transferer</button>
+                <button class="tp-sec-btn" id="btnClasser"><span class="tp-sec-icon">&#x1f4c1;</span>Classer</button>
+            </div>
+            <!-- Sections masquees (PJ, echeances, classement) — s'affichent si pertinent -->
+            <div class="tp-section" id="pjSection" style="display:none;">
+                <div class="tp-section-title">Pieces jointes</div>
+                <div id="pjList"></div>
+            </div>
+            <div class="tp-section" id="echSection" style="display:none;">
+                <div class="tp-section-title">Echeance</div>
+                <div id="echList"></div>
+            </div>
+            <div class="tp-section" id="clsSection" style="display:none;">
+                <div class="tp-section-title">Classement suggere</div>
+                <div id="clsSuggestion"></div>
+            </div>
+        </div>
+
+        <!-- Section Profil -->
+        <div id="profilSection" style="display:none; padding: 12px;">
+            <div style="margin-bottom: 16px;">
+                <div style="font-size: 12px; font-weight: 600; color: #333; margin-bottom: 8px;">Mode EasyMail</div>
+                <div id="profilMode" style="font-size: 11px; color: #555; padding: 8px; background: #f0f6ff; border-radius: 6px; border-left: 3px solid #0078d4;">Chargement...</div>
+                <button id="btnActiverStandard" style="display:none; margin-top: 8px; width: 100%; padding: 8px; background: #0078d4; color: #fff; border: none; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">Activer le Mode Standard</button>
+            </div>
+            <div style="margin-bottom: 16px;">
+                <div style="font-size: 12px; font-weight: 600; color: #333; margin-bottom: 8px;">Modele IA</div>
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: #fff; border: 1px solid #eee; border-radius: 6px; cursor: pointer; font-size: 11px;">
+                        <input type="radio" name="aiModel" value="claude-sonnet" checked>
+                        <div><div style="font-weight: 600;">Claude Sonnet</div><div style="font-size: 9px; color: #888;">Meilleure qualite</div></div>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: #fff; border: 1px solid #eee; border-radius: 6px; cursor: pointer; font-size: 11px;">
+                        <input type="radio" name="aiModel" value="gpt-4.1-mini">
+                        <div><div style="font-weight: 600;">GPT-4.1 mini</div><div style="font-size: 9px; color: #888;">Meilleur rapport qualite-prix</div></div>
+                    </label>
+                </div>
+            </div>
+            <div style="margin-bottom: 16px;">
+                <div style="font-size: 12px; font-weight: 600; color: #333; margin-bottom: 8px;">Nom</div>
+                <input type="text" id="profilUserName" placeholder="Votre nom" style="width: 100%; padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 11px;">
+            </div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

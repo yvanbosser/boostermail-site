@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>EasyMail - V7 Overlay plein ecran (par-dessus le mail)</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', sans-serif; background: #f3f3f3; overflow: hidden; height: 100vh; }
+
+.outlook-frame { display: flex; height: 100vh; }
+
+.outlook-sidebar { width: 48px; background: #ebebeb; border-right: 1px solid #d0d0d0; display: flex; flex-direction: column; align-items: center; padding-top: 10px; gap: 6px; flex-shrink: 0; }
+.sb-icon { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #777; cursor: pointer; }
+.sb-icon:hover { background: #ddd; }
+.sb-icon.active { background: #cde4f7; color: #0078d4; }
+
+.folder-panel { width: 170px; background: #f7f7f7; border-right: 1px solid #e0e0e0; padding: 6px 0; flex-shrink: 0; }
+.fp-item { padding: 5px 10px; font-size: 11px; color: #555; cursor: pointer; display: flex; justify-content: space-between; }
+.fp-item:hover { background: #eee; }
+.fp-item.active { background: #d6e4f0; color: #0078d4; font-weight: 600; }
+.fp-cnt { font-size: 10px; color: #aaa; }
+
+.mail-list { width: 260px; background: #fff; border-right: 1px solid #e0e0e0; overflow-y: auto; flex-shrink: 0; }
+.ml-item { padding: 8px 10px; border-bottom: 1px solid #f5f5f5; cursor: pointer; }
+.ml-item:hover { background: #f8fbff; }
+.ml-item.active { background: #e8f0fe; border-left: 3px solid #0078d4; }
+.ml-sender { font-size: 11px; font-weight: 600; color: #333; }
+.ml-subj { font-size: 10px; color: #555; margin-top: 1px; }
+.ml-prev { font-size: 9px; color: #aaa; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ml-time { font-size: 9px; color: #ccc; float: right; }
+
+.main-content { display: flex; flex-direction: column; flex: 1; }
+.main-body { display: flex; flex: 1; overflow: hidden; position: relative; }
+
+.ribbon { height: 36px; background: #f8f8f8; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; padding: 0 10px; }
+.r-tab { font-size: 11px; color: #888; padding: 6px 8px; cursor: pointer; }
+.r-tab.active { color: #0078d4; font-weight: 600; }
+.r-spacer { flex: 1; }
+.em-ribbon { background: #0078d4; color: #fff; border: none; border-radius: 5px; padding: 5px 12px; font-size: 11px; font-weight: 600; cursor: pointer; }
+
+/* READING PANE FULL */
+.reading-pane { flex: 1; background: #fff; overflow-y: auto; padding: 20px 28px; }
+.rp-from { font-size: 14px; font-weight: 600; color: #1a1a1a; }
+.rp-meta { font-size: 11px; color: #888; margin-top: 2px; }
+.rp-subj { font-size: 16px; font-weight: 600; margin-top: 10px; color: #1a1a1a; }
+.rp-body { font-size: 13px; color: #333; line-height: 1.65; margin-top: 14px; }
+.rp-att { display: inline-block; background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; padding: 3px 8px; font-size: 10px; color: #666; margin-top: 10px; margin-right: 4px; }
+
+/* EASYMAIL OVERLAY - prend toute la zone de lecture */
+.em-overlay {
+    position: absolute; top: 0; right: 0; bottom: 0;
+    width: 100%; background: rgba(0,0,0,0.02);
+    display: flex; z-index: 100;
+}
+
+/* Moitie gauche : le mail original (lecture seule, fond distinct) */
+.em-mail-preview {
+    flex: 1; background: #f5f7fa; overflow-y: auto; padding: 20px 24px;
+    border-right: 2px solid #e0e0e0;
+}
+.emp-label { font-size: 10px; color: #999; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 8px; padding: 4px 8px; background: #f5f5f5; border-radius: 4px; display: inline-block; }
+
+/* Moitie droite : EasyMail */
+.em-response-panel {
+    flex: 1; background: #fff; display: flex; flex-direction: column;
+    border-left: 2px solid #0078d4;
+}
+.erp-header {
+    padding: 12px 16px; background: linear-gradient(135deg, #0078d4, #005a9e);
+    color: #fff; display: flex; align-items: center; justify-content: space-between;
+}
+.erp-logo { font-size: 14px; font-weight: 700; }
+.erp-close { background: none; border: none; color: rgba(255,255,255,0.6); font-size: 18px; cursor: pointer; }
+.erp-close:hover { color: #fff; }
+
+.erp-body { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; }
+
+/* Contact */
+.erp-contact { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding: 8px; background: #f8f9fa; border-radius: 6px; }
+.erp-av { width: 28px; height: 28px; border-radius: 50%; background: #0078d4; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+.erp-name { font-size: 12px; font-weight: 600; color: #333; }
+.erp-detail { font-size: 9px; color: #999; }
+.erp-tag { font-size: 8px; padding: 1px 5px; border-radius: 3px; background: #e8f4fd; color: #0078d4; }
+
+/* Importance */
+.erp-imp { display: flex; gap: 4px; margin-bottom: 10px; }
+.erp-imp-btn { flex: 1; padding: 6px; border: 1px solid #e0e0e0; border-radius: 5px; text-align: center; font-size: 10px; color: #888; cursor: pointer; background: #fff; }
+.erp-imp-btn.active { background: #0078d4; color: #fff; border-color: #0078d4; }
+
+/* To / Subject */
+.erp-fields { margin-bottom: 10px; }
+.erp-field { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.erp-field label { font-size: 10px; color: #999; width: 30px; }
+.erp-field input { flex: 1; padding: 5px 8px; border: 1px solid #e0e0e0; border-radius: 4px; font-size: 11px; outline: none; color: #333; }
+.erp-field input:focus { border-color: #0078d4; }
+
+/* Response editor */
+.erp-editor {
+    flex: 1; background: #fafbfc; border: 1px solid #eee; border-radius: 6px;
+    padding: 12px; font-size: 13px; line-height: 1.6; color: #333;
+    overflow-y: auto; margin-bottom: 10px; min-height: 0;
+}
+
+/* Toolbar */
+.erp-toolbar { display: flex; gap: 4px; margin-bottom: 10px; flex-wrap: wrap; }
+.erp-tb { padding: 5px 10px; border: 1px solid #e0e0e0; border-radius: 4px; font-size: 10px; color: #666; cursor: pointer; background: #fff; }
+.erp-tb:hover { border-color: #0078d4; color: #0078d4; }
+.erp-tb-input { flex: 1; min-width: 120px; padding: 5px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 10px; outline: none; }
+.erp-tb.send { background: linear-gradient(135deg, #0078d4, #005a9e); color: #fff; border: none; font-weight: 600; padding: 6px 16px; }
+
+/* Info cards */
+.erp-info { display: flex; gap: 6px; }
+.erp-card { flex: 1; padding: 6px 8px; border-radius: 4px; font-size: 9px; }
+.erp-card.ech { background: #fff8e1; border-left: 2px solid #ffc107; color: #795548; }
+.erp-card.cls { background: #e3f2fd; border-left: 2px solid #0078d4; color: #0078d4; }
+.erp-card strong { font-size: 10px; }
+</style>
+</head>
+<body>
+<div class="outlook-frame">
+    <div class="outlook-sidebar">
+        <div class="sb-icon active">&#x2709;</div>
+        <div class="sb-icon">&#x1f4c5;</div>
+        <div class="sb-icon">&#x1f464;</div>
+    </div>
+    <div class="folder-panel">
+        <div class="fp-item active"><span>Boite de reception</span><span class="fp-cnt">9</span></div>
+        <div class="fp-item"><span>Elements envoyes</span></div>
+        <div class="fp-item"><span>IMMOBILIER</span></div>
+        <div class="fp-item"><span>FINANCE</span></div>
+    </div>
+    <div class="main-content">
+        <div class="ribbon">
+            <div class="r-tab active">Accueil</div>
+            <div class="r-tab">Affichage</div>
+            <div class="r-spacer"></div>
+            <button class="em-ribbon">&#x2709; EasyMail</button>
+        </div>
+        <div class="main-body">
+            <div class="mail-list">
+                <div class="ml-item active">
+                    <div class="ml-time">10:00</div>
+                    <div class="ml-sender">Ronan FOUIN &#x1f4ce;</div>
+                    <div class="ml-subj">RE: SOUTH GARDEN</div>
+                    <div class="ml-prev">Suite a notre echange...</div>
+                </div>
+                <div class="ml-item">
+                    <div class="ml-time">08:49</div>
+                    <div class="ml-sender">Estelle DOUILLARD &#x1f4ce;</div>
+                    <div class="ml-subj">MINOPOLIS - Bilan</div>
+                </div>
+                <div class="ml-item">
+                    <div class="ml-time">08:40</div>
+                    <div class="ml-sender">Coralie BERTHAUD</div>
+                    <div class="ml-subj">SAS ANNA CHU</div>
+                </div>
+            </div>
+
+            <!-- OVERLAY EASYMAIL : mail a gauche + reponse a droite -->
+            <div class="em-overlay">
+
+                <!-- GAUCHE : mail original (lecture) -->
+                <div class="em-mail-preview">
+                    <div class="emp-label">&#x1f4e8; Mail recu</div>
+                    <div class="rp-from">Ronan FOUIN &lt;ronan.fouin@airbee-conseil.fr&gt;</div>
+                    <div class="rp-meta">A : Yvan BOSSER | 02/04/2026 10:00</div>
+                    <div class="rp-subj">RE: SOUTH GARDEN</div>
+                    <div><span class="rp-att">&#x1f4c4; Situation locative Q1.pdf</span><span class="rp-att">&#x1f4c4; Charges 2025.xlsx</span></div>
+                    <div class="rp-body">
+                        <p>Bonjour Yvan,</p>
+                        <p>Suite a notre echange, veuillez trouver ci-joint la situation locative du Q1 2026 pour le South Garden ainsi que le detail des charges 2025.</p>
+                        <p>Concernant le locataire du lot 3, nous avons bien recu son preavis de depart au 30 juin 2026. Je vous propose d'organiser un point la semaine prochaine pour discuter de la remise en location.</p>
+                        <p>Par ailleurs, pourriez-vous me confirmer si vous souhaitez reconduire le contrat d'entretien des espaces verts pour 2026 ?</p>
+                        <p>Restant a votre disposition,</p>
+                        <p>Bien cordialement,<br>Ronan FOUIN<br>Expert-comptable<br>Airbee Conseil</p>
+                    </div>
+                </div>
+
+                <!-- DROITE : EasyMail reponse -->
+                <div class="em-response-panel">
+                    <div class="erp-header">
+                        <div class="erp-logo">&#x2709; EasyMail — Repondre</div>
+                        <button class="erp-close">&times;</button>
+                    </div>
+                    <div class="erp-body">
+                        <div class="erp-contact">
+                            <div class="erp-av">R</div>
+                            <div>
+                                <div class="erp-name">Ronan FOUIN <span class="erp-tag">vous</span> <span class="erp-tag">100%</span></div>
+                                <div class="erp-detail">Airbee Conseil — Expert-comptable</div>
+                            </div>
+                        </div>
+
+                        <div class="erp-imp">
+                            <div class="erp-imp-btn">&#x26A1; Rapide</div>
+                            <div class="erp-imp-btn active">&#x1f4dd; Standard</div>
+                            <div class="erp-imp-btn">&#x1f9e0; Approfondi</div>
+                        </div>
+
+                        <div class="erp-fields">
+                            <div class="erp-field">
+                                <label>A :</label>
+                                <input value="ronan.fouin@airbee-conseil.fr">
+                            </div>
+                            <div class="erp-field">
+                                <label>Objet :</label>
+                                <input value="RE: SOUTH GARDEN">
+                            </div>
+                        </div>
+
+                        <div class="erp-editor">
+                            <p>Bonjour Ronan,</p>
+                            <p>Merci pour ces documents, je vais les examiner.</p>
+                            <p>Concernant le lot 3, c'est bien note pour le depart au 30 juin. Je suis disponible jeudi prochain pour faire le point sur la remise en location.</p>
+                            <p>Pour le contrat d'entretien des espaces verts, je vous confirme la reconduction pour 2026.</p>
+                            <p>Cdlt,<br>Yvan</p>
+                        </div>
+
+                        <div class="erp-toolbar">
+                            <button class="erp-tb">&#x1f504; Autre</button>
+                            <button class="erp-tb">&#x2190; Precedent</button>
+                            <input class="erp-tb-input" placeholder="Modifier...">
+                            <button class="erp-tb">&#x270f;</button>
+                            <button class="erp-tb send">&#x1f4e4; Envoyer</button>
+                        </div>
+
+                        <div class="erp-info">
+                            <div class="erp-card ech">
+                                <strong>&#x1f4c5; Sem. prochaine</strong><br>
+                                Point lot 3 avec Ronan
+                            </div>
+                            <div class="erp-card cls">
+                                <strong>&#x1f4c1; Classement</strong><br>
+                                IMMOBILIER / South Garden
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+</body>
+</html>

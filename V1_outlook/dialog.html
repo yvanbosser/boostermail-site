@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BoosterMail</title>
+    <link rel="stylesheet" href="dialog.css">
+    <!-- Office.js statique (bloquant) pour le mode Office.js (displayDialogAsync).
+         En standalone, Office.context sera null — dialog.js gère via _isOfficeContext. -->
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+</head>
+<body>
+    <!-- ============================================================ -->
+    <!-- BANDEAU BLEU UNIFIÉ (pas de header gris Windows)             -->
+    <!-- ============================================================ -->
+    <div class="em-header">
+        <div class="em-logo">&#x2709; BoosterMail</div>
+        <div class="em-header-sep"></div>
+        <div class="em-header-info">
+            <div class="em-reply-label" id="headerReplyLabel">Chargement...</div>
+            <span class="em-tag" id="tagRegister" style="display:none;"></span>
+            <span class="em-tag" id="tagConfidence" style="display:none;"></span>
+            <div class="em-header-spacer"></div>
+            <div class="em-status" id="headerStatus"></div>
+            <div class="em-header-actions">
+                <button class="em-hdr-btn" id="btnNavProfil" onclick="window.open(_backendUrl+'/plugin/popup.html?container=extension&view=profil','_blank','width=600,height=500')" title="Profil">&#x1f464;</button>
+                <button class="em-hdr-btn" id="btnNavContacts" onclick="window.open(_backendUrl+'/plugin/popup.html?container=extension&view=contacts','_blank','width=600,height=500')" title="Contacts">&#x1f4d1;</button>
+                <button class="em-hdr-btn" id="btnNavEcheances" onclick="window.open(_backendUrl+'/plugin/popup.html?container=extension&view=echeances','_blank','width=600,height=500')" title="Echeances">&#x23f0;</button>
+            </div>
+            <!-- Pas de bouton fermer — l'utilisateur ferme via la croix Windows -->
+            <button class="em-hdr-btn" id="btnClose" style="display:none;">&times;</button>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- ZONE SPLIT : MAIL REÇU (30%) | ÉDITEUR (70%)                 -->
+    <!-- ============================================================ -->
+    <div class="em-split">
+
+        <!-- ======================================================== -->
+        <!-- PANNEAU GAUCHE — MAIL REÇU (30%)                         -->
+        <!-- Onglets : Résumé | Mail reçu (mockup v14)                -->
+        <!-- ======================================================== -->
+        <div class="em-mail-side">
+            <div class="mail-tabs">
+                <div class="mail-tab active" data-tab="resume">&#x1f4cb; Resume</div>
+                <div class="mail-tab" data-tab="full">&#x1f4e8; Mail recu</div>
+            </div>
+
+            <div class="tab-content">
+                <!-- Onglet : Résumé (mockup v14) -->
+                <div class="tab-pane active" id="tab-resume">
+                    <div class="resume-from" id="resumeFrom">—</div>
+                    <div class="resume-subject" id="resumeSubject">—</div>
+                    <div class="resume-section" id="resumePoints">
+                        <div class="resume-section-title">Points principaux</div>
+                        <div class="em-spinner active" id="resumeSpinner">Analyse en cours...</div>
+                    </div>
+                    <div class="resume-section" id="resumeActions">
+                        <div class="resume-section-title">Actions attendues</div>
+                        <div id="resumeActionsList"><span style="color:#999;font-size:10px;">Disponible apres generation</span></div>
+                    </div>
+                    <div class="resume-section" id="resumePJ" style="display:none;">
+                        <div class="resume-section-title">Pieces jointes</div>
+                        <div class="resume-att" id="resumePJList"></div>
+                    </div>
+                </div>
+
+                <!-- Onglet : Mail complet (mockup v14) -->
+                <div class="tab-pane" id="tab-full">
+                    <div class="full-from" id="mailFrom">—</div>
+                    <div class="full-meta" id="mailMeta">—</div>
+                    <div class="full-subject" id="mailSubject">—</div>
+                    <div id="pjList" class="pj-list"></div>
+                    <div class="full-body" id="mailBody" style="border-top:1px solid #eee;padding-top:10px;margin-top:6px;">
+                        <div class="em-spinner active" id="bodySpinner">Chargement du mail...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- PANNEAU DROIT — ÉDITEUR RÉPONSE (70%) (mockup v14)       -->
+        <!-- ======================================================== -->
+        <div class="em-panel">
+            <div class="em-body">
+
+                <!-- Champs destinataires -->
+                <div class="em-fields">
+                    <div class="em-field-row" style="position:relative;">
+                        <label>A :</label>
+                        <input type="text" id="fieldTo" placeholder="destinataire@email.com" autocomplete="off">
+                        <div class="em-autocomplete" id="acTo"></div>
+                    </div>
+                    <div class="em-field-row" id="rowCc" style="display:none; position:relative;">
+                        <label>Cc :</label>
+                        <input type="text" id="fieldCc" placeholder="copies" autocomplete="off">
+                        <div class="em-autocomplete" id="acCc"></div>
+                    </div>
+                    <div class="em-field-row">
+                        <label>Objet :</label>
+                        <input type="text" id="fieldSubject" placeholder="Objet du mail">
+                    </div>
+                </div>
+
+                <!-- Boutons mode réponse (comme le proto) -->
+                <div class="em-mode-row" id="modeRow">
+                    <button class="em-mode-btn active" id="modeReply" data-mode="reply" onclick="setReplyMode('reply')">&#x21a9; Repondre</button>
+                    <button class="em-mode-btn" id="modeReplyAll" data-mode="reply_all" onclick="setReplyMode('reply_all')">&#x21a9;&#x21a9; Rep. a tous</button>
+                    <button class="em-mode-btn" id="modeForward" data-mode="forward" onclick="setReplyMode('forward')">&#x21aa; Transferer</button>
+                </div>
+
+                <!-- Brief + Importance + Joindre + Générer (mockup v14) -->
+                <div class="em-gen-row">
+                    <textarea class="em-brief" id="fieldBrief" rows="1"
+                        placeholder="Instructions (optionnel)"
+                        oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"></textarea>
+
+                    <div class="em-imp-group">
+                        <div class="em-imp-chip" data-imp="R" onclick="selectImportance(this)">
+                            R<span class="tooltip">Rapide</span>
+                        </div>
+                        <div class="em-imp-chip active" data-imp="S" onclick="selectImportance(this)">
+                            S<span class="tooltip">Standard</span>
+                        </div>
+                        <div class="em-imp-chip" data-imp="H" onclick="selectImportance(this)">
+                            H<span class="tooltip">Haute qualite</span>
+                        </div>
+                    </div>
+
+                    <button class="em-attach-btn" title="Trombone intelligent" onclick="smartPaperclip()">
+                        &#x1f4ce;
+                    </button>
+
+                    <button class="em-gen-btn" id="btnGenerate" onclick="generateReply()">
+                        &#x2728; Generer
+                    </button>
+                </div>
+
+                <!-- Barre de mise en forme enrichie (mockup v14 + proto) -->
+                <div class="em-format-bar" id="formatBar">
+                    <select class="fmt-select" id="fmtFont" onchange="execFmt('fontName', this.value)">
+                        <option>Aptos</option>
+                        <option>Arial</option>
+                        <option>Calibri</option>
+                        <option>Cambria</option>
+                        <option>Consolas</option>
+                        <option>Courier New</option>
+                        <option>Franklin Gothic</option>
+                        <option>Garamond</option>
+                        <option>Georgia</option>
+                        <option>Lucida Sans</option>
+                        <option>Palatino Linotype</option>
+                        <option>Segoe UI</option>
+                        <option>Tahoma</option>
+                        <option>Times New Roman</option>
+                        <option>Trebuchet MS</option>
+                        <option>Verdana</option>
+                    </select>
+                    <div class="fmt-size-combo" style="position:relative;">
+                        <input type="text" class="fmt-size-input" id="fmtSizeInput" value="11"
+                            onchange="applyFontSize(this.value)"
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();applyFontSize(this.value);}">
+                        <select class="fmt-size-dropdown" id="fmtSizeDropdown"
+                            onchange="document.getElementById('fmtSizeInput').value=this.options[this.selectedIndex].text;applyFontSize(this.value);">
+                            <option value="1">8</option>
+                            <option value="1">9</option>
+                            <option value="2">10</option>
+                            <option value="3" selected>11</option>
+                            <option value="3">12</option>
+                            <option value="4">13</option>
+                            <option value="4">14</option>
+                            <option value="5">16</option>
+                            <option value="5">18</option>
+                            <option value="6">20</option>
+                            <option value="6">22</option>
+                            <option value="6">24</option>
+                            <option value="7">26</option>
+                            <option value="7">28</option>
+                            <option value="7">36</option>
+                            <option value="7">48</option>
+                        </select>
+                    </div>
+                    <div class="fmt-sep"></div>
+                    <button class="fmt-btn" onclick="execFmt('bold')" title="Gras"><b>B</b></button>
+                    <button class="fmt-btn" onclick="execFmt('italic')" title="Italique"><i>I</i></button>
+                    <button class="fmt-btn" onclick="execFmt('underline')" title="Souligne"><u>U</u></button>
+                    <button class="fmt-btn" onclick="execFmt('strikethrough')" title="Barre"><s>S</s></button>
+                    <div class="fmt-sep"></div>
+                    <div class="fmt-color-wrap" style="position:relative;">
+                        <button class="fmt-btn" onclick="document.getElementById('fmtTextColor').click()" title="Couleur texte">&#x1f58c;</button>
+                        <input type="color" id="fmtTextColor" value="#333333" class="fmt-color-hidden"
+                            onchange="execFmt('foreColor', this.value)">
+                    </div>
+                    <div class="fmt-color-wrap" style="position:relative;">
+                        <button class="fmt-btn fmt-hilite-btn" id="btnHilite" onclick="toggleHiliteDropdown()" title="Surligner">&#x1f58d;</button>
+                        <div class="fmt-hilite-dropdown" id="hiliteDropdown">
+                            <div class="fmt-hilite-grid">
+                                <span class="fmt-hilite-swatch" style="background:#FFFF00" onclick="applyHilite('#FFFF00')" title="Jaune"></span>
+                                <span class="fmt-hilite-swatch" style="background:#00FF00" onclick="applyHilite('#00FF00')" title="Vert vif"></span>
+                                <span class="fmt-hilite-swatch" style="background:#00FFFF" onclick="applyHilite('#00FFFF')" title="Cyan"></span>
+                                <span class="fmt-hilite-swatch" style="background:#FF00FF" onclick="applyHilite('#FF00FF')" title="Magenta"></span>
+                                <span class="fmt-hilite-swatch" style="background:#0000FF" onclick="applyHilite('#0000FF')" title="Bleu"></span>
+                                <span class="fmt-hilite-swatch" style="background:#FF0000" onclick="applyHilite('#FF0000')" title="Rouge"></span>
+                                <span class="fmt-hilite-swatch" style="background:#000080" onclick="applyHilite('#000080')" title="Bleu fonce"></span>
+                                <span class="fmt-hilite-swatch" style="background:#008080" onclick="applyHilite('#008080')" title="Sarcelle"></span>
+                                <span class="fmt-hilite-swatch" style="background:#008000" onclick="applyHilite('#008000')" title="Vert"></span>
+                                <span class="fmt-hilite-swatch" style="background:#800080" onclick="applyHilite('#800080')" title="Violet"></span>
+                                <span class="fmt-hilite-swatch" style="background:#800000" onclick="applyHilite('#800000')" title="Marron"></span>
+                                <span class="fmt-hilite-swatch" style="background:#808000" onclick="applyHilite('#808000')" title="Olive"></span>
+                                <span class="fmt-hilite-swatch" style="background:#808080" onclick="applyHilite('#808080')" title="Gris"></span>
+                                <span class="fmt-hilite-swatch" style="background:#C0C0C0" onclick="applyHilite('#C0C0C0')" title="Gris clair"></span>
+                                <span class="fmt-hilite-swatch" style="background:#FFFFFF; border:1px solid #ddd;" onclick="applyHilite('transparent')" title="Aucun"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="fmt-sep"></div>
+                    <button class="fmt-btn" onclick="execFmt('justifyLeft')" title="Aligner gauche">&#x2261;</button>
+                    <button class="fmt-btn" onclick="execFmt('justifyCenter')" title="Centrer">&#x2550;</button>
+                    <button class="fmt-btn" onclick="execFmt('justifyRight')" title="Aligner droite">&#x2261;</button>
+                    <div class="fmt-sep"></div>
+                    <button class="fmt-btn" onclick="execFmt('insertUnorderedList')" title="Liste a puces">&#x2022;</button>
+                    <button class="fmt-btn" onclick="execFmt('insertOrderedList')" title="Liste numerotee">1.</button>
+                    <div class="fmt-sep"></div>
+                    <button class="fmt-btn" onclick="execFmt('removeFormat')" title="Effacer le formatage">&#x2718;</button>
+                </div>
+
+                <!-- Éditeur rich text -->
+                <div class="em-editor" id="editor" contenteditable="true"
+                     data-placeholder="La reponse apparaitra ici..."></div>
+
+                <!-- Spinner génération -->
+                <div class="em-spinner" id="genSpinner">Generation en cours...</div>
+
+                <!-- Toolbar bas — 3 lignes toujours visibles -->
+
+                <!-- LIGNE 1 : Barre de modification + bouton retour -->
+                <div class="em-toolbar-line" id="refineBar">
+                    <div style="flex:1;position:relative;">
+                        <textarea class="em-refine-input" id="refineInput" rows="2"
+                            placeholder="Ex : Raccourcir, ton plus ferme, ajouter une relance, reformuler..."
+                            oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"
+                            onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();refineReply();}"></textarea>
+                        <button class="em-refine-arrow" onclick="refineReply()" title="Envoyer (Entree)">&#x2191;</button>
+                    </div>
+                    <button class="em-tb-btn em-undo-btn" id="btnUndo" onclick="undoReply()" style="display:none;" title="Annuler la modification">&#x21a9;</button>
+                </div>
+
+                <!-- LIGNE 2 : Liens action + bouton envoyer -->
+                <div class="em-toolbar-line">
+                    <span class="em-action-label" id="actionLabel">Reponse optimisee</span>
+                    <a href="#" class="em-action-link" onclick="event.preventDefault();regenWithImportance(-1);" id="btnShorter">&#x26A1; Plus court</a>
+                    <a href="#" class="em-action-link" onclick="event.preventDefault();regenWithImportance(+1);" id="btnDeeper">&#x1f9e0; Plus travaille</a>
+                    <a href="#" class="em-action-link" id="btnRegen" onclick="event.preventDefault();regenReply();">&#x1f504; Essayer une autre reponse</a>
+                    <a href="#" class="em-action-link em-restore-icon" id="btnRestore" onclick="event.preventDefault();restorePreviousVersion();" style="display:none;" title="Version precedente">&#x21a9;</a>
+                    <div class="em-toolbar-spacer"></div>
+                    <button class="em-send-btn" id="btnSend" onclick="sendReply()" disabled>
+                        &#x1f4e4; Relire et envoyer
+                    </button>
+                </div>
+
+                <!-- LIGNE 3 : Cards echeance + classement (mockup v14) -->
+                <div class="em-info-row" id="infoRow">
+                    <div class="em-info-card ech" id="infoEcheance">
+                        <div class="eic-label">Echeance detectee</div>
+                        <div id="infoEcheanceContent">—</div>
+                    </div>
+                    <div class="em-info-card cls" id="infoClassement">
+                        <div class="eic-label">Classement suggere</div>
+                        <div id="infoClassementContent">—</div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- POPUP SÉLECTION PJ AVANT GÉNÉRATION (comme le proto)        -->
+    <!-- ============================================================ -->
+    <div class="em-popup-overlay" id="popupPjAnalysis">
+        <div class="em-popup">
+            <div class="em-popup-title">&#x1f4ce; Analyser les pieces jointes ?</div>
+            <div class="em-popup-body">
+                <p style="margin-bottom:8px;font-size:11px;color:#666;">Selectionnez les PJ a analyser pour enrichir la reponse :</p>
+                <div id="pjAnalysisList"></div>
+                <div class="em-popup-actions" style="margin-top:8px;margin-bottom:0;">
+                    <a href="#" style="font-size:10px;color:#0F6CBD;" onclick="event.preventDefault();pjSelectAll(true);">Tout cocher</a>
+                    <a href="#" style="font-size:10px;color:#0F6CBD;margin-left:8px;" onclick="event.preventDefault();pjSelectAll(false);">Tout decocher</a>
+                </div>
+            </div>
+            <div class="em-popup-actions">
+                <button class="em-popup-btn" onclick="skipPjAnalysis()">Ignorer les PJ</button>
+                <button class="em-popup-btn primary" onclick="acceptPjAnalysis()">Analyser et generer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- POPUP PJ FORWARD (inclure les PJ originales ?) -->
+    <div class="em-popup-overlay" id="popupFwdPj">
+        <div class="em-popup">
+            <div class="em-popup-title">&#x1f4ce; Transferer avec pieces jointes ?</div>
+            <div class="em-popup-body">
+                <p style="margin-bottom:8px;font-size:11px;color:#666;">Selectionnez les PJ a inclure dans le transfert :</p>
+                <div id="fwdPjList"></div>
+                <div class="em-popup-actions" style="margin-top:8px;margin-bottom:0;">
+                    <a href="#" style="font-size:10px;color:#0F6CBD;" onclick="event.preventDefault();fwdPjSelectAll(true);">Tout cocher</a>
+                    <a href="#" style="font-size:10px;color:#0F6CBD;margin-left:8px;" onclick="event.preventDefault();fwdPjSelectAll(false);">Tout decocher</a>
+                </div>
+            </div>
+            <div class="em-popup-actions">
+                <button class="em-popup-btn" onclick="skipFwdAttachments()">Sans PJ</button>
+                <button class="em-popup-btn primary" onclick="includeSelectedFwdAttachments()">Inclure</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- POPUP SMART PAPERCLIP (suggestion dossier) -->
+    <div class="em-popup-overlay" id="popupSmartPaperclip">
+        <div class="em-popup" style="max-width:360px;">
+            <div class="em-popup-title">&#x1f4ce; Trombone intelligent</div>
+            <div class="em-popup-body" id="smartPaperclipBody">
+                <p style="font-size:11px;color:#666;">Suggestion de dossier pour ce correspondant :</p>
+                <div id="smartPaperclipFolder" style="margin-top:8px;padding:10px;background:#e3f2fd;border-radius:6px;cursor:pointer;font-size:12px;color:#0F6CBD;font-weight:500;" onclick="openSuggestedFolder()"></div>
+            </div>
+            <div class="em-popup-actions">
+                <button class="em-popup-btn" onclick="closeSmartPaperclip()">Fermer</button>
+                <button class="em-popup-btn primary" onclick="openSuggestedFolder()">Ouvrir le dossier</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- POPUPS POST-ENVOI (12i)                                      -->
+    <!-- ============================================================ -->
+
+    <!-- Popup Échéances -->
+    <div class="em-popup-overlay" id="popupEcheances">
+        <div class="em-popup">
+            <div class="em-popup-title">&#x1f4c5; Echeance detectee</div>
+            <div class="em-popup-body" id="echeancesBody"></div>
+            <div class="em-popup-actions">
+                <button class="em-popup-btn" onclick="dismissEcheance()">Ignorer</button>
+                <button class="em-popup-btn primary" onclick="confirmEcheance()">OK, note</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Popup Classement Mail -->
+    <div class="em-popup-overlay" id="popupClassMail">
+        <div class="em-popup">
+            <div class="em-popup-title">&#x1f4c1; Classer ce mail</div>
+            <div class="em-popup-body" id="classMailBody">
+                <div id="classMailSuggestion"></div>
+                <div class="em-folder-tree" id="classMailTree"></div>
+            </div>
+            <div class="em-popup-actions">
+                <button class="em-popup-btn" onclick="skipClassMail()">Pas maintenant</button>
+                <button class="em-popup-btn primary" id="btnClassMail" onclick="doClassMail()" disabled>Classer ici</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Popup Classement PJ -->
+    <div class="em-popup-overlay" id="popupClassPJ">
+        <div class="em-popup">
+            <div class="em-popup-title">&#x1f4ce; Classer les pieces jointes</div>
+            <div class="em-popup-body" id="classPJBody">
+                <div id="classPJList"></div>
+                <div id="classPJSuggestion"></div>
+            </div>
+            <div class="em-popup-actions">
+                <button class="em-popup-btn" onclick="skipClassPJ()">Pas maintenant</button>
+                <button class="em-popup-btn primary" id="btnClassPJ" onclick="doClassPJ()" disabled>Classer ici</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="dialog.js"></script>
+</body>
+</html>

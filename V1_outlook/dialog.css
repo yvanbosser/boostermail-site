@@ -1,0 +1,862 @@
+/*
+ * EasyMail V1 Outlook — Dialog Split-Screen (12f)
+ * Basé sur mockup_v9_overlay_v5.html
+ * Layout : mail reçu (30%) | éditeur réponse (70%)
+ */
+
+/* === RESET === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #f5f5f5;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* === BANDEAU BLEU UNIFIÉ === */
+.em-header {
+    padding: 10px 16px;
+    background: linear-gradient(135deg, #0F6CBD, #005a9e);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    user-select: none;
+}
+.em-logo {
+    font-size: 14px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 3;  /* Aligne avec em-mail-side (30%) */
+}
+.em-header-sep {
+    width: 1px;
+    height: 28px;
+    background: rgba(255,255,255,0.3);
+    margin: 0 16px;
+    flex-shrink: 0;
+}
+.em-header-info {
+    flex: 7;  /* Aligne avec em-panel (70%) */
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.em-reply-label {
+    font-size: 12px;
+    font-weight: 500;
+}
+.em-reply-label strong { font-weight: 600; }
+.em-tag {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.15);
+}
+.em-header-spacer { flex: 1; }
+.em-status {
+    font-size: 10px;
+    opacity: 0.85;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+.em-header-actions {
+    display: flex;
+    gap: 4px;
+    margin-left: 12px;
+}
+.em-hdr-btn {
+    background: rgba(255,255,255,0.15);
+    border: none;
+    color: #fff;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+}
+.em-hdr-btn:hover { background: rgba(255,255,255,0.3); }
+
+/* === ZONE SPLIT === */
+.em-split {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* === PANNEAU GAUCHE : MAIL REÇU (30%) === */
+.em-mail-side {
+    flex: 3;
+    background: #f5f7fa;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-right: 1px solid #e0e0e0;
+    min-width: 200px;
+}
+
+/* Onglets Résumé / Mail reçu */
+.mail-tabs {
+    display: flex;
+    background: #eef1f5;
+    border-bottom: 1px solid #ddd;
+    flex-shrink: 0;
+}
+.mail-tab {
+    flex: 1;
+    text-align: center;
+    padding: 8px 0;
+    font-size: 11px;
+    color: #888;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    font-weight: 500;
+    transition: color 0.15s, border-color 0.15s;
+}
+.mail-tab:hover { color: #555; }
+.mail-tab.active {
+    color: #0F6CBD;
+    border-bottom-color: #0F6CBD;
+    font-weight: 600;
+}
+
+/* Contenu onglets */
+.tab-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 16px;
+}
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+
+/* Résumé (mockup v14) */
+.resume-from {
+    font-size: 12px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 4px;
+}
+.resume-subject {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin-bottom: 10px;
+}
+.resume-date {
+    font-size: 10px;
+    color: #999;
+    margin-bottom: 10px;
+}
+.resume-section {
+    margin-bottom: 10px;
+}
+.resume-section-title {
+    font-size: 9px;
+    color: #999;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+.resume-point {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 6px 8px;
+    background: #fff;
+    border-radius: 5px;
+    border-left: 3px solid #0F6CBD;
+    margin-bottom: 4px;
+    font-size: 11px;
+    color: #444;
+    line-height: 1.4;
+}
+.resume-point .bullet {
+    color: #0F6CBD;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+.resume-att {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+.resume-att-chip {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 9px;
+    color: #666;
+}
+
+/* Mail complet */
+.full-from {
+    font-size: 12px;
+    font-weight: 600;
+    color: #333;
+}
+.full-meta {
+    font-size: 10px;
+    color: #999;
+    margin-top: 2px;
+}
+.full-subject {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin-top: 8px;
+}
+.full-body {
+    font-size: 12px;
+    color: #444;
+    line-height: 1.6;
+    margin-top: 10px;
+    word-wrap: break-word;
+}
+.full-body p { margin-bottom: 8px; }
+
+/* PJ chips */
+.pj-list {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+.pj-chip {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 9px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* === PANNEAU DROIT : ÉDITEUR RÉPONSE (70%) === */
+.em-panel {
+    flex: 7;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 300px;
+}
+.em-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Champs À / Cc / Objet */
+.em-fields { margin-bottom: 8px; }
+.em-field-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+}
+.em-field-row label {
+    font-size: 10px;
+    color: #aaa;
+    width: 35px;
+    flex-shrink: 0;
+}
+.em-field-row input {
+    flex: 1;
+    padding: 4px 8px;
+    border: 1px solid #e8e8e8;
+    border-radius: 4px;
+    font-size: 11px;
+    outline: none;
+    color: #333;
+    font-family: inherit;
+}
+.em-field-row input:focus { border-color: #0F6CBD; }
+
+/* Boutons mode reply/reply_all/forward */
+.em-mode-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+.em-mode-btn {
+    padding: 4px 10px;
+    border: 1px solid #e0e0e0;
+    border-radius: 5px;
+    font-size: 10px;
+    color: #666;
+    cursor: pointer;
+    background: #fff;
+    transition: all 0.15s;
+}
+.em-mode-btn:hover { border-color: #0F6CBD; color: #0F6CBD; }
+.em-mode-btn.active {
+    background: #0F6CBD;
+    color: #fff;
+    border-color: #0F6CBD;
+}
+
+/* Brief + Importance + Générer */
+.em-gen-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+    align-items: flex-start;
+}
+.em-brief {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 11px;
+    outline: none;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 30px;
+    max-height: 100px;
+    line-height: 1.4;
+}
+.em-brief:focus { border-color: #0F6CBD; }
+.em-brief::placeholder { color: #bbb; }
+
+/* Boutons importance R/S/H */
+.em-imp-group {
+    display: flex;
+    gap: 0;
+    flex-shrink: 0;
+}
+.em-imp-chip {
+    padding: 6px 10px;
+    border: 1px solid #e0e0e0;
+    font-size: 11px;
+    color: #888;
+    cursor: pointer;
+    background: #fff;
+    position: relative;
+    transition: background 0.15s, color 0.15s;
+}
+.em-imp-chip:first-child { border-radius: 6px 0 0 6px; }
+.em-imp-chip:last-child { border-radius: 0 6px 6px 0; }
+.em-imp-chip:not(:first-child) { border-left: none; }
+.em-imp-chip.active {
+    background: #0F6CBD;
+    color: #fff;
+    border-color: #0F6CBD;
+    z-index: 1;
+}
+.em-imp-chip .tooltip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #555;
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 9px;
+    white-space: nowrap;
+    z-index: 10;
+}
+.em-imp-chip .tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: #555;
+}
+.em-imp-chip:hover .tooltip { display: block; }
+
+/* Bouton Générer */
+.em-gen-btn {
+    padding: 6px 16px;
+    border: none;
+    border-radius: 6px;
+    background: #0F6CBD;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+    align-self: flex-start;
+    transition: background 0.15s;
+}
+.em-gen-btn:hover { background: #005a9e; }
+.em-gen-btn:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+/* Trombone */
+.em-attach-btn {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    width: 32px;
+    height: 32px;
+    background: none;
+    color: #555;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+.em-attach-btn:hover { border-color: #0F6CBD; color: #0F6CBD; }
+
+/* === BARRE DE MISE EN FORME === */
+.em-format-bar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 6px;
+    background: #f8f9fa;
+    border: 1px solid #eee;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+}
+.fmt-select {
+    padding: 3px 4px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    font-size: 10px;
+    outline: none;
+    background: #fff;
+    color: #555;
+    cursor: pointer;
+}
+/* Combobox taille (input + dropdown superposés) */
+.fmt-size-combo {
+    display: flex;
+    align-items: center;
+    width: 54px;
+}
+.fmt-size-input {
+    width: 34px;
+    padding: 3px 4px;
+    border: 1px solid #ddd;
+    border-radius: 3px 0 0 3px;
+    font-size: 10px;
+    outline: none;
+    background: #fff;
+    color: #555;
+    text-align: center;
+    font-family: inherit;
+}
+.fmt-size-input:focus { border-color: #0F6CBD; }
+.fmt-size-dropdown {
+    width: 20px;
+    padding: 0;
+    border: 1px solid #ddd;
+    border-left: none;
+    border-radius: 0 3px 3px 0;
+    font-size: 10px;
+    outline: none;
+    background: #fff;
+    color: #555;
+    cursor: pointer;
+    height: 22px;
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23999'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+/* Color picker caché derrière le bouton */
+.fmt-color-hidden {
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Dropdown surlignage */
+.fmt-hilite-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+    padding: 6px;
+    z-index: 60;
+}
+.fmt-hilite-dropdown.active { display: block; }
+.fmt-hilite-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 3px;
+}
+.fmt-hilite-swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 3px;
+    cursor: pointer;
+    display: block;
+    transition: transform 0.1s;
+}
+.fmt-hilite-swatch:hover { transform: scale(1.2); }
+
+.fmt-sep {
+    width: 1px;
+    height: 18px;
+    background: #ddd;
+    margin: 0 3px;
+}
+.fmt-btn {
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 3px;
+    background: none;
+    color: #555;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+}
+.fmt-btn:hover { background: #e8e8e8; }
+.fmt-btn.active { background: #d6e4f0; color: #0F6CBD; }
+
+/* === ÉDITEUR RICH TEXT === */
+.em-editor {
+    flex: 1;
+    background: #fff;
+    border: 1px solid #eee;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    padding: 12px 14px;
+    font-size: 13px;
+    line-height: 1.65;
+    color: #333;
+    overflow-y: auto;
+    margin-bottom: 8px;
+    min-height: 120px;
+    outline: none;
+}
+.em-editor:empty::before {
+    content: attr(data-placeholder);
+    color: #ccc;
+    pointer-events: none;
+}
+
+/* === BARRE D'ACTIONS BAS — 3 lignes === */
+.em-toolbar-line {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+    align-items: center;
+    flex-shrink: 0;
+}
+.em-tb-btn {
+    padding: 5px 10px;
+    border: 1px solid #e0e0e0;
+    border-radius: 5px;
+    font-size: 10px;
+    color: #666;
+    cursor: pointer;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    transition: border-color 0.15s, color 0.15s;
+}
+.em-tb-btn:hover { border-color: #0F6CBD; color: #0F6CBD; }
+
+/* Barre refinement */
+.em-refine-bar {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    flex: 1;
+    min-width: 120px;
+}
+.em-refine-input {
+    width: 100%;
+    padding: 5px 8px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    font-size: 10px;
+    outline: none;
+    resize: none;
+    font-family: inherit;
+}
+.em-refine-input:focus { border-color: #0F6CBD; }
+.em-refine-input {
+    padding-right: 32px; /* espace pour le bouton arrow */
+}
+.em-refine-arrow {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 50%;
+    background: #0F6CBD;
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+}
+.em-refine-arrow:hover { background: #005a9e; }
+
+/* Bouton Envoyer */
+/* Bouton Relire et envoyer — VERT comme le proto (#107c10) */
+.em-send-btn {
+    background: #107c10;
+    color: #fff;
+    border: none;
+    font-weight: 600;
+    padding: 6px 16px;
+    font-size: 11px;
+    border-radius: 5px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: background 0.15s;
+}
+.em-send-btn:hover { background: #0b5e0b; }
+.em-send-btn:disabled { background: #8fbc8f; cursor: not-allowed; }
+
+/* Liens action (identiques au proto) */
+.em-action-links {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.em-action-label {
+    font-size: 11px;
+    color: #999;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.em-action-link {
+    font-size: 11px;
+    color: #0F6CBD;
+    text-decoration: none;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.em-action-link:hover { text-decoration: underline; }
+.em-restore-icon {
+    font-size: 14px;
+    font-weight: 700;
+}
+
+/* Spacer */
+.em-toolbar-spacer { flex: 1; }
+
+/* === SPINNER / LOADING === */
+.em-spinner {
+    display: none;
+    text-align: center;
+    padding: 20px;
+    color: #999;
+    font-size: 12px;
+}
+.em-spinner.active { display: block; }
+
+/* === AUTOCOMPLETE CONTACTS (12o) === */
+.em-autocomplete {
+    position: absolute;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 50;
+    display: none;
+}
+.em-autocomplete.active { display: block; }
+.em-ac-item {
+    padding: 6px 10px;
+    font-size: 11px;
+    color: #333;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+}
+.em-ac-item:hover { background: #f0f6ff; }
+.em-ac-item.selected { background: #e3f2fd; }
+.em-ac-name { font-weight: 500; }
+.em-ac-email { font-size: 10px; color: #888; }
+.em-ac-org { font-size: 9px; color: #aaa; }
+
+/* === POPUP POST-ENVOI (12i) === */
+.em-popup-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+}
+.em-popup-overlay.active { display: flex; }
+
+.em-popup {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+    max-width: 480px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 24px;
+}
+.em-popup-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.em-popup-body {
+    font-size: 12px;
+    color: #555;
+    line-height: 1.5;
+    margin-bottom: 16px;
+}
+.em-popup-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+.em-popup-btn {
+    padding: 6px 14px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    background: #fff;
+    color: #555;
+    transition: all 0.15s;
+}
+.em-popup-btn:hover { border-color: #0F6CBD; color: #0F6CBD; }
+.em-popup-btn.primary {
+    background: #0F6CBD;
+    color: #fff;
+    border-color: #0F6CBD;
+}
+.em-popup-btn.primary:hover { background: #005a9e; }
+
+/* Échéance card dans popup */
+.em-ech-card {
+    background: #fff8e1;
+    border-left: 3px solid #ffc107;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    font-size: 11px;
+}
+.em-ech-card .ech-desc { color: #333; font-weight: 500; }
+.em-ech-card .ech-date { color: #795548; font-size: 10px; margin-top: 4px; }
+
+/* Dossier suggestion dans popup */
+.em-folder-suggestion {
+    background: #e3f2fd;
+    border-left: 3px solid #0F6CBD;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: #0F6CBD;
+    font-weight: 500;
+    cursor: pointer;
+}
+.em-folder-suggestion:hover { background: #bbdefb; }
+
+/* Arborescence dossiers dans popup */
+.em-folder-tree {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #eee;
+    border-radius: 6px;
+    padding: 8px;
+    margin-bottom: 12px;
+}
+.em-folder-item {
+    padding: 4px 8px;
+    font-size: 11px;
+    color: #555;
+    cursor: pointer;
+    border-radius: 4px;
+}
+.em-folder-item:hover { background: #f0f6ff; color: #0F6CBD; }
+.em-folder-item.selected { background: #e3f2fd; color: #0F6CBD; font-weight: 600; }
+
+/* === CARDS INFO BAS (mockup v14) === */
+.em-info-row {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+    margin-top: 4px;
+}
+.em-info-card {
+    flex: 1;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 10px;
+}
+.em-info-card.ech {
+    background: #fff8e1;
+    border-left: 3px solid #ffc107;
+    color: #795548;
+}
+.em-info-card.cls {
+    background: #e3f2fd;
+    border-left: 3px solid #0F6CBD;
+    color: #0F6CBD;
+}
+.eic-label {
+    font-size: 8px;
+    color: #999;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+/* === RESPONSIVE — split vertical si trop étroit === */
+@media (max-width: 600px) {
+    .em-split { flex-direction: column; }
+    .em-mail-side {
+        flex: none;
+        height: 200px;
+        border-right: none;
+        border-bottom: 1px solid #e0e0e0;
+    }
+    .em-panel { flex: 1; }
+}

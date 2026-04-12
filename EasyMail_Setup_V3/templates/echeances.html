@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suivi des relances — EasyMail</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f6f8; color: #1a1a2e; }
+
+        .header {
+            background: white; padding: 16px 24px;
+            display: flex; align-items: center; justify-content: space-between;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06); position: sticky; top: 0; z-index: 10;
+        }
+        .header h1 { font-size: 20px; color: #1a1a2e; font-weight: 600; }
+        .header-links { display: flex; gap: 8px; align-items: center; }
+        .header-link {
+            background: none; border: 1px solid #ddd; color: #666; padding: 7px 14px;
+            border-radius: 6px; font-size: 13px; cursor: pointer; text-decoration: none;
+        }
+        .header-link:hover { background: #f5f5f5; }
+
+        .container { max-width: 1100px; margin: 20px auto; padding: 0 24px; }
+
+        /* Main layout */
+        .main-layout { display: flex; gap: 24px; align-items: flex-start; }
+        .cards-col { flex: 1; min-width: 0; }
+        .detail-col { width: 340px; flex-shrink: 0; position: sticky; top: 80px; display: none; }
+        .detail-col.visible { display: block; }
+
+        /* Section titles */
+        .section-title {
+            font-size: 15px; font-weight: 600; color: #1a1a2e; margin: 24px 0 10px 0;
+        }
+        .section-title:first-child { margin-top: 0; }
+        .section-count { color: #888; font-weight: 400; }
+
+        /* Cards - style ChatGPT */
+        .card {
+            background: white; border-radius: 12px; margin-bottom: 10px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06); overflow: hidden;
+            cursor: pointer; transition: box-shadow 0.15s;
+        }
+        .card:hover { box-shadow: 0 3px 12px rgba(0,0,0,0.1); }
+        .card.selected { box-shadow: 0 3px 12px rgba(21,101,192,0.25); outline: 2px solid #1565c0; outline-offset: -2px; }
+
+        /* Header - blanc par défaut, bleu si sélectionné */
+        .card-head {
+            background: white; color: #1a1a2e; padding: 12px 16px;
+            display: flex; align-items: center; gap: 12px;
+            border-bottom: 1px solid #eee;
+        }
+        .card.selected .card-head {
+            background: #1565c0; color: white; border-bottom: none;
+        }
+        .card-avatar {
+            width: 40px; height: 40px; border-radius: 50%;
+            background: #e3f2fd; color: #1565c0; display: flex; align-items: center;
+            justify-content: center; font-size: 16px; font-weight: 600; flex-shrink: 0;
+        }
+        .card.selected .card-avatar { background: rgba(255,255,255,0.2); color: white; }
+        .card-head-info { flex: 1; min-width: 0; }
+        .card-head-name { font-size: 14px; font-weight: 600; }
+        .card-head-subject { font-size: 12px; color: #888; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .card.selected .card-head-subject { color: rgba(255,255,255,0.8); }
+        .card-head-menu {
+            background: none; border: none; color: #bbb;
+            font-size: 20px; cursor: pointer; padding: 4px 8px;
+        }
+        .card-head-menu:hover { color: #666; }
+        .card.selected .card-head-menu { color: rgba(255,255,255,0.7); }
+        .card.selected .card-head-menu:hover { color: white; }
+
+        /* Body blanc */
+        .card-body {
+            padding: 12px 16px 14px 16px;
+        }
+        .card-detail-line {
+            font-size: 13px; color: #555; margin-bottom: 4px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .card-detail-line .icon { font-size: 14px; width: 18px; text-align: center; color: #888; }
+        .card-detail-line strong { color: #1a1a2e; }
+
+        .card-retard-badge {
+            display: inline-block; font-size: 11px; padding: 3px 10px;
+            border-radius: 12px; font-weight: 500; margin-left: 4px;
+        }
+        .badge-red { background: #ffebee; color: #c62828; }
+        .badge-orange { background: #fff3e0; color: #e65100; }
+
+        .card-link {
+            font-size: 12px; color: #1565c0; margin-top: 8px;
+            display: block;
+        }
+
+        .card-priority {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 12px; color: #888; margin-top: 4px;
+        }
+        .priority-dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; }
+        .priority-dot.haute { background: #d32f2f; }
+        .priority-dot.moyenne { background: #fb8c00; }
+        .priority-dot.basse { background: #43a047; }
+
+        .card-buttons {
+            display: flex; gap: 8px; margin-top: 12px;
+        }
+        .btn {
+            padding: 7px 16px; border-radius: 6px; font-size: 12px;
+            font-weight: 500; cursor: pointer; border: 1px solid #ddd; background: white; color: #555;
+        }
+        .btn:hover { background: #f5f5f5; }
+        .card:not(.selected) .card-buttons { pointer-events: none; opacity: 0.4; }
+        .btn-primary { background: white; color: #555; border-color: #ddd; }
+        .btn-primary:hover { background: #f5f5f5; }
+        .card.selected .btn-primary { background: #1565c0; color: white; border-color: #1565c0; }
+        .card.selected .btn-primary:hover { background: #0d47a1; }
+
+        /* Detail panel */
+        .detail-panel { background: white; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); overflow: hidden; }
+        .detail-section { padding: 16px 18px; border-bottom: 1px solid #f0f0f0; }
+        .detail-section:last-child { border-bottom: none; }
+        .detail-title { font-size: 13px; font-weight: 600; color: #1a1a2e; margin-bottom: 8px; }
+        .detail-text { font-size: 13px; color: #555; line-height: 1.6; }
+        .detail-status { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #555; margin-bottom: 4px; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .dot-red { background: #d32f2f; }
+        .dot-orange { background: #fb8c00; }
+        .dot-green { background: #43a047; }
+        .detail-link { font-size: 13px; color: #1565c0; text-decoration: none; display: block; margin-top: 8px; }
+        .detail-link:hover { text-decoration: underline; }
+        .detail-actions { padding: 14px 18px; display: flex; gap: 8px; flex-wrap: wrap; }
+        .btn-detail { padding: 8px 16px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; display: flex; align-items: center; gap: 6px; }
+        .btn-relance { background: #1565c0; color: white; }
+        .btn-relance:hover { background: #0d47a1; }
+        .btn-recu { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+        .btn-recu:hover { background: #c8e6c9; }
+        .btn-annuler { background: #f5f5f5; color: #888; border: 1px solid #e0e0e0; }
+        .btn-annuler:hover { background: #e8e8e8; }
+
+        /* Archived */
+        .archived-toggle { font-size: 13px; color: #999; margin-top: 24px; cursor: pointer; user-select: none; }
+        .archived-toggle:hover { color: #666; }
+        .archived-list .card { opacity: 0.5; }
+
+        .empty-state { padding: 48px; text-align: center; color: #aaa; background: white; border-radius: 12px; font-size: 14px; }
+
+        /* Tabs */
+        .tabs-bar { display: flex; gap: 0; margin-bottom: 20px; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.06); align-items: center; }
+        .search-box {
+            margin-left: auto; padding: 5px 12px; border: 1px solid #e0e0e0; border-radius: 6px;
+            font-size: 13px; font-family: inherit; outline: none; width: 200px; margin-right: 10px;
+            transition: border-color 0.2s, width 0.2s;
+        }
+        .search-box:focus { border-color: #1565c0; width: 260px; }
+        .search-box::placeholder { color: #bbb; }
+        .tab-btn {
+            flex: 1; padding: 12px 16px; text-align: center; font-size: 13px; font-weight: 500;
+            cursor: pointer; border: none; background: white; color: #666; transition: all 0.15s;
+            border-bottom: 3px solid transparent;
+        }
+        .tab-btn:hover { background: #f5f7fa; }
+        .tab-btn.active { color: #1565c0; border-bottom-color: #1565c0; font-weight: 600; }
+        .tab-btn .tab-count {
+            display: inline-block; background: #e8e8e8; color: #666; font-size: 11px;
+            padding: 1px 7px; border-radius: 10px; margin-left: 6px;
+        }
+        .tab-btn.active .tab-count { background: #e3f2fd; color: #1565c0; }
+        .tab-btn.tab-depassees .tab-count { background: #ffebee; color: #c62828; }
+        .tab-btn.tab-depassees.active .tab-count { background: #ffcdd2; color: #c62828; }
+
+        /* Reporter popup */
+        .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; z-index: 100; }
+        .overlay.hidden { display: none; }
+        .popup-box { background: white; border-radius: 12px; padding: 24px; width: 420px; box-shadow: 0 8px 32px rgba(0,0,0,0.15); }
+        .popup-box h3 { font-size: 16px; margin-bottom: 14px; }
+        .popup-opt { padding: 10px 14px; border: 1px solid #eee; border-radius: 8px; cursor: pointer; font-size: 13px; text-align: center; margin-bottom: 6px; }
+        .popup-opt:hover { background: #f0f7ff; border-color: #1565c0; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Suivi des relances</h1>
+        <div class="header-links">
+            <a href="/inbox" class="header-link">&#x2709;&#xFE0F; Bo&#xEE;te de r&#xE9;ception</a>
+            <a href="/contacts" class="header-link">🧠 Contacts</a>
+            <a href="/profile" class="header-link">👤 Profil</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="tabs-bar">
+            <button class="tab-btn active" id="tab-encours" onclick="switchTab('encours')">Échéances en cours <span class="tab-count" id="count-encours">0</span></button>
+            <button class="tab-btn tab-depassees" id="tab-depassees" onclick="switchTab('depassees')">Échéances dépassées <span class="tab-count" id="count-depassees">0</span></button>
+            <button class="tab-btn" id="tab-archivees" onclick="switchTab('archivees')">Échéances archivées <span class="tab-count" id="count-archivees">0</span></button>
+            <input type="text" class="search-box" id="echeance-search" placeholder="Rechercher..." oninput="render()">
+        </div>
+        <div class="main-layout">
+            <div class="cards-col" id="cards-col"></div>
+            <div class="detail-col" id="detail-col">
+                <div class="detail-panel" id="detail-panel"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modifier l'échéance popup -->
+    <div class="overlay hidden" id="reporter-popup">
+        <div class="popup-box">
+            <h3>Modifier l'échéance</h3>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+                <span id="reporter-current-date" style="font-size:14px;font-weight:600;color:#1565c0;white-space:nowrap;"></span>
+                <select id="reporter-select" onchange="onReporterSelect(this.value)" style="flex:1;padding:9px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer;color:#333;background:white;"></select>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <button class="popup-opt" onclick="confirmReporter()" style="flex:1;background:#1565c0;color:white;border-color:#1565c0;font-weight:500;">Valider</button>
+                <button class="popup-opt" onclick="closeReporter()" style="flex:1;color:#999;">Annuler</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var allEcheances = [];
+        var selectedId = null;
+        var reporterEchId = null;
+        var _urlTab = new URLSearchParams(window.location.search).get('tab');
+        var currentTab = _urlTab || sessionStorage.getItem('echeances_tab') || 'encours';
+
+        function switchTab(tab) {
+            currentTab = tab;
+            sessionStorage.setItem('echeances_tab', tab);
+            document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+            document.getElementById('tab-' + tab).classList.add('active');
+            selectedId = null;
+            render();
+        }
+
+        function loadEcheances() {
+            fetch('/api/echeances').then(function(r) { return r.json(); }).then(function(data) {
+                allEcheances = data;
+                render();
+            }).catch(function(err) { console.error('Erreur chargement echeances:', err); });
+        }
+
+        function escHtml(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+        function daysUntil(dateStr) {
+            if (!dateStr) return 999;
+            var today = new Date(); today.setHours(0,0,0,0);
+            var p = dateStr.split('-');
+            var target = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+            return Math.round((target - today) / 86400000);
+        }
+
+        function formatRelative(days) {
+            if (days < -1) return 'En retard de ' + Math.abs(days) + 'j';
+            if (days === -1) return 'En retard de 1j';
+            if (days === 0) return "aujourd'hui";
+            if (days === 1) return 'demain';
+            return 'dans ' + days + 'j';
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            var p = dateStr.split('-');
+            return p.length === 3 ? p[2]+'/'+p[1]+'/'+p[0] : dateStr;
+        }
+
+        function getInitial(name) { return (name || '?').charAt(0).toUpperCase(); }
+
+        // Classify each écheance into a section (basé sur le jour de relance, pas l'échéance)
+        function getSection(e) {
+            var days = daysUntil(e.date_echeance);
+            if (days < 0) return 'retard'; // échéance dépassée
+            if (days === 0 || days === 1) return 'aujourdhui'; // échéance aujourd'hui ou demain → relance aujourd'hui
+            if (days === 2) return 'demain'; // échéance dans 2 jours → relance demain
+            // Fin de la semaine : vendredi
+            var today = new Date(); today.setHours(0,0,0,0);
+            var dayOfWeek = today.getDay(); // 0=Sun, 1=Mon, ..., 5=Fri
+            var daysToFriday;
+            if (dayOfWeek === 6) daysToFriday = 6;
+            else if (dayOfWeek === 0) daysToFriday = 5;
+            else daysToFriday = 5 - dayOfWeek;
+            if (daysToFriday === 0) daysToFriday = 7; // vendredi → vendredi prochain
+            if (days <= daysToFriday + 1) return 'semaine'; // +1 car relance 1 jour avant
+            return 'plus_tard';
+        }
+
+        // Compute Friday date string for section title
+        function getFridayDate() {
+            var today = new Date(); today.setHours(0,0,0,0);
+            var dayOfWeek = today.getDay();
+            // Si samedi (6) ou dimanche (0), aller au vendredi SUIVANT
+            var daysToFriday;
+            if (dayOfWeek === 6) daysToFriday = 6; // samedi → vendredi prochain
+            else if (dayOfWeek === 0) daysToFriday = 5; // dimanche → vendredi prochain
+            else daysToFriday = 5 - dayOfWeek; // lundi-vendredi → ce vendredi
+            if (daysToFriday === 0) daysToFriday = 7; // vendredi → vendredi prochain
+            var friday = new Date(today);
+            friday.setDate(friday.getDate() + daysToFriday);
+            var mois = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+            return 'vendredi ' + friday.getDate() + ' ' + mois[friday.getMonth()];
+        }
+
+        // Ajuster une date pour eviter samedi/dimanche (recule au vendredi)
+        function skipWeekend(d) {
+            var day = d.getDay();
+            if (day === 0) d.setDate(d.getDate() - 2); // dimanche → vendredi
+            else if (day === 6) d.setDate(d.getDate() - 1); // samedi → vendredi
+            return d;
+        }
+
+        // Recommended relance date
+        function getRelanceLabel(e) {
+            var days = daysUntil(e.date_echeance);
+            if (days <= 0) return '→ Relance recommandée aujourd\'hui';
+            if (days === 1) return '→ Relance recommandée aujourd\'hui (échéance demain)';
+            if (days === 2) {
+                var tomorrow = new Date(); tomorrow.setHours(0,0,0,0); tomorrow.setDate(tomorrow.getDate() + 1);
+                var dow = tomorrow.getDay();
+                if (dow === 0 || dow === 6) return '→ Relance recommandée aujourd\'hui';
+                return '→ Relance recommandée demain';
+            }
+            var rp = e.date_echeance.split('-');
+            var relanceDate = new Date(parseInt(rp[0], 10), parseInt(rp[1], 10) - 1, parseInt(rp[2], 10));
+            relanceDate.setDate(relanceDate.getDate() - 1);
+            skipWeekend(relanceDate);
+            var jours = ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+            var moisNoms = ['janvier','f\u00e9vrier','mars','avril','mai','juin','juillet','ao\u00fbt','septembre','octobre','novembre','d\u00e9cembre'];
+            return '\u2192 Relance recommand\u00e9e ' + jours[relanceDate.getDay()] + ' ' + relanceDate.getDate() + ' ' + moisNoms[relanceDate.getMonth()];
+        }
+
+        function render() {
+            var enCours = [], depassees = [], archivees = [], terminees = [];
+            var now = new Date(); now.setHours(0,0,0,0);
+
+            allEcheances.forEach(function(e) {
+                if (e.statut === 'terminee' || e.statut === 'annulee') {
+                    terminees.push(e);
+                    return;
+                }
+                var days = daysUntil(e.date_echeance);
+                if (days < -5) {
+                    // > 5 jours de retard → archivée (auto)
+                    archivees.push(e);
+                } else if (days < 0) {
+                    // 1-5 jours de retard → dépassée
+                    depassees.push(e);
+                } else {
+                    enCours.push(e);
+                }
+            });
+
+            // Archivées inclut aussi les terminées/annulées
+            archivees = archivees.concat(terminees);
+
+            // Suppression affichage : echeances actives > 15j de retard, ou terminees/annulees depuis > 15j
+            archivees = archivees.filter(function(e) {
+                if (e.statut === 'terminee' || e.statut === 'annulee') {
+                    // Pour les terminees/annulees, filtrer par date de completion
+                    if (e.completed_at) {
+                        var completedDays = Math.ceil((new Date() - new Date(e.completed_at)) / 86400000);
+                        return completedDays <= 30;
+                    }
+                    return true; // Pas de completed_at → afficher
+                }
+                // Pour les actives en retard > 5j, filtrer par date d'echeance
+                var days = daysUntil(e.date_echeance);
+                return days > -15;
+            });
+
+            // Filtrage par recherche
+            var _searchQuery = (document.getElementById('echeance-search').value || '').trim().toLowerCase();
+            if (_searchQuery) {
+                var _matchSearch = function(e) {
+                    var haystack = ((e.description || '') + ' ' + (e.correspondant || '') + ' ' + (e.correspondant_nom || '') + ' ' + (e.original_subject || '')).toLowerCase();
+                    return haystack.indexOf(_searchQuery) >= 0;
+                };
+                enCours = enCours.filter(_matchSearch);
+                depassees = depassees.filter(_matchSearch);
+                archivees = archivees.filter(_matchSearch);
+            }
+
+            // Update tab counts
+            document.getElementById('count-encours').textContent = enCours.length;
+            document.getElementById('count-depassees').textContent = depassees.length;
+            document.getElementById('count-archivees').textContent = archivees.length;
+
+            var col = document.getElementById('cards-col');
+            var html = '';
+
+            if (currentTab === 'encours') {
+                enCours.sort(function(a, b) { return (a.date_echeance || '9999').localeCompare(b.date_echeance || '9999'); });
+                if (!selectedId && enCours.length > 0) selectedId = enCours[0].id;
+
+                var sections = {
+                    aujourdhui: { label: "À relancer aujourd'hui", items: [] },
+                    demain: { label: 'À relancer demain', items: [] },
+                    semaine: { label: 'Avant la fin de la semaine (' + getFridayDate() + ')', items: [] },
+                    plus_tard: { label: 'Semaine prochaine et plus', items: [] }
+                };
+                enCours.forEach(function(e) {
+                    var sec = getSection(e);
+                    if (sec === 'retard') sec = 'aujourdhui'; // retard < 1j → relancer aujourd'hui
+                    sections[sec].items.push(e);
+                });
+
+                ['aujourdhui', 'demain', 'semaine', 'plus_tard'].forEach(function(key) {
+                    var sec = sections[key];
+                    if (sec.items.length === 0) return;
+                    html += '<div class="section-title">' + sec.label + ' <span class="section-count">(' + sec.items.length + ')</span></div>';
+                    sec.items.forEach(function(e) { html += renderCard(e); });
+                });
+
+                if (enCours.length === 0) html = '<div class="empty-state">Aucune relance en cours — tout est à jour ✓</div>';
+
+            } else if (currentTab === 'depassees') {
+                depassees.sort(function(a, b) { return (a.date_echeance || '').localeCompare(b.date_echeance || ''); });
+                if (!selectedId && depassees.length > 0) selectedId = depassees[0].id;
+
+                if (depassees.length > 0) {
+                    html += '<div class="section-title">Échéances dépassées <span class="section-count">(' + depassees.length + ')</span></div>';
+                    html += '<div style="font-size:12px;color:#aaa;margin:-8px 0 12px 0;">Archivées automatiquement après 5 jours sans réponse</div>';
+                    depassees.forEach(function(e) { html += renderCard(e); });
+                } else {
+                    html = '<div class="empty-state">Aucune échéance dépassée ✓</div>';
+                }
+
+            } else if (currentTab === 'archivees') {
+                if (!selectedId && archivees.length > 0) selectedId = archivees[0].id;
+
+                if (archivees.length > 0) {
+                    html += '<div class="section-title" style="display:flex;align-items:center;">&Eacute;ch&eacute;ances archiv&eacute;es <span class="section-count">(' + archivees.length + ')</span><a href="#" onclick="event.preventDefault();_confirmViderArchive(this)" style="font-size:12px;color:#888;text-decoration:none;cursor:pointer;position:relative;transition:color 0.15s;margin-left:auto;" onmouseover="this.style.color=\'#e44\'" onmouseout="this.style.color=\'#888\'"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M2 4h12"/><path d="M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4"/><path d="M12.67 4v9.33a1.33 1.33 0 01-1.34 1.34H4.67a1.33 1.33 0 01-1.34-1.34V4"/><path d="M6.67 7.33v4"/><path d="M9.33 7.33v4"/></svg>Vider l\'archive</a></div>';
+                    archivees.forEach(function(e) {
+                        var displayName = e.correspondant_nom || e.correspondant || 'Inconnu';
+                        var statusLabel = e.statut === 'annulee' ? 'Annulée' : e.statut === 'terminee' ? 'Terminée' : 'Archivée (> 5j)';
+                        html += '<div class="card" style="opacity:0.6;cursor:default;"><div class="card-head" style="background:#9e9e9e;color:white;">';
+                        html += '<div class="card-avatar" style="background:rgba(255,255,255,0.2);color:white;">' + getInitial(displayName) + '</div>';
+                        html += '<div class="card-head-info"><div class="card-head-name">' + escHtml(displayName) + '</div>';
+                        html += '<div class="card-head-subject" style="color:rgba(255,255,255,0.8);">' + escHtml(e.description) + '</div></div>';
+                        html += '<span style="font-size:11px;color:rgba(255,255,255,0.8);">' + statusLabel + '</span>';
+                        html += '</div></div>';
+                    });
+                } else {
+                    html = '<div class="empty-state">Aucune échéance archivée</div>';
+                }
+            }
+
+            col.innerHTML = html;
+            if (selectedId && currentTab !== 'archivees') renderDetail(selectedId);
+            else document.getElementById('detail-col').classList.remove('visible');
+        }
+
+        function renderCard(e) {
+            var days = daysUntil(e.date_echeance);
+            var displayName = e.correspondant_nom || e.correspondant || 'Inconnu';
+            var isSelected = e.id === selectedId;
+
+            var html = '<div class="card' + (isSelected ? ' selected' : '') + '" onclick="selectCard(' + e.id + ')">';
+
+            html += '<div class="card-head">';
+            html += '<div class="card-avatar">' + getInitial(displayName) + '</div>';
+            html += '<div class="card-head-info">';
+            html += '<div class="card-head-name">' + escHtml(displayName) + '</div>';
+            html += '<div class="card-head-subject" style="font-size:12px;color:rgba(255,255,255,0.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(e.original_subject || e.description) + '</div>';
+            html += '</div>';
+            html += '</div>';
+
+            html += '<div class="card-body">';
+            html += '<div style="font-size:11px;margin-bottom:4px;"><a href="#" onclick="event.preventDefault();event.stopPropagation();voirMail(' + e.id + ')" style="color:#0078d4;text-decoration:none;">✉️ Voir le mail original</a></div>';
+            var sentDaysAgo = 0;
+            if (e.created_at) {
+                var cStr = e.created_at.replace('T', ' ').slice(0, 10);
+                var cParts = cStr.split('-');
+                var createdDate = new Date(parseInt(cParts[0], 10), parseInt(cParts[1], 10) - 1, parseInt(cParts[2], 10));
+                var _now = new Date(); _now.setHours(0,0,0,0);
+                sentDaysAgo = Math.round((_now - createdDate) / 86400000);
+            }
+            var sentLabel = sentDaysAgo <= 0 ? "Mail envoy\u00e9 aujourd'hui" : 'Mail envoy\u00e9 il y a ' + sentDaysAgo + ' jour' + (sentDaysAgo > 1 ? 's' : '');
+            html += '<div class="card-detail-line"><span class="icon">ℹ️</span> ' + sentLabel + '</div>';
+            html += '<div class="card-detail-line"><span class="icon">🔴</span> Réponse attendue : <strong>' + formatRelative(days) + '</strong>';
+            if (days < 0) html += ' <span class="card-retard-badge badge-red">En retard de ' + Math.abs(days) + ' jour' + (Math.abs(days) > 1 ? 's' : '') + '</span>';
+            html += '</div>';
+            html += '<div class="card-link">' + getRelanceLabel(e) + '</div>';
+
+            html += '<div class="card-buttons">';
+            var nbRel = e.nb_relances || 0;
+            var relBtnLabel = nbRel === 0 ? 'Relance rapide' : (nbRel === 1 ? '2ème relance' : (nbRel + 1) + 'ème relance');
+            html += '<button class="btn btn-primary" onclick="event.stopPropagation();relancer(' + e.id + ')">' + relBtnLabel + '</button>';
+            html += '<button class="btn" onclick="event.stopPropagation();reponseRecue(' + e.id + ')">R&eacute;ponse d&eacute;j&agrave; re&ccedil;ue</button>';
+            html += '<button class="btn" onclick="event.stopPropagation();reporter(' + e.id + ')">Modifier</button>';
+            html += '<a href="#" onclick="event.preventDefault();event.stopPropagation();_confirmDeleteEcheance(this,' + e.id + ')" title="Supprimer" style="color:#888;text-decoration:none;cursor:pointer;padding:4px 2px;position:relative;transition:color 0.15s;display:inline-flex;align-items:center;margin-left:auto;" onmouseover="this.style.color=\'#e44\'" onmouseout="this.style.color=\'#888\'"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12"/><path d="M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4"/><path d="M12.67 4v9.33a1.33 1.33 0 01-1.34 1.34H4.67a1.33 1.33 0 01-1.34-1.34V4"/><path d="M6.67 7.33v4"/><path d="M9.33 7.33v4"/></svg></a>';
+            html += '</div>';
+
+            html += '</div></div>';
+            return html;
+        }
+
+        function selectCard(id) {
+            selectedId = id;
+            render();
+            renderDetail(id);
+        }
+
+        function renderDetail(id) {
+            var e = allEcheances.find(function(x) { return x.id === id; });
+            if (!e) { document.getElementById('detail-col').classList.remove('visible'); return; }
+
+            var days = daysUntil(e.date_echeance);
+            var displayName = e.correspondant_nom || e.correspondant || 'Inconnu';
+            var dotClass = days < 0 ? 'dot-red' : days === 0 ? 'dot-orange' : 'dot-green';
+
+            var html = '';
+
+            // Extrait du mail envoyé
+            html += '<div class="detail-section">';
+            html += '<div class="detail-title">Mail envoyé :</div>';
+            if (e.extrait_mail) {
+                html += '<div class="detail-text" style="font-style:italic;color:#555;">"' + escHtml(e.extrait_mail) + '"</div>';
+            } else {
+                html += '<div class="detail-text" style="color:#aaa;">Extrait non disponible</div>';
+            }
+            html += '<div style="font-size:12px;color:#999;margin-top:8px;">' + escHtml(displayName) + '</div>';
+            html += '</div>';
+
+            // Statut
+            html += '<div class="detail-section">';
+            html += '<div class="detail-status"><div class="dot ' + dotClass + '"></div> Réponse attendue <strong>' + formatRelative(days) + '</strong></div>';
+
+            // Historique des relances
+            var relDates = [];
+            try { relDates = JSON.parse(e.relances_dates || '[]'); } catch(ex) {}
+            if (relDates.length > 0) {
+                relDates.forEach(function(rd, idx) {
+                    // Support ancien format (string) et nouveau format (objet)
+                    var rdDate = typeof rd === 'string' ? rd : (rd.date || '');
+                    var rdSubject = typeof rd === 'object' ? (rd.subject || '') : '';
+                    var rdParts = rdDate.split('-');
+                    var rdFormatted = rdParts.length === 3 ? rdParts[2]+'/'+rdParts[1]+'/'+rdParts[0] : rdDate;
+                    var ordinal = idx === 0 ? '1ère' : (idx + 1) + 'ème';
+                    var searchSubject = rdSubject || e.original_subject || e.description || '';
+                    html += '<div class="detail-status relance-link" style="color:#1565c0;cursor:pointer;" data-subject="' + escHtml(searchSubject) + '" data-correspondant="' + escHtml(e.correspondant || '') + '"><div class="dot" style="background:#1565c0;"></div> ' + ordinal + ' relance effectu\u00e9e le <strong>' + rdFormatted + '</strong> <span style="font-size:11px;color:#999;">\uD83D\uDD17</span></div>';
+                });
+            }
+
+            html += '<div class="detail-status"><div class="dot dot-red"></div> Aucune réponse reçue détectée</div>';
+            html += '</div>';
+
+            document.getElementById('detail-panel').innerHTML = html;
+            document.getElementById('detail-col').classList.add('visible');
+            // Delegation d'événements pour les liens relance (évite XSS onclick inline)
+            document.getElementById('detail-panel').querySelectorAll('.relance-link').forEach(function(el) {
+                el.addEventListener('click', function() {
+                    voirRelanceMail(el.dataset.subject, el.dataset.correspondant);
+                });
+            });
+        }
+
+        function relancer(id) {
+            fetch('/api/echeances/' + id + '/relance').then(function(r) { return r.json(); }).then(function(data) {
+                if (data.error) { alert(data.error); return; }
+                var params = new URLSearchParams({ to: data.to || '', subject: data.subject || '', brief: data.brief || '', relance: '1', echeance_id: id });
+                window.location.href = '/new_mail?' + params.toString();
+            }).catch(function(err) { alert('Erreur de connexion'); });
+        }
+
+        var _undoTimer = null;
+        // --- Suppression échéance avec confirmation ---
+        var _deleteEchConfirm = null;
+        function _confirmDeleteEcheance(btn, id) {
+            if (_deleteEchConfirm) { _deleteEchConfirm.remove(); _deleteEchConfirm = null; }
+            var confirmEl = document.createElement('div');
+            confirmEl.style.cssText = 'position:absolute;right:0;bottom:100%;margin-bottom:4px;background:#fff;border:1px solid #e0e0e0;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.12);padding:8px 12px;z-index:100;display:flex;align-items:center;gap:8px;white-space:nowrap;';
+            confirmEl.innerHTML = '<span style="font-size:12px;color:#666;">Supprimer ?</span>'
+                + '<button style="border:none;background:#e44;color:#fff;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;">Oui</button>'
+                + '<button style="border:none;background:#f0f0f0;color:#666;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;">Non</button>';
+            btn.appendChild(confirmEl);
+            _deleteEchConfirm = confirmEl;
+            confirmEl.addEventListener('click', function(ev) { ev.preventDefault(); ev.stopPropagation(); });
+            confirmEl.querySelector('button:first-of-type').addEventListener('click', function() {
+                confirmEl.remove(); _deleteEchConfirm = null;
+                fetch('/api/echeances/' + id, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({statut: 'annulee'}) })
+                .then(function() { selectedId = null; loadEcheances(); })
+                .catch(function() { alert('Erreur de connexion'); });
+            });
+            confirmEl.querySelector('button:last-of-type').addEventListener('click', function() {
+                confirmEl.remove(); _deleteEchConfirm = null;
+            });
+            setTimeout(function() {
+                document.addEventListener('click', function _close(e) {
+                    if (_deleteEchConfirm && !_deleteEchConfirm.contains(e.target)) {
+                        _deleteEchConfirm.remove(); _deleteEchConfirm = null;
+                    }
+                    document.removeEventListener('click', _close);
+                });
+            }, 10);
+        }
+
+        // --- Vider l'archive ---
+        var _viderArchiveConfirm = null;
+        function _confirmViderArchive(btn) {
+            if (_viderArchiveConfirm) { _viderArchiveConfirm.remove(); _viderArchiveConfirm = null; }
+            var confirmEl = document.createElement('div');
+            confirmEl.style.cssText = 'position:absolute;right:0;bottom:100%;margin-bottom:4px;background:#fff;border:1px solid #e0e0e0;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.12);padding:8px 12px;z-index:100;display:flex;align-items:center;gap:8px;white-space:nowrap;';
+            confirmEl.innerHTML = '<span style="font-size:12px;color:#666;">Supprimer toutes les \u00e9ch\u00e9ances archiv\u00e9es ?</span>'
+                + '<button style="border:none;background:#e44;color:#fff;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;">Oui</button>'
+                + '<button style="border:none;background:#f0f0f0;color:#666;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;">Non</button>';
+            btn.appendChild(confirmEl);
+            _viderArchiveConfirm = confirmEl;
+            confirmEl.addEventListener('click', function(ev) { ev.preventDefault(); ev.stopPropagation(); });
+            confirmEl.querySelector('button:first-of-type').addEventListener('click', function() {
+                confirmEl.remove(); _viderArchiveConfirm = null;
+                fetch('/api/echeances/purge_archives', { method: 'POST' })
+                .then(function(r) { return r.json(); })
+                .then(function(d) { if (d.ok) { selectedId = null; loadEcheances(); } })
+                .catch(function() { alert('Erreur de connexion'); });
+            });
+            confirmEl.querySelector('button:last-of-type').addEventListener('click', function() {
+                confirmEl.remove(); _viderArchiveConfirm = null;
+            });
+            setTimeout(function() {
+                document.addEventListener('click', function _close(e) {
+                    if (_viderArchiveConfirm && !_viderArchiveConfirm.contains(e.target)) {
+                        _viderArchiveConfirm.remove(); _viderArchiveConfirm = null;
+                    }
+                    document.removeEventListener('click', _close);
+                });
+            }, 10);
+        }
+
+        function reponseRecue(id) {
+            fetch('/api/echeances/' + id, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({statut: 'terminee'}) })
+            .then(function() {
+                selectedId = null;
+                loadEcheances();
+                // Toast undo
+                _showUndoToast(id);
+            }).catch(function() { alert('Erreur de connexion'); });
+        }
+
+        function _showUndoToast(id) {
+            // Supprimer un toast existant
+            var existing = document.getElementById('undo-toast');
+            if (existing) { existing.remove(); clearTimeout(_undoTimer); }
+
+            var toast = document.createElement('div');
+            toast.id = 'undo-toast';
+            toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:white;padding:12px 20px;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:16px;box-shadow:0 4px 16px rgba(0,0,0,0.2);z-index:200;';
+            toast.innerHTML = 'Échéance marquée comme terminée ✓ <button onclick="_undoReponseRecue(' + id + ')" style="background:none;border:1px solid rgba(255,255,255,0.4);color:white;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;">Annuler</button>';
+            document.body.appendChild(toast);
+
+            _undoTimer = setTimeout(function() {
+                var t = document.getElementById('undo-toast');
+                if (t) t.remove();
+            }, 4000);
+        }
+
+        function _undoReponseRecue(id) {
+            clearTimeout(_undoTimer);
+            var t = document.getElementById('undo-toast');
+            if (t) t.remove();
+            // Remettre en active
+            fetch('/api/echeances/' + id, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({statut: 'active'}) })
+            .then(function() { loadEcheances(); }).catch(function() {});
+        }
+
+        function annuler(id) {
+            fetch('/api/echeances/' + id, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({statut: 'annulee'}) })
+            .then(function() { selectedId = null; loadEcheances(); }).catch(function() { alert('Erreur de connexion'); });
+        }
+
+        var _reporterDate = null;
+        var _reporterOriginalDate = null;
+
+        function _formatDateFr(d) {
+            var opts = {weekday:'long', day:'numeric', month:'long', year:'numeric'};
+            var label = d.toLocaleDateString('fr-FR', opts);
+            return label.charAt(0).toUpperCase() + label.slice(1);
+        }
+
+        function reporter(id) {
+            reporterEchId = id;
+            var ech = allEcheances.find(function(e) { return e.id === id; });
+            if (!ech || !ech.date_echeance) { alert('Cette échéance n\'a pas de date définie'); return; }
+            _reporterOriginalDate = new Date(ech.date_echeance + 'T00:00:00');
+            _reporterDate = new Date(_reporterOriginalDate);
+
+            // Afficher la date actuelle
+            document.getElementById('reporter-current-date').textContent = _formatDateFr(_reporterOriginalDate);
+
+            // Construire la liste déroulante : -4j à +90j (date actuelle visible dès l'ouverture)
+            var select = document.getElementById('reporter-select');
+            select.innerHTML = '';
+            for (var delta = -4; delta <= 90; delta++) {
+                var d = new Date(_reporterOriginalDate);
+                d.setDate(d.getDate() + delta);
+                var opt = document.createElement('option');
+                var isoDate = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+                opt.value = isoDate;
+
+                if (delta === 0) {
+                    opt.textContent = '— Date actuelle —';
+                    opt.selected = true;
+                } else if (delta < 0) {
+                    opt.textContent = delta + 'j  →  ' + _formatDateFr(d);
+                } else {
+                    opt.textContent = '+' + delta + 'j  →  ' + _formatDateFr(d);
+                }
+                select.appendChild(opt);
+            }
+
+            document.getElementById('reporter-popup').classList.remove('hidden');
+        }
+        function closeReporter() { document.getElementById('reporter-popup').classList.add('hidden'); reporterEchId = null; _reporterDate = null; _reporterOriginalDate = null; }
+
+        function onReporterSelect(isoDate) {
+            if (!isoDate) return;
+            _reporterDate = new Date(isoDate + 'T00:00:00');
+            document.getElementById('reporter-current-date').textContent = _formatDateFr(_reporterDate);
+        }
+
+        function confirmReporter() {
+            if (!reporterEchId || !_reporterDate) return;
+            var d = _reporterDate;
+            // Si la nouvelle date tombe un weekend, decaler au lundi
+            if (d.getDay() === 0) d.setDate(d.getDate() + 1); // dimanche → lundi
+            else if (d.getDay() === 6) d.setDate(d.getDate() + 2); // samedi → lundi
+            fetch('/api/echeances/' + reporterEchId, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({date_echeance: d.toISOString().slice(0,10)}) })
+            .then(function() { closeReporter(); loadEcheances(); }).catch(function() { closeReporter(); alert('Erreur de connexion'); });
+        }
+
+        function voirMail(id) { window.location.href = '/api/echeances/' + id + '/mail'; }
+
+        // Popup modale pour afficher un mail de relance
+        function voirRelanceMail(subject, correspondant) {
+            var modal = document.getElementById('relance-mail-modal');
+            var content = document.getElementById('relance-mail-content');
+            content.innerHTML = '<div style="text-align:center;padding:32px;color:#888;">Recherche du mail en cours...</div>';
+            modal.style.display = 'flex';
+
+            // Rechercher le mail dans les threads par sujet + correspondant
+            fetch('/api/echeances/search_relance_mail?subject=' + encodeURIComponent(subject) + '&correspondant=' + encodeURIComponent(correspondant))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.body) {
+                        var html = '<div style="font-size:12px;color:#888;margin-bottom:8px;">';
+                        html += '<strong>À :</strong> ' + escHtml(data.to || correspondant) + '<br>';
+                        html += '<strong>Objet :</strong> ' + escHtml(data.subject || subject) + '<br>';
+                        html += '<strong>Date :</strong> ' + escHtml(data.date || '') + '</div>';
+                        var bodyClean = (data.body || '').replace(/<br\s*\/?>/gi, '\n');
+                        html += '<div style="font-size:13px;color:#333;line-height:1.6;white-space:pre-wrap;">' + escHtml(bodyClean) + '</div>';
+                        content.innerHTML = html;
+                    } else {
+                        content.innerHTML = '<div style="text-align:center;padding:32px;color:#888;">Mail de relance non trouvé</div>';
+                    }
+                })
+                .catch(function() {
+                    content.innerHTML = '<div style="text-align:center;padding:32px;color:#888;">Erreur lors de la recherche</div>';
+                });
+        }
+        function closeRelanceModal() {
+            document.getElementById('relance-mail-modal').style.display = 'none';
+        }
+
+        // Restaurer l'onglet mémorisé au chargement
+        if (currentTab !== 'encours') {
+            document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+            document.getElementById('tab-' + currentTab).classList.add('active');
+        }
+        loadEcheances();
+    </script>
+
+    <!-- Modal mail de relance -->
+    <div id="relance-mail-modal" onclick="if(event.target===this)closeRelanceModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:100;align-items:center;justify-content:center;">
+        <div style="background:white;border-radius:12px;width:560px;max-height:70vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.15);">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #eee;">
+                <div style="font-size:15px;font-weight:600;color:#1a1a2e;">Mail de relance</div>
+                <button onclick="closeRelanceModal()" style="background:none;border:none;font-size:20px;color:#999;cursor:pointer;">&times;</button>
+            </div>
+            <div id="relance-mail-content" style="padding:20px;"></div>
+        </div>
+    </div>
+</body>
+</html>

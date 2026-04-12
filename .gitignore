@@ -1,0 +1,42 @@
+# Configuration locale (cle API)
+config.json
+
+# Base de donnees
+emails.db
+emails.db-shm
+emails.db-wal
+easymail.db
+
+# Profil de style (genere a l'onboarding)
+style_profile.txt
+style_profile.bak
+
+# Flag dependances installees
+.deps_installed
+
+# Mode developpement (desactive git auto dans start.bat + app.py)
+.dev_mode
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Backups
+easymail_backup_*/
+
+# Documents / rapports (pas utiles pour les testeurs)
+*.docx
+RAPPORT_*.md
+SESSION_RECAP_*.md
+TESTS_SCENARIOS*.md
+PLAN_DE_TESTS*.md
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

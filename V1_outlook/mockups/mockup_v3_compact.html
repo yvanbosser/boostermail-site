@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>EasyMail - Mockup V3 Compact</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', sans-serif; background: #f3f3f3; overflow: hidden; height: 100vh; }
+
+.outlook-frame { display: flex; height: 100vh; }
+
+/* SIDEBAR ICONS ONLY */
+.outlook-sidebar {
+    width: 48px; background: #f0f0f0; border-right: 1px solid #d0d0d0;
+    display: flex; flex-direction: column; align-items: center; padding-top: 8px; gap: 4px; flex-shrink: 0;
+}
+.sidebar-icon {
+    width: 36px; height: 36px; border-radius: 6px; display: flex;
+    align-items: center; justify-content: center; font-size: 18px;
+    cursor: pointer; color: #666; position: relative;
+}
+.sidebar-icon:hover { background: #e0e0e0; }
+.sidebar-icon.active { background: #d6e4f0; color: #0078d4; }
+.sidebar-icon .notif {
+    position: absolute; top: 2px; right: 2px; width: 8px; height: 8px;
+    border-radius: 50%; background: #e44;
+}
+
+/* FOLDER PANEL */
+.folder-panel {
+    width: 180px; background: #fafafa; border-right: 1px solid #e0e0e0; padding: 8px 0; flex-shrink: 0;
+}
+.folder-item { padding: 5px 12px; font-size: 12px; color: #444; cursor: pointer; display: flex; justify-content: space-between; }
+.folder-item:hover { background: #eee; }
+.folder-item.active { background: #d6e4f0; color: #0078d4; font-weight: 600; }
+.folder-item .cnt { font-size: 10px; color: #999; }
+
+/* MAIL LIST */
+.mail-list {
+    width: 280px; background: #fff; border-right: 1px solid #e0e0e0;
+    overflow-y: auto; flex-shrink: 0;
+}
+.mail-item { padding: 10px 12px; border-bottom: 1px solid #f5f5f5; cursor: pointer; }
+.mail-item:hover { background: #f8fbff; }
+.mail-item.active { background: #e8f0fe; border-left: 3px solid #0078d4; }
+.mail-item .sender { font-size: 12px; font-weight: 600; color: #222; }
+.mail-item .subject { font-size: 11px; color: #444; margin-top: 1px; }
+.mail-item .preview { font-size: 10px; color: #999; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mail-item .meta { font-size: 10px; color: #bbb; float: right; }
+
+/* READING PANE */
+.reading-pane { flex: 1; background: #fff; overflow-y: auto; padding: 20px 24px; }
+.reading-pane .rp-from { font-size: 14px; font-weight: 600; color: #1a1a1a; }
+.reading-pane .rp-meta { font-size: 11px; color: #888; margin-top: 2px; }
+.reading-pane .rp-subject { font-size: 16px; font-weight: 600; color: #1a1a1a; margin-top: 10px; }
+.reading-pane .rp-body { font-size: 13px; color: #333; line-height: 1.6; margin-top: 14px; }
+.rp-att { display: inline-block; background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; padding: 3px 8px; font-size: 10px; color: #666; margin-top: 8px; margin-right: 4px; }
+
+/* EASYMAIL PANEL - COMPACT */
+.easymail-panel {
+    width: 340px; background: #fff; border-left: 2px solid #0078d4;
+    display: flex; flex-direction: column; flex-shrink: 0;
+    box-shadow: -2px 0 6px rgba(0,0,0,0.06);
+}
+.panel-header {
+    background: #0078d4; color: #fff; padding: 10px 14px;
+    display: flex; align-items: center; justify-content: space-between;
+}
+.panel-header .logo { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.panel-header .tabs { display: flex; gap: 2px; }
+.panel-header .tab {
+    padding: 4px 10px; border-radius: 4px; font-size: 11px;
+    cursor: pointer; color: rgba(255,255,255,0.7);
+}
+.panel-header .tab.active { background: rgba(255,255,255,0.2); color: #fff; }
+.panel-header .close-btn { background: none; border: none; color: rgba(255,255,255,0.5); font-size: 16px; cursor: pointer; }
+
+.panel-body { flex: 1; overflow-y: auto; padding: 12px; }
+
+/* TABS CONTENT */
+.tab-repondre, .tab-classer, .tab-echeances { }
+
+/* QUICK CONTACT */
+.quick-contact {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+    padding: 8px; background: #f8f9fa; border-radius: 6px;
+}
+.qc-avatar {
+    width: 28px; height: 28px; border-radius: 50%; background: #0078d4;
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; flex-shrink: 0;
+}
+.qc-name { font-size: 12px; font-weight: 600; color: #333; }
+.qc-detail { font-size: 10px; color: #999; }
+.qc-tags { display: flex; gap: 3px; margin-top: 2px; }
+.qc-tag { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: #e8f4fd; color: #0078d4; }
+
+/* COMPACT IMPORTANCE */
+.imp-row { display: flex; gap: 4px; margin-bottom: 10px; }
+.imp-chip {
+    flex: 1; padding: 6px 4px; border: 1px solid #e0e0e0; border-radius: 5px;
+    background: #fff; text-align: center; font-size: 11px; color: #777; cursor: pointer;
+}
+.imp-chip.active { background: #0078d4; color: #fff; border-color: #0078d4; font-weight: 600; }
+
+/* GENERATE */
+.gen-row { display: flex; gap: 6px; margin-bottom: 10px; }
+.gen-input {
+    flex: 1; padding: 7px 10px; border: 1px solid #ddd; border-radius: 6px;
+    font-size: 11px; outline: none; font-family: inherit;
+}
+.gen-input:focus { border-color: #0078d4; }
+.gen-btn {
+    padding: 7px 14px; border: none; border-radius: 6px;
+    background: #0078d4; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.gen-btn:hover { background: #005a9e; }
+
+/* RESPONSE */
+.response-box {
+    background: #fafbfc; border: 1px solid #e8e8e8; border-radius: 6px;
+    padding: 10px 12px; margin-bottom: 10px; min-height: 160px;
+    font-size: 12px; line-height: 1.6; color: #333;
+}
+
+/* ACTIONS */
+.actions-row { display: flex; gap: 6px; margin-bottom: 10px; }
+.act-btn {
+    padding: 6px 10px; border: 1px solid #ddd; border-radius: 5px;
+    background: #fff; font-size: 10px; color: #666; cursor: pointer; flex: 1; text-align: center;
+}
+.act-btn:hover { border-color: #0078d4; color: #0078d4; }
+.act-btn.send { background: #0078d4; color: #fff; border-color: #0078d4; font-weight: 600; flex: 2; }
+.act-btn.send:hover { background: #005a9e; }
+
+/* BOTTOM CARDS */
+.bottom-card {
+    background: #fff; border: 1px solid #e8e8e8; border-radius: 6px;
+    padding: 8px 10px; margin-bottom: 6px; font-size: 11px;
+}
+.bottom-card.ech { border-left: 3px solid #ffc107; background: #fffde7; }
+.bottom-card.classify { border-left: 3px solid #0078d4; background: #e3f2fd; cursor: pointer; }
+.bc-label { font-size: 9px; color: #999; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 3px; }
+.bc-text { color: #444; }
+.bc-highlight { color: #0078d4; font-weight: 500; }
+
+.main-content { display: flex; flex-direction: column; flex: 1; }
+.main-body { display: flex; flex: 1; overflow: hidden; }
+
+/* RIBBON MINIMAL */
+.ribbon {
+    height: 38px; background: #fafafa; border-bottom: 1px solid #e0e0e0;
+    display: flex; align-items: center; padding: 0 12px; gap: 8px;
+}
+.ribbon .r-tab { font-size: 12px; color: #888; padding: 6px 10px; cursor: pointer; }
+.ribbon .r-tab.active { color: #0078d4; font-weight: 600; }
+.ribbon .r-spacer { flex: 1; }
+.ribbon .em-btn {
+    background: #0078d4; color: #fff; border: none; border-radius: 5px;
+    padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+    display: flex; align-items: center; gap: 4px;
+}
+</style>
+</head>
+<body>
+<div class="outlook-frame">
+    <div class="outlook-sidebar">
+        <div class="sidebar-icon active" title="Courrier">&#x2709;</div>
+        <div class="sidebar-icon" title="Calendrier">&#x1f4c5;</div>
+        <div class="sidebar-icon" title="Contacts">&#x1f464;</div>
+        <div class="sidebar-icon" title="Taches">&#x2611;</div>
+    </div>
+    <div class="folder-panel">
+        <div class="folder-item active"><span>Boite de reception</span><span class="cnt">9</span></div>
+        <div class="folder-item"><span>Elements envoyes</span></div>
+        <div class="folder-item"><span>Brouillons</span><span class="cnt">3</span></div>
+        <div class="folder-item"><span>IMMOBILIER</span></div>
+        <div class="folder-item"><span>FINANCE</span></div>
+        <div class="folder-item"><span>GROUPE</span></div>
+    </div>
+    <div class="main-content">
+        <div class="ribbon">
+            <div class="r-tab active">Accueil</div>
+            <div class="r-tab">Affichage</div>
+            <div class="r-spacer"></div>
+            <button class="em-btn">&#x2709; EasyMail</button>
+        </div>
+        <div class="main-body">
+            <div class="mail-list">
+                <div class="mail-item active">
+                    <div class="meta">10:00</div>
+                    <div class="sender">Ronan FOUIN &#x1f4ce;</div>
+                    <div class="subject">RE: SOUTH GARDEN</div>
+                    <div class="preview">Suite a notre echange, veuillez...</div>
+                </div>
+                <div class="mail-item">
+                    <div class="meta">08:49</div>
+                    <div class="sender">Estelle DOUILLARD &#x1f4ce;</div>
+                    <div class="subject">MINOPOLIS - Bilan 31/12</div>
+                    <div class="preview">Vous trouverez ci-joint les...</div>
+                </div>
+                <div class="mail-item">
+                    <div class="meta">08:40</div>
+                    <div class="sender">Coralie BERTHAUD</div>
+                    <div class="subject">SAS ANNA CHU - Bailleur</div>
+                    <div class="preview">Lorsque vous avez souhaite...</div>
+                </div>
+                <div class="mail-item">
+                    <div class="meta">hier</div>
+                    <div class="sender">Vincent HUBERT</div>
+                    <div class="subject">ORVAULT - COURRIER</div>
+                    <div class="preview">Veuillez trouver ci-joint...</div>
+                </div>
+            </div>
+            <div class="reading-pane">
+                <div class="rp-from">Ronan FOUIN &lt;ronan.fouin@airbee-conseil.fr&gt;</div>
+                <div class="rp-meta">A : Yvan BOSSER | 02/04/2026 10:00</div>
+                <div class="rp-subject">RE: SOUTH GARDEN</div>
+                <div><span class="rp-att">&#x1f4c4; Situation locative Q1.pdf</span><span class="rp-att">&#x1f4c4; Charges 2025.xlsx</span></div>
+                <div class="rp-body">
+                    <p>Bonjour Yvan,</p>
+                    <p>Suite a notre echange, veuillez trouver ci-joint la situation locative du Q1 2026 pour le South Garden ainsi que le detail des charges 2025.</p>
+                    <p>Concernant le lot 3, nous avons recu son preavis au 30 juin 2026. Je propose un point semaine prochaine.</p>
+                    <p>Pourriez-vous confirmer la reconduction du contrat espaces verts 2026 ?</p>
+                    <p>Cordialement,<br>Ronan FOUIN</p>
+                </div>
+            </div>
+            <div class="easymail-panel">
+                <div class="panel-header">
+                    <div class="logo">&#x2709; EasyMail</div>
+                    <div class="tabs">
+                        <div class="tab active">Repondre</div>
+                        <div class="tab">Classer</div>
+                        <div class="tab">Echeances</div>
+                    </div>
+                    <button class="close-btn">&times;</button>
+                </div>
+                <div class="panel-body">
+                    <div class="quick-contact">
+                        <div class="qc-avatar">R</div>
+                        <div>
+                            <div class="qc-name">Ronan FOUIN</div>
+                            <div class="qc-detail">Airbee Conseil</div>
+                            <div class="qc-tags"><span class="qc-tag">vous</span><span class="qc-tag">100%</span></div>
+                        </div>
+                    </div>
+                    <div class="imp-row">
+                        <div class="imp-chip">&#x26A1; R</div>
+                        <div class="imp-chip active">&#x1f4dd; S</div>
+                        <div class="imp-chip">&#x1f9e0; H</div>
+                    </div>
+                    <div class="gen-row">
+                        <input class="gen-input" placeholder="Instructions (optionnel)">
+                        <button class="gen-btn">&#x2728; Generer</button>
+                    </div>
+                    <div class="response-box">
+                        <p>Bonjour Ronan,</p>
+                        <p>Merci pour ces documents. Bien note pour le depart du lot 3 au 30 juin.</p>
+                        <p>Je suis disponible jeudi pour le point sur la remise en location.</p>
+                        <p>Je confirme la reconduction du contrat espaces verts pour 2026.</p>
+                        <p>Cdlt,<br>Yvan</p>
+                    </div>
+                    <div class="actions-row">
+                        <button class="act-btn">&#x1f504; Autre</button>
+                        <button class="act-btn">&#x270f; Modifier</button>
+                        <button class="act-btn send">&#x1f4e4; Relire et envoyer</button>
+                    </div>
+                    <div class="bottom-card ech">
+                        <div class="bc-label">Echeance detectee</div>
+                        <div class="bc-text">&#x1f4c5; <strong>Semaine prochaine</strong> - Point remise en location lot 3 avec Ronan</div>
+                    </div>
+                    <div class="bottom-card classify">
+                        <div class="bc-label">Classement suggere</div>
+                        <div class="bc-text">&#x1f4c1; <span class="bc-highlight">IMMOBILIER / South Garden / admin-compta</span> &#x2713;</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

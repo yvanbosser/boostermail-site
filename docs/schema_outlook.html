@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>EasyMail — Comment ça se connecte</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f5f7fa; padding: 40px; }
+        h1 { text-align: center; font-size: 28px; color: #1a1a2e; margin-bottom: 8px; }
+        .subtitle { text-align: center; color: #888; font-size: 16px; margin-bottom: 48px; }
+
+        .schema { max-width: 900px; margin: 0 auto; }
+
+        /* --- VOTRE CAS --- */
+        .case { background: white; border-radius: 16px; padding: 32px; margin-bottom: 32px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+        .case-title { font-size: 18px; font-weight: 700; margin-bottom: 24px; display: flex; align-items: center; gap: 12px; }
+        .case-title .badge { font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 12px; }
+        .badge-you { background: #e8f5e9; color: #2e7d32; }
+        .badge-avocat { background: #e3f2fd; color: #1565c0; }
+        .badge-web { background: #fce4ec; color: #c62828; }
+
+        .flow-row { display: flex; align-items: center; justify-content: center; gap: 0; flex-wrap: wrap; }
+
+        .box {
+            padding: 16px 20px; border-radius: 12px; text-align: center;
+            min-width: 140px; position: relative;
+        }
+        .box .icon { font-size: 32px; margin-bottom: 6px; }
+        .box .label { font-size: 14px; font-weight: 600; }
+        .box .sublabel { font-size: 11px; color: #888; margin-top: 2px; }
+
+        .box-easymail { background: linear-gradient(135deg, #4361ee, #7209b7); color: white; }
+        .box-easymail .sublabel { color: rgba(255,255,255,0.7); }
+        .box-outlook { background: #e3f2fd; color: #1565c0; border: 2px solid #90caf9; }
+        .box-server { background: #fff3e0; color: #e65100; border: 2px solid #ffcc80; }
+        .box-server-ovh { background: #f3e5f5; color: #6a1b9a; border: 2px solid #ce93d8; }
+        .box-internet { background: #e8f5e9; color: #2e7d32; border: 2px solid #a5d6a7; }
+        .box-web { background: #e3f2fd; color: #1565c0; border: 2px solid #90caf9; }
+        .box-no { background: #ffebee; color: #c62828; border: 2px dashed #ef9a9a; }
+
+        .arrow {
+            font-size: 24px; color: #bbb; padding: 0 8px;
+            display: flex; align-items: center; font-weight: 700;
+        }
+        .arrow-label {
+            font-size: 10px; color: #999; text-align: center;
+            position: relative; top: -2px;
+        }
+        .arrow-col { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+
+        .compat { text-align: center; margin-top: 16px; font-size: 14px; font-weight: 600; }
+        .compat-yes { color: #2e7d32; }
+        .compat-no { color: #c62828; }
+
+        .legend {
+            max-width: 900px; margin: 32px auto 0; padding: 24px;
+            background: white; border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+        }
+        .legend h3 { font-size: 16px; margin-bottom: 12px; }
+        .legend-item { display: flex; align-items: center; gap: 12px; padding: 6px 0; font-size: 14px; }
+        .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+
+        .key-point {
+            max-width: 900px; margin: 32px auto 0; padding: 24px;
+            background: linear-gradient(135deg, #4361ee, #7209b7);
+            color: white; border-radius: 12px; text-align: center;
+        }
+        .key-point h3 { font-size: 18px; margin-bottom: 8px; }
+        .key-point p { font-size: 15px; opacity: 0.9; }
+    </style>
+</head>
+<body>
+
+<h1>Comment EasyMail se connecte à Outlook</h1>
+<p class="subtitle">3 configurations possibles, expliquées simplement</p>
+
+<div class="schema">
+
+    <!-- CAS 1 : YVAN -->
+    <div class="case">
+        <div class="case-title">
+            <span class="badge badge-you">✅ Votre cas — Yvan</span>
+            Configuration : Microsoft 365
+        </div>
+        <div class="flow-row">
+            <div class="box box-easymail">
+                <div class="icon">🚀</div>
+                <div class="label">EasyMail</div>
+                <div class="sublabel">sur votre PC</div>
+            </div>
+            <div class="arrow-col">
+                <div class="arrow">→</div>
+                <div class="arrow-label">parle à</div>
+            </div>
+            <div class="box box-outlook">
+                <div class="icon">📧</div>
+                <div class="label">Outlook Desktop</div>
+                <div class="sublabel">logiciel sur votre PC</div>
+            </div>
+            <div class="arrow-col">
+                <div class="arrow">→</div>
+                <div class="arrow-label">se connecte à</div>
+            </div>
+            <div class="box box-server">
+                <div class="icon">☁️</div>
+                <div class="label">Microsoft 365</div>
+                <div class="sublabel">serveur Microsoft</div>
+            </div>
+            <div class="arrow-col">
+                <div class="arrow">↔</div>
+                <div class="arrow-label">envoie / reçoit</div>
+            </div>
+            <div class="box box-internet">
+                <div class="icon">🌍</div>
+                <div class="label">Internet</div>
+                <div class="sublabel">vos correspondants</div>
+            </div>
+        </div>
+        <div class="compat compat-yes">✅ EasyMail compatible — fonctionne parfaitement</div>
+    </div>
+
+    <!-- CAS 2 : AVOCAT -->
+    <div class="case">
+        <div class="case-title">
+            <span class="badge badge-avocat">✅ Votre avocat</span>
+            Configuration : Exchange hébergé chez OVH
+        </div>
+        <div class="flow-row">
+            <div class="box box-easymail">
+                <div class="icon">🚀</div>
+                <div class="label">EasyMail</div>
+                <div class="sublabel">sur son PC</div>
+            </div>
+            <div class="arrow-col">
+                <div class="arrow">→</div>
+                <div class="arrow-label">parle à</div>
+            </div>
+            <div class="box box-outlook">
+                <div class="icon">📧</div>
+                <div class="label">Outlook Desktop</div>
+                <div class="sublabel">même logiciel</div>
+            </div>
+            <div class="arrow-col">
+                <div class="arrow">→</div>
+                <div class="arrow-label">se connecte à</div>
+            </div>
+            <div class="box box-server-ovh">
+                <div class="icon">🏢</div>
+                <div class="label">Exchange OVH</div>
+                <div class="sublabel">serveur OVH</div>
+            </div>
+            <div class="arrow-col">
+                <div class="arrow">↔</div>
+                <div class="arrow-label">envoie / reçoit</div>
+            </div>
+            <div class="box box-internet">
+                <div class="icon">🌍</div>
+                <div class="label">Internet</div>
+                <div class="sublabel">ses correspondants</div>
+            </div>
+        </div>
+        <div class="compat compat-yes">✅ EasyMail compatible — même fonctionnement, seul le serveur change</div>
+    </div>
+
+    <!-- CAS 3 : WEB ONLY -->
+    <div class="case">
+        <div class="case-title">
+            <span class="badge badge-web">❌ Utilisateur web uniquement</span>
+            Configuration : Outlook dans le navigateur (pas de logiciel installé)
+        </div>
+        <div class="flow-row">
+            <div class="box box-no">
+                <div class="icon">🚫</div>
+                <div class="label">EasyMail</div>
+                <div class="sublabel">pas de point d'accès</div>
+            </div>
+            <div class="arrow-col">
+                <div class="arrow" style="color:#ef9a9a;">✗</div>
+                <div class="arrow-label" style="color:#c62828;">impossible</div>
+            </div>
+            <div class="box box-web">
+                <div class="icon">🌐</div>
+                <div class="label">Navigateur web</div>
+                <div class="sublabel">Chrome, Edge...</div>
+            </div>
+            <div class="arrow-col">
+                <div class="arrow">→</div>
+                <div class="arrow-label">accède à</div>
+            </div>
+            <div class="box box-server">
+                <div class="icon">☁️</div>
+                <div class="label">outlook.office.com</div>
+                <div class="sublabel">tout dans le cloud</div>
+            </div>
+            <div class="arrow-col">
+                <div class="arrow">↔</div>
+                <div class="arrow-label">envoie / reçoit</div>
+            </div>
+            <div class="box box-internet">
+                <div class="icon">🌍</div>
+                <div class="label">Internet</div>
+                <div class="sublabel"></div>
+            </div>
+        </div>
+        <div class="compat compat-no">❌ Pas compatible aujourd'hui — prévu en Phase 3 (API Microsoft Graph)</div>
+    </div>
+
+</div>
+
+<!-- POINT CLÉ -->
+<div class="key-point">
+    <h3>💡 Le point clé à retenir</h3>
+    <p>EasyMail parle à <strong>Outlook Desktop</strong> (le logiciel sur le PC).<br>
+    Peu importe où sont stockés les mails (Microsoft, OVH, ou autre) — si Outlook Desktop est installé, EasyMail fonctionne.</p>
+</div>
+
+<!-- LÉGENDE -->
+<div class="legend">
+    <h3>En résumé : la question à poser à un bêta-testeur</h3>
+    <div class="legend-item">
+        <div class="legend-dot" style="background: #2e7d32;"></div>
+        <span><strong>"Tu as Outlook installé sur ton PC ?"</strong> → Si oui → EasyMail fonctionne ✅</span>
+    </div>
+    <div class="legend-item">
+        <div class="legend-dot" style="background: #c62828;"></div>
+        <span><strong>"Tu utilises Outlook uniquement dans le navigateur ?"</strong> → Si oui → pas compatible pour l'instant ❌</span>
+    </div>
+</div>
+
+</body>
+</html>

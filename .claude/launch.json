@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "easymail",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["app.py"],
+      "port": 5050
+    },
+    {
+      "name": "easymail-plugin",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["V1_plugin/app_plugin.py"],
+      "port": 5060
+    }
+  ]
+}

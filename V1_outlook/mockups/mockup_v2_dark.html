@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>EasyMail - Mockup V2 Dark Mode</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', sans-serif; background: #1e1e1e; overflow: hidden; height: 100vh; color: #e0e0e0; }
+
+.outlook-frame { display: flex; height: 100vh; }
+
+/* SIDEBAR */
+.outlook-sidebar {
+    width: 200px; background: #252526; border-right: 1px solid #3c3c3c;
+    padding: 8px 0; flex-shrink: 0;
+}
+.outlook-sidebar .account {
+    padding: 12px 16px; font-size: 11px; color: #888; font-weight: 600;
+    border-bottom: 1px solid #3c3c3c; margin-bottom: 4px;
+}
+.outlook-sidebar .folder {
+    padding: 6px 16px 6px 24px; font-size: 13px; color: #ccc; cursor: pointer;
+    display: flex; justify-content: space-between;
+}
+.outlook-sidebar .folder:hover { background: #2d2d2d; }
+.outlook-sidebar .folder.active { background: #37373d; color: #4fc3f7; font-weight: 600; }
+.outlook-sidebar .folder .badge {
+    background: #4fc3f7; color: #1e1e1e; border-radius: 10px;
+    padding: 1px 7px; font-size: 11px; font-weight: 700;
+}
+
+/* MAIL LIST */
+.mail-list {
+    width: 300px; background: #1e1e1e; border-right: 1px solid #3c3c3c;
+    overflow-y: auto; flex-shrink: 0;
+}
+.mail-list-header {
+    padding: 12px 16px; font-size: 14px; font-weight: 600; color: #ccc;
+    border-bottom: 1px solid #3c3c3c; background: #252526;
+}
+.mail-item {
+    padding: 12px 16px; border-bottom: 1px solid #2d2d2d; cursor: pointer;
+}
+.mail-item:hover { background: #2a2d2e; }
+.mail-item.active { background: #1a3a5c; border-left: 3px solid #4fc3f7; }
+.mail-item .sender { font-size: 13px; font-weight: 600; color: #e0e0e0; }
+.mail-item .subject { font-size: 12px; color: #b0b0b0; margin-top: 2px; }
+.mail-item .preview { font-size: 11px; color: #666; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mail-item .date { font-size: 11px; color: #666; float: right; }
+
+/* READING PANE */
+.reading-pane {
+    flex: 1; background: #1e1e1e; overflow-y: auto; padding: 24px 32px;
+    border-right: 1px solid #3c3c3c;
+}
+.reading-pane .mail-from { font-size: 15px; font-weight: 600; color: #e0e0e0; }
+.reading-pane .mail-to { font-size: 12px; color: #888; margin-top: 4px; }
+.reading-pane .mail-subject { font-size: 18px; font-weight: 600; color: #fff; margin-top: 12px; }
+.reading-pane .mail-date-header { font-size: 11px; color: #666; margin-top: 4px; }
+.reading-pane .mail-body { font-size: 14px; color: #ccc; line-height: 1.6; margin-top: 16px; }
+.att-chip { background: #2d2d2d; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 11px; color: #aaa; margin-top: 12px; display: inline-block; margin-right: 6px; }
+
+/* RIBBON */
+.outlook-ribbon {
+    height: 44px; background: #252526; border-bottom: 1px solid #3c3c3c;
+    display: flex; align-items: center; padding: 0 16px; gap: 12px;
+}
+.ribbon-tab { font-size: 13px; color: #999; padding: 8px 12px; cursor: pointer; }
+.ribbon-tab.active { color: #4fc3f7; border-bottom: 2px solid #4fc3f7; font-weight: 600; }
+.ribbon-spacer { flex: 1; }
+.easymail-ribbon-btn {
+    background: linear-gradient(135deg, #4fc3f7, #0288d1);
+    color: #fff; border: none; border-radius: 6px;
+    padding: 6px 16px; font-size: 13px; font-weight: 600;
+    cursor: pointer; display: flex; align-items: center; gap: 6px;
+}
+
+/* EASYMAIL PANEL */
+.easymail-panel {
+    width: 380px; background: #252526; border-left: 2px solid #4fc3f7;
+    display: flex; flex-direction: column; flex-shrink: 0;
+}
+.panel-header {
+    background: linear-gradient(135deg, #0288d1, #01579b);
+    color: #fff; padding: 14px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+}
+.panel-header .logo { font-size: 16px; font-weight: 700; }
+.panel-header .close-btn { background: none; border: none; color: rgba(255,255,255,0.5); font-size: 18px; cursor: pointer; }
+
+.panel-body { flex: 1; overflow-y: auto; padding: 16px; }
+
+.contact-card {
+    background: #2d2d2d; border-radius: 8px; padding: 12px;
+    border: 1px solid #3c3c3c; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 10px;
+}
+.contact-avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: #4fc3f7; color: #1e1e1e; display: flex;
+    align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; flex-shrink: 0;
+}
+.contact-info .name { font-size: 13px; font-weight: 600; color: #e0e0e0; }
+.contact-info .role { font-size: 11px; color: #888; }
+.tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: #1a3a5c; color: #4fc3f7; display: inline-block; margin-top: 4px; margin-right: 3px; }
+
+.section-title { font-size: 11px; font-weight: 600; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin: 16px 0 8px; }
+.section-title:first-child { margin-top: 0; }
+
+.importance-row { display: flex; gap: 6px; margin-bottom: 12px; }
+.imp-btn { flex: 1; padding: 8px; border: 1px solid #3c3c3c; border-radius: 6px; background: #2d2d2d; cursor: pointer; text-align: center; font-size: 12px; color: #aaa; }
+.imp-btn.active { background: #0288d1; color: #fff; border-color: #0288d1; }
+
+.brief-input { width: 100%; padding: 8px 10px; border: 1px solid #3c3c3c; border-radius: 6px; font-size: 12px; resize: none; font-family: inherit; outline: none; background: #1e1e1e; color: #e0e0e0; margin-bottom: 12px; }
+
+.generate-btn {
+    width: 100%; padding: 10px; border: none; border-radius: 8px;
+    background: linear-gradient(135deg, #4fc3f7, #0288d1);
+    color: #fff; font-size: 14px; font-weight: 600;
+    cursor: pointer; margin-bottom: 12px;
+}
+
+.response-area {
+    background: #1e1e1e; border-radius: 8px; border: 1px solid #3c3c3c;
+    padding: 14px; margin-bottom: 12px; min-height: 180px;
+    font-size: 13px; line-height: 1.6; color: #ccc;
+}
+
+.refine-bar { display: flex; gap: 6px; margin-bottom: 12px; }
+.refine-input { flex: 1; padding: 8px 10px; border: 1px solid #3c3c3c; border-radius: 6px; font-size: 12px; background: #1e1e1e; color: #e0e0e0; outline: none; }
+.refine-btn { padding: 8px 12px; border: none; border-radius: 6px; background: #3c3c3c; color: #ccc; cursor: pointer; }
+
+.action-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.action-btn { flex: 1; padding: 8px; border: 1px solid #3c3c3c; border-radius: 6px; background: #2d2d2d; cursor: pointer; text-align: center; font-size: 11px; color: #aaa; }
+.action-btn.primary { background: #0288d1; color: #fff; border-color: #0288d1; font-weight: 600; }
+
+.echeance-card { background: #3e2e00; border-radius: 6px; padding: 10px 12px; border-left: 3px solid #ffc107; margin-bottom: 8px; font-size: 12px; }
+.echeance-card .ech-date { font-weight: 600; color: #ffc107; font-size: 11px; }
+.echeance-card .ech-desc { color: #ccc; margin-top: 2px; }
+
+.classify-suggestion { background: #1a3a5c; border-radius: 6px; padding: 10px 12px; border: 1px solid #4fc3f7; margin-bottom: 8px; font-size: 12px; display: flex; align-items: center; gap: 8px; cursor: pointer; color: #4fc3f7; }
+
+.main-content { display: flex; flex-direction: column; flex: 1; }
+.main-body { display: flex; flex: 1; overflow: hidden; }
+</style>
+</head>
+<body>
+<div class="outlook-frame">
+    <div class="outlook-sidebar">
+        <div class="account">yvan.bosser@groupe-bosser.fr</div>
+        <div class="folder active"><span>Boite de reception</span><span class="badge">9</span></div>
+        <div class="folder"><span>Elements envoyes</span></div>
+        <div class="folder"><span>Brouillons</span></div>
+        <div class="folder"><span>IMMOBILIER</span></div>
+        <div class="folder"><span>FINANCE</span></div>
+    </div>
+    <div class="main-content">
+        <div class="outlook-ribbon">
+            <div class="ribbon-tab active">Accueil</div>
+            <div class="ribbon-tab">Affichage</div>
+            <div class="ribbon-spacer"></div>
+            <button class="easymail-ribbon-btn">&#x2709; EasyMail</button>
+        </div>
+        <div class="main-body">
+            <div class="mail-list">
+                <div class="mail-list-header">Prioritaire</div>
+                <div class="mail-item active">
+                    <div class="date">10:00</div>
+                    <div class="sender">Ronan FOUIN</div>
+                    <div class="subject">RE: SOUTH GARDEN</div>
+                    <div class="preview">Suite a notre echange...</div>
+                </div>
+                <div class="mail-item">
+                    <div class="date">08:49</div>
+                    <div class="sender">Estelle DOUILLARD</div>
+                    <div class="subject">MINOPOLIS - Bilan 31/12/2025</div>
+                    <div class="preview">Vous trouverez ci-joint...</div>
+                </div>
+                <div class="mail-item">
+                    <div class="date">08:40</div>
+                    <div class="sender">Estelle DOUILLARD</div>
+                    <div class="subject">GREENPARK III - Bilan</div>
+                    <div class="preview">Vous trouverez ci-joint...</div>
+                </div>
+            </div>
+            <div class="reading-pane">
+                <div class="mail-from">Ronan FOUIN &lt;ronan.fouin@airbee-conseil.fr&gt;</div>
+                <div class="mail-to">A : Yvan BOSSER</div>
+                <div class="mail-subject">RE: SOUTH GARDEN</div>
+                <div class="mail-date-header">02/04/2026 10:00</div>
+                <div><span class="att-chip">&#x1f4c4; Situation locative Q1.pdf</span><span class="att-chip">&#x1f4c4; Charges 2025.xlsx</span></div>
+                <div class="mail-body">
+                    <p>Bonjour Yvan,</p>
+                    <p>Suite a notre echange, veuillez trouver ci-joint la situation locative du Q1 2026 pour le South Garden.</p>
+                    <p>Concernant le lot 3, nous avons bien recu son preavis de depart au 30 juin. Je vous propose un point la semaine prochaine.</p>
+                    <p>Bien cordialement,<br>Ronan FOUIN</p>
+                </div>
+            </div>
+            <div class="easymail-panel">
+                <div class="panel-header">
+                    <div class="logo">&#x2709; EasyMail</div>
+                    <button class="close-btn">&times;</button>
+                </div>
+                <div class="panel-body">
+                    <div class="contact-card">
+                        <div class="contact-avatar">R</div>
+                        <div class="contact-info">
+                            <div class="name">Ronan FOUIN</div>
+                            <div class="role">Expert-comptable - Airbee</div>
+                            <div><span class="tag">vouvoiement</span><span class="tag">100%</span></div>
+                        </div>
+                    </div>
+                    <div class="section-title">Importance</div>
+                    <div class="importance-row">
+                        <div class="imp-btn">&#x26A1; Rapide</div>
+                        <div class="imp-btn active">&#x1f4dd; Standard</div>
+                        <div class="imp-btn">&#x1f9e0; Approfondi</div>
+                    </div>
+                    <textarea class="brief-input" rows="2" placeholder="Instructions (optionnel)"></textarea>
+                    <button class="generate-btn">&#x2728; Generer la reponse</button>
+                    <div class="response-area">
+                        <p>Bonjour Ronan,</p>
+                        <p>Merci pour ces documents. C'est bien note pour le depart du lot 3 au 30 juin. Disponible jeudi pour le point.</p>
+                        <p>Cdlt,<br>Yvan</p>
+                    </div>
+                    <div class="refine-bar">
+                        <input class="refine-input" placeholder="Modifier...">
+                        <button class="refine-btn">&#x270f;</button>
+                    </div>
+                    <div class="action-row">
+                        <button class="action-btn">&#x1f504; Autre</button>
+                        <button class="action-btn primary">&#x1f4e4; Envoyer</button>
+                    </div>
+                    <div class="section-title">Echeance</div>
+                    <div class="echeance-card">
+                        <div class="ech-date">&#x1f4c5; Semaine prochaine</div>
+                        <div class="ech-desc">Point remise en location lot 3</div>
+                    </div>
+                    <div class="section-title">Classement</div>
+                    <div class="classify-suggestion">&#x1f4c1; IMMOBILIER / South Garden &#x2713;</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

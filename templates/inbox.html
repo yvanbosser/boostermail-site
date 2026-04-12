@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EasyMail — Boîte de réception</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; }
+
+        .header {
+            background: white; padding: 16px 24px;
+            display: flex; align-items: center; gap: 16px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08); position: sticky; top: 0; z-index: 10;
+        }
+        .header h1 { font-size: 18px; color: #1a1a2e; }
+        .btn-new {
+            background: #0078d4; color: white; padding: 8px 18px;
+            border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 500;
+        }
+        .btn-new:hover { background: #006cbf; }
+
+        .container { max-width: 900px; margin: 24px auto; padding: 0 24px; }
+        .section-bar {
+            display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+        }
+        .section-title {
+            font-size: 14px; font-weight: 700; color: #1a1a2e;
+        }
+
+        .email-list { background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+
+        .email-item {
+            display: flex; align-items: center; gap: 14px;
+            padding: 14px 20px; border-bottom: 1px solid #f0f0f0;
+            text-decoration: none; color: inherit; transition: background 0.12s;
+        }
+        .email-item:last-child { border-bottom: none; }
+        .email-item:hover { background: #f8f9fa; }
+        .email-item.unread { background: #f0f7ff; }
+        .email-item.unread:hover { background: #e8f2ff; }
+
+        .unread-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #0078d4; flex-shrink: 0;
+        }
+        .email-item.read .unread-dot { background: transparent; }
+
+        .email-sender { font-weight: 600; font-size: 13px; color: #1a1a2e; min-width: 160px; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+        .email-subject { font-size: 13px; color: #333; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .email-item.unread .email-subject { font-weight: 600; }
+        .email-date { font-size: 12px; color: #aaa; flex-shrink: 0; }
+        .email-attach { flex-shrink: 0; color: #999; display: inline-flex; align-items: center; }
+
+        .email-delete {
+            flex-shrink: 0; width: 28px; height: 28px; display: flex;
+            align-items: center; justify-content: center; border: none;
+            background: none; color: #ccc; cursor: pointer; border-radius: 4px;
+            transition: all 0.15s; opacity: 0; position: relative;
+        }
+        .email-item:hover .email-delete { opacity: 1; }
+        .email-delete:hover { background: #fee; color: #e44; }
+        .delete-confirm {
+            position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+            display: flex; align-items: center; gap: 4px; background: #fff;
+            border: 1px solid #e44; border-radius: 6px; padding: 4px 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15); white-space: nowrap; z-index: 10;
+        }
+        .delete-confirm span { font-size: 12px; color: #e44; font-weight: 500; }
+        .delete-confirm button {
+            width: 24px; height: 24px; border: none; border-radius: 4px;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            font-size: 14px; transition: background 0.1s;
+        }
+        .delete-confirm .btn-yes { background: #e44; color: #fff; }
+        .delete-confirm .btn-yes:hover { background: #c33; }
+        .delete-confirm .btn-no { background: #f0f0f0; color: #666; }
+        .delete-confirm .btn-no:hover { background: #ddd; }
+
+        .empty-state { padding: 48px; text-align: center; color: #aaa; }
+        .empty-state span { font-size: 48px; display: block; margin-bottom: 12px; }
+
+        .refresh-btn {
+            background: none; border: 1px solid #ddd; color: #666; padding: 7px 14px;
+            border-radius: 6px; font-size: 13px; cursor: pointer; margin-right: 8px;
+        }
+        .refresh-btn:hover { background: #f5f5f5; }
+
+        /* Echeances badge */
+        .header-badge-link { position: relative; text-decoration: none; }
+        .badge-count {
+            position: absolute; top: -6px; right: -8px;
+            background: #e53935; color: white; font-size: 10px; font-weight: 700;
+            min-width: 16px; height: 16px; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            padding: 0 4px;
+        }
+        .badge-count.hidden { display: none; }
+
+        /* Banniere echeances */
+        .echeance-banner {
+            background: #f0f4ff; border-bottom: 1px solid #d0d7e8;
+            padding: 8px 24px; display: flex; align-items: center; gap: 8px;
+            cursor: pointer; font-size: 13px; color: #333;
+        }
+        .echeance-banner.hidden { display: none; }
+        .echeance-banner:hover { background: #e3eafc; }
+
+        /* Pop-up echeances urgentes */
+        .ech-popup-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+            display: flex; align-items: center; justify-content: center; z-index: 90;
+        }
+        .ech-popup-overlay.hidden { display: none; }
+        .ech-popup {
+            background: white; border-radius: 12px; padding: 24px 28px;
+            max-width: 520px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+            max-height: 70vh; overflow-y: auto;
+        }
+        .ech-popup-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        .ech-popup-header h2 { font-size: 16px; color: #1a1a2e; }
+        .ech-popup-close {
+            background: none; border: none; font-size: 20px; cursor: pointer; color: #999;
+        }
+        .ech-popup-item {
+            display: flex; gap: 10px; padding: 10px 0;
+            border-bottom: 1px solid #f0f0f0; align-items: flex-start;
+        }
+        .ech-popup-item:last-child { border-bottom: none; }
+        .ech-popup-bar { width: 4px; border-radius: 2px; min-height: 40px; flex-shrink: 0; }
+        .ech-popup-bar.red { background: #e53935; }
+        .ech-popup-bar.orange { background: #fb8c00; }
+        .ech-popup-content { flex: 1; }
+        .ech-popup-desc { font-size: 13px; font-weight: 600; color: #1a1a2e; }
+        .ech-popup-meta { font-size: 12px; color: #888; margin-top: 2px; }
+        .ech-popup-alert {
+            display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: #555;
+        }
+        .ech-popup-alert select {
+            border: 1px solid #ccc; border-radius: 5px; padding: 3px 6px; font-size: 12px;
+        }
+        .ech-popup-alert button {
+            background: #0078d4; color: white; border: none; border-radius: 5px;
+            padding: 4px 12px; font-size: 12px; cursor: pointer;
+        }
+        .ech-popup-alert button:hover { background: #006cbf; }
+        .ech-popup-alert .ech-alert-ok {
+            color: #43a047; font-weight: 600; font-size: 12px;
+        }
+
+        /* Onboarding pop-up */
+        .onboarding-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+            display: flex; align-items: center; justify-content: center; z-index: 100;
+        }
+        .onboarding-overlay.hidden { display: none; }
+        .onboarding-box {
+            background: white; border-radius: 12px; padding: 32px 36px;
+            max-width: 460px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+            text-align: center;
+        }
+        .onboarding-box h2 { font-size: 18px; color: #1a1a2e; margin-bottom: 12px; }
+        .onboarding-box p { font-size: 14px; color: #555; line-height: 1.6; margin-bottom: 20px; }
+        .onboarding-spinner {
+            width: 36px; height: 36px; border: 3px solid #e0e0e0;
+            border-top-color: #0078d4; border-radius: 50%;
+            animation: spin 0.8s linear infinite; margin: 0 auto 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .onboarding-done { color: #28a745; font-weight: 600; font-size: 14px; display: none; }
+        .onboarding-done.show { display: block; }
+        .onboarding-step { font-size: 12px; color: #999; margin-top: 4px; }
+
+        /* Toast notification */
+        .toast {
+            position: fixed; bottom: 24px; right: 24px; z-index: 200;
+            background: #1a1a2e; color: white; padding: 12px 20px;
+            border-radius: 8px; font-size: 13px; font-weight: 500;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+            transform: translateY(80px); opacity: 0;
+            transition: transform 0.4s ease, opacity 0.4s ease;
+        }
+        .toast.show {
+            transform: translateY(0); opacity: 1;
+        }
+        .toast .toast-icon { margin-right: 8px; }
+
+        /* Bandeau mise à jour */
+        .update-banner {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; padding: 10px 24px;
+            display: flex; align-items: center; justify-content: center; gap: 12px;
+            font-size: 13px; font-weight: 500;
+            animation: slideDown 0.4s ease;
+        }
+        .update-banner.hidden { display: none; }
+        .update-banner .update-btn {
+            background: rgba(255,255,255,0.25); color: white;
+            border: 1px solid rgba(255,255,255,0.4);
+            padding: 5px 14px; border-radius: 5px; cursor: pointer;
+            font-size: 12px; font-weight: 600; transition: background 0.2s;
+        }
+        .update-banner .update-btn:hover { background: rgba(255,255,255,0.4); }
+        .update-banner .update-spinner {
+            display: none; width: 14px; height: 14px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top: 2px solid white; border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes slideDown { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>✉️ EasyMail</h1>
+        <div style="flex:1;"></div>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <a href="/echeances" class="refresh-btn header-badge-link" style="text-decoration:none;">📅 Echeances<span class="badge-count hidden" id="ech-badge">0</span></a>
+            <a href="/contacts" class="refresh-btn" style="text-decoration:none;">🧠 Contacts</a>
+            <a href="/profile" class="refresh-btn" style="text-decoration:none;">👤 Profil</a>
+        </div>
+    </div>
+
+    <!-- Bandeau mise à jour -->
+    <div class="update-banner hidden" id="update-banner">
+        <span>✨</span>
+        <span id="update-message">Yvan vient d'ameliorer EasyMail</span>
+        <button class="update-btn" id="update-btn" onclick="applyUpdate()">Mettre à jour</button>
+        <div class="update-spinner" id="update-spinner"></div>
+    </div>
+
+    <!-- Banniere echeances urgentes -->
+    <div class="echeance-banner hidden" id="ech-banner">
+        <span id="ech-banner-text"></span>
+    </div>
+
+    <!-- Pop-up echeances urgentes -->
+    <div class="ech-popup-overlay hidden" id="ech-popup-overlay" onclick="closeEchPopup()">
+        <div class="ech-popup" onclick="event.stopPropagation()">
+            <div class="ech-popup-header">
+                <h2>⚠ Échéance à venir détectée</h2>
+                <button onclick="closeEchPopup()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#666;">&times;</button>
+            </div>
+            <div id="ech-popup-list"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="section-bar">
+            <div class="section-title">{{ emails|length }} message(s) dans la boîte de réception</div>
+            <button class="refresh-btn" onclick="window.location.href='/inbox?force=1'" style="margin-right:0;">↻ Actualiser</button>
+            <div style="flex:1;"></div>
+            <a href="/new_mail" class="btn-new">+ Nouveau mail</a>
+        </div>
+
+        <div class="email-list">
+            {% if emails %}
+                {% for email in emails %}
+                <a class="email-item {% if email.is_read %}read{% else %}unread{% endif %}"
+                   href="/email/{{ email.id }}">
+                    <div class="unread-dot"></div>
+                    <div class="email-sender">{{ email.from_name or email.from }}</div>
+                    <div class="email-subject">{{ email.subject }}</div>
+                    {% if email.get('has_attachments') %}<span class="email-attach" title="Pièce(s) jointe(s)"><svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 9.5l-6.2 6.2a3.5 3.5 0 01-5-5L10.8 4a2.3 2.3 0 013.3 3.3l-6.5 6.5a1.2 1.2 0 01-1.7-1.7L12.2 6"/></svg></span>{% endif %}
+                    <div class="email-date">{{ email.date }}</div>
+                    <button class="email-delete" onclick="deleteEmail(event, '{{ email.id }}')" title="Supprimer">
+                        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12"/><path d="M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4"/><path d="M12.67 4v9.33a1.33 1.33 0 01-1.34 1.34H4.67a1.33 1.33 0 01-1.34-1.34V4"/><path d="M6.67 7.33v4"/><path d="M9.33 7.33v4"/></svg>
+                    </button>
+                </a>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <span>📭</span>
+                    Boîte de réception vide
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Pop-up onboarding -->
+    <div class="onboarding-overlay hidden" id="onboarding-overlay">
+        <div class="onboarding-box">
+            <h2>🎯 Bienvenue sur EasyMail</h2>
+            <!-- Phase 1 : saisie du nom -->
+            <div id="onboarding-name-phase">
+                <p>Première utilisation détectée. Confirmez votre nom pour commencer.</p>
+                <div style="margin:16px 0;">
+                    <label style="font-size:12px;color:#666;display:block;margin-bottom:4px;">Votre nom complet</label>
+                    <input type="text" id="onboarding-name-input" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;" placeholder="Prénom Nom">
+                </div>
+                <p style="font-size:13px;color:#333;">
+                    EasyMail va analyser vos 800 derniers mails pour apprendre votre style rédactionnel.<br>
+                    <span style="color:#999;font-style:italic;">Durée estimée : 3 à 5 minutes.</span>
+                </p>
+                <div style="text-align:center;margin-top:16px;">
+                    <button onclick="startOnboardingWithName()" style="background:#0078d4;color:white;border:none;padding:10px 28px;border-radius:6px;font-size:14px;cursor:pointer;font-weight:600;">Démarrer l'analyse</button>
+                </div>
+            </div>
+            <!-- Phase 2 : analyse en cours -->
+            <div id="onboarding-progress-phase" style="display:none;">
+                <p style="font-size:13px;color:#333;">
+                    EasyMail apprend votre plume. Dans quelques instants, il écrira exactement comme vous.<br>
+                    <span style="color:#999;font-style:italic;">Quelques minutes d'analyse pour des heures de gagnées.</span>
+                </p>
+            </div>
+            <div class="onboarding-spinner" id="onboarding-spinner" style="display:none;"></div>
+            <div class="onboarding-step" id="onboarding-step" style="display:none;">Démarrage...</div>
+            <div style="margin-top:12px;padding:0 20px;">
+                <div style="background:#e9ecef;border-radius:4px;height:6px;overflow:hidden;">
+                    <div id="onboarding-bar" style="background:#0078d4;height:100%;width:0%;border-radius:4px;transition:width 0.5s ease;"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:11px;color:#999;">
+                    <span id="onboarding-elapsed"></span>
+                    <span id="onboarding-phase"></span>
+                </div>
+            </div>
+            <div style="margin-top:14px;text-align:center;">
+                <button id="btn-stop-onboarding" onclick="stopOnboarding()" style="background:none;border:1px solid #dc3545;color:#dc3545;padding:6px 16px;border-radius:6px;font-size:12px;cursor:pointer;">Stopper l'analyse</button>
+            </div>
+            <div class="onboarding-done" id="onboarding-done">
+                ✅ Configuration terminée — EasyMail est prêt !
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var _activeDeleteConfirm = null;
+        function deleteEmail(e, emailId) {
+            e.preventDefault();
+            e.stopPropagation();
+            var btn = e.currentTarget;
+            // Fermer tout confirm précédent
+            if (_activeDeleteConfirm) { _activeDeleteConfirm.remove(); _activeDeleteConfirm = null; }
+            // Créer le mini-confirm à côté de la corbeille
+            var confirmEl = document.createElement('div');
+            confirmEl.className = 'delete-confirm';
+            confirmEl.innerHTML = '<span>Supprimer ?</span>'
+                + '<button class="btn-yes" title="Confirmer">✓</button>'
+                + '<button class="btn-no" title="Annuler">✗</button>';
+            btn.style.opacity = '1';
+            btn.appendChild(confirmEl);
+            _activeDeleteConfirm = confirmEl;
+            // Stop propagation sur le confirm
+            confirmEl.addEventListener('click', function(ev) { ev.preventDefault(); ev.stopPropagation(); });
+            // Bouton Oui
+            confirmEl.querySelector('.btn-yes').addEventListener('click', function(ev) {
+                ev.preventDefault(); ev.stopPropagation();
+                confirmEl.remove(); _activeDeleteConfirm = null;
+                var emailItem = btn.closest('.email-item');
+                _doDelete(emailId, emailItem);
+            });
+            // Bouton Non
+            confirmEl.querySelector('.btn-no').addEventListener('click', function(ev) {
+                ev.preventDefault(); ev.stopPropagation();
+                confirmEl.remove(); _activeDeleteConfirm = null;
+            });
+            // Fermer si clic ailleurs
+            setTimeout(function() {
+                document.addEventListener('click', function _close() {
+                    if (_activeDeleteConfirm) { _activeDeleteConfirm.remove(); _activeDeleteConfirm = null; }
+                    document.removeEventListener('click', _close);
+                });
+            }, 10);
+        }
+        function _doDelete(emailId, emailItem) {
+            fetch('/api/delete_email/' + encodeURIComponent(emailId), { method: 'POST' })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.ok) {
+                        if (emailItem) emailItem.remove();
+                        var countEl = document.querySelector('.section-title');
+                        if (countEl) {
+                            var remaining = document.querySelectorAll('.email-item').length;
+                            countEl.textContent = remaining + ' message(s) dans la boîte de réception';
+                        }
+                    } else {
+                        alert('Erreur : ' + (data.error || 'suppression échouée'));
+                    }
+                })
+                .catch(function() { alert('Erreur de connexion'); });
+        }
+
+        // Force le rechargement si la page est restaurée depuis le cache navigateur (bouton retour)
+        window.addEventListener('pageshow', function(event) {
+            if (event.persisted) {
+                window.location.reload();
+            }
+        });
+
+        // Onboarding : vérifier si l'analyse de style est en cours
+        var _onboardingPoll = null;
+
+        function stopOnboarding() {
+            fetch('/api/stop_style_analysis', { method: 'POST' })
+                .then(r => r.json())
+                .then(function() {
+                    if (_onboardingPoll) clearInterval(_onboardingPoll);
+                    var stepEl = document.getElementById('onboarding-step');
+                    var spinnerEl = document.getElementById('onboarding-spinner');
+                    var stopBtn = document.getElementById('btn-stop-onboarding');
+                    if (spinnerEl) spinnerEl.style.display = 'none';
+                    if (stopBtn) stopBtn.style.display = 'none';
+                    if (stepEl) {
+                        stepEl.innerHTML = '<div style="padding:12px;background:#fff3cd;border:1px solid #ffc107;border-radius:8px;text-align:left;">'
+                            + '<div style="font-weight:600;color:#856404;margin-bottom:4px;">Analyse interrompue.</div>'
+                            + '<div style="font-size:12px;color:#856404;line-height:1.5;">Sans profil de style, EasyMail génèrera des réponses professionnelles standards — mais n\'intègrera pas votre ton, vos formulations et vos habitudes. Relancez l\'analyse depuis la page Profil.</div>'
+                            + '</div>';
+                    }
+                    setTimeout(function() {
+                        document.getElementById('onboarding-overlay').classList.add('hidden');
+                    }, 5000);
+                });
+        }
+
+        function startOnboardingWithName() {
+            var nameInput = document.getElementById('onboarding-name-input');
+            var userName = nameInput.value.trim();
+            if (!userName) { nameInput.focus(); return; }
+            // Sauvegarder le nom et démarrer l'analyse
+            fetch('/api/start_onboarding', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_name: userName })
+            }).then(r => r.json()).then(d => {
+                if (d.success) {
+                    // Passer à la phase progression
+                    document.getElementById('onboarding-name-phase').style.display = 'none';
+                    document.getElementById('onboarding-progress-phase').style.display = 'block';
+                    document.getElementById('onboarding-spinner').style.display = 'block';
+                    document.getElementById('onboarding-step').style.display = 'block';
+                    startOnboardingPolling();
+                }
+            });
+        }
+
+        function startOnboardingPolling() {
+            var t0 = Date.now();
+            _onboardingPoll = setInterval(function() {
+                        var elapsed = Math.floor((Date.now() - t0) / 1000);
+                        var elapsedEl = document.getElementById('onboarding-elapsed');
+                        if (elapsedEl) elapsedEl.textContent = elapsed + 's';
+
+                        fetch('/api/style_status')
+                            .then(r => r.json())
+                            .then(d => {
+                                if (d.step) {
+                                    document.getElementById('onboarding-step').textContent = d.step;
+                                }
+                                var barEl = document.getElementById('onboarding-bar');
+                                var phaseEl = document.getElementById('onboarding-phase');
+                                if (barEl && d.step) {
+                                    if (d.step.indexOf('envoyés lus') > -1) { barEl.style.width = '20%'; if (phaseEl) phaseEl.textContent = '20%'; }
+                                    else if (d.step.indexOf('reçus lus') > -1) { barEl.style.width = '40%'; if (phaseEl) phaseEl.textContent = '40%'; }
+                                    else if (d.step.indexOf('Analyse') > -1 && d.step.indexOf('style') > -1) {
+                                        var chunkPct = d.chunks ? Math.min(d.chunks / 130, 1) : 0;
+                                        var pct = 50 + Math.floor(chunkPct * 35);
+                                        barEl.style.width = pct + '%';
+                                        if (phaseEl) phaseEl.textContent = pct + '%';
+                                    }
+                                    else if (d.step.indexOf('Indexation') > -1) { barEl.style.width = '92%'; if (phaseEl) phaseEl.textContent = '92%'; }
+                                }
+                                if (d.ready) {
+                                    clearInterval(_onboardingPoll);
+                                    if (barEl) barEl.style.width = '100%';
+                                    if (phaseEl) phaseEl.textContent = '100%';
+                                    document.getElementById('onboarding-spinner').style.display = 'none';
+                                    document.getElementById('onboarding-step').style.display = 'none';
+                                    var stopBtn = document.getElementById('btn-stop-onboarding');
+                                    if (stopBtn) stopBtn.style.display = 'none';
+                                    document.getElementById('onboarding-done').classList.add('show');
+                                    setTimeout(function() {
+                                        document.getElementById('onboarding-overlay').classList.add('hidden');
+                                    }, 2500);
+                                }
+                                // Si erreur (plus analyzing, pas ready)
+                                if (!d.analyzing && !d.ready && d.step) {
+                                    clearInterval(_onboardingPoll);
+                                    var stepEl = document.getElementById('onboarding-step');
+                                    if (stepEl) { stepEl.textContent = d.step; stepEl.style.color = '#dc3545'; }
+                                    document.getElementById('onboarding-spinner').style.display = 'none';
+                                }
+                            }).catch(function() {
+                                // Erreur réseau : arrêter le polling pour éviter les requêtes infinies
+                                clearInterval(_onboardingPoll);
+                                var stepEl = document.getElementById('onboarding-step');
+                                if (stepEl) { stepEl.textContent = 'Erreur de connexion'; stepEl.style.color = '#dc3545'; }
+                                document.getElementById('onboarding-spinner').style.display = 'none';
+                            });
+            }, 2000);
+        }
+
+        (function() {
+            fetch('/api/style_status')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ready) return;
+                    if (!data.analyzing && data.has_style) return;
+                    // Afficher le popup
+                    document.getElementById('onboarding-overlay').classList.remove('hidden');
+                    if (data.needs_setup) {
+                        // Phase 1 : saisie du nom
+                        document.getElementById('onboarding-name-phase').style.display = 'block';
+                        document.getElementById('onboarding-progress-phase').style.display = 'none';
+                        var nameInput = document.getElementById('onboarding-name-input');
+                        if (data.detected_name) nameInput.value = data.detected_name;
+                    } else if (data.analyzing) {
+                        // Analyse déjà en cours (rechargement page)
+                        document.getElementById('onboarding-name-phase').style.display = 'none';
+                        document.getElementById('onboarding-progress-phase').style.display = 'block';
+                        document.getElementById('onboarding-spinner').style.display = 'block';
+                        document.getElementById('onboarding-step').style.display = 'block';
+                        if (data.step) document.getElementById('onboarding-step').textContent = data.step;
+                        startOnboardingPolling();
+                    }
+                });
+        })();
+
+        // Auto-refresh desactive (bouton Actualiser disponible)
+
+        // ─── ECHEANCES : badge + banniere + pop-up ─────────────────────
+        function loadEcheancesUrgentes() {
+            fetch('/api/echeances/urgent')
+                .then(r => r.json())
+                .then(data => {
+                    var allUrgent = data.echeances || [];
+                    var badge = document.getElementById('ech-badge');
+                    var banner = document.getElementById('ech-banner');
+
+                    var today = new Date(); today.setHours(0,0,0,0);
+                    var relancesToday = []; // échéance demain ou aujourd'hui (relance J-1/J-0)
+                    var depassees = [];     // échéance passée (retard)
+                    allUrgent.forEach(function(e) {
+                        if (!e.date_echeance) return;
+                        var p = e.date_echeance.split('-');
+                        var d = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+                        var days = Math.round((d - today) / 86400000);
+                        if (days < 0) depassees.push(e);
+                        else if (days <= 1) relancesToday.push(e);
+                    });
+
+                    // Badge : toutes les urgentes
+                    var totalBadge = relancesToday.length + depassees.length;
+                    if (totalBadge > 0) {
+                        badge.textContent = totalBadge;
+                        badge.classList.remove('hidden');
+                    } else {
+                        badge.classList.add('hidden');
+                    }
+
+                    // Bandeau
+                    if (relancesToday.length > 0 || depassees.length > 0) {
+                        var parts = [];
+                        if (relancesToday.length > 0) {
+                            parts.push(relancesToday.length + ' relance' + (relancesToday.length > 1 ? 's' : '') + ' \u00e0 effectuer aujourd\'hui');
+                        }
+                        if (depassees.length > 0) {
+                            parts.push(depassees.length + ' \u00e9ch\u00e9ance' + (depassees.length > 1 ? 's' : '') + ' d\u00e9pass\u00e9e' + (depassees.length > 1 ? 's' : ''));
+                        }
+                        var tab = relancesToday.length > 0 ? 'encours' : 'depassees';
+                        document.getElementById('ech-banner-text').innerHTML =
+                            '\uD83D\uDD34 ' + parts.join(' et ') + ' \u2014 <a href="/echeances?tab=' + tab + '" style="color:#1a73e8;text-decoration:underline;">Voir</a>';
+                        banner.classList.remove('hidden');
+                    } else {
+                        banner.classList.add('hidden');
+                    }
+                })
+                .catch(function() {});
+        }
+
+        function closeEchPopup() {
+            document.getElementById('ech-popup-overlay').classList.add('hidden');
+        }
+
+        // Charger les echeances urgentes au chargement
+        loadEcheancesUrgentes();
+        // Re-check 3s après (attrape les échéances du scan post-envoi en cours)
+        setTimeout(loadEcheancesUrgentes, 3000);
+
+        // Toast nouveau profil : poll 1x après 6s (laisse le temps au daemon thread)
+        setTimeout(function() {
+            fetch('/api/new_profile_toast')
+                .then(r => r.json())
+                .then(function(data) {
+                    if (!data.show) return;
+                    var toast = document.getElementById('profile-toast');
+                    toast.textContent = 'Profil de ' + data.name + ' ajouté à vos contacts';
+                    toast.classList.add('show');
+                    setTimeout(function() { toast.classList.remove('show'); }, 5000);
+                })
+                .catch(function() {});
+        }, 6000);
+    </script>
+    <div class="toast" id="profile-toast"></div>
+
+    <script>
+    // --- Mise à jour automatique ---
+    function checkForUpdate() {
+        fetch('/api/check_update')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var banner = document.getElementById('update-banner');
+                if (data.available) {
+                    document.getElementById('update-message').textContent = data.message || "Yvan vient d'ameliorer EasyMail";
+                    banner.classList.remove('hidden');
+                } else {
+                    banner.classList.add('hidden');
+                }
+            })
+            .catch(function() {});
+    }
+
+    function applyUpdate() {
+        var btn = document.getElementById('update-btn');
+        var spinner = document.getElementById('update-spinner');
+        btn.style.display = 'none';
+        spinner.style.display = 'inline-block';
+        document.getElementById('update-message').textContent = 'Mise a jour en cours...';
+
+        fetch('/api/apply_update', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    document.getElementById('update-message').textContent = 'Redemarrage...';
+                    // Attendre que le serveur redémarre puis recharger
+                    setTimeout(function() {
+                        var attempts = 0;
+                        var checkReady = setInterval(function() {
+                            fetch('/api/check_update')
+                                .then(function() {
+                                    clearInterval(checkReady);
+                                    window.location.reload();
+                                })
+                                .catch(function() {
+                                    attempts++;
+                                    if (attempts > 20) {
+                                        clearInterval(checkReady);
+                                        window.location.reload();
+                                    }
+                                });
+                        }, 500);
+                    }, 2000);
+                } else {
+                    document.getElementById('update-message').textContent = 'Echec: ' + data.message;
+                    btn.style.display = 'inline-block';
+                    spinner.style.display = 'none';
+                }
+            })
+            .catch(function() {
+                document.getElementById('update-message').textContent = 'Erreur de connexion';
+                btn.style.display = 'inline-block';
+                spinner.style.display = 'none';
+            });
+    }
+
+    // Vérifier toutes les 60 secondes
+    checkForUpdate();
+    setInterval(checkForUpdate, 60000);
+    </script>
+</body>
+</html>

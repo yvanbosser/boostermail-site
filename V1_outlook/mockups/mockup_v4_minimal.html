@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>EasyMail - Mockup V4 Minimal Floating</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', sans-serif; background: #f3f3f3; overflow: hidden; height: 100vh; }
+
+.outlook-frame { display: flex; height: 100vh; }
+
+/* SIDEBAR */
+.outlook-sidebar {
+    width: 48px; background: #ebebeb; border-right: 1px solid #d0d0d0;
+    display: flex; flex-direction: column; align-items: center; padding-top: 10px; gap: 6px; flex-shrink: 0;
+}
+.sb-icon { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #777; cursor: pointer; }
+.sb-icon:hover { background: #ddd; }
+.sb-icon.active { background: #cde4f7; color: #0078d4; }
+.sb-spacer { flex: 1; }
+.sb-icon.easymail-icon { color: #0078d4; font-size: 18px; position: relative; }
+.sb-icon.easymail-icon .pulse {
+    position: absolute; top: -2px; right: -2px; width: 10px; height: 10px;
+    border-radius: 50%; background: #4caf50; border: 2px solid #ebebeb;
+    animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.3); } }
+
+/* FOLDER */
+.folder-panel { width: 170px; background: #f7f7f7; border-right: 1px solid #e0e0e0; padding: 6px 0; flex-shrink: 0; }
+.fp-item { padding: 5px 10px; font-size: 11px; color: #555; cursor: pointer; display: flex; justify-content: space-between; }
+.fp-item:hover { background: #eee; }
+.fp-item.active { background: #d6e4f0; color: #0078d4; font-weight: 600; }
+.fp-cnt { font-size: 10px; color: #aaa; }
+
+/* MAIL LIST */
+.mail-list { width: 260px; background: #fff; border-right: 1px solid #e0e0e0; overflow-y: auto; flex-shrink: 0; }
+.ml-item { padding: 8px 10px; border-bottom: 1px solid #f5f5f5; cursor: pointer; }
+.ml-item:hover { background: #f8fbff; }
+.ml-item.active { background: #e8f0fe; border-left: 3px solid #0078d4; }
+.ml-sender { font-size: 11px; font-weight: 600; color: #333; }
+.ml-subj { font-size: 10px; color: #555; margin-top: 1px; }
+.ml-prev { font-size: 9px; color: #aaa; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ml-time { font-size: 9px; color: #ccc; float: right; }
+
+/* READING PANE */
+.reading-pane { flex: 1; background: #fff; overflow-y: auto; padding: 20px 28px; position: relative; }
+.rp-from { font-size: 14px; font-weight: 600; color: #1a1a1a; }
+.rp-meta { font-size: 11px; color: #888; margin-top: 2px; }
+.rp-subj { font-size: 16px; font-weight: 600; margin-top: 10px; }
+.rp-body { font-size: 13px; color: #333; line-height: 1.65; margin-top: 14px; }
+.rp-att { display: inline-block; background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; padding: 3px 8px; font-size: 10px; color: #666; margin-top: 10px; margin-right: 4px; }
+
+/* FLOATING EASYMAIL WIDGET */
+.easymail-float {
+    position: absolute; bottom: 20px; right: 20px; width: 360px;
+    background: #fff; border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08);
+    border: 1px solid #e0e0e0; display: flex; flex-direction: column;
+    max-height: 520px; overflow: hidden;
+}
+.float-header {
+    background: linear-gradient(135deg, #0078d4, #005a9e);
+    color: #fff; padding: 10px 14px; border-radius: 12px 12px 0 0;
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: move;
+}
+.float-header .logo { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.float-header .actions { display: flex; gap: 6px; }
+.float-header .hdr-btn {
+    background: rgba(255,255,255,0.15); border: none; color: #fff;
+    width: 24px; height: 24px; border-radius: 4px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; font-size: 12px;
+}
+.float-header .hdr-btn:hover { background: rgba(255,255,255,0.3); }
+
+.float-body { flex: 1; overflow-y: auto; padding: 12px; }
+
+/* CONTACT MINI */
+.cm { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.cm-av { width: 26px; height: 26px; border-radius: 50%; background: #0078d4; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+.cm-name { font-size: 12px; font-weight: 600; color: #333; }
+.cm-sub { font-size: 9px; color: #999; }
+
+/* STEPS */
+.steps { display: flex; margin-bottom: 10px; border-bottom: 1px solid #f0f0f0; }
+.step {
+    flex: 1; text-align: center; padding: 6px 0; font-size: 10px;
+    color: #999; cursor: pointer; border-bottom: 2px solid transparent;
+}
+.step.active { color: #0078d4; border-bottom-color: #0078d4; font-weight: 600; }
+.step .step-num {
+    display: inline-flex; width: 16px; height: 16px; border-radius: 50%;
+    background: #e0e0e0; color: #666; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 700; margin-right: 3px;
+}
+.step.active .step-num { background: #0078d4; color: #fff; }
+.step.done .step-num { background: #4caf50; color: #fff; }
+
+/* IMPORTANCE DOTS */
+.imp-dots { display: flex; gap: 4px; margin-bottom: 10px; justify-content: center; }
+.imp-dot {
+    padding: 5px 12px; border-radius: 20px; font-size: 10px;
+    border: 1px solid #e0e0e0; color: #888; cursor: pointer; background: #fff;
+}
+.imp-dot.active { background: #0078d4; color: #fff; border-color: #0078d4; }
+
+/* INPUT ROW */
+.input-row { display: flex; gap: 4px; margin-bottom: 10px; }
+.input-field {
+    flex: 1; padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px;
+    font-size: 11px; outline: none; font-family: inherit;
+}
+.input-field:focus { border-color: #0078d4; }
+.input-btn {
+    padding: 6px 12px; border: none; border-radius: 6px;
+    background: #0078d4; color: #fff; font-size: 11px; font-weight: 600; cursor: pointer;
+}
+
+/* RESPONSE */
+.resp {
+    background: #f8f9fb; border: 1px solid #eee; border-radius: 8px;
+    padding: 10px; margin-bottom: 10px; font-size: 12px; line-height: 1.6;
+    color: #333; min-height: 140px;
+}
+
+/* BOTTOM ACTIONS */
+.bot-actions { display: flex; gap: 4px; margin-bottom: 8px; }
+.bot-btn {
+    flex: 1; padding: 7px; border-radius: 6px; text-align: center;
+    font-size: 10px; cursor: pointer; border: 1px solid #e0e0e0;
+    background: #fff; color: #666;
+}
+.bot-btn:hover { border-color: #0078d4; color: #0078d4; }
+.bot-btn.primary { background: linear-gradient(135deg, #0078d4, #005a9e); color: #fff; border: none; font-weight: 600; flex: 2; }
+
+/* INFO CARDS */
+.info-card {
+    padding: 6px 8px; border-radius: 5px; font-size: 10px; margin-bottom: 4px;
+    display: flex; align-items: center; gap: 6px;
+}
+.info-card.ech { background: #fff8e1; border-left: 2px solid #ffc107; color: #795548; }
+.info-card.cls { background: #e3f2fd; border-left: 2px solid #0078d4; color: #0078d4; cursor: pointer; }
+
+.main-content { display: flex; flex-direction: column; flex: 1; }
+.main-body { display: flex; flex: 1; overflow: hidden; }
+
+/* RIBBON */
+.ribbon { height: 36px; background: #f8f8f8; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; padding: 0 10px; }
+.r-tab { font-size: 11px; color: #888; padding: 6px 8px; cursor: pointer; }
+.r-tab.active { color: #0078d4; font-weight: 600; }
+.r-spacer { flex: 1; }
+</style>
+</head>
+<body>
+<div class="outlook-frame">
+    <div class="outlook-sidebar">
+        <div class="sb-icon active">&#x2709;</div>
+        <div class="sb-icon">&#x1f4c5;</div>
+        <div class="sb-icon">&#x1f464;</div>
+        <div class="sb-spacer"></div>
+        <div class="sb-icon easymail-icon" title="EasyMail">&#x2728;<div class="pulse"></div></div>
+    </div>
+    <div class="folder-panel">
+        <div class="fp-item active"><span>Boite de reception</span><span class="fp-cnt">9</span></div>
+        <div class="fp-item"><span>Elements envoyes</span></div>
+        <div class="fp-item"><span>IMMOBILIER</span></div>
+        <div class="fp-item"><span>FINANCE</span></div>
+        <div class="fp-item"><span>GROUPE</span></div>
+    </div>
+    <div class="main-content">
+        <div class="ribbon">
+            <div class="r-tab active">Accueil</div>
+            <div class="r-tab">Affichage</div>
+            <div class="r-spacer"></div>
+        </div>
+        <div class="main-body">
+            <div class="mail-list">
+                <div class="ml-item active">
+                    <div class="ml-time">10:00</div>
+                    <div class="ml-sender">Ronan FOUIN &#x1f4ce;</div>
+                    <div class="ml-subj">RE: SOUTH GARDEN</div>
+                    <div class="ml-prev">Suite a notre echange...</div>
+                </div>
+                <div class="ml-item">
+                    <div class="ml-time">08:49</div>
+                    <div class="ml-sender">Estelle DOUILLARD &#x1f4ce;</div>
+                    <div class="ml-subj">MINOPOLIS - Bilan</div>
+                    <div class="ml-prev">Vous trouverez ci-joint...</div>
+                </div>
+                <div class="ml-item">
+                    <div class="ml-time">08:40</div>
+                    <div class="ml-sender">Coralie BERTHAUD</div>
+                    <div class="ml-subj">SAS ANNA CHU</div>
+                    <div class="ml-prev">Lorsque vous avez...</div>
+                </div>
+                <div class="ml-item">
+                    <div class="ml-time">hier</div>
+                    <div class="ml-sender">Vincent HUBERT</div>
+                    <div class="ml-subj">ORVAULT - COURRIER</div>
+                    <div class="ml-prev">Veuillez trouver...</div>
+                </div>
+            </div>
+            <div class="reading-pane">
+                <div class="rp-from">Ronan FOUIN &lt;ronan.fouin@airbee-conseil.fr&gt;</div>
+                <div class="rp-meta">A : Yvan BOSSER | 02/04/2026 10:00</div>
+                <div class="rp-subj">RE: SOUTH GARDEN</div>
+                <div><span class="rp-att">&#x1f4c4; Situation locative Q1.pdf</span><span class="rp-att">&#x1f4c4; Charges 2025.xlsx</span></div>
+                <div class="rp-body">
+                    <p>Bonjour Yvan,</p>
+                    <p>Suite a notre echange, veuillez trouver ci-joint la situation locative du Q1 2026 pour le South Garden ainsi que le detail des charges 2025.</p>
+                    <p>Concernant le lot 3, nous avons recu son preavis de depart au 30 juin 2026. Je vous propose d'organiser un point la semaine prochaine pour discuter de la remise en location.</p>
+                    <p>Pourriez-vous me confirmer si vous souhaitez reconduire le contrat d'entretien des espaces verts pour 2026 ?</p>
+                    <p>Bien cordialement,<br>Ronan FOUIN<br>Airbee Conseil</p>
+                </div>
+
+                <!-- FLOATING WIDGET -->
+                <div class="easymail-float">
+                    <div class="float-header">
+                        <div class="logo">&#x2709; EasyMail</div>
+                        <div class="actions">
+                            <button class="hdr-btn" title="Reduire">&#x2014;</button>
+                            <button class="hdr-btn" title="Agrandir">&#x2610;</button>
+                            <button class="hdr-btn" title="Fermer">&times;</button>
+                        </div>
+                    </div>
+                    <div class="float-body">
+                        <div class="cm">
+                            <div class="cm-av">R</div>
+                            <div>
+                                <div class="cm-name">Ronan FOUIN</div>
+                                <div class="cm-sub">Airbee Conseil | vouvoiement | 100%</div>
+                            </div>
+                        </div>
+
+                        <div class="steps">
+                            <div class="step done"><span class="step-num">&#x2713;</span>Analyser</div>
+                            <div class="step active"><span class="step-num">2</span>Repondre</div>
+                            <div class="step"><span class="step-num">3</span>Classer</div>
+                        </div>
+
+                        <div class="imp-dots">
+                            <div class="imp-dot">&#x26A1; Rapide</div>
+                            <div class="imp-dot active">Standard</div>
+                            <div class="imp-dot">Approfondi</div>
+                        </div>
+
+                        <div class="input-row">
+                            <input class="input-field" placeholder="Instructions (optionnel)">
+                            <button class="input-btn">&#x2728;</button>
+                        </div>
+
+                        <div class="resp">
+                            <p>Bonjour Ronan,</p>
+                            <p>Merci pour ces documents.</p>
+                            <p>Bien note pour le depart du lot 3 au 30 juin. Je suis disponible jeudi prochain pour le point remise en location.</p>
+                            <p>Je confirme la reconduction du contrat espaces verts 2026.</p>
+                            <p>Cdlt,<br>Yvan</p>
+                        </div>
+
+                        <div class="bot-actions">
+                            <button class="bot-btn">&#x1f504; Autre</button>
+                            <button class="bot-btn">&#x270f; Modifier</button>
+                            <button class="bot-btn primary">&#x1f4e4; Envoyer</button>
+                        </div>
+
+                        <div class="info-card ech">&#x1f4c5; <strong>Semaine prochaine</strong> - Point lot 3 avec Ronan</div>
+                        <div class="info-card cls">&#x1f4c1; IMMOBILIER / South Garden / admin-compta &#x2713;</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

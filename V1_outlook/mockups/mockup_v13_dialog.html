@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>EasyMail - V13 Dialog deplie (80% ecran, arborescence visible)</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', sans-serif; background: #f3f3f3; overflow: hidden; height: 100vh; }
+
+.outlook-frame { display: flex; height: 100vh; }
+
+/* OUTLOOK VISIBLE A GAUCHE (~20%) */
+.outlook-sidebar { width: 48px; background: #ebebeb; border-right: 1px solid #d0d0d0; display: flex; flex-direction: column; align-items: center; padding-top: 10px; gap: 6px; flex-shrink: 0; }
+.sb-icon { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #777; cursor: pointer; }
+.sb-icon:hover { background: #ddd; }
+.sb-icon.active { background: #cde4f7; color: #0078d4; }
+
+.folder-panel { width: 170px; background: #f7f7f7; border-right: 1px solid #e0e0e0; padding: 6px 0; flex-shrink: 0; }
+.fp-item { padding: 5px 10px; font-size: 11px; color: #555; cursor: pointer; display: flex; justify-content: space-between; }
+.fp-item:hover { background: #eee; }
+.fp-item.active { background: #d6e4f0; color: #0078d4; font-weight: 600; }
+.fp-cnt { font-size: 10px; color: #aaa; }
+
+/* ZONE GRAYED (Outlook derriere le dialog) */
+.outlook-behind {
+    flex: 0 0 40px; background: #e8e8e8; opacity: 0.4;
+    display: flex; flex-direction: column; overflow: hidden;
+}
+
+/* ============================== */
+/* DIALOG POPUP (~80% de l'ecran) */
+/* ============================== */
+.dialog-overlay {
+    flex: 1; display: flex; flex-direction: column;
+    background: #fff;
+    box-shadow: -4px 0 20px rgba(0,0,0,0.15);
+    position: relative;
+}
+
+/* Barre de titre Windows */
+.dialog-titlebar {
+    height: 30px; background: #f0f0f0; border-bottom: 1px solid #ddd;
+    display: flex; align-items: center; padding: 0 10px;
+    font-size: 11px; color: #666; flex-shrink: 0;
+}
+.dialog-titlebar .spacer { flex: 1; }
+.dialog-titlebar .win-btn {
+    width: 26px; height: 26px; border: none; background: none;
+    color: #888; cursor: pointer; font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+}
+.dialog-titlebar .win-btn:hover { background: #ddd; }
+.dialog-titlebar .win-btn.close:hover { background: #e81123; color: #fff; }
+
+/* BANDEAU BLEU UNIFIE */
+.em-unified-header {
+    padding: 10px 16px;
+    background: linear-gradient(135deg, #0078d4, #005a9e);
+    color: #fff;
+    display: flex; align-items: center;
+    flex-shrink: 0;
+}
+.em-logo { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px; flex: 3; }
+.em-header-sep { width: 1px; height: 28px; background: rgba(255,255,255,0.3); margin: 0 16px; flex-shrink: 0; }
+.em-header-right { flex: 7; display: flex; align-items: center; gap: 12px; }
+.em-reply-to { font-size: 12px; font-weight: 500; }
+.em-reply-to strong { font-weight: 600; }
+.em-tag-mini { font-size: 9px; padding: 1px 6px; border-radius: 3px; background: rgba(255,255,255,0.15); }
+.em-header-spacer { flex: 1; }
+.em-status { font-size: 10px; opacity: 0.7; }
+.em-header-actions { display: flex; gap: 4px; margin-left: 12px; }
+.em-hdr-btn {
+    background: rgba(255,255,255,0.15); border: none; color: #fff;
+    width: 28px; height: 28px; border-radius: 4px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.em-hdr-btn:hover { background: rgba(255,255,255,0.3); }
+
+/* ZONE SPLIT */
+.em-split { display: flex; flex: 1; overflow: hidden; }
+
+/* 30% MAIL RECU */
+.em-mail-side {
+    flex: 3; background: #f5f7fa; display: flex; flex-direction: column;
+    overflow: hidden; border-right: 1px solid #e0e0e0;
+}
+.mail-tabs { display: flex; background: #eef1f5; border-bottom: 1px solid #ddd; flex-shrink: 0; }
+.mail-tab {
+    flex: 1; text-align: center; padding: 8px 0; font-size: 11px;
+    color: #888; cursor: pointer; border-bottom: 2px solid transparent; font-weight: 500;
+}
+.mail-tab:hover { color: #555; }
+.mail-tab.active { color: #0078d4; border-bottom-color: #0078d4; font-weight: 600; }
+.tab-content { flex: 1; overflow-y: auto; padding: 14px 16px; }
+.tab-resume.active { display: block; }
+.tab-full.active { display: block; }
+.tab-resume:not(.active) { display: none; }
+.tab-full:not(.active) { display: none; }
+
+.resume-from { font-size: 12px; font-weight: 600; color: #333; margin-bottom: 4px; }
+.resume-subject { font-size: 13px; font-weight: 600; color: #1a1a1a; margin-bottom: 10px; }
+.resume-section { margin-bottom: 10px; }
+.resume-section-title { font-size: 9px; color: #999; text-transform: uppercase; font-weight: 600; margin-bottom: 4px; }
+.resume-point {
+    display: flex; align-items: flex-start; gap: 6px;
+    padding: 6px 8px; background: #fff; border-radius: 5px;
+    border-left: 3px solid #0078d4; margin-bottom: 4px;
+    font-size: 11px; color: #444; line-height: 1.4;
+}
+.resume-point .bullet { color: #0078d4; font-weight: 700; flex-shrink: 0; }
+.resume-att { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.resume-att-chip { background: #fff; border: 1px solid #ddd; border-radius: 4px; padding: 3px 8px; font-size: 9px; color: #666; }
+
+.full-from { font-size: 12px; font-weight: 600; color: #333; }
+.full-meta { font-size: 10px; color: #999; margin-top: 2px; }
+.full-subject { font-size: 14px; font-weight: 600; color: #1a1a1a; margin-top: 8px; }
+.full-body { font-size: 12px; color: #444; line-height: 1.6; margin-top: 10px; }
+.full-att { display: inline-block; background: #fff; border: 1px solid #ddd; border-radius: 4px; padding: 3px 8px; font-size: 9px; color: #666; margin-top: 8px; margin-right: 4px; }
+
+/* 70% EASYMAIL */
+.em-panel { flex: 7; background: #fff; display: flex; flex-direction: column; overflow: hidden; }
+.em-body { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; }
+
+.em-fields { margin-bottom: 8px; }
+.em-f { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.em-f label { font-size: 10px; color: #aaa; width: 35px; }
+.em-f input { flex: 1; padding: 4px 8px; border: 1px solid #e8e8e8; border-radius: 4px; font-size: 11px; outline: none; color: #333; }
+.em-f input:focus { border-color: #0078d4; }
+
+.em-gen-row { display: flex; gap: 4px; margin-bottom: 6px; align-items: flex-start; }
+.em-brief-input {
+    flex: 1; padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px;
+    font-size: 11px; outline: none; font-family: inherit;
+    resize: vertical; min-height: 30px; max-height: 100px; line-height: 1.4;
+}
+.em-brief-input:focus { border-color: #0078d4; }
+.em-imp-group { display: flex; gap: 0; flex-shrink: 0; }
+.em-imp-chip {
+    padding: 6px 10px; border: 1px solid #e0e0e0;
+    font-size: 11px; color: #888; cursor: pointer; background: #fff;
+}
+.em-imp-chip:first-child { border-radius: 6px 0 0 6px; }
+.em-imp-chip:last-child { border-radius: 0 6px 6px 0; }
+.em-imp-chip:not(:first-child) { border-left: none; }
+.em-imp-chip.active { background: #0078d4; color: #fff; border-color: #0078d4; z-index: 1; }
+.em-gen-btn {
+    padding: 6px 16px; border: none; border-radius: 6px;
+    background: #0078d4; color: #fff; font-size: 12px; font-weight: 600;
+    cursor: pointer; flex-shrink: 0;
+}
+.em-gen-btn:hover { background: #005a9e; }
+
+.em-format-bar {
+    display: flex; align-items: center; gap: 2px; padding: 4px 6px;
+    background: #f8f9fa; border: 1px solid #eee; border-bottom: none;
+    border-radius: 8px 8px 0 0; flex-wrap: wrap;
+}
+.fmt-select { padding: 3px 4px; border: 1px solid #ddd; border-radius: 3px; font-size: 10px; outline: none; background: #fff; color: #555; cursor: pointer; }
+.fmt-sep { width: 1px; height: 18px; background: #ddd; margin: 0 3px; }
+.fmt-btn {
+    width: 26px; height: 26px; border: none; border-radius: 3px;
+    background: none; color: #555; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; font-size: 12px;
+}
+.fmt-btn:hover { background: #e8e8e8; }
+.fmt-color { width: 18px; height: 18px; border-radius: 3px; border: 1px solid #ddd; cursor: pointer; }
+
+.em-editor {
+    flex: 1; background: #fff; border: 1px solid #eee; border-top: none;
+    border-radius: 0 0 8px 8px;
+    padding: 12px 14px; font-size: 13px; line-height: 1.65; color: #333;
+    overflow-y: auto; margin-bottom: 8px; min-height: 0;
+}
+
+.em-toolbar { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
+.em-tb {
+    padding: 5px 10px; border: 1px solid #e0e0e0; border-radius: 5px;
+    font-size: 10px; color: #666; cursor: pointer; background: #fff;
+    display: flex; align-items: center; gap: 3px;
+}
+.em-tb:hover { border-color: #0078d4; color: #0078d4; }
+.em-tb-input { flex: 1; min-width: 120px; padding: 5px 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 10px; outline: none; }
+.em-tb-input:focus { border-color: #0078d4; }
+.em-tb.send { background: linear-gradient(135deg, #0078d4, #005a9e); color: #fff; border: none; font-weight: 600; padding: 6px 16px; font-size: 11px; }
+
+.em-info-row { display: flex; gap: 6px; }
+.em-info-card { flex: 1; padding: 7px 10px; border-radius: 6px; font-size: 10px; }
+.em-info-card.ech { background: #fff8e1; border-left: 3px solid #ffc107; color: #795548; }
+.em-info-card.cls { background: #e3f2fd; border-left: 3px solid #0078d4; color: #0078d4; }
+.eic-label { font-size: 8px; color: #999; text-transform: uppercase; font-weight: 600; margin-bottom: 2px; }
+</style>
+</head>
+<body>
+<div class="outlook-frame">
+    <!-- OUTLOOK VISIBLE A GAUCHE -->
+    <div class="outlook-sidebar">
+        <div class="sb-icon active">&#x2709;</div>
+        <div class="sb-icon">&#x1f4c5;</div>
+        <div class="sb-icon">&#x1f464;</div>
+    </div>
+    <div class="folder-panel">
+        <div class="fp-item active"><span>Boite de reception</span><span class="fp-cnt">9</span></div>
+        <div class="fp-item"><span>Elements envoyes</span></div>
+        <div class="fp-item"><span>IMMOBILIER</span></div>
+        <div class="fp-item"><span>FINANCE</span></div>
+        <div class="fp-item"><span>GROUPE</span></div>
+    </div>
+
+    <!-- ZONE GRISEE (mail list + reading pane derriere) -->
+    <div class="outlook-behind"></div>
+
+    <!-- ============================== -->
+    <!-- DIALOG POPUP (80% de l'ecran)  -->
+    <!-- L'arborescence Outlook reste   -->
+    <!-- visible a gauche               -->
+    <!-- ============================== -->
+    <div class="dialog-overlay">
+        <div class="dialog-titlebar">
+            <span>&#x2709; EasyMail — Repondre a Ronan FOUIN</span>
+            <div class="spacer"></div>
+            <button class="win-btn">&#x2014;</button>
+            <button class="win-btn">&#x25A1;</button>
+            <button class="win-btn close">&times;</button>
+        </div>
+
+        <!-- BANDEAU BLEU -->
+        <div class="em-unified-header">
+            <div class="em-logo">&#x2709; EasyMail</div>
+            <div class="em-header-sep"></div>
+            <div class="em-header-right">
+                <div class="em-reply-to">Repondre a <strong>Ronan FOUIN</strong></div>
+                <span class="em-tag-mini">vouvoiement</span>
+                <span class="em-tag-mini">confiance 100%</span>
+                <div class="em-header-spacer"></div>
+                <div class="em-status">Reponse prete &#x2022; 3.2s</div>
+                <div class="em-header-actions">
+                    <button class="em-hdr-btn" title="Reduire">&#x2014;</button>
+                    <button class="em-hdr-btn" title="Fermer">&times;</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="em-split">
+            <!-- 30% MAIL RECU -->
+            <div class="em-mail-side">
+                <div class="mail-tabs">
+                    <div class="mail-tab active" onclick="switchTab('resume')">&#x1f4cb; Resume</div>
+                    <div class="mail-tab" onclick="switchTab('full')">&#x1f4e8; Mail recu</div>
+                </div>
+                <div class="tab-content tab-resume active" id="tab-resume">
+                    <div class="resume-from">Ronan FOUIN — Airbee Conseil</div>
+                    <div class="resume-subject">RE: SOUTH GARDEN</div>
+                    <div class="resume-section">
+                        <div class="resume-section-title">Points principaux</div>
+                        <div class="resume-point"><span class="bullet">1</span><span>Transmission <strong>situation locative Q1 2026</strong> + <strong>charges 2025</strong></span></div>
+                        <div class="resume-point"><span class="bullet">2</span><span><strong>Preavis lot 3</strong> : depart au <strong>30 juin 2026</strong>. Point semaine prochaine</span></div>
+                        <div class="resume-point"><span class="bullet">3</span><span>Demande : <strong>reconduction contrat espaces verts 2026</strong> ?</span></div>
+                    </div>
+                    <div class="resume-section">
+                        <div class="resume-section-title">Actions attendues</div>
+                        <div class="resume-point"><span class="bullet">&#x2192;</span><span>Confirmer reconduction espaces verts</span></div>
+                        <div class="resume-point"><span class="bullet">&#x2192;</span><span>Convenir d'un creneau point lot 3</span></div>
+                    </div>
+                    <div class="resume-section">
+                        <div class="resume-section-title">Pieces jointes</div>
+                        <div class="resume-att">
+                            <span class="resume-att-chip">&#x1f4c4; Situation locative Q1.pdf</span>
+                            <span class="resume-att-chip">&#x1f4c4; Charges 2025.xlsx</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="tab-content tab-full" id="tab-full">
+                    <div class="full-from">Ronan FOUIN &lt;ronan.fouin@airbee-conseil.fr&gt;</div>
+                    <div class="full-meta">A : Yvan BOSSER | 02/04/2026 10:00</div>
+                    <div class="full-subject">RE: SOUTH GARDEN</div>
+                    <div><span class="full-att">&#x1f4c4; Situation locative Q1.pdf</span><span class="full-att">&#x1f4c4; Charges 2025.xlsx</span></div>
+                    <div class="full-body">
+                        <p>Bonjour Yvan,</p>
+                        <p>Suite a notre echange, veuillez trouver ci-joint la situation locative du Q1 2026 pour le South Garden ainsi que le detail des charges 2025.</p>
+                        <p>Concernant le locataire du lot 3, nous avons bien recu son preavis de depart au 30 juin 2026. Je vous propose d'organiser un point la semaine prochaine pour discuter de la remise en location.</p>
+                        <p>Par ailleurs, pourriez-vous me confirmer si vous souhaitez reconduire le contrat d'entretien des espaces verts pour 2026 ?</p>
+                        <p>Bien cordialement,<br>Ronan FOUIN<br>Expert-comptable<br>Airbee Conseil</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 70% EASYMAIL EDITEUR -->
+            <div class="em-panel">
+                <div class="em-body">
+                    <div class="em-fields">
+                        <div class="em-f"><label>A :</label><input value="ronan.fouin@airbee-conseil.fr"></div>
+                        <div class="em-f"><label>Objet :</label><input value="RE: SOUTH GARDEN"></div>
+                    </div>
+
+                    <div class="em-gen-row">
+                        <textarea class="em-brief-input" rows="1" placeholder="Instructions (optionnel)"></textarea>
+                        <div class="em-imp-group">
+                            <div class="em-imp-chip" onclick="selectImp(this)">R</div>
+                            <div class="em-imp-chip active" onclick="selectImp(this)">S</div>
+                            <div class="em-imp-chip" onclick="selectImp(this)">A</div>
+                        </div>
+                        <button style="border:1px solid #ddd; border-radius:6px; width:32px; height:32px; background:none; cursor:pointer; font-size:14px;">&#x1f4ce;</button>
+                        <button class="em-gen-btn">&#x2728; Generer</button>
+                    </div>
+
+                    <div class="em-format-bar">
+                        <select class="fmt-select"><option>Aptos</option><option>Calibri</option><option>Arial</option></select>
+                        <select class="fmt-select" style="width:50px;"><option>11</option><option>10</option><option>12</option><option>14</option></select>
+                        <div class="fmt-sep"></div>
+                        <button class="fmt-btn" style="font-weight:bold;">B</button>
+                        <button class="fmt-btn" style="font-style:italic;">I</button>
+                        <button class="fmt-btn" style="text-decoration:underline;">U</button>
+                        <button class="fmt-btn" style="text-decoration:line-through;">S</button>
+                        <div class="fmt-sep"></div>
+                        <button class="fmt-btn">&#x1f58c;</button>
+                        <input type="color" class="fmt-color" value="#333333">
+                        <div class="fmt-sep"></div>
+                        <button class="fmt-btn">&#x2261;</button>
+                    </div>
+
+                    <div class="em-editor">
+                        <p>Bonjour Ronan,</p>
+                        <p>Merci pour ces documents, je vais les examiner.</p>
+                        <p>Concernant le lot 3, c'est bien note pour le depart au 30 juin. Je suis disponible jeudi prochain pour faire le point sur la remise en location.</p>
+                        <p>Pour le contrat d'entretien des espaces verts, je vous confirme la reconduction pour 2026.</p>
+                        <p>Bien cordialement,<br>Yvan</p>
+                    </div>
+
+                    <div class="em-toolbar">
+                        <button class="em-tb">&#x1f504; Autre</button>
+                        <button class="em-tb">&#x21A9;</button>
+                        <input class="em-tb-input" placeholder="Modifier : ex. ton plus ferme, raccourcir...">
+                        <button class="em-tb">&#x270f;</button>
+                        <button class="em-tb send">&#x1f4e4; Valider et envoyer</button>
+                    </div>
+
+                    <div class="em-info-row">
+                        <div class="em-info-card ech">
+                            <div class="eic-label">Echeance detectee</div>
+                            &#x1f4c5; <strong>Sem. prochaine</strong><br>Point remise en location lot 3
+                        </div>
+                        <div class="em-info-card cls">
+                            <div class="eic-label">Classement suggere</div>
+                            &#x1f4c1; IMMOBILIER / South Garden &#x2713;
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function switchTab(tab) {
+    document.getElementById('tab-resume').className = 'tab-content tab-resume' + (tab === 'resume' ? ' active' : '');
+    document.getElementById('tab-full').className = 'tab-content tab-full' + (tab === 'full' ? ' active' : '');
+    document.querySelectorAll('.mail-tab').forEach(function(t, i) {
+        t.className = 'mail-tab' + ((i === 0 && tab === 'resume') || (i === 1 && tab === 'full') ? ' active' : '');
+    });
+}
+function selectImp(el) {
+    document.querySelectorAll('.em-imp-chip').forEach(function(c) { c.classList.remove('active'); });
+    el.classList.add('active');
+}
+</script>
+</body>
+</html>
