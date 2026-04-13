@@ -484,28 +484,43 @@ _warmup_progress = {'step': '', 'current': 0, 'total': 0}
 # Cache prefetch persistant (fichier JSON)
 _PREFETCH_CACHE_PATH = os.path.join(os.path.dirname(__file__), 'prefetch_cache.json')
 
-def _save_prefetch_cache():
-    """Sauvegarde le _prefetch_cache sur disque (JSON). Appelé à la fermeture."""
+def _save_prefetch_cache(inbox_ids=None):
+    """Sauvegarde le _prefetch_cache sur disque (JSON). Appelé à la fermeture et après le preload.
+    Si inbox_ids est fourni, ne sauve que les entrées dont le mail est encore dans l'inbox."""
     try:
         with _prefetch_lock:
-            # Ne sauver que les entrées 'done' avec du contenu
             to_save = {}
             for key, val in _prefetch_cache.items():
                 if isinstance(val, dict) and val.get('status') == 'done':
-                    # Copier sans les body_snippet (trop lourds, re-fetchés en Phase 2)
+                    # Nettoyage sync inbox : si on connaît l'inbox, ne garder que les mails présents
+                    if inbox_ids is not None:
+                        # Extraire l'email_id de la clé (format: "ab_XXXX" ou "c_XXXX_keyword")
+                        parts = key.split('_', 1)
+                        if len(parts) > 1:
+                            eid = parts[1].split('_')[0] if parts[0] == 'c' else parts[1]
+                            if eid not in inbox_ids:
+                                continue
+                    # Sauver avec body_snippet (nécessaire pour la spéculation)
                     clean = {'status': 'done'}
                     for ctx_key in ('conversation', 'sender_history', 'keyword_context'):
                         items = val.get(ctx_key, [])
                         if items:
-                            clean[ctx_key] = [
-                                {k: v for k, v in m.items() if k != 'body_snippet'}
-                                for m in items
-                            ]
+                            clean[ctx_key] = list(items)
                     if clean.get('conversation') or clean.get('sender_history'):
                         to_save[key] = clean
         if to_save:
+            # Nettoyer les items non-serialisables avant sauvegarde
+            def _clean_for_json(obj):
+                if isinstance(obj, dict):
+                    return {k: _clean_for_json(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [_clean_for_json(i) for i in obj if isinstance(i, (dict, str, int, float, bool, type(None)))]
+                elif isinstance(obj, (str, int, float, bool, type(None))):
+                    return obj
+                else:
+                    return str(obj)
             with open(_PREFETCH_CACHE_PATH, 'w', encoding='utf-8') as f:
-                json.dump(to_save, f, ensure_ascii=False, default=str)
+                json.dump(_clean_for_json(to_save), f, ensure_ascii=False)
             print(f"[cache] Prefetch sauvegardé: {len(to_save)} entrées ({os.path.getsize(_PREFETCH_CACHE_PATH)//1024}KB)", flush=True)
     except Exception as e:
         print(f"[cache] Erreur sauvegarde prefetch: {e}", flush=True)
@@ -514,23 +529,24 @@ def _load_prefetch_cache():
     """Charge le _prefetch_cache depuis le disque (JSON). Appelé au démarrage."""
     try:
         if os.path.exists(_PREFETCH_CACHE_PATH):
-            # Ignorer si le fichier a plus de 48h (trop vieux)
-            age_hours = (time.time() - os.path.getmtime(_PREFETCH_CACHE_PATH)) / 3600
-            if age_hours > 48:
-                print(f"[cache] Prefetch cache trop ancien ({age_hours:.0f}h), ignoré", flush=True)
-                os.remove(_PREFETCH_CACHE_PATH)
-                return 0
             with open(_PREFETCH_CACHE_PATH, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             with _prefetch_lock:
                 for key, val in data.items():
-                    if key not in _prefetch_cache:
-                        _prefetch_cache[key] = val
+                    if key not in _prefetch_cache and isinstance(val, dict):
+                        # Vérifier que les items de contexte sont bien des listes de dicts
+                        valid = True
+                        for ctx_key in ('conversation', 'sender_history', 'keyword_context'):
+                            items = val.get(ctx_key, [])
+                            if items and not all(isinstance(m, dict) for m in items):
+                                valid = False
+                                break
+                        if valid:
+                            _prefetch_cache[key] = val
             print(f"[cache] Prefetch chargé depuis disque: {len(data)} entrées", flush=True)
             return len(data)
     except Exception as e:
         print(f"[cache] Erreur chargement prefetch: {e}", flush=True)
-        # Fichier corrompu — supprimer et continuer
         try:
             os.remove(_PREFETCH_CACHE_PATH)
         except Exception:
@@ -5744,8 +5760,12 @@ if __name__ == "__main__":
                     pass
             if preloaded:
                 print(f"[preload-ctx] Terminé: {preloaded} mails avec contexte A+B+C prêt", flush=True)
-                # Sauvegarder le cache après le préchargement (protection anti-crash)
-                _save_prefetch_cache()
+                # Sauvegarder le cache après le préchargement (sync avec inbox)
+                _inbox_ids = set()
+                with _inbox_lock:
+                    if _inbox_cache.get('emails'):
+                        _inbox_ids = {e.get('id', '') for e in _inbox_cache['emails'] if e.get('id')}
+                _save_prefetch_cache(inbox_ids=_inbox_ids if _inbox_ids else None)
 
         except Exception as e:
             print(f"[warmup] Erreur: {e}", flush=True)
