@@ -477,6 +477,10 @@ _MAX_EMAIL_CACHE = 50  # Limite taille des caches session
 _MAX_HTML_CACHE = 50
 _MAX_ATTACHMENT_CACHE = 20
 
+# Warmup status (pour la popup overlay)
+_warmup_done = False
+_warmup_progress = {'step': '', 'current': 0, 'total': 0}
+
 
 def _trim_dict_cache(d, max_size):
     """Limite la taille d'un dict cache en supprimant les plus anciennes entrées."""
@@ -3384,6 +3388,16 @@ def api_style_status():
     })
 
 
+@app.route("/api/warmup_status")
+def api_warmup_status():
+    """Retourne l'etat du warmup (pour la popup overlay inbox)."""
+    return jsonify({
+        "done": _warmup_done,
+        "step": _warmup_progress.get('step', ''),
+        "current": _warmup_progress.get('current', 0),
+        "total": _warmup_progress.get('total', 0)
+    })
+
 @app.route("/api/metrics")
 def api_metrics():
     """Retourne les metriques d'utilisation."""
@@ -5532,13 +5546,16 @@ if __name__ == "__main__":
 
     # Pré-chauffer le cache inbox au démarrage (évite cold start)
     def _warmup():
+        global _warmup_done, _warmup_progress
         try:
             t0 = time.time()
+            _warmup_progress = {'step': 'Chargement de la boite de reception...', 'current': 0, 'total': 0}
             emails = com_run(outlook.get_inbox_emails, limit=200, priority=0)
             with _inbox_lock:
                 _inbox_cache['emails'] = emails
                 _inbox_cache['time'] = time.time()
             print(f"[warmup] Inbox pré-chargé: {len(emails)} emails en {time.time()-t0:.1f}s", flush=True)
+            _warmup_progress = {'step': 'Chargement des dossiers...', 'current': 0, 'total': len(emails)}
 
             # Pré-charger l'arborescence des dossiers Outlook (pour le classement)
             # Essai cache DB d'abord (instantané), puis COM si vide, rescan BG toutes les 60min
@@ -5576,12 +5593,14 @@ if __name__ == "__main__":
             # Priorité basse (10) — toute action utilisateur passe devant
             # S'arrête dès qu'un utilisateur ouvre un mail (version change)
             # Cache DB = persistant entre sessions → 2ème démarrage instantané
+            _warmup_progress = {'step': 'Chargement des mails...', 'current': 0, 'total': len(emails)}
             v0 = _email_version
             t1 = time.time()
             loaded_com = 0
             loaded_db = 0
             _warmup_count = 0
-            for em in emails:
+            for _idx, em in enumerate(emails):
+                _warmup_progress['current'] = _idx + 1
                 if _email_version != v0:
                     print(f"[warmup] Interrompu (utilisateur a ouvert un mail) après {loaded_com + loaded_db} emails", flush=True)
                     break
@@ -5620,6 +5639,11 @@ if __name__ == "__main__":
                     pass
             if loaded_com or loaded_db:
                 print(f"[warmup] {loaded_com + loaded_db} emails pré-chargés ({loaded_db} DB + {loaded_com} COM) en {time.time()-t1:.1f}s", flush=True)
+
+            # Warmup terminé — débloquer l'inbox
+            _warmup_done = True
+            _warmup_progress = {'step': 'Pret !', 'current': len(emails), 'total': len(emails)}
+            print(f"[warmup] TERMINE en {time.time()-t0:.1f}s", flush=True)
 
             # Préchargement en arrière-plan du contexte A+B+C pour les mails non traités
             # Se lance après le warmup, tourne tant que l'utilisateur n'agit pas
