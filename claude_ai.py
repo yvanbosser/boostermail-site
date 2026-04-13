@@ -282,7 +282,13 @@ class ClaudeAssistant:
         # -- D : Profil du correspondant (PREMIER — prime Claude sur la relation) --
         _SERVICE_PREFIXES = {'noreply', 'no-reply', 'info', 'contact', 'admin', 'support', 'hello', 'sales', 'billing', 'notification', 'notifications', 'service', 'mailer-daemon', 'postmaster'}
         _raw_local = to_email.split('@')[0].lower().replace('.', ' ').replace('-', ' ') if to_email else ''
-        _contact_display = to_email.split('@')[0].replace('.', ' ').title() if (to_email and _raw_local.split()[0] not in _SERVICE_PREFIXES) else "correspondant"
+        # Utiliser le display_name du profil contact s'il existe, sinon parser l'email
+        if contact_profile and contact_profile.get('display_name'):
+            _contact_display = contact_profile['display_name']
+        elif to_email and _raw_local.split()[0] not in _SERVICE_PREFIXES:
+            _contact_display = to_email.split('@')[0].replace('.', ' ').title()
+        else:
+            _contact_display = "correspondant"
         cp = None  # Initialisé ici pour éviter UnboundLocalError
         if contact_profile and contact_profile.get('profile_text'):
             cp = contact_profile
