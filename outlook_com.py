@@ -289,6 +289,24 @@ class OutlookClient:
             print(f"[outlook] Erreur get_email: {e}", flush=True)
             return None
 
+    def _save_attachment_binary(self, att, filepath):
+        """Sauvegarde une PJ via PropertyAccessor (lecture binaire directe).
+        Contourne le blocage Windows Defender sur SaveAsFile COM.
+        Fallback sur SaveAsFile si PropertyAccessor echoue."""
+        try:
+            PR_ATTACH_DATA_BIN = "http://schemas.microsoft.com/mapi/proptag/0x37010102"
+            data = att.PropertyAccessor.GetProperty(PR_ATTACH_DATA_BIN)
+            with open(filepath, 'wb') as f:
+                f.write(data)
+            return True
+        except Exception:
+            # Fallback SaveAsFile pour les types non-binaires (embedded messages type=5)
+            try:
+                att.SaveAsFile(filepath)
+                return True
+            except Exception:
+                return False
+
     def save_inline_images(self, entry_id):
         """Sauvegarde les images inline d'un mail en temp. Retourne {content_id: filepath}."""
         try:
@@ -314,14 +332,11 @@ class OutlookClient:
                 if content_id and ('cid:' + content_id) in html_body:
                     fname_lower = filename.lower()
                     if not any(fname_lower.endswith(ext) for ext in _DOC_EXTS):
-                        try:
-                            safe_name = re.sub(r'[\\/:*?"<>|]', '_', filename)
-                            safe_name = os.path.basename(safe_name)
-                            filepath = os.path.join(mail_dir, safe_name)
-                            att.SaveAsFile(filepath)
+                        safe_name = re.sub(r'[\\/:*?"<>|]', '_', filename)
+                        safe_name = os.path.basename(safe_name)
+                        filepath = os.path.join(mail_dir, safe_name)
+                        if self._save_attachment_binary(att, filepath):
                             inline_images[content_id] = filepath
-                        except Exception:
-                            pass
             return inline_images
         except Exception as e:
             print(f"[outlook] Erreur save_inline_images: {e}", flush=True)
@@ -349,16 +364,16 @@ class OutlookClient:
                 safe_name = re.sub(r'[\\/:*?"<>|]', '_', filename)
                 safe_name = os.path.basename(safe_name)
                 filepath = os.path.join(mail_dir, safe_name)
-                att.SaveAsFile(filepath)
-                # Inline seulement si content_id présent ET pas un document
-                fname_lower = filename.lower()
-                is_inline = bool(content_id) and not any(fname_lower.endswith(ext) for ext in _DOC_EXTS)
-                saved.append({
-                    'name': filename,
-                    'path': filepath,
-                    'size': os.path.getsize(filepath),
-                    'is_inline': is_inline
-                })
+                if self._save_attachment_binary(att, filepath):
+                    # Inline seulement si content_id présent ET pas un document
+                    fname_lower = filename.lower()
+                    is_inline = bool(content_id) and not any(fname_lower.endswith(ext) for ext in _DOC_EXTS)
+                    saved.append({
+                        'name': filename,
+                        'path': filepath,
+                        'size': os.path.getsize(filepath),
+                        'is_inline': is_inline
+                    })
             print(f"[outlook] {len(saved)} PJ sauvegardées en temp pour {entry_id[:20]}...", flush=True)
             return saved
         except Exception as e:
