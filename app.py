@@ -2928,7 +2928,53 @@ def send_reply():
                                          'folder_id': kw_match['folder_id'], 'confidence': 0.9,
                                          'reason': f"Contact + sujet ({kw_match['count']} similaires)"})
 
-            # 4. Cross-contact (3+ contacts memes mots-cles → meme dossier)
+            # 4. Matching nom de dossier dans body/sujet (spec: feuilles > 5 chars, > 1 mot)
+            if len(_suggestions) < 3:
+                _COMMON_FOLDER_NAMES = {'divers', 'autre', 'autres', 'factures', 'facture', 'courrier', 'inbox', 'archive', 'archives'}
+                _existing_paths = {s['folder_path'] for s in _suggestions}
+                folders = _get_folders_cached()
+                if folders:
+                    _search_text = f"{subject} {_body_clean}".lower()
+                    # Nettoyer les accents pour matching insensible
+                    import unicodedata
+                    _search_norm = unicodedata.normalize('NFD', _search_text)
+                    _search_norm = ''.join(c for c in _search_norm if unicodedata.category(c) != 'Mn')
+                    _folder_matches = []
+                    for f in folders:
+                        name = f.get('name', '')
+                        # Retirer les prefixes numeriques ("20 - ", "1- ", "22.4 ")
+                        clean_name = re.sub(r'^\d+[\.\-\s]+\s*', '', name).strip()
+                        if len(clean_name) <= 5 or ' ' not in clean_name:
+                            continue
+                        if clean_name.lower() in _COMMON_FOLDER_NAMES:
+                            continue
+                        # Verifier que c'est une feuille (pas de sous-dossiers)
+                        _is_leaf = not any(f2.get('path', '').startswith(f['path'] + '/') for f2 in folders if f2 != f)
+                        if not _is_leaf:
+                            continue
+                        # Matching insensible aux accents
+                        _name_norm = unicodedata.normalize('NFD', clean_name.lower())
+                        _name_norm = ''.join(c for c in _name_norm if unicodedata.category(c) != 'Mn')
+                        if _name_norm in _search_norm and f['path'] not in _existing_paths:
+                            _folder_matches.append(f)
+                    # Ajouter les matches (max 3 - existants)
+                    for _fm in _folder_matches[:3 - len(_suggestions)]:
+                        _suggestions.append({'source': 'folder_name', 'folder_path': _fm['path'],
+                                             'folder_id': _fm['id'], 'confidence': 0.8,
+                                             'reason': f"Nom du dossier detecte dans le mail"})
+                        _existing_paths.add(_fm['path'])
+
+            # 5. Regle domaine (3+ contacts meme domaine → meme dossier)
+            if len(_suggestions) < 3:
+                _PUBLIC_DOMAINS = {'gmail.com', 'outlook.com', 'hotmail.com', 'hotmail.fr', 'yahoo.fr', 'yahoo.com', 'orange.fr', 'free.fr', 'sfr.fr', 'laposte.net', 'live.fr', 'wanadoo.fr'}
+                if domain and domain not in _PUBLIC_DOMAINS:
+                    _domain_rule = db.get_domain_folder_suggestion(domain)
+                    if _domain_rule and _domain_rule['folder_path'] not in {s['folder_path'] for s in _suggestions}:
+                        _suggestions.append({'source': 'domain', 'folder_path': _domain_rule['folder_path'],
+                                             'folder_id': _domain_rule['folder_id'], 'confidence': 0.6,
+                                             'reason': f"Domaine {domain} ({_domain_rule['contact_count']} contacts)"})
+
+            # 6. Cross-contact (3+ contacts memes mots-cles → meme dossier)
             if len(_suggestions) < 3:
                 cross = db.get_cross_contact_folder(_subj_kw or _body_kw)
                 if cross and cross['folder_path'] not in [s['folder_path'] for s in _suggestions]:
@@ -2936,7 +2982,7 @@ def send_reply():
                                          'folder_id': cross['folder_id'], 'confidence': 0.7,
                                          'reason': f"Sujet similaire ({cross['contact_count']} contacts)"})
 
-            # 5. Momentum (dernier dossier classe dans les 30 min)
+            # 7. Momentum (dernier dossier classe dans les 30 min) — renuméroté
             if len(_suggestions) < 3 and _classify_momentum:
                 _mom = _classify_momentum
                 if _mom and _mom.get('folder_path') and _mom.get('folder_id') and (time.time() - _mom.get('ts', 0)) < 1800:

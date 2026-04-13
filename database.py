@@ -483,6 +483,26 @@ class Database:
             return {'folder_path': row[0], 'folder_id': row[1] or '', 'contact_count': row[2]}
         return None
 
+    def get_domain_folder_suggestion(self, domain):
+        """Regle domaine : si 3+ contacts du meme domaine sont classes dans le meme dossier.
+        Retourne {'folder_path', 'folder_id', 'contact_count'} ou None."""
+        if not domain:
+            return None
+        c = self._conn().cursor()
+        c.execute("""
+            SELECT folder_path, folder_id, COUNT(DISTINCT contact_email) as contact_count
+            FROM folder_classifications
+            WHERE domain = ?
+            GROUP BY folder_path
+            HAVING COUNT(DISTINCT contact_email) >= 3
+            ORDER BY contact_count DESC
+            LIMIT 1
+        """, (domain,))
+        row = c.fetchone()
+        if row:
+            return {'folder_path': row[0], 'folder_id': row[1] or '', 'contact_count': row[2]}
+        return None
+
     def get_pj_folder_by_keywords(self, contact_email, current_keywords):
         """Tier 1 bis PJ : trouve le dossier Windows qui matche le mieux les mots-clés du sujet
         pour un contact multi-dossiers. Retourne {'dest_folder', 'count', 'score'} ou None."""
