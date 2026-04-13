@@ -232,9 +232,11 @@ La connexion Microsoft est OBLIGATOIRE pour une utilisation normale.
 - Resultat : quand l'utilisateur ouvre un mail pre-charge, generation en 3s au lieu de 8s
 - Fonctionne aussi pendant les pauses (reunion, telephone) — le BG continue de pre-charger
 
-**Popup marketing warmup** (a implementer) :
+**Popup marketing warmup** (IMPLEMENTEE — VF.3) :
+- Overlay dans inbox.html avec barre de progression
 - S'affiche a chaque demarrage, bloque l'acces aux mails tant que le warmup n'est pas fini
-- Barre de progression + nombre de mails charges
+- Route `/api/warmup_status` (done, step, current, total)
+- Disparait automatiquement (flash si cache rempli, progression si premier demarrage)
 - Garantit que l'utilisateur ne commence jamais avec un warmup incomplet
 
 ### Plan V1 — 15 etapes
