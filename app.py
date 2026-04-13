@@ -4034,6 +4034,7 @@ def api_classify_email():
                            subject=_classify_subject, subject_keywords=_kw)
 
     # Momentum : sauvegarder le dernier dossier classe (pour le top 3)
+    global _classify_momentum
     _classify_momentum = {'folder_path': folder_path, 'folder_id': folder_id, 'ts': time.time()}
 
     return jsonify({"success": True, **results})
