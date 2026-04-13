@@ -237,7 +237,7 @@
 </head>
 <body>
     <!-- Overlay warmup (bloque l'inbox tant que le warmup n'est pas fini) -->
-    <div class="warmup-overlay" id="warmup-overlay">
+    <div class="warmup-overlay" id="warmup-overlay" style="display:none;">
         <div class="warmup-box">
             <div style="font-size:36px;margin-bottom:12px;">✉️</div>
             <h2>BoosterMail se prepare...</h2>
@@ -701,9 +701,10 @@
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.done) {
-                        // Warmup deja termine — cacher immediatement sans transition
                         overlay.style.display = 'none';
                     } else {
+                        // Warmup en cours — afficher l'overlay
+                        overlay.style.display = 'flex';
                         var pct = data.total > 0 ? Math.round(data.current / data.total * 100) : 0;
                         bar.style.width = pct + '%';
                         text.textContent = data.step || ('Chargement... ' + data.current + '/' + data.total);
