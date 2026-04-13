@@ -154,7 +154,7 @@ Optionnelles : PyPDF2, python-docx, openpyxl
 - Windows uniquement (Outlook installe + pywin32)
 - Onboarding ~2-3 min en background au premier lancement
 - start.bat : kill anciennes instances, auto-install deps, verif config.json
-- Sauvegarde automatique : tache planifiee `easymail-backup`
+- Sauvegarde automatique : tache planifiee DESACTIVEE (saturait OneDrive). Backups manuels dans `C:\EasyMail_backups\`
 - Garde forward : documentee dans `feedback_easymail_forward_guard.md`
 
 ---
@@ -184,6 +184,34 @@ La connexion Microsoft est OBLIGATOIRE pour une utilisation normale.
 → detail dans `NOUVELLE_SESSION.md`, `docs/BILAN_SESSION_20260410.md`
 
 ---
+
+## Session du 12-13/04/2026 — PROTO VF.1
+
+### Migration hors OneDrive
+- Projet deplace de `OneDrive\Desktop\EasyMail\` vers **`C:\EasyMail\`** (hors OneDrive)
+- Raison : OneDrive corrompait les fichiers SQLite (.db, .db-wal, .db-shm) et supprimait les backups
+- Backups dans `C:\EasyMail_backups\` (6 jalons nommes + releases)
+- Tache planifiee backup horaire **desactivee** (creait 43MB/heure, 2.8GB en une semaine)
+- Raccourci bureau "Proto" pointe vers `C:\EasyMail\start.bat`
+
+### Fix SaveAsFile → PropertyAccessor
+- `outlook_com.py` : `att.SaveAsFile()` bloque par Windows Defender (120s timeout)
+- Remplace par `att.PropertyAccessor.GetProperty(PR_ATTACH_DATA_BIN)` + ecriture manuelle
+- Resultat : 0.5s au lieu de 120s pour les images inline
+- Methode `_save_attachment_binary()` ajoutee avec fallback SaveAsFile pour type=5
+
+### Normalisation V1 (etape 1 du plan)
+- `app_plugin.py` : champs `body_snippet`, `from_name`, `direction` ajoutes aux items contexte B/A/C
+- `dialog.js` : fix `_setStatus()` non defini → `headerStatus.textContent`
+- `app_plugin.py` : markdown cleanup, rate limiting 2s, mark_treated apres envoi
+
+### DB restauree
+- `emails.db` : backup du 06/04 (104 contacts, 7443 threads, 21 corrections, integrite OK)
+- `boostermail.db` : donnees copiees (103 contacts, writing_level=N8, writing_score=78)
+- Index Windows Search reconstruit (145000 elements)
+
+### Plan V1 — 15 etapes
+→ detail complet dans `docs/COMPARATIF_PROTO_V1.md`
 
 ## Historique des decisions
 
