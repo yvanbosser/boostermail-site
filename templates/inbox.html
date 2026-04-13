@@ -701,11 +701,8 @@
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.done) {
-                        bar.style.width = '100%';
-                        text.textContent = data.total + ' mails charges';
-                        setTimeout(function() {
-                            overlay.classList.add('hidden');
-                        }, 400);
+                        // Warmup deja termine — cacher immediatement sans transition
+                        overlay.style.display = 'none';
                     } else {
                         var pct = data.total > 0 ? Math.round(data.current / data.total * 100) : 0;
                         bar.style.width = pct + '%';
