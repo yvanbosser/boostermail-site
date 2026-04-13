@@ -2682,17 +2682,19 @@ def send_reply():
             db.mark_treated(_mid, action='replied')
         # Aussi marquer comme lu dans Outlook
         com_run(outlook.mark_as_read, _full_id, priority=10)  # BG : non bloquant UX, très rapide (0.1s)
-        # Nettoyer tous les caches (même chaîne que classify/delete)
-        for _mid in _ids_to_mark:
+        print(f"[send] Mail traité: {len(_ids_to_mark)} ID(s) marqué(s)", flush=True)
+
+    # -- Capturer l'email du cache AVANT la purge (pour post-envoi) --
+    _cached_email = _email_cache.get(email_id) if email_id else None
+
+    # -- Nettoyer tous les caches APRÈS la capture --
+    if not is_first_mail and email_id:
+        for _mid in set(filter(None, [url_email_id, email_id, _cached.get('id', email_id) if _cached else email_id])):
             db.purge_email_cache_for(_mid)
             _email_cache.pop(_mid, None)
         _purge_prefetch_for(email_id)
-        _inbox_cache['time'] = 0  # Forcer refresh inbox
-        print(f"[send] Mail traité: {len(_ids_to_mark)} ID(s) marqué(s), caches purgés", flush=True)
-
-    # -- Post-envoi en arrière-plan (ne bloque pas la réponse HTTP) --
-    # Capturer l'email du cache AVANT le thread (evite un COM call redondant)
-    _cached_email = _email_cache.get(email_id) if email_id else None
+        with _inbox_lock:
+            _inbox_cache['time'] = 0
 
     # -- Préparer les données d'apprentissage (synchrone, rapide) --
     global _sends_since_recal, _has_correction_since_recal
@@ -2982,7 +2984,7 @@ def send_reply():
                                          'folder_id': cross['folder_id'], 'confidence': 0.7,
                                          'reason': f"Sujet similaire ({cross['contact_count']} contacts)"})
 
-            # 7. Momentum (dernier dossier classe dans les 30 min) — renuméroté
+            # 7. Momentum (dernier dossier classe dans les 30 min)
             if len(_suggestions) < 3 and _classify_momentum:
                 _mom = _classify_momentum
                 if _mom and _mom.get('folder_path') and _mom.get('folder_id') and (time.time() - _mom.get('ts', 0)) < 1800:
@@ -2991,7 +2993,7 @@ def send_reply():
                                              'folder_id': _mom['folder_id'], 'confidence': 0.5,
                                              'reason': 'Dossier recent'})
 
-            # 6. Tier 3 : IA top 3 (seulement si < 3 suggestions)
+            # 8. IA top 3 (seulement si < 3 suggestions)
             if len(_suggestions) < 3:
                 folders = _get_folders_cached()
                 if folders:
@@ -4011,21 +4013,23 @@ def api_classify_email():
     if not results["moved"] and not results["copied"]:
         return jsonify({"error": "Échec du classement"}), 500
 
-    # 3. Marquer traité si pas déjà fait (sauf nouveau mail)
+    # 3. Capturer les données pour l'apprentissage AVANT la purge
+    cached = (_email_cache.get(entry_id) or {}) if not is_new_mail else {}
+
+    # 4. Marquer traité + purger les caches
     if not is_new_mail and entry_id:
         db.mark_treated(entry_id, action='classified')
         db.purge_email_cache_for(entry_id)
         _email_cache.pop(entry_id, None)
         _purge_prefetch_for(entry_id)
 
-    # 4. Retirer le mail classé du cache inbox + invalider pour refresh BG
+    # 5. Retirer le mail classé du cache inbox + invalider pour refresh BG
     with _inbox_lock:
         if _inbox_cache.get('emails') and not is_new_mail and entry_id:
             _inbox_cache['emails'] = [e for e in _inbox_cache['emails'] if e.get('id') != entry_id]
         _inbox_cache['time'] = 0
 
-    # 5. Sauvegarder pour apprentissage (avec sujet + mots-clés)
-    cached = (_email_cache.get(entry_id) or {}) if not is_new_mail else {}
+    # 6. Sauvegarder pour apprentissage (avec sujet + mots-clés)
     sender = (cached.get('from', '') or '').strip().lower() if cached else (data.get('contact_email', '') or '')
     domain = sender.split('@')[1] if '@' in sender else ''
     _classify_subject = cached.get('subject', '') or data.get('subject', '') or ''

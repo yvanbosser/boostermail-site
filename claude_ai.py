@@ -1554,9 +1554,9 @@ Choisis parmi les DOSSIERS OUTLOOK DISPONIBLES fournis dans le system prompt."""
         for f in folder_tree:
             if f['path'].lower() == fp_lower:
                 return (f['path'], f['id'])
-        # 3. Match partiel (fin du path)
+        # 3. Match partiel (fin du path, avec séparateur)
         for f in folder_tree:
-            if f['path'].endswith(fp) or fp.endswith(f['path']):
+            if f['path'].endswith('/' + fp) or fp.endswith('/' + f['path']):
                 return (f['path'], f['id'])
         # 4. Préfixe le plus long (IA a inventé un sous-dossier)
         best_f = None
