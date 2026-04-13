@@ -309,6 +309,12 @@ class ClaudeAssistant:
         if cp:
             # Extraire vocabulaire et sujets
             pj = cp.get('profile_json', '{}')
+            # Double-désérialisation si nécessaire (profile_json parfois doublement sérialisé en DB)
+            if isinstance(pj, str):
+                try:
+                    pj = json.loads(pj)
+                except Exception:
+                    pj = {}
             if isinstance(pj, str):
                 try:
                     pj = json.loads(pj)

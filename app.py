@@ -1095,7 +1095,8 @@ def view_email(email_id):
                         _speculative_status[_email_id] = 'done'
                 print(f"[speculative] Réponse prête en {time.time()-t_spec:.1f}s (importance={importance}) pour {_full_id[:20]}...", flush=True)
         except Exception as e:
-            print(f"[speculative] Erreur: {e}", flush=True)
+            import traceback
+            print(f"[speculative] Erreur: {e}\n{traceback.format_exc()}", flush=True)
             # Débloquer stream_from_buffer + signaler l'erreur
             if buffer is not None:
                 buffer['error'] = str(e)
@@ -2584,7 +2585,8 @@ Retravaille le mail en partant de CE brouillon, pas de zéro."""
                 yield f"data: {json.dumps({'done': True})}\n\n"
                 print(f"[generate-stream] OK -- TOTAL {time.time()-t0:.1f}s", flush=True)
             except Exception as e:
-                print(f"[generate-stream] ERREUR: {e}", flush=True)
+                import traceback
+                print(f"[generate-stream] ERREUR: {e}\n{traceback.format_exc()}", flush=True)
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
         return Response(generate_sse(), mimetype='text/event-stream; charset=utf-8',
