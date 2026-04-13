@@ -531,20 +531,24 @@ def _load_prefetch_cache():
         if os.path.exists(_PREFETCH_CACHE_PATH):
             with open(_PREFETCH_CACHE_PATH, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+            loaded = 0
+            skipped = 0
             with _prefetch_lock:
                 for key, val in data.items():
                     if key not in _prefetch_cache and isinstance(val, dict):
-                        # Vérifier que les items de contexte sont bien des listes de dicts
-                        valid = True
+                        # Filtrer les items non-dict dans les listes de contexte
+                        cleaned = {'status': val.get('status', 'done')}
                         for ctx_key in ('conversation', 'sender_history', 'keyword_context'):
                             items = val.get(ctx_key, [])
-                            if items and not all(isinstance(m, dict) for m in items):
-                                valid = False
-                                break
-                        if valid:
-                            _prefetch_cache[key] = val
-            print(f"[cache] Prefetch chargé depuis disque: {len(data)} entrées", flush=True)
-            return len(data)
+                            if items:
+                                cleaned[ctx_key] = [m for m in items if isinstance(m, dict)]
+                        if cleaned.get('conversation') or cleaned.get('sender_history'):
+                            _prefetch_cache[key] = cleaned
+                            loaded += 1
+                        else:
+                            skipped += 1
+            print(f"[cache] Prefetch chargé depuis disque: {loaded} entrées ({skipped} ignorées)", flush=True)
+            return loaded
     except Exception as e:
         print(f"[cache] Erreur chargement prefetch: {e}", flush=True)
         try:
