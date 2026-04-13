@@ -3,6 +3,10 @@ config.json
 
 # Base de donnees
 emails.db
+boostermail.db
+
+# Cache prefetch (JSON, regenere automatiquement)
+prefetch_cache.json
 emails.db-shm
 emails.db-wal
 easymail.db

@@ -225,6 +225,14 @@ La connexion Microsoft est OBLIGATOIRE pour une utilisation normale.
 - Methode `purge_email_cache_for()` dans database.py
 - Pas de TTL, pas de limite de taille — le cache suit l'inbox
 
+**Cache prefetch persistant (JSON)** (IMPLEMENTE — VF.4) :
+- Sauvegarde `_prefetch_cache` dans `prefetch_cache.json` a la fermeture (atexit) et apres le prechargement BG
+- Recharge au demarrage suivant — zero recherche COM si le fichier existe
+- TTL 48h — fichier ignore si trop ancien
+- Body_snippets stripes (trop lourds, re-fetches en Phase 2)
+- Fichier ~50-200KB selon le nombre de mails
+- Fallback gracieux si fichier corrompu (supprime et continue)
+
 **Prechargement en arriere-plan du contexte** :
 - Apres le warmup, le thread BG pre-charge le contexte A+B+C des mails non traites
 - Interruptible : s'arrete immediatement si l'utilisateur ouvre un mail (`_email_version`)

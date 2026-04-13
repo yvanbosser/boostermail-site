@@ -481,6 +481,65 @@ _MAX_ATTACHMENT_CACHE = 20
 _warmup_done = False
 _warmup_progress = {'step': '', 'current': 0, 'total': 0}
 
+# Cache prefetch persistant (fichier JSON)
+_PREFETCH_CACHE_PATH = os.path.join(os.path.dirname(__file__), 'prefetch_cache.json')
+
+def _save_prefetch_cache():
+    """Sauvegarde le _prefetch_cache sur disque (JSON). Appelé à la fermeture."""
+    try:
+        with _prefetch_lock:
+            # Ne sauver que les entrées 'done' avec du contenu
+            to_save = {}
+            for key, val in _prefetch_cache.items():
+                if isinstance(val, dict) and val.get('status') == 'done':
+                    # Copier sans les body_snippet (trop lourds, re-fetchés en Phase 2)
+                    clean = {'status': 'done'}
+                    for ctx_key in ('conversation', 'sender_history', 'keyword_context'):
+                        items = val.get(ctx_key, [])
+                        if items:
+                            clean[ctx_key] = [
+                                {k: v for k, v in m.items() if k != 'body_snippet'}
+                                for m in items
+                            ]
+                    if clean.get('conversation') or clean.get('sender_history'):
+                        to_save[key] = clean
+        if to_save:
+            with open(_PREFETCH_CACHE_PATH, 'w', encoding='utf-8') as f:
+                json.dump(to_save, f, ensure_ascii=False, default=str)
+            print(f"[cache] Prefetch sauvegardé: {len(to_save)} entrées ({os.path.getsize(_PREFETCH_CACHE_PATH)//1024}KB)", flush=True)
+    except Exception as e:
+        print(f"[cache] Erreur sauvegarde prefetch: {e}", flush=True)
+
+def _load_prefetch_cache():
+    """Charge le _prefetch_cache depuis le disque (JSON). Appelé au démarrage."""
+    try:
+        if os.path.exists(_PREFETCH_CACHE_PATH):
+            # Ignorer si le fichier a plus de 48h (trop vieux)
+            age_hours = (time.time() - os.path.getmtime(_PREFETCH_CACHE_PATH)) / 3600
+            if age_hours > 48:
+                print(f"[cache] Prefetch cache trop ancien ({age_hours:.0f}h), ignoré", flush=True)
+                os.remove(_PREFETCH_CACHE_PATH)
+                return 0
+            with open(_PREFETCH_CACHE_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            with _prefetch_lock:
+                for key, val in data.items():
+                    if key not in _prefetch_cache:
+                        _prefetch_cache[key] = val
+            print(f"[cache] Prefetch chargé depuis disque: {len(data)} entrées", flush=True)
+            return len(data)
+    except Exception as e:
+        print(f"[cache] Erreur chargement prefetch: {e}", flush=True)
+        # Fichier corrompu — supprimer et continuer
+        try:
+            os.remove(_PREFETCH_CACHE_PATH)
+        except Exception:
+            pass
+    return 0
+
+import atexit
+atexit.register(_save_prefetch_cache)
+
 
 def _trim_dict_cache(d, max_size):
     """Limite la taille d'un dict cache en supprimant les plus anciennes entrées."""
@@ -5544,6 +5603,9 @@ if __name__ == "__main__":
     style_path = os.path.join(os.path.dirname(__file__), "style_profile.txt")
     _needs_onboarding = not os.path.exists(style_path)
 
+    # Charger le cache prefetch depuis le disque (avant le warmup)
+    _loaded_prefetch = _load_prefetch_cache()
+
     # Pré-chauffer le cache inbox au démarrage (évite cold start)
     def _warmup():
         global _warmup_done, _warmup_progress
@@ -5682,6 +5744,8 @@ if __name__ == "__main__":
                     pass
             if preloaded:
                 print(f"[preload-ctx] Terminé: {preloaded} mails avec contexte A+B+C prêt", flush=True)
+                # Sauvegarder le cache après le préchargement (protection anti-crash)
+                _save_prefetch_cache()
 
         except Exception as e:
             print(f"[warmup] Erreur: {e}", flush=True)
