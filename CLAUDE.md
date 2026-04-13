@@ -210,6 +210,33 @@ La connexion Microsoft est OBLIGATOIRE pour une utilisation normale.
 - `boostermail.db` : donnees copiees (103 contacts, writing_level=N8, writing_score=78)
 - Index Windows Search reconstruit (145000 elements)
 
+### Optimisations warmup et cache (13/04/2026)
+
+**Cache DB permanent des dossiers Outlook** :
+- Table `folder_cache` dans database.py — sauvegarde les 396 dossiers en DB
+- Premier demarrage : scan COM (50s) puis sauvegarde en DB
+- Demarrages suivants : charge depuis DB (< 0.5s)
+- Rescan automatique toutes les 60 minutes en arriere-plan
+- Impact : warmup dossiers passe de 50s a < 0.5s
+
+**Cache mails synchronise avec l'inbox** :
+- Le cache DB (`email_cache`) reflète exactement la boite de reception
+- Purge automatique quand un mail est supprime (`api_delete_email`) ou classe (`api_classify_email`)
+- Methode `purge_email_cache_for()` dans database.py
+- Pas de TTL, pas de limite de taille — le cache suit l'inbox
+
+**Prechargement en arriere-plan du contexte** :
+- Apres le warmup, le thread BG pre-charge le contexte A+B+C des mails non traites
+- Interruptible : s'arrete immediatement si l'utilisateur ouvre un mail (`_email_version`)
+- Cout API : zero (pas d'appel Claude, juste du COM)
+- Resultat : quand l'utilisateur ouvre un mail pre-charge, generation en 3s au lieu de 8s
+- Fonctionne aussi pendant les pauses (reunion, telephone) — le BG continue de pre-charger
+
+**Popup marketing warmup** (a implementer) :
+- S'affiche a chaque demarrage, bloque l'acces aux mails tant que le warmup n'est pas fini
+- Barre de progression + nombre de mails charges
+- Garantit que l'utilisateur ne commence jamais avec un warmup incomplet
+
 ### Plan V1 — 15 etapes
 → detail complet dans `docs/COMPARATIF_PROTO_V1.md`
 

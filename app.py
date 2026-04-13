@@ -1741,10 +1741,12 @@ def api_delete_email(entry_id):
     try:
         com_run(outlook.delete_email, entry_id, priority=0)
         db.mark_treated(entry_id, action='deleted')
+        db.purge_email_cache_for(entry_id)
         # Retirer le mail du cache inbox (sans invalider tout le cache)
         with _inbox_lock:
             if _inbox_cache['emails']:
                 _inbox_cache['emails'] = [e for e in _inbox_cache['emails'] if e.get('id') != entry_id]
+        _email_cache.pop(entry_id, None)
         return jsonify({"ok": True})
     except Exception as e:
         print(f"[delete] Erreur: {e}", flush=True)
@@ -3840,6 +3842,8 @@ def api_classify_email():
     # 3. Marquer traité si pas déjà fait (sauf nouveau mail)
     if not is_new_mail and entry_id:
         db.mark_treated(entry_id, action='classified')
+        db.purge_email_cache_for(entry_id)
+        _email_cache.pop(entry_id, None)
 
     # 4. Retirer le mail classé du cache inbox + invalider pour refresh BG
     with _inbox_lock:
@@ -5537,12 +5541,30 @@ if __name__ == "__main__":
             print(f"[warmup] Inbox pré-chargé: {len(emails)} emails en {time.time()-t0:.1f}s", flush=True)
 
             # Pré-charger l'arborescence des dossiers Outlook (pour le classement)
-            # BG car non requis pour l'UX immédiate (classement = post-envoi, 30s+ après démarrage)
-            # _get_folders_cached() a un polling 45s pour attendre ce warmup si nécessaire
+            # Essai cache DB d'abord (instantané), puis COM si vide, rescan BG toutes les 60min
             t2 = time.time()
-            folders = com_run(outlook.get_all_folders, use_cache=False, priority=10)
-            if folders:
-                print(f"[warmup] {len(folders)} dossiers Outlook pré-chargés en {time.time()-t2:.1f}s", flush=True)
+            cached_folders = db.get_cached_folders()
+            if cached_folders:
+                OutlookClient._folders_cache = cached_folders
+                print(f"[warmup] {len(cached_folders)} dossiers Outlook depuis cache DB en {time.time()-t2:.1f}s", flush=True)
+                # Rescan COM en arrière-plan pour détecter les changements
+                def _rescan_folders_bg():
+                    while True:
+                        time.sleep(3600)  # 60 minutes
+                        try:
+                            fresh = com_run(outlook.get_all_folders, use_cache=False, priority=10)
+                            if fresh:
+                                db.save_folders_cache(fresh)
+                                print(f"[warmup] Rescan dossiers: {len(fresh)} (arrière-plan)", flush=True)
+                        except Exception as e:
+                            print(f"[warmup] Erreur rescan dossiers: {e}", flush=True)
+                threading.Thread(target=_rescan_folders_bg, daemon=True).start()
+            else:
+                # Premier démarrage : scan COM complet puis sauvegarde en DB
+                folders = com_run(outlook.get_all_folders, use_cache=False, priority=10)
+                if folders:
+                    db.save_folders_cache(folders)
+                    print(f"[warmup] {len(folders)} dossiers Outlook scannés et sauvegardés en {time.time()-t2:.1f}s", flush=True)
 
             # Pré-charger l'arborescence des dossiers Windows (pour le classement PJ)
             t3 = time.time()
@@ -5598,6 +5620,37 @@ if __name__ == "__main__":
                     pass
             if loaded_com or loaded_db:
                 print(f"[warmup] {loaded_com + loaded_db} emails pré-chargés ({loaded_db} DB + {loaded_com} COM) en {time.time()-t1:.1f}s", flush=True)
+
+            # Préchargement en arrière-plan du contexte A+B+C pour les mails non traités
+            # Se lance après le warmup, tourne tant que l'utilisateur n'agit pas
+            v_preload = _email_version
+            preloaded = 0
+            for em in emails:
+                if _email_version != v_preload:
+                    print(f"[preload-ctx] Interrompu après {preloaded} mails (utilisateur actif)", flush=True)
+                    break
+                eid = em.get('id', '')
+                if not eid or db.is_treated(eid):
+                    continue
+                # Vérifier si le prefetch A+B est déjà en cache
+                ab_key = f"ab_{eid}"
+                with _prefetch_lock:
+                    if ab_key in _prefetch_cache:
+                        continue
+                # Lancer le prefetch A+B+C pour ce mail
+                email_data = _email_cache.get(eid)
+                if not email_data:
+                    continue
+                try:
+                    _start_prefetch_ab(eid, email_data, version=v_preload)
+                    preloaded += 1
+                    if preloaded % 5 == 0:
+                        print(f"[preload-ctx] {preloaded} mails pré-chargés (contexte A+B+C)...", flush=True)
+                except Exception:
+                    pass
+            if preloaded:
+                print(f"[preload-ctx] Terminé: {preloaded} mails avec contexte A+B+C prêt", flush=True)
+
         except Exception as e:
             print(f"[warmup] Erreur: {e}", flush=True)
     threading.Thread(target=_warmup, daemon=True).start()

@@ -235,6 +235,17 @@ class Database:
             )
         """)
 
+        # Cache dossiers Outlook — évite le scan COM (50s) à chaque démarrage
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS folder_cache (
+                folder_id TEXT PRIMARY KEY,
+                folder_path TEXT NOT NULL,
+                folder_name TEXT,
+                folder_depth INTEGER DEFAULT 0,
+                cached_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+
         # Migration: ajouter nb_relances et relances_dates si manquant
         try:
             c.execute("ALTER TABLE echeances ADD COLUMN nb_relances INTEGER DEFAULT 0")
@@ -977,6 +988,35 @@ class Database:
             INSERT OR REPLACE INTO email_cache (entry_id, email_json, cached_at)
             VALUES (?, ?, datetime('now', 'localtime'))
         """, (entry_id, json.dumps(email_data, ensure_ascii=False, default=str)))
+        conn.commit()
+
+    # --- CACHE DOSSIERS OUTLOOK ------------------------------------------------
+
+    def get_cached_folders(self):
+        """Retourne les dossiers Outlook depuis le cache DB. Retourne liste ou None si vide."""
+        c = self._conn().cursor()
+        c.execute("SELECT folder_id, folder_path, folder_name, folder_depth FROM folder_cache ORDER BY folder_path")
+        rows = c.fetchall()
+        if not rows:
+            return None
+        return [{'id': r[0], 'path': r[1], 'name': r[2], 'depth': r[3]} for r in rows]
+
+    def save_folders_cache(self, folders):
+        """Sauvegarde les dossiers Outlook dans le cache DB (remplace tout)."""
+        conn = self._conn()
+        conn.execute("DELETE FROM folder_cache")
+        for f in folders:
+            conn.execute("""
+                INSERT INTO folder_cache (folder_id, folder_path, folder_name, folder_depth, cached_at)
+                VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
+            """, (f.get('id', ''), f.get('path', ''), f.get('name', ''), f.get('depth', 0)))
+        conn.commit()
+        print(f"[db] Cache dossiers: {len(folders)} dossiers sauvegardes", flush=True)
+
+    def purge_email_cache_for(self, entry_id):
+        """Supprime un email du cache (quand il est classe ou supprime)."""
+        conn = self._conn()
+        conn.execute("DELETE FROM email_cache WHERE entry_id = ?", (entry_id,))
         conn.commit()
 
     def purge_learning_data(self):
