@@ -1461,20 +1461,20 @@ IMPORTANT : retourne UNIQUEMENT le JSON array, pas de texte avant/apres.
                 if cat in ('famille', 'ami'):
                     profile_block += f"\n⚠️ Ce contact est de la catégorie '{cat}' — ne PAS le classer dans des dossiers professionnels sauf si un historique le justifie."
 
-        prompt = f"""Suggère le dossier Outlook le plus adapté pour classer ce mail.
+        prompt = f"""Suggère les 1 a 3 dossiers Outlook les plus adaptes pour classer ce mail, par ordre de pertinence.
 
-RÈGLES DE CLASSEMENT (par priorité décroissante) :
-1. PRIORITÉ ABSOLUE : analyse l'OBJET et le CONTENU du mail pour identifier le SUJET RÉEL (quel bien, quel dossier, quelle affaire). Le sujet du mail prime TOUJOURS sur l'historique du contact.
-2. Si l'historique montre que ce contact + ces mots-clés du sujet → un dossier spécifique, utilise-le
-3. Si le contact a été classé dans un seul dossier ET que le sujet du mail est cohérent avec ce dossier → réutilise-le
-4. ⚠️ ATTENTION : un même contact peut traiter PLUSIEURS dossiers différents (ex: un expert-comptable gère plusieurs SCI, un avocat suit plusieurs affaires). Ne JAMAIS proposer un dossier uniquement parce que le contact y a été classé récemment — vérifie TOUJOURS que le sujet du mail correspond.
-5. Si le contact a plusieurs dossiers, cherche celui dont les mots-clés correspondent le mieux à l'OBJET + CONTENU du mail actuel
-6. Si le contact est inconnu ET a un profil (catégorie, organisation) → cherche un dossier qui correspond au profil
-7. IMPORTANT : ne te fie PAS à un mot isolé du corps du mail pour choisir un dossier. Analyse l'OBJET GLOBAL de la conversation (sujet, correspondants, contexte). Un mail qui mentionne un "bac à fleurs" dans un contexte immobilier ne va PAS dans un dossier "fleurs" — il va dans le dossier du bien immobilier concerné.
-8. IMPORTANT : si le CONTENU du mail parle d'un sujet différent de l'OBJET (ex: objet="Bail Asturia" mais contenu="assureur Greenpark"), c'est le CONTENU qui détermine le classement, PAS l'objet. Les gens répondent souvent sur un vieux fil pour parler d'un autre sujet.
-9. Si aucun historique ET aucun dossier ne correspond clairement au sujet du mail → retourne folder_path: null (mieux vaut ne rien proposer qu'un mauvais classement)
+REGLES DE CLASSEMENT (par priorite decroissante) :
+1. PRIORITE ABSOLUE : analyse l'OBJET et le CONTENU du mail pour identifier le SUJET REEL (quel bien, quel dossier, quelle affaire). Le sujet du mail prime TOUJOURS sur l'historique du contact.
+2. Si l'historique montre que ce contact + ces mots-cles du sujet → un dossier specifique, utilise-le
+3. Si le contact a ete classe dans un seul dossier ET que le sujet du mail est coherent avec ce dossier → reutilise-le
+4. ATTENTION : un meme contact peut traiter PLUSIEURS dossiers differents (ex: un expert-comptable gere plusieurs SCI, un avocat suit plusieurs affaires). Ne JAMAIS proposer un dossier uniquement parce que le contact y a ete classe recemment — verifie TOUJOURS que le sujet du mail correspond.
+5. Si le contact a plusieurs dossiers, cherche celui dont les mots-cles correspondent le mieux a l'OBJET + CONTENU du mail actuel
+6. Si le contact est inconnu ET a un profil (categorie, organisation) → cherche un dossier qui correspond au profil
+7. IMPORTANT : ne te fie PAS a un mot isole du corps du mail pour choisir un dossier. Analyse l'OBJET GLOBAL de la conversation (sujet, correspondants, contexte).
+8. IMPORTANT : si le CONTENU du mail parle d'un sujet different de l'OBJET, c'est le CONTENU qui determine le classement, PAS l'objet.
+9. Si tu n'as pas 3 suggestions pertinentes, retourne seulement celles qui sont VRAIMENT adaptees. Mieux vaut 1 bonne suggestion que 3 mauvaises. Si aucun dossier ne correspond → retourne un tableau vide.
 
-Expéditeur: {sender}
+Expediteur: {sender}
 Objet: {subject}
 Extrait: {(body_snippet or '')[:1000]}{profile_block}
 {history_block}{examples_block}
@@ -1483,11 +1483,11 @@ Choisis parmi les DOSSIERS OUTLOOK DISPONIBLES fournis dans le system prompt."""
 
         try:
             # System prompt avec cache_control pour la liste de dossiers (cachée 5 min)
-            _system_folders = f"DOSSIERS OUTLOOK DISPONIBLES :\n{folder_list}\n\nRetourne un JSON: {{\"folder_path\": \"le/chemin/exact/du/dossier\", \"confidence\": 0.0-1.0, \"reason\": \"explication courte\"}}\nSi aucun dossier n'est pertinent, retourne {{\"folder_path\": null, \"confidence\": 0, \"reason\": \"aucun dossier adapté\"}}\nUNIQUEMENT le JSON, rien d'autre."
+            _system_folders = f"DOSSIERS OUTLOOK DISPONIBLES :\n{folder_list}\n\nRetourne un JSON : un TABLEAU de 1 a 3 suggestions, par ordre de pertinence.\nFormat: [{{\"folder_path\": \"chemin/exact\", \"confidence\": 0.0-1.0, \"reason\": \"explication courte\"}}]\nSi aucun dossier n'est pertinent, retourne []\nUNIQUEMENT le JSON, rien d'autre."
             response = self._create_with_retry(
                 _label='classify',
                 model=MODEL_CLASSIFY,
-                max_tokens=200,
+                max_tokens=400,
                 temperature=0.1,
                 system=[{"type": "text", "text": _system_folders, "cache_control": {"type": "ephemeral"}}],
                 messages=[{"role": "user", "content": prompt}]
@@ -1500,72 +1500,81 @@ Choisis parmi les DOSSIERS OUTLOOK DISPONIBLES fournis dans le system prompt."""
                     text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
                     text = re.sub(r'\s*```\s*$', '', text, flags=re.MULTILINE)
                     text = text.strip()
-                    if text.startswith('{'):
-                        result = json.loads(text)
+                    # Parser le JSON (tableau ou dict unique pour rétrocompatibilité)
+                    parsed = None
+                    if text.startswith('['):
+                        parsed = json.loads(text)
+                    elif text.startswith('{'):
+                        parsed = [json.loads(text)]  # Encapsuler en liste
                     else:
-                        start = text.find('{')
-                        end = text.rfind('}') + 1
+                        start = text.find('[')
+                        end = text.rfind(']') + 1
                         if start >= 0 and end > start:
-                            result = json.loads(text[start:end])
+                            parsed = json.loads(text[start:end])
                         else:
-                            return None
-                    fp = result.get('folder_path')
-                    if not fp:
+                            start = text.find('{')
+                            end = text.rfind('}') + 1
+                            if start >= 0 and end > start:
+                                parsed = [json.loads(text[start:end])]
+                    if not parsed:
                         return None
-                    # Résoudre l'ID du dossier depuis le path
-                    folder_id = None
-                    # 1. Match exact
-                    for f in folder_tree:
-                        if f['path'] == fp:
-                            folder_id = f['id']
-                            break
-                    # 2. Match case-insensitive
-                    if not folder_id:
-                        fp_lower = fp.lower()
-                        for f in folder_tree:
-                            if f['path'].lower() == fp_lower:
-                                folder_id = f['id']
-                                fp = f['path']
-                                break
-                    # 3. Match partiel (fin du path)
-                    if not folder_id:
-                        for f in folder_tree:
-                            if f['path'].endswith(fp) or fp.endswith(f['path']):
-                                folder_id = f['id']
-                                fp = f['path']
-                                break
-                    # 4. L'IA a peut-être inventé un sous-dossier : chercher le plus long
-                    #    chemin existant qui est un préfixe du chemin suggéré
-                    if not folder_id:
-                        best_f = None
-                        best_len = 0
-                        fp_lower = fp.lower()
-                        for f in folder_tree:
-                            fl = f['path'].lower()
-                            if fp_lower.startswith(fl + '/') and len(fl) > best_len:
-                                best_f = f
-                                best_len = len(fl)
-                        if best_f:
-                            folder_id = best_f['id']
-                            fp = best_f['path']
-                            print(f"[classify] suggest_folder: match préfixe → '{fp}'", flush=True)
-                    # 5. Match par mots-clés du dernier segment
-                    if not folder_id:
-                        last_seg = fp.split('/')[-1].lower()
-                        for f in folder_tree:
-                            if f['name'].lower() == last_seg:
-                                folder_id = f['id']
-                                fp = f['path']
-                                break
-                    if not folder_id:
-                        print(f"[classify] suggest_folder: aucun dossier Outlook ne correspond à '{fp}'", flush=True)
+                    # Filtrer les suggestions vides
+                    suggestions = [r for r in parsed if isinstance(r, dict) and r.get('folder_path')]
+                    if not suggestions:
                         return None
-                    result['folder_id'] = folder_id
-                    result['folder_path'] = fp
-                    return result
+                    # Résoudre les folder_id pour chaque suggestion
+                    resolved = []
+                    for result in suggestions[:3]:
+                        fp = result.get('folder_path')
+                        folder_id = self._resolve_folder_id(fp, folder_tree)
+                        if folder_id:
+                            result['folder_id'] = folder_id[1]
+                            result['folder_path'] = folder_id[0]
+                            resolved.append(result)
+                    if not resolved:
+                        return None
+                    # Retourner la première suggestion (rétrocompatible) + la liste complète
+                    first = resolved[0]
+                    first['_suggestions'] = resolved
+                    return first
         except Exception as e:
             print(f"[classify] Erreur suggest_folder: {e}", flush=True)
             return None
+
+    def _resolve_folder_id(self, fp, folder_tree):
+        """Résout un folder_path en (path_exact, folder_id). Retourne None si introuvable."""
+        if not fp:
+            return None
+        # 1. Match exact
+        for f in folder_tree:
+            if f['path'] == fp:
+                return (f['path'], f['id'])
+        # 2. Match case-insensitive
+        fp_lower = fp.lower()
+        for f in folder_tree:
+            if f['path'].lower() == fp_lower:
+                return (f['path'], f['id'])
+        # 3. Match partiel (fin du path)
+        for f in folder_tree:
+            if f['path'].endswith(fp) or fp.endswith(f['path']):
+                return (f['path'], f['id'])
+        # 4. Préfixe le plus long (IA a inventé un sous-dossier)
+        best_f = None
+        best_len = 0
+        for f in folder_tree:
+            fl = f['path'].lower()
+            if fp_lower.startswith(fl + '/') and len(fl) > best_len:
+                best_f = f
+                best_len = len(fl)
+        if best_f:
+            return (best_f['path'], best_f['id'])
+        # 5. Match dernier segment
+        last_seg = fp.split('/')[-1].lower()
+        for f in folder_tree:
+            if f['name'].lower() == last_seg:
+                return (f['path'], f['id'])
+        print(f"[classify] _resolve_folder_id: aucun match pour '{fp}'", flush=True)
+        return None
 
     def suggest_pj_folder(self, sender, subject, attachment_names, folder_tree, recent_pj_classifications=None, contact_profile=None, pj_history=None, body_snippet=None):
         """Suggère le dossier Windows pour classer les PJ + noms renommés.

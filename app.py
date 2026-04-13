@@ -2945,7 +2945,7 @@ def send_reply():
                                              'folder_id': _mom['folder_id'], 'confidence': 0.5,
                                              'reason': 'Dossier recent'})
 
-            # 6. Tier 3 : IA (seulement si < 3 suggestions)
+            # 6. Tier 3 : IA top 3 (seulement si < 3 suggestions)
             if len(_suggestions) < 3:
                 folders = _get_folders_cached()
                 if folders:
@@ -2957,8 +2957,15 @@ def send_reply():
                                                       contact_profile=_contact_profile,
                                                       contact_history=_contact_history)
                     if ai_suggestion and ai_suggestion.get('folder_path'):
-                        if ai_suggestion['folder_path'] not in [s['folder_path'] for s in _suggestions]:
-                            _suggestions.append({'source': 'ai', **ai_suggestion})
+                        # L'IA retourne maintenant jusqu'à 3 suggestions via _suggestions
+                        _ai_list = ai_suggestion.pop('_suggestions', [ai_suggestion])
+                        _existing_paths = {s['folder_path'] for s in _suggestions}
+                        for _ai_s in _ai_list:
+                            if len(_suggestions) >= 3:
+                                break
+                            if _ai_s.get('folder_path') and _ai_s['folder_path'] not in _existing_paths:
+                                _suggestions.append({'source': 'ai', **_ai_s})
+                                _existing_paths.add(_ai_s['folder_path'])
 
             _trim_dict_cache(_classification_post_send_cache, _MAX_POST_SEND_CACHE)
             # Stocker les suggestions (retro-compatible : 'suggestion' = premier, 'suggestions' = top 3)
