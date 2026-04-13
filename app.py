@@ -2682,7 +2682,13 @@ def send_reply():
             db.mark_treated(_mid, action='replied')
         # Aussi marquer comme lu dans Outlook
         com_run(outlook.mark_as_read, _full_id, priority=10)  # BG : non bloquant UX, très rapide (0.1s)
-        print(f"[send] Mail traité: {len(_ids_to_mark)} ID(s) marqué(s)", flush=True)
+        # Nettoyer tous les caches (même chaîne que classify/delete)
+        for _mid in _ids_to_mark:
+            db.purge_email_cache_for(_mid)
+            _email_cache.pop(_mid, None)
+        _purge_prefetch_for(email_id)
+        _inbox_cache['time'] = 0  # Forcer refresh inbox
+        print(f"[send] Mail traité: {len(_ids_to_mark)} ID(s) marqué(s), caches purgés", flush=True)
 
     # -- Post-envoi en arrière-plan (ne bloque pas la réponse HTTP) --
     # Capturer l'email du cache AVANT le thread (evite un COM call redondant)
