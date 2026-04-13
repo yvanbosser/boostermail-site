@@ -5649,6 +5649,7 @@ if __name__ == "__main__":
             # Se lance après le warmup, tourne tant que l'utilisateur n'agit pas
             v_preload = _email_version
             preloaded = 0
+            _preloaded_ids = set()  # Éviter les doublons (ID court et long du même mail)
             for em in emails:
                 if _email_version != v_preload:
                     print(f"[preload-ctx] Interrompu après {preloaded} mails (utilisateur actif)", flush=True)
@@ -5656,17 +5657,24 @@ if __name__ == "__main__":
                 eid = em.get('id', '')
                 if not eid or db.is_treated(eid):
                     continue
-                # Vérifier si le prefetch A+B est déjà en cache
-                ab_key = f"ab_{eid}"
-                with _prefetch_lock:
-                    if ab_key in _prefetch_cache:
-                        continue
-                # Lancer le prefetch A+B+C pour ce mail
+                # Récupérer le mail complet (avec l'ID long)
                 email_data = _email_cache.get(eid)
                 if not email_data:
                     continue
+                # Utiliser l'ID long (full_id) pour la clé de cache
+                full_id = email_data.get('id', eid)
+                if full_id in _preloaded_ids or eid in _preloaded_ids:
+                    continue
+                # Vérifier si le prefetch A+B est déjà en cache (ID court OU long)
+                with _prefetch_lock:
+                    if _cache_key_ab(full_id) in _prefetch_cache or _cache_key_ab(eid) in _prefetch_cache:
+                        _preloaded_ids.add(full_id)
+                        _preloaded_ids.add(eid)
+                        continue
                 try:
-                    _start_prefetch_ab(eid, email_data, version=v_preload)
+                    _start_prefetch_ab(full_id, email_data, alias_id=eid if eid != full_id else None, version=v_preload)
+                    _preloaded_ids.add(full_id)
+                    _preloaded_ids.add(eid)
                     preloaded += 1
                     if preloaded % 5 == 0:
                         print(f"[preload-ctx] {preloaded} mails pré-chargés (contexte A+B+C)...", flush=True)
