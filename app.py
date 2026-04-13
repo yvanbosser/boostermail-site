@@ -561,6 +561,23 @@ import atexit
 atexit.register(_save_prefetch_cache)
 
 
+def _purge_prefetch_for(email_id):
+    """Purge le contexte A+B+C d'un mail dans le prefetch cache (mémoire + JSON).
+    Appelé après classify/delete pour garder la chaîne de caches propre."""
+    # 1. Purge mémoire
+    with _prefetch_lock:
+        keys_to_remove = [k for k in _prefetch_cache if email_id in k]
+        for k in keys_to_remove:
+            _prefetch_cache.pop(k, None)
+    # 2. Purge JSON (sauvegarde avec les inbox_ids actuels)
+    _inbox_ids = set()
+    with _inbox_lock:
+        if _inbox_cache.get('emails'):
+            _inbox_ids = {e.get('id', '') for e in _inbox_cache['emails'] if e.get('id')}
+    if _inbox_ids:
+        _save_prefetch_cache(inbox_ids=_inbox_ids)
+
+
 def _trim_dict_cache(d, max_size):
     """Limite la taille d'un dict cache en supprimant les plus anciennes entrées."""
     if len(d) > max_size:
@@ -822,7 +839,7 @@ def inbox():
     if cached_emails:
         # Cache disponible → afficher immédiatement, refresh en BG si nécessaire
         emails = cached_emails
-        needs_refresh = force or cache_age > 60 or not _inbox_cache.get('_user_loaded')
+        needs_refresh = force or cache_age > 30 or not _inbox_cache.get('_user_loaded')
         if needs_refresh:
             label = 'force' if force else f'périmé {cache_age:.0f}s'
             print(f"[inbox] {len(emails)} emails (cache {label}, refresh bg)", flush=True)
@@ -1826,11 +1843,12 @@ def api_delete_email(entry_id):
         com_run(outlook.delete_email, entry_id, priority=0)
         db.mark_treated(entry_id, action='deleted')
         db.purge_email_cache_for(entry_id)
-        # Retirer le mail du cache inbox (sans invalider tout le cache)
+        # Retirer le mail de TOUS les caches
         with _inbox_lock:
             if _inbox_cache['emails']:
                 _inbox_cache['emails'] = [e for e in _inbox_cache['emails'] if e.get('id') != entry_id]
         _email_cache.pop(entry_id, None)
+        _purge_prefetch_for(entry_id)
         return jsonify({"ok": True})
     except Exception as e:
         print(f"[delete] Erreur: {e}", flush=True)
@@ -3939,6 +3957,7 @@ def api_classify_email():
         db.mark_treated(entry_id, action='classified')
         db.purge_email_cache_for(entry_id)
         _email_cache.pop(entry_id, None)
+        _purge_prefetch_for(entry_id)
 
     # 4. Retirer le mail classé du cache inbox + invalider pour refresh BG
     with _inbox_lock:
