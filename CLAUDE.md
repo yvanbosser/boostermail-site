@@ -185,9 +185,18 @@ La connexion Microsoft est OBLIGATOIRE pour une utilisation normale.
 
 ---
 
-## Session du 12-13/04/2026 — PROTO VF.1
+## Session du 12-13/04/2026 — PROTO VF.1 a VF.8
 
-### Migration hors OneDrive
+### Decision strategique : nouvelle approche V1 (13/04)
+- **Outlook = declencheur + expediteur. Le proto = moteur.**
+- Le bouton Outlook ouvre le dialog qui appelle le proto (localhost:5050)
+- Plus besoin de porter les 109 processus dans un backend V1 separe
+- Effort estime : ~10h au lieu de ~40h
+- Qualite reponses : identique au proto (pas de portage = pas de degradation)
+
+### Migration hors OneDrive (VF.1)
+
+### Migration hors OneDrive (VF.1)
 - Projet deplace de `OneDrive\Desktop\EasyMail\` vers **`C:\EasyMail\`** (hors OneDrive)
 - Raison : OneDrive corrompait les fichiers SQLite (.db, .db-wal, .db-shm) et supprimait les backups
 - Backups dans `C:\EasyMail_backups\` (6 jalons nommes + releases)
@@ -247,8 +256,20 @@ La connexion Microsoft est OBLIGATOIRE pour une utilisation normale.
 - Disparait automatiquement (flash si cache rempli, progression si premier demarrage)
 - Garantit que l'utilisateur ne commence jamais avec un warmup incomplet
 
-### Plan V1 — 15 etapes
-→ detail complet dans `docs/COMPARATIF_PROTO_V1.md`
+### Plan V1 — ABANDONNE au profit de la nouvelle approche
+Le plan de 15 etapes (40h, 30+ risques) est remplace par la nouvelle approche :
+dialog V1 connecte au proto (~10h). Detail dans `docs/COMPARATIF_PROTO_V1.md`.
+
+### Audit complet (13/04)
+- 2 passes d'audit, 3 bugs critiques/high corriges, 0 restant
+- 8 bugs low documentes (risque acceptable)
+- Rapport complet : `docs/RAPPORT_AUDIT_SESSION_20260413.md`
+
+### Classification mail — pipeline 8 tiers (VF.7 + VF.8)
+- IA top 3 suggestions au lieu de 1 (VF.7)
+- Tiers 4 (folder name matching) et 5 (regle domaine) ajoutes (VF.8)
+- Bug momentum corrige (global manquant)
+- Violations de spec restantes documentees (~12h de travail)
 
 ## Historique des decisions
 

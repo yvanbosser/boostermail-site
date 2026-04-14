@@ -20,9 +20,10 @@ Ces fichiers donnent 80% du contexte en 20% des tokens.
 | 2 | `STRUCTURE_PROJET.md` | 235 | Carte complète du projet — où trouver quoi |
 | 3 | `V1_outlook/TODO_SESSION_SUIVANTE.md` | — | Ce qui reste à faire, bugs ouverts, état des flux, priorités ordonnées |
 | 4 | `V1_outlook/PLAN_FINALISATION_OUTLOOK.md` | 209 | Avancement par plateforme, tableau de bord, ordre d'exécution |
-| 5 | `docs/BILAN_SESSION_20260410.md` | — | Bilan de la dernière session (décisions, problèmes, état) |
+| 5 | `docs/RAPPORT_AUDIT_SESSION_20260413.md` | — | Bilan session 12-13/04 (VF.1-VF.8, audit complet, bugs corriges) |
+| 6 | `docs/COMPARATIF_PROTO_V1.md` | — | Plan de branchement V1 en 15 etapes + ecarts proto vs V1 |
 
-**Total : ~800 lignes — suffisant pour 90% des sessions.**
+**Total : ~1000 lignes — suffisant pour 90% des sessions.**
 
 ---
 
@@ -84,7 +85,7 @@ Ces fichiers donnent 80% du contexte en 20% des tokens.
 
 ## Points essentiels à ne JAMAIS oublier
 
-1. **Le proto est INTOUCHABLE** — `app.py`, `claude_ai.py`, `outlook_com.py`, `templates/` = lecture seule
+1. **Le proto est le MOTEUR** — `app.py`, `claude_ai.py`, `outlook_com.py` peuvent etre modifies (VF.1-VF.8 faits le 12-13/04). Les modifications doivent etre auditees.
 2. **3 plateformes** — New Outlook (priorité 1), Classic Outlook (priorité 2), Outlook Web (priorité 3)
 3. **Socle commun** — `dialog.html/js/css` et `popup.html/js` sont partagés par les 3 plateformes
 4. **Le proto est la RÉFÉRENCE** — on copie fidèlement le moteur, on n'interprète pas
@@ -147,15 +148,24 @@ Pas de bouton Annuler. Réapparaît tant que l'activation n'est pas faite.
 
 Chaque étape enrichit la précédente sans rien casser.
 
-### 5. Trois chantiers indépendants
+### 5. Nouvelle approche V1 (decision 13/04/2026)
 
-| Chantier | Dépendance | Priorité |
+**Idee cle** : Outlook = declencheur + expediteur. Le proto = moteur.
+Le bouton dans Outlook ouvre le dialog, mais le dialog appelle le proto (localhost:5050) au lieu d'un backend V1 separe. Tout le moteur IA (109 processus, caches, speculation) est deja pret.
+
+| Chantier | Etat | Priorite |
 |---|---|---|
-| **Moteur IA** (génération, envoi, post-envoi) | Aucune — tout est prêt | **#1 — à faire maintenant** |
-| **Lancement instantané** (popup au démarrage) | Config Windows (non résolu) | #2 — à résoudre séparément |
-| **Overlay auto + détection auto** | Admin deploy ou certification AppSource | #3 — en attente |
+| **Connecter dialog V1 au proto** | A faire (~10h) | **#1** |
+| **Lancement instantane** (popup au demarrage) | Non resolu | #2 |
+| **Overlay auto + detection auto** | Attente admin deploy | #3 |
 
-**NE PAS mélanger ces 3 chantiers.** C'est la leçon du 10/04.
+### 6. Projet deplace hors OneDrive (decision 12/04/2026)
+
+- Projet : `C:\EasyMail\` (HORS OneDrive)
+- Backups : `C:\EasyMail_backups\` (6 jalons nommes + releases)
+- Raccourci bureau : "Proto" → `C:\EasyMail\start.bat`
+- Tache backup horaire : DESACTIVEE
+- OneDrive ne touche plus aux fichiers du projet
 
 ---
 
