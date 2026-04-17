@@ -2128,20 +2128,24 @@ def _prepare_generate_context(email_id, project, is_first_mail, importance=2, to
     return email, conversation, sender_history, keyword_context
 
 
-_last_generate_time = 0
+_last_generate_times = {}  # dict par email_id — permet 2 dialogs simultanés sur des mails différents
 _last_generate_lock = threading.Lock()
 
 @app.route("/generate_reply", methods=["POST"])
 def generate_reply():
-    global _last_generate_time
-    now = time.time()
-    with _last_generate_lock:
-        if now - _last_generate_time < 2:
-            return jsonify({"error": "Trop de requêtes, attendez 2 secondes"}), 429
-        _last_generate_time = now
-
     data = request.get_json(force=True) or {}
     email_id = data.get("email_id")
+    _rl_key = email_id if email_id else "new_mail"
+    now = time.time()
+    with _last_generate_lock:
+        if now - _last_generate_times.get(_rl_key, 0) < 2:
+            return jsonify({"error": "Trop de requêtes, attendez 2 secondes"}), 429
+        _last_generate_times[_rl_key] = now
+        # Nettoyage anti memory leak : supprimer les entrées >60s
+        if len(_last_generate_times) > 50:
+            cutoff = now - 60
+            for k in [k for k, v in _last_generate_times.items() if v < cutoff]:
+                del _last_generate_times[k]
     project = data.get("project")
     is_first_mail = data.get("is_first_mail", False)
     brief = data.get("brief", "")
