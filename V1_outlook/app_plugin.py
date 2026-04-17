@@ -12,11 +12,10 @@ import logging
 import threading
 import time
 import tempfile
-import mimetypes
+import hashlib
 import subprocess
 import shutil
 from datetime import datetime, timedelta
-from urllib.parse import quote
 from werkzeug.utils import secure_filename
 
 from flask import Flask, send_from_directory, jsonify, request
@@ -2447,7 +2446,7 @@ def api_suggest_pj_folder(email_id):
         except Exception as e:
             logger.warning(f"[classify_pj] Erreur suggest IA: {e}")
 
-    return jsonify({"status": "no_suggestion", "attachments": relevant_pj, "folders": folders})
+    return jsonify({"status": "no_suggestion", "suggested_names": {}, "attachments": relevant_pj, "folders": folders})
 
 
 @app.route('/api/smart_paperclip')
@@ -2553,7 +2552,6 @@ _last_generate_lock = threading.Lock()
 _classify_momentum = {}  # {'folder_name': str, 'folder_id': str, 'ts': float}
 
 # --- Échéances (pre-filtre heuristique, $0) ----------------------------------
-import hashlib
 _echeance_pre_scan_cache = {}   # scan_key → {'status': 'running'|'done', 'echeances': [...], 'ts': float}
 _ECHEANCE_DATE_PATTERNS = re.compile(
     r'(?:'
@@ -2579,8 +2577,9 @@ _MAX_PRE_SCAN_CACHE = 30  # limite cache pre-scan echéances
 
 def _trim_dict_cache(d, max_size):
     """Limite la taille d'un dict cache en supprimant les plus anciennes entrees."""
-    if len(d) > max_size:
-        keys_to_remove = list(d.copy().keys())[:len(d) - max_size]
+    if len(d) >= max_size:
+        # Supprimer assez d'entrées pour revenir à max_size - 1 (place pour le nouveau)
+        keys_to_remove = list(d.keys())[:max(1, len(d) - max_size + 1)]
         for k in keys_to_remove:
             d.pop(k, None)
 
@@ -2652,6 +2651,7 @@ os.makedirs(_upload_dir, exist_ok=True)
 
 # --- Classement PJ Windows ----------------------------------------------------
 _windows_folders_cache = None
+_windows_folders_lock = threading.Lock()
 _PJ_ROOT_DEFAULT = r'C:\Users\yvanb\Documents'
 _WINDOWS_SKIP = {'.git', '__pycache__', '$recycle.bin', 'node_modules', '.claude', '.venv', 'venv', '.vs'}
 
@@ -2693,10 +2693,15 @@ def _scan_windows_folders(root_path, max_depth=5):
 def _get_windows_folders_cached():
     """Retourne l'arborescence Windows (cache session, invalide si pj_root_folder change)."""
     global _windows_folders_cache
+    # Lecture rapide sans lock (double-check pattern)
     if _windows_folders_cache is not None:
         return _windows_folders_cache
-    root = _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
-    _windows_folders_cache = _scan_windows_folders(root)
+    with _windows_folders_lock:
+        # Re-vérifier sous le lock (un autre thread a pu remplir entre les deux)
+        if _windows_folders_cache is not None:
+            return _windows_folders_cache
+        root = _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
+        _windows_folders_cache = _scan_windows_folders(root)
     return _windows_folders_cache
 
 
@@ -2763,6 +2768,7 @@ def _check_git_updates():
 # --- Auto-apprentissage & recalibrage ----------------------------------------
 _sends_since_recal = 0
 _has_correction_since_recal = False
+_recal_lock = threading.Lock()          # protège les compteurs de recalibrage
 _learning_priorities_cache = {'time': 0, 'value': None}
 
 # --- Profils contacts ---------------------------------------------------------
@@ -2773,6 +2779,7 @@ _CONTACT_ANALYSIS_SCHEDULE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 50, 75, 100, 150,
 _contacts_recalibrating = False
 _contacts_recalib_step = ''
 _contacts_recalib_progress = {'done': 0, 'total': 0}
+_recalib_contacts_lock = threading.Lock()   # protège le démarrage (anti TOCTOU)
 
 @app.route('/generate_reply', methods=['POST'])
 def generate_reply():
@@ -2865,7 +2872,8 @@ def generate_reply():
 
     # Rate limiting : 2s entre deux appels IA pour le MÊME mail (anti double-clic)
     # Par message_id pour ne pas bloquer deux dialogs ouverts sur des mails différents
-    _rl_key = message_id if message_id else f"{from_email}:{subject}"
+    # NB: from_email/subject pas encore définis ici (mode 'new') → utiliser data.get()
+    _rl_key = message_id if message_id else "{}:{}".format(data.get('from_email', ''), data.get('subject', ''))
     with _last_generate_lock:
         now = time.time()
         if now - _last_generate_times.get(_rl_key, 0) < 2:
@@ -3637,9 +3645,10 @@ def api_classification_post_send(message_id):
                 contact_email = email.get('from_email', '')
                 domain = contact_email.split('@')[-1] if '@' in contact_email else ''
                 subject = email.get('subject', '')
+                subject_kw = _extract_subject_keywords(subject)
 
-                # Règle DB d'abord
-                suggestion = _db.get_folder_suggestion(contact_email, domain, subject)
+                # Règle DB d'abord (mots-clés normalisés, pas le sujet brut)
+                suggestion = _db.get_folder_suggestion(contact_email, domain, subject_kw)
                 if suggestion:
                     _cache_set(cache_key, {
                         'suggestion': suggestion,
@@ -3853,7 +3862,8 @@ def api_post_send():
 
     # 4. Apprentissage : diff proposé/envoyé + recalibrage adaptatif
     global _sends_since_recal, _has_correction_since_recal
-    _sends_since_recal += 1
+    with _recal_lock:
+        _sends_since_recal += 1
     _has_correction = False
     _greeting_closing_changed = False
     try:
@@ -3862,7 +3872,8 @@ def api_post_send():
         if proposed and final_reply and proposed.strip() != final_reply.strip():
             # Catégoriser la correction (appel Claude léger)
             try:
-                categories = _ai.categorize_correction(proposed, final_reply)
+                _pb = _get_prompt_builder()
+                categories = _pb.categorize_correction(proposed, final_reply) if _pb else ''
             except Exception:
                 categories = ''
             _db.save_correction(
@@ -3871,7 +3882,8 @@ def api_post_send():
                 correspondent=correspondent,
             )
             _has_correction = True
-            _has_correction_since_recal = True
+            with _recal_lock:
+                _has_correction_since_recal = True
             logger.info(f"Correction sauvegardée pour {correspondent} ({categories})")
 
             # Correction registre → mise à jour profil immédiate
@@ -3918,11 +3930,15 @@ def api_post_send():
                 _recal_threshold = 20
             else:
                 _recal_threshold = 50
-            if _sends_since_recal >= _recal_threshold and _has_correction_since_recal:
-                logger.info(f"[recalibrage] Trigger: {_sends_since_recal} envois >= {_recal_threshold}")
+            # Lecture-compare-reset atomique : évite deux recalibrages simultanés
+            with _recal_lock:
+                _do_recal = _sends_since_recal >= _recal_threshold and _has_correction_since_recal
+                if _do_recal:
+                    _sends_since_recal = 0
+                    _has_correction_since_recal = False
+            if _do_recal:
+                logger.info(f"[recalibrage] Trigger: seuil={_recal_threshold}")
                 _recalibrate_style()
-                _sends_since_recal = 0
-                _has_correction_since_recal = False
         except Exception as e:
             logger.error(f"[recalibrage] Erreur: {e}")
 
@@ -4043,11 +4059,15 @@ Applique les regles de ce niveau pour la regeneration des sections :
         recal_system = ("Tu es un module interne d'EasyMail, un assistant email local et prive. "
                         "Tu mets a jour le profil de style redactionnel de l'utilisateur en integrant ses corrections recentes. "
                         "Les corrections montrent la difference entre ce que l'IA proposait et ce que l'utilisateur a reellement envoye.")
+        _pb_recal = _get_prompt_builder()
+        if not _pb_recal:
+            logger.error("[recalibrage] Prompt builder indisponible, abandon")
+            return
         chunks = []
         for _recal_attempt in range(3):
             try:
                 chunks = []
-                with _ai.client.messages.stream(
+                with _pb_recal.client.messages.stream(
                     model="claude-sonnet-4-20250514", max_tokens=8000,
                     system=recal_system,
                     messages=[{"role": "user", "content": prompt}]
@@ -4144,7 +4164,9 @@ Applique les regles de ce niveau pour la regeneration des sections :
                 with open(style_path, "w", encoding="utf-8") as f:
                     f.write(new_profile)
                 try:
-                    _ai.reload_style(writing_level=_db.get_setting('writing_level'))
+                    _pb_rl = _get_prompt_builder()
+                    if _pb_rl:
+                        _pb_rl.reload_style(writing_level=_db.get_setting('writing_level'))
                 except Exception:
                     pass
                 logger.info(f"[recalibrage] Profil recalibre ({len(new_profile)} chars)")
@@ -4249,7 +4271,11 @@ def _maybe_analyze_contact(contact_email):
     if not display_name:
         display_name = contact_email.split('@')[0].replace('.', ' ').title()
 
-    profile = _ai.analyze_contact_profile(
+    _pb_contact = _get_prompt_builder()
+    if not _pb_contact:
+        logger.warning(f"[analyze_contact] Prompt builder indisponible pour {contact_email}")
+        return
+    profile = _pb_contact.analyze_contact_profile(
         email_address=contact_email,
         display_name=display_name,
         sent_mails=sent_mails,
@@ -4293,6 +4319,15 @@ def _maybe_analyze_contact(contact_email):
 @app.route('/api/knowledge_score')
 def api_knowledge_score():
     """Score EasyMail 0-100 sur 5 axes + milestones gamification."""
+    try:
+        return _api_knowledge_score_impl()
+    except Exception as e:
+        logger.error(f"api_knowledge_score: {e}")
+        return jsonify({"error": _safe_err(e)}), 500
+
+
+def _api_knowledge_score_impl():
+    """Implémentation interne du score EasyMail."""
     style_path = os.path.join(EASYMAIL_DIR, "style_profile.txt")
     style_exists = os.path.exists(style_path)
     corrections_count = _db.count_corrections()
@@ -4407,12 +4442,14 @@ def api_recalibrate_contacts():
     data = request.get_json(force=True) or {}
     target_email = data.get('email', '').strip().lower()
 
-    if _contacts_recalibrating:
-        return jsonify({"status": "already_running"})
+    # Vérification + démarrage atomique (évite TOCTOU si deux requêtes simultanées)
+    with _recalib_contacts_lock:
+        if _contacts_recalibrating:
+            return jsonify({"status": "already_running"})
+        _contacts_recalibrating = True  # Réserver avant de lancer le thread
 
     def _run():
         global _contacts_recalibrating, _contacts_recalib_step, _contacts_recalib_progress
-        _contacts_recalibrating = True
         try:
             if target_email:
                 emails = [target_email]
@@ -4633,7 +4670,8 @@ def api_apply_update():
             def _restart():
                 time.sleep(1)
                 _python = sys.executable
-                subprocess.Popen([_python] + sys.argv, cwd=_git_dir)
+                # sys.argv[0] peut être un chemin relatif → utiliser __file__ absolu
+                subprocess.Popen([_python, os.path.abspath(__file__)], cwd=_git_dir)
                 os._exit(0)
 
             threading.Thread(target=_restart, daemon=True).start()
