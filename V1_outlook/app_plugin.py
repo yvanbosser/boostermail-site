@@ -334,69 +334,162 @@ _warmup_done = False
 _warmup_progress = {"status": "idle", "loaded": 0, "total": 0, "current_subject": ""}
 _warmup_lock = threading.Lock()  # #8 : protege _warmup_done et _warmup_progress
 
+def _execute_warmup(graph):
+    """
+    Logique de warmup extraite : charge les mails, prefetch A/B/C,
+    puis lance la spéculation préemptive TIER 1 (contacts connus).
+    Appelable directement (auto-trigger) ou via la route HTTP.
+    """
+    global _warmup_done
+    try:
+        # Pré-charger _warmup_cache depuis la DB (session précédente) — affichage instantané
+        try:
+            cached_rows = _db.get_recent_email_cache(limit=10)
+            with _warmup_lock:
+                for entry_id, email_data in cached_rows:
+                    if entry_id not in _warmup_cache:
+                        _warmup_cache[entry_id] = email_data
+            if cached_rows:
+                logger.info(f"Warmup: {len(cached_rows)} mails rechargés depuis DB")
+        except Exception as e:
+            logger.debug(f"Warmup pré-chargement DB ignoré: {e}")
+
+        with _warmup_lock:
+            _warmup_progress["current_subject"] = "Recuperation des mails..."
+        mails = graph.get_received_emails(limit=10)
+        with _warmup_lock:
+            _warmup_progress["total"] = len(mails)
+        for i, msg in enumerate(mails):
+            mid = msg.get('id', '')
+            subject = msg.get('subject', '(sans objet)')
+            with _warmup_lock:
+                _warmup_progress["loaded"] = i + 1
+                _warmup_progress["current_subject"] = subject
+            if mid:
+                _warmup_cache[mid] = msg
+                try:
+                    _db.save_email_cache(mid, msg)
+                except Exception:
+                    pass
+        # Limiter le cache a 10 entrees (ANOMALIE #7 fix : lock requis)
+        with _warmup_lock:
+            while len(_warmup_cache) > 10:
+                _warmup_cache.pop(next(iter(_warmup_cache)))
+        logger.info(f"Warmup: {len(mails)} mails pre-charges + caches en DB")
+
+        # ANOMALIE #8 fix : lancer les prefetch AVANT de mettre _warmup_done = True
+        # (évite que l'utilisateur ouvre un mail pendant la fenêtre entre done=True et les threads lancés)
+        prefetch_threads = []
+        for msg in mails[:5]:
+            mail_data = {
+                'from_email': msg.get('from_email', ''),
+                'from_name': msg.get('from_name', ''),
+                'subject': msg.get('subject', ''),
+                'body': msg.get('body') or msg.get('body_preview', ''),
+                'message_id': msg.get('id', ''),
+                'conversation_id': msg.get('conversation_id', ''),
+            }
+            if mail_data['from_email']:
+                t = threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True)
+                t.start()
+                prefetch_threads.append(t)
+        logger.info(f"Warmup prefetch lancé ({len(prefetch_threads)} threads)")
+
+        # Marquer done APRÈS le lancement des threads
+        with _warmup_lock:
+            _warmup_done = True
+            _warmup_progress["status"] = "done"
+        logger.info("Warmup terminé — spéculation TIER 1 en cours")
+
+        # Lancer la spéculation préemptive TIER 1 (contacts connus dans les 20 premiers mails)
+        threading.Thread(target=_run_preemptive_bg, args=(mails,), daemon=True).start()
+    except Exception as e:
+        with _warmup_lock:
+            _warmup_progress["status"] = "error"
+        logger.error(f"Warmup erreur: {e}")
+        # Retry unique après 60s si échec mid-parcours (ex: token expiré pendant le warmup)
+        def _retry():
+            time.sleep(60)
+            with _warmup_lock:
+                # Les deux vérifications sous le même lock — pas de race condition
+                if _warmup_done:
+                    return  # Un warmup a réussi entre-temps
+                if _warmup_progress.get("status") == "running":
+                    return  # Déjà relancé par auto-trigger
+                # Réserver le slot "running" immédiatement sous lock
+                _warmup_progress["status"] = "running"
+            graph2 = get_graph()
+            if graph2:
+                logger.info("Warmup retry après échec (token récupéré)")
+                _execute_warmup(graph2)
+            else:
+                with _warmup_lock:
+                    _warmup_progress["status"] = "error"
+                logger.warning("Warmup retry: token toujours indisponible")
+        threading.Thread(target=_retry, daemon=True).start()
+
+
+def _auto_trigger_warmup():
+    """
+    Lance le warmup automatiquement 3s après le démarrage de Flask.
+    Non-bloquant (thread daemon). Ignoré si warmup déjà fait.
+    """
+    def _run():
+        time.sleep(3)  # Laisser Flask + auth s'initialiser
+        # ANOMALIE #1 fix : vérifier _warmup_done ET status sous le même lock (pas de race condition)
+        with _warmup_lock:
+            if _warmup_done:
+                logger.info("Auto-warmup: déjà fait, skip")
+                return
+            if _warmup_progress.get("status") == "running":
+                logger.info("Auto-warmup: déjà en cours, skip")
+                return
+            _warmup_progress.update({"status": "running", "loaded": 0, "total": 10,
+                                      "current_subject": "Demarrage auto..."})
+        # ANOMALIE #6 fix : retry si token pas encore disponible (1 tentative après 30s)
+        graph = get_graph()
+        if not graph:
+            logger.info("Auto-warmup: token non dispo, retry dans 30s")
+            with _warmup_lock:
+                _warmup_progress["status"] = "idle"
+            time.sleep(30)
+            with _warmup_lock:
+                if _warmup_done or _warmup_progress.get("status") == "running":
+                    return
+                _warmup_progress.update({"status": "running", "loaded": 0, "total": 10,
+                                          "current_subject": "Demarrage auto (retry)..."})
+            graph = get_graph()
+            if not graph:
+                logger.info("Auto-warmup: token non disponible (connexion Microsoft requise)")
+                with _warmup_lock:
+                    _warmup_progress["status"] = "idle"
+                return
+        logger.info("Auto-warmup démarré")
+        _execute_warmup(graph)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 @app.route('/api/warmup_inbox', methods=['POST'])
 def api_warmup_inbox():
     """Pre-charge les 10 derniers mails recus via Graph API.
     Lance le prefetch A/B/C pour chacun en arriere-plan."""
     global _warmup_done
+    # ANOMALIE #4 fix : toutes les vérifications + mise à jour du statut dans un seul bloc lock
     with _warmup_lock:
         if _warmup_done:
             return jsonify({"status": "already_done", "count": len(_warmup_cache)})
+        if _warmup_progress.get("status") == "running":
+            return jsonify({"status": "already_running"})
+        _warmup_progress.update({"status": "running", "loaded": 0, "total": 10, "current_subject": "Connexion..."})
 
     graph = get_graph()
     if not graph:
+        with _warmup_lock:
+            _warmup_progress["status"] = "idle"
         return jsonify({"status": "no_graph"})
 
-    with _warmup_lock:
-        _warmup_progress.update({"status": "running", "loaded": 0, "total": 10, "current_subject": "Connexion..."})
-
-    def _do_warmup():
-        global _warmup_done
-        try:
-            with _warmup_lock:
-                _warmup_progress["current_subject"] = "Recuperation des mails..."
-            mails = graph.get_received_emails(limit=10)
-            with _warmup_lock:
-                _warmup_progress["total"] = len(mails)
-            for i, msg in enumerate(mails):
-                mid = msg.get('id', '')
-                subject = msg.get('subject', '(sans objet)')
-                with _warmup_lock:
-                    _warmup_progress["loaded"] = i + 1
-                    _warmup_progress["current_subject"] = subject
-                if mid:
-                    _warmup_cache[mid] = msg
-                    try:
-                        _db.save_email_cache(mid, msg)
-                    except Exception:
-                        pass
-            # #7 : limiter le cache a 10 entrees
-            while len(_warmup_cache) > 10:
-                _warmup_cache.pop(next(iter(_warmup_cache)))
-            logger.info(f"Warmup: {len(mails)} mails pre-charges + caches en DB")
-
-            with _warmup_lock:
-                _warmup_done = True
-                _warmup_progress["status"] = "done"
-            logger.info("Warmup chargement mails termine — lancement prefetch en fond")
-
-            for msg in mails[:5]:
-                mail_data = {
-                    'from_email': msg.get('from_email', ''),
-                    'from_name': msg.get('from_name', ''),
-                    'subject': msg.get('subject', ''),
-                    'message_id': msg.get('id', ''),
-                    'conversation_id': msg.get('conversation_id', ''),
-                }
-                if mail_data['from_email']:
-                    _run_prefetch(mail_data)
-            logger.info("Warmup prefetch lance (5 mails)")
-        except Exception as e:
-            with _warmup_lock:
-                _warmup_progress["status"] = "error"
-            logger.error(f"Warmup erreur: {e}")
-
-    threading.Thread(target=_do_warmup, daemon=True).start()
+    threading.Thread(target=_execute_warmup, args=(graph,), daemon=True).start()
     return jsonify({"status": "started"})
 
 @app.route('/api/warmup_inbox/progress', methods=['GET'])
@@ -421,6 +514,9 @@ _current_compose_data = {}
 # Prefetch cache (contexte A+B+C + speculative)
 _prefetch_cache = {}
 _prefetch_lock = threading.Lock()
+# Cache des réponses préemptives (contacts connus, top 5 récents)
+_preemptive_cache = {}                 # {message_id: {chunks, text, timestamp}}
+_preemptive_lock = threading.Lock()
 # SSE clients connectés
 _sse_clients = []
 _sse_lock = threading.Lock()
@@ -719,27 +815,35 @@ def _run_prefetch(mail_data):
             # On utilise concurrent.futures pour le parallélisme (même gain réseau si HTTP/2).
             keywords = _extract_prefetch_keywords(subject)
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            # Fix #12 : ne pas utiliser le context manager du pool (shutdown wait=True bloque)
+            # Utiliser submit() + cancel() explicite pour ne pas attendre les futures lentes
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+            try:
                 future_a = pool.submit(_prefetch_context_a, graph, conversation_id) if conversation_id else None
                 future_b = pool.submit(graph.search_by_sender, from_email, 20)
-                future_c = pool.submit(graph.search_emails, f'subject:{keywords}', 20) if keywords else None
+                future_c = pool.submit(_prefetch_context_c_with_table, keywords, graph) if keywords else None
 
                 if future_a:
                     try:
                         context_a = future_a.result(timeout=15)
                     except Exception as e:
+                        future_a.cancel()
                         logger.warning(f"Prefetch A error: {e}")
 
                 try:
                     context_b = future_b.result(timeout=15)
                 except Exception as e:
+                    future_b.cancel()
                     logger.warning(f"Prefetch B error: {e}")
 
                 if future_c:
                     try:
                         context_c = future_c.result(timeout=15)
                     except Exception as e:
+                        future_c.cancel()
                         logger.warning(f"Prefetch C error: {e}")
+            finally:
+                pool.shutdown(wait=False)  # Ne pas bloquer — les threads non-annulables se terminent seuls
 
             _broadcast_sse('prefetch_progress', {'a': len(context_a), 'b': len(context_b), 'c': len(context_c)})
 
@@ -751,20 +855,20 @@ def _run_prefetch(mail_data):
                 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
                     fb = pool.submit(_requests.get, f'{companion}/prefetch_sender',
                                      params={'email': from_email, 'max': '20'}, timeout=10)
-                    fc = pool.submit(_requests.get, f'{companion}/prefetch_subject',
-                                     params={'keywords': _extract_prefetch_keywords(subject), 'max': '20'}, timeout=10)
+                    # Contexte C : GetTable (nouvelle route) avec fallback /prefetch_subject
+                    kw = _extract_prefetch_keywords(subject)
+                    fc = pool.submit(_prefetch_context_c_with_table, kw, None) if kw else None
                     try:
                         resp_b = fb.result(timeout=15)
                         if resp_b.status_code == 200:
                             context_b = resp_b.json().get('results', [])
                     except Exception:
                         pass
-                    try:
-                        resp_c = fc.result(timeout=15)
-                        if resp_c.status_code == 200:
-                            context_c = resp_c.json().get('results', [])
-                    except Exception:
-                        pass
+                    if fc:
+                        try:
+                            context_c = fc.result(timeout=15) or []
+                        except Exception as e:
+                            logger.debug(f"Prefetch C (Mode Dégradé) : échec {e}")
                 _broadcast_sse('prefetch_progress', {'a': 0, 'b': len(context_b), 'c': len(context_c)})
             except Exception as e:
                 logger.warning(f"Prefetch Companion error: {e}")
@@ -796,8 +900,13 @@ def _run_prefetch(mail_data):
 
         _broadcast_sse('prefetch_progress', {'status': 'done', 'a': len(context_a), 'b': len(context_b), 'c': len(context_c)})
 
-        # TODO (futur) : lancer la génération spéculative ici
-        # _start_speculative(mail_data, context_a, context_b, context_c, contact_profile)
+        # Lancer la spéculation si contact connu (spéculation hybride)
+        if message_id and from_email and _is_contact_known(from_email):
+            threading.Thread(
+                target=_start_speculative,
+                args=(mail_data,),
+                daemon=True
+            ).start()
 
     except Exception as e:
         logger.error(f"Prefetch error: {e}")
@@ -810,13 +919,370 @@ def _prefetch_context_a(graph, conversation_id):
     return graph.get_conversation_thread(conversation_id, max_results=20)
 
 
+def _normalize_context_c(items, source='unknown'):
+    """
+    Normalise les items contexte C au format attendu par _build_prompt() :
+    {body_snippet, from_name, date, subject, direction}
+
+    _build_prompt() utilise m['direction'] sans .get() → KeyError si absent.
+    body_snippet est lu directement → champ vide si absent.
+    Les mails du contexte C sont toujours reçus (inbox).
+    """
+    normalized = []
+    for m in items:
+        normalized.append({
+            'subject':      m.get('subject', ''),
+            'body_snippet': m.get('body_snippet') or m.get('body_preview') or m.get('body', ''),
+            'from_name':    m.get('from_name') or m.get('from_email', '').split('@')[0],
+            'from_email':   m.get('from_email', ''),
+            'date':         m.get('date', ''),
+            'direction':    'received',   # contexte C = inbox = toujours reçu
+        })
+    return normalized
+
+
+def _prefetch_context_c_with_table(keywords, graph=None):
+    """
+    Contexte C : recherche par mots-clés via Companion GetTable (COM Outlook local).
+    Fallback sur Graph API si le Companion est indisponible.
+
+    Priorité : Companion GetTable > Graph search_emails > []
+    Avantage GetTable : < 100ms, aucun quota Graph, fonctionne hors réseau.
+
+    La sortie est normalisée (_normalize_context_c) pour compatibilité _build_prompt().
+    """
+    if not keywords:
+        return []
+
+    # 1. Tenter Companion GetTable (préféré — COM local, rapide)
+    import requests as _requests  # import global-level alias (cohérent avec Mode Dégradé)
+    try:
+        resp = _requests.get(
+            'http://localhost:5051/api/get_table',
+            params={'keywords': keywords, 'max_results': '20'},
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get('status') == 'ok' and data.get('results'):
+                logger.info(f"Prefetch C via Companion GetTable : {len(data['results'])} résultats")
+                return _normalize_context_c(data['results'], 'get_table')
+    except Exception as e:
+        logger.debug(f"Companion GetTable indisponible : {e}")
+
+    # 2. Fallback Graph API (retour brut Graph normalisé aussi)
+    if graph:
+        try:
+            results = graph.search_emails(f'subject:{keywords}', 20)
+            logger.info(f"Prefetch C via Graph fallback : {len(results)} résultats")
+            return _normalize_context_c(results, 'graph')
+        except Exception as e:
+            logger.warning(f"Prefetch C Graph fallback error: {e}")
+
+    return []
+
+
+def _detect_importance(body, subject):
+    """
+    Détecte automatiquement l'importance d'un mail (R/S/H) par mots-clés.
+
+    Appliqué uniquement si le client n'a pas fourni d'importance explicite.
+    Conservateur : préfère S (Standard) en cas de doute.
+    Le body est strippé de ses balises HTML avant analyse.
+
+    R (Rapide)  : urgence forte et non ambiguë → fast path, 600 tokens
+    H (Haute)   : action / validation explicitement demandée → 1500 tokens
+    S (Standard): tout le reste (défaut) → 1000 tokens
+    """
+    # Strip HTML (le body peut contenir des balises)
+    body_text = re.sub(r'<[^>]+>', ' ', body)
+    text = (subject + ' ' + body_text).lower()
+
+    # R : uniquement les mots d'urgence forts et non ambigus
+    mots_r = [
+        'urgent', 'urgente', 'urgentes', 'urgents',
+        'asap',
+        'emergency',
+        'besoin urgent', 'réponse urgente', 'délai urgent',
+        'tout de suite',
+        'dès que possible',
+        'le plus tôt possible',
+    ]
+    # H : uniquement si une action / validation est explicitement demandée
+    mots_h = [
+        'action requise', 'action required',
+        'à valider', 'à confirmer',
+        'merci de confirmer', 'pouvez-vous confirmer', 'pouvez-vous valider',
+        'votre accord', 'votre validation', 'votre approbation',
+        "qu'en pensez-vous",
+    ]
+
+    for mot in mots_r:
+        if mot in text:
+            return 'R'
+    for mot in mots_h:
+        if mot in text:
+            return 'H'
+    return 'S'
+
+
 def _extract_prefetch_keywords(subject):
     """Extrait les mots-clés du sujet pour le prefetch C (même logique que le proto)."""
     if not subject:
         return ''
     # Retirer les préfixes Re:/Fw:/Tr:
     clean = re.sub(r'^(re\s*:|fw\s*:|fwd\s*:|tr\s*:)\s*', '', subject, flags=re.IGNORECASE).strip()
-    return clean
+    return clean[:100]  # Fix #18 : borner — sujet externe → potentiel vecteur DASL
+
+
+def _is_contact_known(email):
+    """Retourne True si le contact a un profil dans la DB (contact connu = TIER 1/2)."""
+    if not email:
+        return False
+    try:
+        return _db.get_contact_profile(email) is not None
+    except Exception:
+        return False
+
+
+def _start_speculative(mail_data):
+    """
+    Génère une réponse en arrière-plan pour un contact connu (spéculation hybride).
+
+    Attend (polling) que le prefetch de CE mail soit terminé, puis génère avec stream=False
+    et stocke le résultat dans _preemptive_cache[message_id].
+
+    Appelé uniquement si _is_contact_known() → True (TIER 1/2).
+    Le cache est nettoyé automatiquement après envoi / suppression / classement.
+    """
+    message_id = mail_data.get('message_id', '')
+    if not message_id:
+        return
+
+    # Éviter les doublons (déjà en cache ou en cours)
+    with _preemptive_lock:
+        entry = _preemptive_cache.get(message_id, {})
+        if entry.get('status') in ('running', 'done'):
+            return
+        _preemptive_cache[message_id] = {'status': 'running', 'timestamp': time.time()}
+
+    from_email = mail_data.get('from_email', '')
+    subject = mail_data.get('subject', '')
+    cache_key = message_id  # message_id est toujours présent ici (garde au-dessus)
+
+    try:
+        # Attendre que le prefetch de CE mail soit terminé (polling, max 25s)
+        # Approche polling : évite toute pollution d'events partagés entre mails parallèles
+        deadline = time.time() + 25
+        while time.time() < deadline:
+            # Vérifier annulation (template détecté en direct)
+            with _preemptive_lock:
+                if _preemptive_cache.get(message_id, {}).get('status') == 'cancelled':
+                    return
+            with _prefetch_lock:
+                prefetch_status = _prefetch_cache.get(cache_key, {}).get('status', 'none')
+            if prefetch_status in ('done', 'error'):
+                break
+            time.sleep(0.3)
+
+        with _prefetch_lock:
+            prefetch = _prefetch_cache.get(cache_key, {})
+
+        context_a = prefetch.get('context_a', [])
+        context_b = prefetch.get('context_b', [])
+        context_c = prefetch.get('context_c', [])
+        contact_profile = prefetch.get('contact_profile')
+
+        # Construire le prompt via ClaudeAssistant (même logique que generate_reply)
+        ai = get_ai()
+        builder = _get_prompt_builder()
+        if not ai or not builder:
+            with _preemptive_lock:
+                _preemptive_cache.pop(message_id, None)
+            return
+
+        from_name = mail_data.get('from_name', '')
+        raw_body = mail_data.get('body', '')[:10000]
+        # ANOMALIE #5 fix : auto-détecter l'importance (cohérence avec generate_reply)
+        importance_letter = _detect_importance(raw_body, subject)
+        importance_int = {'R': 1, 'S': 2, 'H': 3}[importance_letter]
+        max_tokens = {'R': 600, 'S': 1000, 'H': 1500}[importance_letter]
+
+        # Vérifier template AVANT appel IA (< 100ms si match)
+        try:
+            template, template_name = detect_template(
+                email_body=raw_body,
+                subject=subject,
+                brief='',
+                is_first_mail=False,
+                reply_mode='reply',
+                importance_override=importance_int,
+            )
+            if template:
+                user_name = _db.get_setting('user_name', '')
+                text = assemble_template(template, contact_profile, user_name)
+                words = text.split(' ')
+                chunks = [' '.join(words[i:i+3]) + ' ' for i in range(0, len(words), 3)]
+                with _preemptive_lock:
+                    _preemptive_cache[message_id] = {
+                        'status': 'done',
+                        'text': text,
+                        'chunks': chunks,
+                        'timestamp': time.time(),
+                        'contact': from_email,
+                        'importance': importance_letter,
+                        'source': 'template',
+                    }
+                logger.info(f"Template '{template_name}' preemptif pour {message_id[:20]}")
+                _broadcast_sse('speculative_ready', {'message_id': message_id, 'source': 'template'})
+                return  # Pas d'appel IA nécessaire
+        except Exception as e:
+            logger.warning(f"Erreur detect_template speculative: {e}")
+
+        incoming_email = {
+            'from': from_email,
+            'from_name': from_name,
+            'subject': subject,
+            'body': raw_body,
+            'body_preview': raw_body[:300],
+        }
+
+        # Corrections récentes (DB)
+        recent_corrections = []
+        try:
+            recent_corrections = _db.get_recent_corrections(limit=5)
+        except Exception:
+            pass
+
+        try:
+            from claude_ai import SYSTEM_PROMPT as system_prompt
+            user_prompt = builder._build_prompt(
+                incoming_email=incoming_email,
+                project=None,
+                is_first_mail=False,
+                is_forward=False,
+                brief='',
+                conversation_history=context_a,
+                sender_history=context_b,
+                keyword_context=context_c,
+                importance=importance_int,
+                to_email='',
+                subject=subject,
+                contact_profile=contact_profile,
+                recent_corrections=recent_corrections,
+                learning_priorities=[],
+            )
+            user_prompt += (
+                "\n\nINSTRUCTION CRITIQUE : Génère UNIQUEMENT le corps du mail. "
+                "NE PAS inclure d'ouverture (Bonjour, Salut, Cher...), "
+                "NE PAS inclure de clôture (Cordialement, Bien à vous...), "
+                "NE PAS inclure de signature (nom). "
+                "Commence directement par le contenu. L'ouverture, la clôture et la signature "
+                "seront ajoutées automatiquement par le système."
+            )
+        except Exception as e:
+            logger.error(f"Speculative prompt error: {e}")
+            with _preemptive_lock:
+                _preemptive_cache.pop(message_id, None)
+            return
+
+        # Générer en mode non-streaming (stockage dans cache)
+        full_text = ai.generate_reply(system_prompt, user_prompt,
+                                      max_tokens=max_tokens, temperature=0.3,
+                                      stream=False)
+
+        # Découper en chunks (pour simuler le streaming depuis le cache)
+        chunks = []
+        words = full_text.split(' ')
+        batch = []
+        for word in words:
+            batch.append(word)
+            if len(batch) >= 3:
+                chunks.append(' '.join(batch) + ' ')
+                batch = []
+        if batch:
+            chunks.append(' '.join(batch))
+
+        # Nettoyage du cache si trop plein (max 10 entrées)
+        with _preemptive_lock:
+            # ANOMALIE #9 fix : ne pas écraser un flag 'cancelled' posé par generate_reply()
+            if _preemptive_cache.get(message_id, {}).get('status') == 'cancelled':
+                logger.info(f"Spéculation annulée (template) pour {message_id[:20]}")
+                return
+
+            if len(_preemptive_cache) > 10:
+                # ANOMALIE #11 fix : inclure les entries 'running' vieilles de >30s dans le trim
+                evictable = [(k, v) for k, v in _preemptive_cache.items()
+                             if v.get('status') == 'done'
+                             or (v.get('status') == 'running'
+                                 and time.time() - v.get('timestamp', 0) > 30)]
+                evictable.sort(key=lambda x: x[1].get('timestamp', 0))
+                for k, _ in evictable[:5]:
+                    del _preemptive_cache[k]
+
+            _preemptive_cache[message_id] = {
+                'status': 'done',
+                'text': full_text,
+                'chunks': chunks,
+                'timestamp': time.time(),
+                'contact': from_email,
+                'importance': importance_letter,
+            }
+
+        logger.info(f"Spéculation prête pour {message_id[:20]}... ({len(chunks)} chunks)")
+        _broadcast_sse('speculative_ready', {'message_id': message_id})
+
+    except Exception as e:
+        logger.warning(f"Spéculation échouée pour {message_id[:20]}: {e}")
+        with _preemptive_lock:
+            _preemptive_cache.pop(message_id, None)
+
+
+def _run_preemptive_bg(inbox_mails):
+    """
+    Thread de warmup : identifie les TIER 1 (contacts connus, top 5 récents)
+    et lance la spéculation préemptive pour chacun.
+
+    Appelé après le warmup de l'inbox.
+    Max 5 candidats, max 3 threads parallèles (ThreadPoolExecutor max_workers=3).
+    """
+    if not inbox_mails:
+        return
+
+    # Identifier les candidats TIER 1
+    candidates = []
+    for mail in inbox_mails[:20]:  # Scanner les 20 plus récents
+        # ANOMALIE #6 fix : normaliser les clés (Graph liste utilise 'id', pas 'message_id')
+        msg_id = mail.get('message_id') or mail.get('id', '')
+        from_email = mail.get('from_email', '')
+        if not msg_id or not from_email:
+            continue
+        # Déjà en cache → passer
+        with _preemptive_lock:
+            if msg_id in _preemptive_cache:
+                continue
+        if _is_contact_known(from_email):
+            candidates.append(mail)
+        if len(candidates) >= 5:
+            break
+
+    if not candidates:
+        logger.info("Spéculation préemptive : aucun candidat TIER 1")
+        return
+
+    logger.info(f"Spéculation préemptive : {len(candidates)} candidat(s) TIER 1")
+
+    # Fix #13 : threads daemon libres (pas de pool bloquant — chaque prefetch dure ~25s)
+    for mail in candidates:
+        mail_data = {
+            'from_email': mail.get('from_email', ''),
+            'from_name': mail.get('from_name', ''),
+            'subject': mail.get('subject', ''),
+            'body': mail.get('body') or mail.get('body_preview', ''),
+            'message_id': mail.get('message_id') or mail.get('id', ''),
+            'conversation_id': mail.get('conversation_id', ''),
+        }
+        threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True).start()
 
 
 # --- Prefetch status (consommé par dialog) -----------------------------------
@@ -839,13 +1305,18 @@ def api_prefetch_status():
     with _prefetch_lock:
         entry = _prefetch_cache.get(cache_key, {})
 
+    # Vérifier si une réponse spéculative est prête pour ce mail
+    with _preemptive_lock:
+        spec = _preemptive_cache.get(cache_key, {})
+        speculative_ready = spec.get('status') == 'done'
+
     return jsonify({
         "status": entry.get('status', 'none'),
         "a_count": len(entry.get('context_a', [])),
         "b_count": len(entry.get('context_b', [])),
         "c_count": len(entry.get('context_c', [])),
-        "speculative_ready": False,  # TODO : intégrer quand la spéculative sera implémentée
-        "contact_profile": entry.get('contact_profile') is not None,
+        "speculative_ready": speculative_ready,
+        # contact_profile supprimé : fuite de métadonnées (révèle si contact connu)
     })
 
 
@@ -1037,6 +1508,8 @@ def api_email_body():
             "from_email": email.get('from_email', ''),
             "date": email.get('date', ''),
             "attachments": email.get('attachments', []),
+            "to": email.get('to', email.get('to_email', '')),
+            "cc": email.get('cc', ''),
         })
     except GraphAuthError:
         return jsonify({"error": "Token expiré", "auth_required": True}), 401
@@ -1167,6 +1640,12 @@ def api_classify_email():
                 domain=domain,
                 subject=email.get('subject', ''),
             )
+
+        # Nettoyer les caches (mail classé = traité, plus besoin du prefetch ni de la réponse pré-générée)
+        with _preemptive_lock:
+            _preemptive_cache.pop(message_id, None)
+        with _prefetch_lock:
+            _prefetch_cache.pop(message_id, None)
 
         return jsonify({
             "status": "ok",
@@ -1433,7 +1912,7 @@ def api_search():
 # ROUTES API — GÉNÉRATION IA
 # =============================================================================
 
-_last_generate_time = 0
+_last_generate_times = {}   # {message_id: timestamp} — rate limiting par mail (pas global)
 _last_generate_lock = threading.Lock()
 
 @app.route('/generate_reply', methods=['POST'])
@@ -1442,27 +1921,123 @@ def generate_reply():
     Génération de réponse IA en streaming SSE.
     Utilise ClaudeAssistant._build_prompt() pour construire le prompt WOW complet
     (blocs D→B→A→C→D2→E), puis passe au ai_provider pour le streaming.
-    """
-    global _last_generate_time
-    # Rate limiting : 2s entre deux appels (anti double-clic)
-    with _last_generate_lock:
-        now = time.time()
-        if now - _last_generate_time < 2:
-            return jsonify({"error": "Trop de requetes, reessayez dans un instant"}), 429
-        _last_generate_time = now
 
+    Optimisation spéculation hybride :
+    - Contact connu + cache préemptif disponible → stream depuis cache (T+0.1s)
+    - Sinon → génération normale (T+5-8s)
+    """
     data = request.get_json() or {}
     message_id = data.get('message_id', '')
     brief = data.get('brief', '')[:2000]
+
+    # Fix #16 : vérifier le cache préemptif AVANT le rate limiting
+    # (un cache hit ne coûte rien → pas de raison de le bloquer au double-clic)
+    if message_id and not brief:
+        with _preemptive_lock:
+            cached = _preemptive_cache.get(message_id, {})
+            # ANOMALIE #4 fix : vérifier TTL 30min + copier les données + pop immédiat sous lock
+            cache_age = time.time() - cached.get('timestamp', 0)
+            if (cached.get('status') == 'done' and cached.get('chunks')
+                    and cache_age < 1800):
+                cached_chunks = list(cached['chunks'])      # copie locale (thread-safe)
+                cached_text = cached.get('text', '')        # copie locale
+                _preemptive_cache.pop(message_id, None)     # consommé → pop immédiat
+            else:
+                cached_chunks = None
+                cached_text = ''
+        if cached_chunks:
+            logger.info(f"Cache préemptif HIT pour {message_id[:20]} (age={cache_age:.0f}s)")
+            # Nettoyer aussi le prefetch_cache (contexte A/B/C déjà consommé par la spéculation)
+            with _prefetch_lock:
+                _prefetch_cache.pop(message_id, None)
+
+            # Reconstruire greeting/closing (le cache contient seulement le corps)
+            _preemptive_from = cached.get('contact', '')
+            _preemptive_imp = cached.get('importance', 'S')
+            _preemptive_cp = _db.get_contact_profile(_preemptive_from) if _preemptive_from else None
+            _preemptive_greeting = ''
+            _preemptive_closing = ''
+            if _preemptive_cp:
+                _preemptive_greeting = (_preemptive_cp.get('greeting') or '').strip()
+                _preemptive_closing = (_preemptive_cp.get('closing') or '').strip()
+                _user_name_chk = _db.get_setting('user_name', '')
+                if _user_name_chk:
+                    _last = _user_name_chk.split()[-1].lower()
+                    if _last and len(_last) >= 3 and _last in _preemptive_greeting.lower():
+                        _prn = (_preemptive_cp.get('display_name') or '').split()[0]
+                        _preemptive_greeting = f"Bonjour {_prn}," if _prn else "Bonjour,"
+                if (_preemptive_cp.get('language', 'fr') == 'fr'
+                        and any(_preemptive_greeting.lower().startswith(x) for x in ('hello', 'hi ', 'hey '))):
+                    _prn = (_preemptive_cp.get('display_name') or '').split()[0]
+                    _preemptive_greeting = f"Bonjour {_prn}," if _prn else "Bonjour,"
+            if not _preemptive_greeting:
+                if _preemptive_from:
+                    _local = (_preemptive_from.split('@')[0]
+                              .replace('.', ' ').replace('-', ' ').title().split()[0])
+                    _preemptive_greeting = f"Bonjour {_local}," if _local and len(_local) > 2 else "Bonjour,"
+                else:
+                    _preemptive_greeting = "Bonjour,"
+            if not _preemptive_closing:
+                _preemptive_closing = "Cordialement,"
+            _preemptive_sig = _db.get_setting('user_name', '')
+
+            def stream_from_preemptive():
+                # Greeting (même structure que generate_sse)
+                _greeting_html = f"{_preemptive_greeting}\n\n"
+                yield f"data: {json.dumps({'chunk': _greeting_html})}\n\n"
+                # Corps (chunks du cache — générés sans greeting/closing)
+                for chunk in cached_chunks:
+                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                    time.sleep(0.05)  # Délai progressif (perception)
+                # Closing + signature
+                _closing_html = f"\n\n{_preemptive_closing}"
+                if _preemptive_sig:
+                    _closing_html += f"\n{_preemptive_sig}"
+                yield f"data: {json.dumps({'chunk': _closing_html})}\n\n"
+                if message_id:
+                    _store_proposed(message_id, _greeting_html + cached_text + _closing_html)
+                yield f"data: {json.dumps({'done': True, 'importance_used': _preemptive_imp})}\n\n"
+
+            return Response(
+                stream_with_context(stream_from_preemptive()),
+                mimetype='text/event-stream',
+                headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+            )
+
+    # Rate limiting : 2s entre deux appels IA pour le MÊME mail (anti double-clic)
+    # Par message_id pour ne pas bloquer deux dialogs ouverts sur des mails différents
+    _rl_key = message_id if message_id else f"{from_email}:{subject}"
+    with _last_generate_lock:
+        now = time.time()
+        if now - _last_generate_times.get(_rl_key, 0) < 2:
+            return jsonify({"error": "Trop de requetes, reessayez dans un instant"}), 429
+        _last_generate_times[_rl_key] = now
+        # Nettoyage : supprimer les entrées >60s (anti memory leak)
+        if len(_last_generate_times) > 50:
+            cutoff = now - 60
+            for k in [k for k, v in _last_generate_times.items() if v < cutoff]:
+                del _last_generate_times[k]
+
     importance_letter = data.get('importance', 'S')
     if importance_letter not in ('R', 'S', 'H'):
         importance_letter = 'S'
-    importance_int = {'R': 1, 'S': 2, 'H': 3}[importance_letter]  # Pour _build_prompt()
-    max_tokens = {'R': 600, 'S': 1000, 'H': 1500}[importance_letter]  # Pour l'appel API
     reply_mode = data.get('mode', 'reply')
     to_email = data.get('to', '').strip()
+    # Validation forward (cohérence avec send_reply)
+    if reply_mode == 'forward' and not to_email:
+        return jsonify({"error": "Le champ À est requis en mode transfert"}), 400
     subject = data.get('subject', '')
     from_email = data.get('from_email', '')
+
+    # Auto-détection importance si valeur par défaut (S) — jamais écrase un choix explicite
+    if importance_letter == 'S':
+        detected = _detect_importance(data.get('body', ''), subject)
+        if detected != 'S':
+            importance_letter = detected
+            logger.debug(f"Importance auto-détectée : {importance_letter} (sujet: {subject[:40]})")
+
+    importance_int = {'R': 1, 'S': 2, 'H': 3}[importance_letter]  # Pour _build_prompt()
+    max_tokens = {'R': 600, 'S': 1000, 'H': 1500}[importance_letter]  # Pour l'appel API
     from_name = data.get('from_name', '')
     pj_context = data.get('pj_context', '')[:5000]  # Cap 5K chars
 
@@ -1520,7 +2095,28 @@ def generate_reply():
         except Exception:
             pass
 
-    if graph and correspondent:
+    # A2 fix : réutiliser le prefetch_cache si disponible (évite de refaire les requêtes Graph)
+    _prefetch_hit = False
+    if message_id and reply_mode not in ('new',):
+        with _prefetch_lock:
+            cached_ctx = _prefetch_cache.get(message_id, {})
+        if cached_ctx.get('status') == 'done':
+            ctx_a = cached_ctx.get('context_a', [])
+            ctx_b = cached_ctx.get('context_b', [])
+            ctx_c = cached_ctx.get('context_c', [])
+            # Utiliser le cache seulement si au moins un contexte est non-vide
+            if ctx_a or ctx_b or ctx_c:
+                conversation_history = ctx_a
+                sender_history = ctx_b
+                keyword_context = ctx_c
+                # Profil contact du cache (plus récent que la DB si mis à jour pendant prefetch)
+                if not contact_profile and cached_ctx.get('contact_profile'):
+                    contact_profile = cached_ctx['contact_profile']
+                _prefetch_hit = True
+                logger.info(f"Prefetch cache HIT pour generate_reply {message_id[:20]} "
+                            f"(A={len(ctx_a)} B={len(ctx_b)} C={len(ctx_c)})")
+
+    if not _prefetch_hit and graph and correspondent:
         # Contexte B : historique avec le correspondant (Mode Standard)
         # Inclut les mails REÇUS de ce correspondant ET les mails ENVOYÉS à ce correspondant
         try:
@@ -1678,6 +2274,46 @@ def generate_reply():
     user_name = _db.get_setting('user_name', '')
     signature = user_name if user_name else ''
 
+    # Vérifier template AVANT appel IA (< 100ms si match)
+    try:
+        tpl, tpl_name = detect_template(
+            email_body=raw_body,  # déjà cappé à 10K plus haut
+            subject=subject,
+            brief=brief,
+            is_first_mail=(reply_mode == 'new'),
+            reply_mode=reply_mode,
+            importance_override=importance_int,
+        )
+        if tpl:
+            tpl_text = assemble_template(tpl, contact_profile, user_name)
+            logger.info(f"Template '{tpl_name}' pour {message_id[:20] if message_id else '?'}")
+            # Annuler le thread spéculatif en cours s'il tourne encore (évite gaspillage)
+            # ANOMALIE #9 fix : flag 'cancelled' au lieu de pop (le thread vérifie ce flag
+            # et s'arrête proprement, sans remettre une entrée en cache après le pop)
+            if message_id:
+                with _preemptive_lock:
+                    entry = _preemptive_cache.get(message_id, {})
+                    if entry.get('status') == 'running':
+                        _preemptive_cache[message_id] = {'status': 'cancelled'}
+
+            def stream_template():
+                words = tpl_text.split(' ')
+                for i in range(0, len(words), 3):
+                    chunk = ' '.join(words[i:i+3]) + ' '
+                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                    time.sleep(0.02)
+                if message_id:
+                    _store_proposed(message_id, tpl_text)
+                yield f"data: {json.dumps({'done': True, 'importance_used': importance_letter})}\n\n"
+
+            return Response(
+                stream_with_context(stream_template()),
+                mimetype='text/event-stream',
+                headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+            )
+    except Exception as e:
+        logger.warning(f"Erreur detect_template generate_reply: {e}")
+
     # max_tokens déjà calculé en haut selon importance_letter
 
     def generate_sse():
@@ -1715,7 +2351,10 @@ def generate_reply():
             # Stocker le texte complet (greeting + corps + closing) pour le diff
             if message_id:
                 _store_proposed(message_id, ''.join(full_text))
-            yield f"data: {json.dumps({'done': True})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'importance_used': importance_letter})}\n\n"
+        except GraphAuthError as e:
+            logger.warning(f"Token expiré pendant generate_reply stream: {e}")
+            yield f"data: {json.dumps({'error': 'Session expirée — reconnectez-vous via Profil > Mode Complet', 'auth_required': True})}\n\n"
         except Exception as e:
             logger.error(f"Erreur generate_reply stream: {e}")
             yield f"data: {json.dumps({'error': _safe_err(e)})}\n\n"
@@ -1876,6 +2515,12 @@ def send_reply():
                 _db.mark_treated(message_id, action=mode)
             except Exception:
                 pass  # Non bloquant
+        # Nettoyer les deux caches (mail envoyé = traité)
+        if message_id:
+            with _preemptive_lock:
+                _preemptive_cache.pop(message_id, None)
+            with _prefetch_lock:
+                _prefetch_cache.pop(message_id, None)
         return jsonify(result)
     except GraphAuthError:
         return jsonify({"error": "Token expiré", "auth_required": True}), 401
@@ -2044,8 +2689,14 @@ def api_classification_post_send(message_id):
                     f"Retourne UNIQUEMENT l'ID du dossier."
                 )
                 result = ai.suggest_folder(system_prompt, user_prompt)
+                ai_folder_id = result.strip()
+                # Résoudre l'ID vers un nom lisible depuis la liste de dossiers
+                ai_folder_path = next(
+                    (f.get('name', ai_folder_id) for f in folders if f.get('id') == ai_folder_id),
+                    ai_folder_id
+                )
                 _cache_set(cache_key, {
-                    'suggestion': {'folder_id': result.strip()},
+                    'suggestion': {'folder_id': ai_folder_id, 'folder_path': ai_folder_path},
                     'source': 'ai',
                     'folders': folders,
                 })
@@ -2092,7 +2743,7 @@ def api_pj_classification_post_send(message_id):
                 # Filtrer : uniquement les documents (pas inline)
                 doc_attachments = [a for a in attachments if not a.get('is_inline', False)]
                 if not doc_attachments:
-                    _cache_set(cache_key, [])
+                    _cache_set(cache_key, {'attachments': [], 'suggestion': None})
                     return
 
                 from_email = _post_send_cache.get(f'from_{message_id}', '')
@@ -2108,7 +2759,7 @@ def api_pj_classification_post_send(message_id):
                 })
             except Exception as e:
                 logger.warning(f"Erreur PJ classification post-envoi: {e}")
-                _cache_set(cache_key, [])
+                _cache_set(cache_key, {'attachments': [], 'suggestion': None})
             finally:
                 with _post_send_lock:
                     _post_send_cache.pop(running_key, None)
@@ -2418,6 +3069,8 @@ if __name__ == '__main__':
     print(f"  ")
     print(f"  Proto (beta-testeurs) sur http://localhost:5050 — NON AFFECTE")
     print(f"{'='*60}\n")
+
+    _auto_trigger_warmup()  # Fix #5 : warmup automatique 3s après démarrage
 
     _is_dev = os.path.exists(os.path.join(EASYMAIL_DIR, '.dev_mode'))
     app.run(

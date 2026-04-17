@@ -276,12 +276,13 @@ def _search_windows(query, search_type='all', sender=None, max_results=30):
             where_clauses.append("System.Kind = 'document'")
 
         if query:
-            # Échapper les guillemets simples dans la query
-            safe_query = query.replace("'", "''")
+            # Échappement complet : ' → '' et " → supprimé (caractère OLE DB dangereux)
+            safe_query = query[:200].replace("'", "''").replace('"', '')
             where_clauses.append(f"FREETEXT('{safe_query}')")
 
         if sender:
-            safe_sender = sender.replace("'", "''")
+            # Même stratégie pour CONTAINS (' et " dangereux)
+            safe_sender = sender[:200].replace("'", "''").replace('"', '').replace('\\', '')
             where_clauses.append(f"CONTAINS(System.Message.SenderAddress, '{safe_sender}')")
 
         where = ' AND '.join(where_clauses) if where_clauses else '1=1'
@@ -357,38 +358,41 @@ def search():
 # =============================================================================
 
 import platform
+import threading
 
 _outlook_app = None  # Singleton COM Outlook (Windows uniquement)
+_com_lock = threading.RLock()  # RLock : _get_outlook() peut être appelé depuis un bloc déjà sous _com_lock
 
 
 def _get_outlook():
     """Retourne le singleton Outlook COM. Windows uniquement.
     (B47) Si Outlook a été fermé puis rouvert, l'objet COM est périmé.
-    On vérifie sa validité et on le recrée si nécessaire."""
+    On vérifie sa validité et on le recrée si nécessaire.
+    Protégé par _com_lock (RLock) pour éviter la double-init COM STA."""
     global _outlook_app
     if platform.system() != 'Windows':
         return None
 
-    # Vérifier si le singleton existant est encore valide
-    if _outlook_app is not None:
-        try:
-            # Test rapide : accéder à une propriété simple
-            _ = _outlook_app.Name
-        except Exception:
-            logger.warning("Outlook COM périmé (Outlook fermé/rouvert ?), reconnexion...")
-            _outlook_app = None
+    with _com_lock:
+        # Vérifier si le singleton existant est encore valide
+        if _outlook_app is not None:
+            try:
+                _ = _outlook_app.Name
+            except Exception:
+                logger.warning("Outlook COM périmé (Outlook fermé/rouvert ?), reconnexion...")
+                _outlook_app = None
 
-    if _outlook_app is None:
-        try:
-            import pythoncom
-            pythoncom.CoInitialize()
-            import win32com.client
-            _outlook_app = win32com.client.Dispatch("Outlook.Application")
-            logger.info("Outlook COM initialisé")
-        except Exception as e:
-            logger.error(f"Impossible d'initialiser Outlook COM : {e}")
-            return None
-    return _outlook_app
+        if _outlook_app is None:
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
+                import win32com.client
+                _outlook_app = win32com.client.Dispatch("Outlook.Application")
+                logger.info("Outlook COM initialisé")
+            except Exception as e:
+                logger.error(f"Impossible d'initialiser Outlook COM : {e}")
+                return None
+        return _outlook_app
 
 
 @app.route('/current_selection')
@@ -731,9 +735,9 @@ def prefetch_sender():
         items = inbox.Items
         items.Sort("[ReceivedTime]", True)
 
-        # Filtre DASL par expediteur (audit C1 : sanitiser les guillemets)
-        safe_email = email.replace("'", "").replace('"', '').replace('\\', '')
-        filter_str = f"@SQL=\"urn:schemas:httpmail:fromemail\" LIKE '%{safe_email}%'"
+        # Filtre DASL par expediteur — format aligné sur api_get_table (parenthèses + guillemets simples)
+        safe_email = email[:200].replace('\\', '\\\\').replace('"', '').replace('%', r'\%').replace("'", "''")
+        filter_str = f'@SQL=("urn:schemas:httpmail:fromemail" LIKE \'%{safe_email}%\')'
         restricted = items.Restrict(filter_str)
 
         results = []
@@ -781,8 +785,14 @@ def prefetch_subject():
         items = inbox.Items
         items.Sort("[ReceivedTime]", True)
 
-        # Filtre DASL par sujet
-        safe_kw = keywords.replace("'", "''")
+        # Filtre DASL par sujet — échappement complet (cohérent avec api_get_table)
+        safe_kw = (
+            keywords[:200]
+            .replace('\\', '\\\\')
+            .replace('"', '')
+            .replace('%', r'\%')
+            .replace("'", "''")
+        )
         filter_str = f"@SQL=\"urn:schemas:httpmail:subject\" LIKE '%{safe_kw}%'"
         restricted = items.Restrict(filter_str)
 
@@ -801,6 +811,92 @@ def prefetch_subject():
     except Exception as e:
         logger.error(f"prefetch_subject COM error: {e}")
         return jsonify({"status": "error", "reason": str(e), "results": []})
+
+
+# =============================================================================
+# GET /api/get_table — GetTable COM : recherche DASL dans l'index Outlook
+# Option A (plan SEMAINE 2) : enrichissement contexte C pour app_plugin.py
+# =============================================================================
+
+@app.route('/api/get_table')
+def api_get_table():
+    """
+    Recherche DASL dans le dossier Outlook via GetTable COM.
+    Utilisé par app_plugin.py pour enrichir le contexte C avec l'index local.
+
+    Avantages vs Graph API : aucun quota, < 100ms, fonctionne hors réseau.
+
+    Query params :
+        keywords : mots-clés de recherche (obligatoire)
+        max_results : nombre max de résultats (défaut 20, max 50)
+    """
+    keywords = request.args.get('keywords', '').strip()
+    try:
+        max_results = min(int(request.args.get('max_results', 20)), 50)
+    except (ValueError, TypeError):
+        max_results = 20
+
+    if not keywords:
+        return jsonify({"error": "Paramètre keywords requis", "results": []}), 400
+
+    if platform.system() != 'Windows':
+        return jsonify({"status": "unavailable", "reason": "windows_only", "results": []})
+
+    # Fix #4 : COM STA — sérialiser tous les accès Outlook (un seul thread à la fois)
+    with _com_lock:
+        outlook = _get_outlook()
+        if not outlook:
+            return jsonify({"status": "unavailable", "reason": "com_init_failed", "results": []})
+
+        try:
+            ns = outlook.GetNamespace("MAPI")
+            inbox = ns.GetDefaultFolder(6)  # olFolderInbox
+
+            # Échappement DASL complet : ', ", %, \ + longueur bornée
+            # % = wildcard LIKE → remplacer par \% (escape DASL)
+            # " = délimiteur propriété DASL → supprimer
+            # \ = escape DASL → doubler
+            safe_kw = (
+                keywords[:200]
+                .replace('\\', '\\\\')
+                .replace('"', '')
+                .replace('%', r'\%')
+                .replace("'", "''")
+            )
+            dasl_filter = (
+                f'@SQL=("urn:schemas:httpmail:subject" LIKE \'%{safe_kw}%\' OR '
+                f'"urn:schemas:httpmail:textdescription" LIKE \'%{safe_kw}%\')'
+            )
+
+            table = inbox.GetTable(dasl_filter)
+            table.Columns.RemoveAll()
+            table.Columns.Add("Subject")
+            table.Columns.Add("SenderEmailAddress")
+            table.Columns.Add("SenderName")
+            table.Columns.Add("ReceivedTime")
+            # Note : Body non ajouté — propriété non supportée dans GetTable COM
+            # body_preview sera vide ; le contexte C se base sur le sujet + historique
+
+            results = []
+            while not table.EndOfTable and len(results) < max_results:
+                try:
+                    row = table.GetNextRow()
+                    results.append({
+                        'subject':    str(row['Subject'] or ''),
+                        'from_email': str(row['SenderEmailAddress'] or ''),
+                        'from_name':  str(row['SenderName'] or ''),
+                        'date':       str(row['ReceivedTime'] or ''),
+                        'body_preview': '',  # Non disponible via GetTable sans Body
+                    })
+                except Exception:
+                    pass
+
+            logger.info(f"GetTable: keywords='{keywords}' → {len(results)} résultats")
+            return jsonify({"status": "ok", "results": results})
+
+        except Exception as e:
+            logger.error(f"GetTable COM error: {e}")
+            return jsonify({"status": "error", "reason": str(e), "results": []})
 
 
 # =============================================================================
