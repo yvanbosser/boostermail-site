@@ -1543,12 +1543,30 @@ def api_folders():
 # ROUTES API — CLASSEMENT MAIL (Mode Standard)
 # =============================================================================
 
+def _extract_subject_keywords(subject):
+    """Extrait mots significatifs du sujet pour matching classement."""
+    if not subject:
+        return ''
+    cleaned = re.sub(r'^(Re|Fw|Fwd|Tr|FW|RE)\s*:\s*', '', subject, flags=re.IGNORECASE).strip()
+    user_name = (_db.get_setting('user_name') or '').lower()
+    user_last = user_name.split()[-1] if user_name else ''
+    _STOP = {'le','la','les','un','une','des','et','ou','de','du','en','est','pour','avec','sur',
+             'par','dans','au','aux','ce','son','sa','ses','mon','ma','mes','ton','ta','tes',
+             'votre','vos','notre','nos','qui','que','quoi','dont','bonjour','salut','merci'}
+    tokens = [t.lower() for t in re.split(r'[\s\-_/]+', cleaned) if t]
+    tokens = [t for t in tokens if len(t) >= 3 and t not in _STOP]
+    if user_last and len(user_last) >= 3:
+        tokens = [t for t in tokens if t != user_last]
+    return ' '.join(tokens[:6]) if tokens else ''
+
+
 @app.route('/api/suggest_folder/<path:message_id>')
 def api_suggest_folder(message_id):
     """
-    Suggestion hybride de dossier pour classer un mail.
-    1. Règle contact/domaine (3+ classements → auto)
-    2. IA fallback (Claude analyse expéditeur + objet + extrait → suggère)
+    Suggestion hybride de dossier — 8 tiers.
+    Tier 0: Thread matching / Tier 1: règle contact / Tier 1bis: keywords /
+    Tier 2: folder name matching / Tier 3: domaine / Tier 4: cross-contact /
+    Tier 5: momentum / Tier 6: IA top 3
     """
     graph = get_graph()
     if not graph:
@@ -1562,37 +1580,135 @@ def api_suggest_folder(message_id):
         contact_email = email.get('from_email', '')
         domain = contact_email.split('@')[-1] if '@' in contact_email else ''
         subject = email.get('subject', '')
+        body_preview = email.get('body_preview', '')[:300]
+        _subj_kw = _extract_subject_keywords(subject)
+        _body_kw = _extract_subject_keywords(body_preview) if body_preview else ''
 
-        # Étape 1 : Règle DB (historique contact/domaine)
-        suggestion = _db.get_folder_suggestion(contact_email, domain, subject)
-        if suggestion:
+        _suggestions = []
+        _existing_ids = set()
+
+        def _add(s):
+            if s and s.get('folder_id') and s['folder_id'] not in _existing_ids:
+                _suggestions.append(s)
+                _existing_ids.add(s['folder_id'])
+
+        # Tier 0 : Thread matching
+        thread_match = _db.get_folder_by_thread(contact_email, _subj_kw)
+        if thread_match:
+            _add({'source': 'thread', 'folder_id': thread_match['folder_id'],
+                  'folder_name': thread_match.get('folder_path', ''), 'confidence': 0.95,
+                  'reason': 'Même fil de discussion'})
+
+        # Tier 1 : Règle contact mono-dossier
+        if len(_suggestions) < 3:
+            rule = _db.get_folder_suggestion(contact_email, domain, subject_keywords=_subj_kw)
+            if rule:
+                _add({'source': 'rule', 'folder_id': rule['folder_id'],
+                      'folder_name': rule.get('folder_path', ''), 'confidence': 1.0,
+                      'reason': f"Règle auto ({rule.get('count', '?')} classements)"})
+
+        # Tier 1 bis : Keywords sujet (puis body fallback)
+        if len(_suggestions) < 3 and _subj_kw:
+            kw_match = _db.get_folder_by_keywords(contact_email, _subj_kw)
+            if not kw_match and _body_kw:
+                kw_match = _db.get_folder_by_keywords(contact_email, _body_kw)
+            if kw_match:
+                _add({'source': 'keywords', 'folder_id': kw_match['folder_id'],
+                      'folder_name': kw_match.get('folder_path', ''), 'confidence': 0.9,
+                      'reason': f"Contact + sujet ({kw_match.get('count','?')} similaires)"})
+
+        # Tier 2 : Nom de dossier dans sujet/body (feuilles > 5 chars, > 1 mot)
+        if len(_suggestions) < 3:
+            try:
+                folders = graph.get_all_folders()
+                _COMMON = {'divers', 'autre', 'autres', 'factures', 'facture', 'courrier',
+                           'inbox', 'archive', 'archives', 'boite de reception', 'envoyés', 'brouillons'}
+                _search_text = f"{subject} {body_preview}".lower()
+                _search_norm = unicodedata.normalize('NFD', _search_text)
+                _search_norm = ''.join(c for c in _search_norm if unicodedata.category(c) != 'Mn')
+                # Identifier les feuilles (dossiers sans enfants)
+                all_ids = {f.get('id') for f in folders}
+                parent_ids = {f.get('parentFolderId') for f in folders if f.get('parentFolderId')}
+                for f in folders:
+                    is_leaf = f.get('id') not in parent_ids
+                    if not is_leaf:
+                        continue
+                    name = f.get('name', '')
+                    clean_name = re.sub(r'^\d+[\.\-\s]+\s*', '', name).strip()
+                    if len(clean_name) <= 5 or ' ' not in clean_name:
+                        continue
+                    if clean_name.lower() in _COMMON:
+                        continue
+                    _name_norm = unicodedata.normalize('NFD', clean_name.lower())
+                    _name_norm = ''.join(c for c in _name_norm if unicodedata.category(c) != 'Mn')
+                    if _name_norm in _search_norm:
+                        _add({'source': 'folder_name', 'folder_id': f['id'],
+                              'folder_name': name, 'confidence': 0.8,
+                              'reason': 'Nom du dossier détecté dans le mail'})
+                    if len(_suggestions) >= 3:
+                        break
+            except Exception as e:
+                logger.warning(f"suggest_folder tier2: {e}")
+
+        # Tier 3 : Règle domaine (domaines publics exclus)
+        if len(_suggestions) < 3 and domain:
+            _PUBLIC = {'gmail.com','outlook.com','hotmail.com','hotmail.fr','yahoo.fr','yahoo.com',
+                       'orange.fr','free.fr','sfr.fr','laposte.net','live.fr','wanadoo.fr'}
+            if domain not in _PUBLIC:
+                domain_rule = _db.get_domain_folder_suggestion(domain)
+                if domain_rule:
+                    _add({'source': 'domain', 'folder_id': domain_rule['folder_id'],
+                          'folder_name': domain_rule.get('folder_path', ''), 'confidence': 0.6,
+                          'reason': f"Domaine {domain} ({domain_rule.get('contact_count','?')} contacts)"})
+
+        # Tier 4 : Cross-contact keywords
+        if len(_suggestions) < 3:
+            cross = _db.get_cross_contact_folder(_subj_kw or _body_kw)
+            if cross:
+                _add({'source': 'cross_contact', 'folder_id': cross['folder_id'],
+                      'folder_name': cross.get('folder_path', ''), 'confidence': 0.7,
+                      'reason': f"Sujet similaire ({cross.get('contact_count','?')} contacts)"})
+
+        # Tier 5 : Momentum (dernier classement dans les 30 min)
+        if len(_suggestions) < 3 and _classify_momentum:
+            _mom = _classify_momentum
+            if _mom.get('folder_id') and (time.time() - _mom.get('ts', 0)) < 1800:
+                _add({'source': 'momentum', 'folder_id': _mom['folder_id'],
+                      'folder_name': _mom.get('folder_name', ''), 'confidence': 0.5,
+                      'reason': 'Dossier récent'})
+
+        # Si on a des suggestions → retourner directement
+        if _suggestions:
             return jsonify({
-                "suggestion": suggestion,
-                "source": "rule",
+                "suggestion": _suggestions[0],
+                "suggestions": _suggestions,
+                "source": _suggestions[0]['source'],
             })
 
-        # Étape 2 : IA fallback
+        # Tier 6 : IA fallback (top 3)
         ai = get_ai()
         if not ai:
-            return jsonify({"suggestion": None, "source": "none"})
+            return jsonify({"suggestion": None, "suggestions": [], "source": "none"})
 
-        folders = graph.get_all_folders()
+        try:
+            folders = graph.get_all_folders()
+        except Exception:
+            folders = []
         folder_tree = '\n'.join([f"{'  ' * f.get('depth', 0)}{f.get('name', '')} ({f.get('id', '')})" for f in folders[:100]])
+        _contact_profile = _db.get_contact_profile(contact_email)
+        _recent = _db.get_recent_classifications(contact_email, domain, limit=10)
 
-        system_prompt = "Tu es un assistant de classement email. Suggère le dossier le plus pertinent."
-        user_prompt = (
-            f"Email de: {contact_email}\n"
-            f"Objet: {subject}\n"
-            f"Extrait: {email.get('body_preview', '')[:500]}\n\n"
-            f"Arborescence dossiers:\n{folder_tree}\n\n"
-            f"Retourne UNIQUEMENT l'ID du dossier le plus pertinent, sans explication."
-        )
+        result = ai.suggest_folder(contact_email, subject, body_preview, folders,
+                                   recent_classifications=_recent,
+                                   contact_profile=_contact_profile)
+        if result and result.get('folder_id'):
+            return jsonify({
+                "suggestion": result,
+                "suggestions": [result],
+                "source": "ai",
+            })
+        return jsonify({"suggestion": None, "suggestions": [], "source": "none"})
 
-        result = ai.suggest_folder(system_prompt, user_prompt)
-        return jsonify({
-            "suggestion": {"folder_id": result.strip()},
-            "source": "ai",
-        })
     except GraphAuthError:
         return jsonify({"error": "Token expiré", "auth_required": True}), 401
     except Exception as e:
@@ -1630,17 +1746,23 @@ def api_classify_email():
         # Sauvegarder en DB pour apprentissage
         new_id = move_result.get('new_id', '') or message_id
         email = graph.get_email_by_id(new_id)
+        folder_name = data.get('folder_name', '')  # Nom du dossier (fourni par le frontend)
         if email:
             contact_email = email.get('from_email', '')
             domain = contact_email.split('@')[-1] if '@' in contact_email else ''
+            subject_kw = _extract_subject_keywords(email.get('subject', ''))
             _db.save_classification(
-                entry_id=new_id,  # Utiliser l'ID actuel (après move)
-                folder_path='',
+                entry_id=new_id,
+                folder_path=folder_name,
                 folder_id=folder_id,
                 contact_email=contact_email,
                 domain=domain,
                 subject=email.get('subject', ''),
+                subject_keywords=subject_kw,
             )
+            # Momentum : mémoriser ce dossier pour les 30 prochaines minutes
+            global _classify_momentum
+            _classify_momentum = {'folder_id': folder_id, 'folder_name': folder_name, 'ts': time.time()}
 
         # Nettoyer les caches (mail classé = traité, plus besoin du prefetch ni de la réponse pré-générée)
         with _preemptive_lock:
@@ -1870,6 +1992,146 @@ def api_update_echeance(echeance_id):
         return jsonify({"error": _safe_err(e)}), 500
 
 
+@app.route('/api/echeances/pre_scan', methods=['POST'])
+def api_echeances_pre_scan():
+    """Pre-scan echéances pendant la relecture (avant envoi).
+    Lance le scan Claude en background, stocke le résultat dans _echeance_pre_scan_cache.
+    Le post-envoi réutilisera ce résultat au lieu de relancer un scan."""
+    if _db.get_setting('echeances_enabled', '1') == '0':
+        return jsonify({"ok": True, "echeances": []})
+    data = request.get_json(force=True) or {}
+    body = (data.get('body') or '').strip()
+    to_email = (data.get('to') or '').strip().lower()
+    subject = (data.get('subject') or '').strip()
+    if not body or body.startswith('Erreur'):
+        return jsonify({"ok": True, "echeances": []})
+
+    # Pre-filtre heuristique : skip si aucun pattern d'echeance detecte
+    _body_clean = re.sub(r'<[^>]+>', '', body).strip()
+    if not _has_echeance_pattern(_body_clean):
+        return jsonify({"ok": True, "echeances": [], "skipped": "no_pattern"})
+
+    # Cle de cache basee sur le contenu (hash du body tronque)
+    scan_key = hashlib.md5((to_email + '|' + subject + '|' + _body_clean[:500]).encode()).hexdigest()
+    existing = _echeance_pre_scan_cache.get(scan_key)
+    if existing and existing.get('status') in ('running', 'done'):
+        return jsonify({"ok": True, "scan_key": scan_key})
+
+    _trim_dict_cache(_echeance_pre_scan_cache, _MAX_PRE_SCAN_CACHE)
+    _echeance_pre_scan_cache[scan_key] = {
+        'status': 'running', 'echeances': [], 'ts': time.time(),
+        'body': body, 'to': to_email, 'subject': subject
+    }
+
+    def _do_pre_scan():
+        try:
+            _builder = _get_prompt_builder()
+            if not _builder:
+                _echeance_pre_scan_cache[scan_key] = {
+                    'status': 'done', 'echeances': [], 'ts': time.time()}
+                return
+            mails_to_scan = [{
+                'entry_id': '',
+                'direction': 'sent',
+                'subject': subject,
+                'body': body,
+                'correspondent': to_email,
+                'correspondent_name': '',
+                'date': datetime.now().strftime("%Y-%m-%d")
+            }]
+            echeances = _builder.scan_echeances_batch(mails_to_scan)
+            _echeance_pre_scan_cache[scan_key] = {
+                'status': 'done', 'echeances': echeances or [], 'ts': time.time(),
+                'body': body, 'to': to_email, 'subject': subject
+            }
+            print(f"[echeances] Pre-scan termine: {len(echeances or [])} echeance(s)", flush=True)
+        except Exception as e:
+            print(f"[echeances] Erreur pre-scan: {e}", flush=True)
+            _echeance_pre_scan_cache[scan_key] = {
+                'status': 'done', 'echeances': [], 'ts': time.time()}
+
+    threading.Thread(target=_do_pre_scan, daemon=True).start()
+
+    # Nettoyage entrees > 120s
+    _now = time.time()
+    stale = [k for k, v in list(_echeance_pre_scan_cache.items())
+             if (_now - v.get('ts', 0)) > 120]
+    for k in stale:
+        _echeance_pre_scan_cache.pop(k, None)
+
+    return jsonify({"ok": True, "scan_key": scan_key})
+
+
+@app.route('/api/echeances/purge_archives', methods=['POST'])
+def api_echeances_purge_archives():
+    """Supprime définitivement toutes les échéances archivées (terminées + annulées)."""
+    try:
+        deleted = _db.purge_archived_echeances()
+        print(f"[echeances] Archive purgee: {deleted} echéance(s) supprimee(s)", flush=True)
+        return jsonify({"ok": True, "deleted": deleted})
+    except Exception as e:
+        print(f"[echeances] Erreur purge: {e}", flush=True)
+        return jsonify({"ok": False, "error": _safe_err(e)})
+
+
+@app.route('/api/echeances/search_relance_mail', methods=['GET'])
+def api_echeances_search_relance_mail():
+    """Recherche un mail de relance dans les threads par sujet + correspondant."""
+    subject = request.args.get('subject', '').strip()
+    correspondant = request.args.get('correspondant', '').strip().lower()
+    if not subject:
+        return jsonify({"body": None})
+    threads = _db.get_threads_for_correspondent(correspondant) if correspondant else []
+    best = None
+    subject_lower = subject.lower()
+    for t in threads:
+        if t.get('direction') != 'sent':
+            continue
+        t_subject = (t.get('subject') or '').lower()
+        if subject_lower in t_subject or t_subject in subject_lower:
+            if best is None or (t.get('created_at', '') > best.get('created_at', '')):
+                best = t
+    if best:
+        return jsonify({
+            "body": (best.get('body') or '')[:3000],
+            "subject": best.get('subject', ''),
+            "to": best.get('correspondent', ''),
+            "date": best.get('created_at', '')[:10]
+        })
+    return jsonify({"body": None})
+
+
+@app.route('/api/echeances/check_sender', methods=['GET'])
+def api_echeances_check_sender():
+    """Vérifie si l'expéditeur d'un mail a des échéances actives liées."""
+    sender = request.args.get('email', '').strip().lower()
+    mail_subject = request.args.get('subject', '').strip()
+    if not sender:
+        return jsonify({"echeances": []})
+    try:
+        all_active = _db.get_echeances(statut='active')
+    except Exception:
+        return jsonify({"echeances": []})
+    subject_clean = re.sub(r'^(Re|Fw|Fwd|Tr)\s*:\s*', '', mail_subject, flags=re.IGNORECASE).lower()
+    subject_words = {w for w in subject_clean.split() if len(w) >= 3}
+    matched = []
+    for ech in all_active:
+        ech_corr = (ech.get('correspondant') or '').strip().lower()
+        if ech_corr != sender:
+            continue
+        desc_text = (ech.get('description') or '') + ' ' + (ech.get('original_subject') or '')
+        desc_words = {w.lower() for w in desc_text.split() if len(w) >= 3}
+        common = subject_words & desc_words
+        if len(common) >= 2:
+            matched.append({
+                'id': ech['id'],
+                'description': ech.get('description', ''),
+                'date_echeance': ech.get('date_echeance', ''),
+                'nb_relances': ech.get('nb_relances', 0)
+            })
+    return jsonify({"echeances": matched})
+
+
 # =============================================================================
 # ROUTES API — RECHERCHE CONTEXTE (Mode Standard — Graph API)
 # =============================================================================
@@ -1915,6 +2177,99 @@ def api_search():
 
 _last_generate_times = {}   # {message_id: timestamp} — rate limiting par mail (pas global)
 _last_generate_lock = threading.Lock()
+
+# --- Classement mail ---------------------------------------------------------
+_classify_momentum = {}  # {'folder_name': str, 'folder_id': str, 'ts': float}
+
+# --- Échéances (pre-filtre heuristique, $0) ----------------------------------
+import hashlib
+_echeance_pre_scan_cache = {}   # scan_key → {'status': 'running'|'done', 'echeances': [...], 'ts': float}
+_ECHEANCE_DATE_PATTERNS = re.compile(
+    r'(?:'
+    r'\d{1,2}[/\-\.]\d{1,2}(?:[/\-\.]\d{2,4})?'
+    r'|\d{1,2}\s+(?:janvier|fevrier|f[eé]vrier|mars|avril|mai|juin|juillet|aout|ao[uû]t|septembre|octobre|novembre|decembre|d[eé]cembre)'
+    r'|(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)(?:\s+prochain)?'
+    r'|demain|apres[- ]demain'
+    r'|(?:la\s+)?semaine\s+prochaine|fin\s+de\s+(?:semaine|mois)|debut\s+(?:de\s+)?(?:semaine|mois)'
+    r'|sous\s+\d+[hjms]|sous\s+\d+\s+jours?|dans\s+\d+\s+(?:jours?|semaines?|mois)'
+    r'|(?:T[1-4]|premier|deuxieme|troisieme|quatrieme)\s+trimestre'
+    r')', re.IGNORECASE
+)
+_ECHEANCE_REFERENCE_WORDS = re.compile(
+    r'(?:lors\s+de|suite\s+[aà]|comme\s+convenu|comme\s+[eé]voqu[eé]|en\s+date\s+du|re[cç]u\s+le|envoy[eé]\s+le|sign[eé]\s+le|depuis\s+le)',
+    re.IGNORECASE
+)
+_ECHEANCE_ENGAGEMENT_WORDS = re.compile(
+    r'(?:avant\s+le|d[\'\u2019]ici\s+le|au\s+plus\s+tard|pour\s+le|je\s+reviens|je\s+vous\s+tiens|je\s+vous\s+confirme|merci\s+de|pourriez[- ]vous|pri[eè]re\s+de|rendez[- ]vous|r[eé]union\s+pr[eé]vue|appel\s+pr[eé]vu|date\s+limite|deadline|expire\s+le|pr[eé]vu\s+le|planifi[eé]\s+le|programm[eé]\s+le|sous\s+\d+|dans\s+les\s+meilleurs\s+d[eé]lais)',
+    re.IGNORECASE
+)
+_MAX_PRE_SCAN_CACHE = 30  # limite cache pre-scan echéances
+
+
+def _trim_dict_cache(d, max_size):
+    """Limite la taille d'un dict cache en supprimant les plus anciennes entrees."""
+    if len(d) > max_size:
+        keys_to_remove = list(d.copy().keys())[:len(d) - max_size]
+        for k in keys_to_remove:
+            d.pop(k, None)
+
+
+def _has_echeance_pattern(text):
+    """Pre-filtre heuristique : detecte si un texte contient potentiellement une echeance.
+    Retourne True si une date FUTURE + un contexte d'engagement sont detectes ($0, aucun appel IA)."""
+    if not text:
+        return False
+    # Etape 1 : chercher une date
+    if not _ECHEANCE_DATE_PATTERNS.search(text):
+        return False
+    # Etape 2 : verifier que ce n'est pas une reference au passe
+    for date_match in _ECHEANCE_DATE_PATTERNS.finditer(text):
+        start = max(0, date_match.start() - 100)
+        context_before = text[start:date_match.start()]
+        if _ECHEANCE_REFERENCE_WORDS.search(context_before):
+            continue  # Date de reference passee, ignorer
+        # Etape 3 : verifier qu'il y a un contexte d'engagement dans les 200 chars autour
+        context_around = text[max(0, date_match.start()-100):min(len(text), date_match.end()+100)]
+        if _ECHEANCE_ENGAGEMENT_WORDS.search(context_around):
+            return True
+    return False
+
+
+def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids=None):
+    """Annule auto les echeances actives d'un correspondant si le correspondant a REPONDU (mail recu).
+    NE SE DECLENCHE PAS quand l'utilisateur ENVOIE un mail — seulement quand il REPOND a un mail recu."""
+    exclude_ids = exclude_ids or set()
+    from_email = ''
+    if cached_email:
+        from_email = (cached_email.get('from', '') or '').strip().lower()
+    if not from_email:
+        return  # Nouveau mail sans mail recu = pas d'auto-annulation
+
+    try:
+        all_echeances = _db.get_echeances(statut='active')
+    except Exception:
+        return
+
+    subject_clean = re.sub(r'^(Re|Fw|Fwd|Tr)\s*:\s*', '', subject or '', flags=re.IGNORECASE).lower()
+    subject_words = {w for w in subject_clean.split() if len(w) >= 4}
+
+    for ech in all_echeances:
+        if ech.get('id') in exclude_ids:
+            continue
+        ech_corr = (ech.get('correspondant', '') or '').strip().lower()
+        if ech_corr != from_email:
+            continue
+        desc_text = (ech.get('description') or '') + ' ' + (ech.get('original_subject') or '')
+        desc_words = {w.lower() for w in desc_text.split() if len(w) >= 4}
+        common = subject_words & desc_words
+        if len(common) >= 3:
+            try:
+                _db.update_echeance(ech['id'], {'statut': 'terminee'})
+                print(f"[echeances] Auto-terminee: '{(ech.get('description') or '')[:50]}' "
+                      f"(correspondant a repondu, mots communs: {common})", flush=True)
+            except Exception:
+                pass
+
 
 # --- Auto-apprentissage & recalibrage ----------------------------------------
 _sends_since_recal = 0
@@ -2212,6 +2567,44 @@ def generate_reply():
             except Exception as e:
                 logger.warning(f"Erreur contexte C: {e}")
 
+    # -- Bloc F : echéances actives avec ce correspondant --
+    _ech_correspondent = correspondent or to_email
+    if _ech_correspondent:
+        try:
+            echeances_actives = _db.get_echeances_for_contact(_ech_correspondent)
+            if echeances_actives:
+                ech_lines = []
+                for ech in echeances_actives:
+                    date_e = ech.get('date_echeance', '')
+                    desc = ech.get('description', '')
+                    etype = ech.get('type', '')
+                    try:
+                        days_left = (datetime.strptime(date_e, "%Y-%m-%d") - datetime.now()).days
+                        if days_left < 0:
+                            statut_str = "DEPASSEE"
+                        elif days_left == 0:
+                            statut_str = "AUJOURD'HUI"
+                        elif days_left <= 3:
+                            statut_str = f"dans {days_left} jour{'s' if days_left > 1 else ''}"
+                        else:
+                            statut_str = f"dans {days_left} jours"
+                    except Exception:
+                        statut_str = ""
+                    ech_lines.append(f"- [{etype}] Echeance {date_e} : \"{desc}\" — {statut_str}")
+                ech_block = "\n".join(ech_lines)
+                brief = (brief or "") + f"""
+
+[ECHEANCES ACTIVES AVEC CE CORRESPONDANT]
+{ech_block}
+
+INSTRUCTIONS ECHEANCES :
+- Si le mail est une RELANCE : redige un rappel courtois mais ferme, en citant la date d'engagement initiale.
+- Si l'utilisateur a un engagement depasse : propose une formulation d'excuse/explication naturelle.
+- Sinon : mentionne l'echeance si le contexte s'y prete, sans forcer."""
+                print(f"[generate] Bloc F: {len(echeances_actives)} echeance(s) injectee(s) pour {_ech_correspondent}", flush=True)
+        except Exception as _e:
+            logger.warning(f"Erreur Bloc F echéances: {_e}")
+
     # Construire le prompt via ClaudeAssistant._build_prompt()
     if builder:
         try:
@@ -2365,6 +2758,73 @@ def generate_reply():
                 closing_html += f"\n{signature}"
             yield f"data: {json.dumps({'chunk': closing_html})}\n\n"
             full_text.append(closing_html)
+
+            # -- GARDE POST-GÉNÉRATION (Python pur, <5ms) --
+            _pg_warnings = []
+            _final_text = ''.join(full_text)
+            if _final_text and contact_profile and reply_mode != 'forward':
+                _cp = contact_profile or {}
+                _register = _cp.get('register', '')
+                _exp_greeting = _cp.get('greeting', '')
+                _exp_closing = _cp.get('closing', '')
+                _first_line = _final_text.split('\n')[0].strip() if _final_text else ''
+                _last_lines = [l.strip() for l in _final_text.split('\n') if l.strip()]
+
+                # 1. Registre tu/vous
+                _tu = len(re.findall(r"\b(tu |te |ton |ta |tes |toi |stp\b|peux-tu|s'il te)", _final_text.lower()))
+                _vz = len(re.findall(r"\b(vous |votre |vos |svp\b|pourriez-vous|s'il vous)", _final_text.lower()))
+                if _register == 'vouvoiement' and _tu > _vz and _tu >= 2:
+                    _pg_warnings.append('register_mismatch')
+                    print(f"[garde-post] REGISTRE: vouvoiement attendu mais tu({_tu}) > vous({_vz})", flush=True)
+                elif _register == 'tutoiement' and _vz > _tu and _vz >= 2:
+                    _pg_warnings.append('register_mismatch')
+                    print(f"[garde-post] REGISTRE: tutoiement attendu mais vous({_vz}) > tu({_tu})", flush=True)
+
+                # 2. Nom utilisateur dans le greeting
+                try:
+                    _uname = _db.get_setting('user_name') or ''
+                    _ulast = _uname.split()[-1].lower() if _uname else ''
+                    if _ulast and len(_ulast) >= 3 and _ulast in _first_line.lower():
+                        _pg_warnings.append('greeting_self_name')
+                        print(f"[garde-post] GREETING contient nom utilisateur: '{_first_line}'", flush=True)
+                except Exception:
+                    pass
+
+                # 2b. Greeting attendu vs reçu
+                if _exp_greeting and _first_line:
+                    _eg = _exp_greeting.rstrip(',').strip().lower()
+                    _fg = _first_line.rstrip(',').strip().lower()
+                    if _eg and _fg != _eg and not _fg.startswith(_eg):
+                        _pg_warnings.append('greeting_mismatch')
+                        print(f"[garde-post] GREETING: attendu '{_exp_greeting}' reçu '{_first_line}'", flush=True)
+
+                # 2c. Closing attendu vs reçu
+                _last_line = _last_lines[-1] if _last_lines else ''
+                if _exp_closing and _last_line:
+                    _ec = _exp_closing.rstrip(',').strip().lower()
+                    _lc = _last_line.rstrip(',').strip().lower()
+                    if _ec and _lc != _ec and _ec not in _lc:
+                        _pg_warnings.append('closing_mismatch')
+                        print(f"[garde-post] CLOSING: attendu '{_exp_closing}' reçu '{_last_line}'", flush=True)
+
+                # 3. Marqueurs IA
+                _ai_markers = ["en tant qu'assistant", "en tant qu'ia", "je n'ai pas accès",
+                               "je suis un modèle", "je ne peux pas accéder"]
+                for _am in _ai_markers:
+                    if _am in _final_text.lower():
+                        _pg_warnings.append('ai_marker')
+                        print(f"[garde-post] MARQUEUR IA détecté: '{_am}'", flush=True)
+                        break
+
+                # 4. Mail trop court (<30 chars hors greeting/closing)
+                _body_only = '\n'.join(_final_text.split('\n')[1:-1]).strip() \
+                    if len(_final_text.split('\n')) > 2 else _final_text
+                if len(_body_only) < 30 and reply_mode != 'new':
+                    _pg_warnings.append('too_short')
+                    print(f"[garde-post] MAIL trop court: {len(_body_only)} chars", flush=True)
+
+            if _pg_warnings:
+                yield f"data: {json.dumps({'warnings': _pg_warnings})}\n\n"
 
             # Stocker le texte complet (greeting + corps + closing) pour le diff
             if message_id:
