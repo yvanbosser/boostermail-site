@@ -314,7 +314,6 @@ def api_status():
 @app.route('/api/detected_platform')
 def api_detected_platform():
     """Detecte la plateforme Outlook via les processus Windows."""
-    import subprocess
     platform = 'unknown'
     try:
         result = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq olk.exe', '/NH'],
@@ -1481,6 +1480,10 @@ def api_save_setting():
     if key not in _ALLOWED_SETTINGS:
         return jsonify({"error": f"Clé '{key}' non autorisée"}), 403
     _db.save_setting(key, value)
+    # Invalider le cache arborescence Windows si le dossier racine PJ change
+    if key == 'pj_root_folder':
+        global _windows_folders_cache
+        _windows_folders_cache = None
     return jsonify({"status": "ok"})
 
 
@@ -2374,7 +2377,7 @@ def api_suggest_pj_folder(email_id):
 
     folders = _get_windows_folders_cached()
     if not folders:
-        return jsonify({"status": "no_folders"})
+        return jsonify({"status": "no_folders", "attachments": [], "folders": []})
 
     # Recuperer les PJ depuis Graph
     try:
@@ -3973,7 +3976,6 @@ def _recalibrate_style():
         with open(style_path, "r", encoding="utf-8") as f:
             current_profile = f.read()
         try:
-            import shutil
             shutil.copy2(style_path, backup_path)
         except Exception as e:
             logger.warning(f"[recalibrage] Erreur backup: {e}")
