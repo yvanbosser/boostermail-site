@@ -104,8 +104,12 @@ try {
         _listenParentMessages();
     }
 
-    // (O13) Vérifier le speculative cache dans les DEUX modes (Office.js ET standalone)
-    _checkSpeculativeCache();
+    // (O13) Vérifier le speculative cache — seulement en mode non-standalone
+    // (en mode standalone, _checkSpeculativeCache est appelé dans _loadMailBodyStandalone
+    //  après la récupération du message_id correct depuis /api/current_mail)
+    if (!_isStandaloneMode) {
+        _checkSpeculativeCache();
+    }
 
     // Bouton fermer
     document.getElementById('btnClose').addEventListener('click', function() {
@@ -583,12 +587,14 @@ function _loadMailBody() {
                 document.getElementById('mailBody').innerHTML = sanitized;
                 // Stocker pour le post-envoi (save_to_thread direction=received)
                 _receivedBody = data.body || data.html_body || '';
+                _mailBodyForGeneration = data.body || data.html_body || '';
             } else if (data.body) {
                 // Convertir texte brut en paragraphes
                 var bodyHtml = data.body.split(/\n\n+/).map(function(p) {
                     return '<p>' + _escapeHtml(p).replace(/\n/g, '<br>') + '</p>';
                 }).join('');
                 document.getElementById('mailBody').innerHTML = bodyHtml;
+                _mailBodyForGeneration = data.body || '';
             } else {
                 document.getElementById('mailBody').innerHTML =
                     '<p style="color:#999;">Contenu non disponible.</p>';
@@ -778,6 +784,13 @@ function generateReply() {
         return;
     }
 
+    // Destinataire obligatoire en mode nouveau mail
+    if (_mode === 'new' && !document.getElementById('fieldTo').value.trim()) {
+        alert('Le champ À est obligatoire pour un nouveau mail.');
+        document.getElementById('fieldTo').focus();
+        return;
+    }
+
     // Sauvegarder l'état actuel pour undo
     if (editor.innerHTML.trim()) {
         _pushUndo(editor.innerHTML);
@@ -812,18 +825,37 @@ function generateReply() {
         body: body,
     }).then(function(response) {
         /* #14 : verifier que la reponse est OK */
-        if (!response.ok) { document.getElementById('headerStatus').textContent = 'Erreur serveur (' + response.status + ')'; _onGenerationDone(); return; }
+        if (!response.ok) {
+            response.json().then(function(errData) {
+                var msg = (errData && errData.error) ? errData.error : ('Erreur serveur (' + response.status + ')');
+                document.getElementById('headerStatus').textContent = msg;
+            }).catch(function() {
+                document.getElementById('headerStatus').textContent = 'Erreur serveur (' + response.status + ')';
+            });
+            _onGenerationDone();
+            return;
+        }
         var reader = response.body.getReader();
         var decoder = new TextDecoder();
+        var _lineBuffer = ''; // Buffer anti-fragmentation : une ligne SSE peut être coupée par TCP
 
         function read() {
             reader.read().then(function(result) {
                 if (result.done) {
+                    // fix #7 : vider le buffer restant (dernier chunk sans \n final)
+                    if (_lineBuffer.startsWith('data: ')) {
+                        try {
+                            var last = JSON.parse(_lineBuffer.substring(6));
+                            if (last.chunk) editor.insertAdjacentText('beforeend', last.chunk);
+                        } catch(e) {}
+                    }
                     _onGenerationDone();
                     return;
                 }
-                var text = decoder.decode(result.value, { stream: true });
-                var lines = text.split('\n');
+                // Accumuler dans le buffer pour reconstituer les lignes complètes
+                _lineBuffer += decoder.decode(result.value, { stream: true });
+                var lines = _lineBuffer.split('\n');
+                _lineBuffer = lines.pop(); // Garder la ligne incomplète pour le prochain chunk
                 lines.forEach(function(line) {
                     if (line.startsWith('data: ')) {
                         try {
@@ -840,10 +872,13 @@ function generateReply() {
                             if (data.error) {
                                 spinner.classList.remove('active');
                                 editor.innerHTML = '<p style="color:#c00;">' + _escapeHtml(data.error) + '</p>';
+                                if (data.auth_required) {
+                                    document.getElementById('headerStatus').textContent = 'Session expiree — reconnectez-vous';
+                                }
                                 _onGenerationDone();
                                 return;
                             }
-                        } catch (e) { /* ignore parse errors on partial chunks */ }
+                        } catch (e) { /* ignore parse errors */ }
                     }
                 });
                 read();
@@ -917,22 +952,42 @@ function refineReply() {
             subject: _subject,
             mode: _mode,
             to_email: document.getElementById('fieldTo').value.trim(),
+            body: _mailBodyForGeneration,
         }),
     }).then(function(response) {
         /* #14 : verifier que la reponse est OK */
-        if (!response.ok) { document.getElementById('headerStatus').textContent = 'Erreur serveur (' + response.status + ')'; _onGenerationDone(); return; }
+        if (!response.ok) {
+            response.json().then(function(errData) {
+                var msg = (errData && errData.error) ? errData.error : ('Erreur serveur (' + response.status + ')');
+                document.getElementById('headerStatus').textContent = msg;
+            }).catch(function() {
+                document.getElementById('headerStatus').textContent = 'Erreur serveur (' + response.status + ')';
+            });
+            _onGenerationDone();
+            return;
+        }
         var reader = response.body.getReader();
         var decoder = new TextDecoder();
+        var _lineBufferRefine = ''; // Buffer anti-fragmentation refine
 
         function read() {
             reader.read().then(function(result) {
                 if (result.done) {
+                    // fix #7 : vider le buffer restant
+                    if (_lineBufferRefine.startsWith('data: ')) {
+                        try {
+                            var last = JSON.parse(_lineBufferRefine.substring(6));
+                            if (last.chunk) editor.insertAdjacentText('beforeend', last.chunk);
+                        } catch(e) {}
+                    }
                     _onGenerationDone();
                     document.getElementById('refineInput').value = '';
                     return;
                 }
-                var text = decoder.decode(result.value, { stream: true });
-                text.split('\n').forEach(function(line) {
+                _lineBufferRefine += decoder.decode(result.value, { stream: true });
+                var lines = _lineBufferRefine.split('\n');
+                _lineBufferRefine = lines.pop();
+                lines.forEach(function(line) {
                     if (line.startsWith('data: ')) {
                         try {
                             var data = JSON.parse(line.substring(6));
@@ -1795,17 +1850,26 @@ function _loadMailBodyStandalone() {
  * Appelé au chargement du dialog (standalone ET Office.js).
  */
 function _checkSpeculativeCache() {
-    var url = '/api/prefetch_status';
+    var url = _backendUrl + '/api/prefetch_status';  // fix #6 : utiliser _backendUrl comme tous les autres fetch
     if (_messageId) url += '?message_id=' + encodeURIComponent(_messageId);
 
     fetch(url)
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.speculative_ready) {
-                // La réponse est prête — afficher dans l'éditeur
-                console.log('[dialog] Speculative cache ready — affichage instantane');
-                document.getElementById('headerStatus').textContent = 'Reponse pre-generee disponible';
-                // TODO : charger la réponse spéculative depuis le backend
+                // La réponse est prête — attendre que le body soit chargé avant de déclencher
+                // (le fetch /api/email_body est asynchrone : _mailBodyForGeneration peut être vide)
+                console.log('[dialog] Speculative cache ready — attente body...');
+                var _waitBody = function(attempts) {
+                    if (_mailBodyForGeneration || _mode === 'new' || attempts <= 0) {
+                        console.log('[dialog] Declenchement automatique (body=' + _mailBodyForGeneration.length + ' chars)');
+                        generateReply();
+                    } else {
+                        setTimeout(function() { _waitBody(attempts - 1); }, 150);
+                    }
+                };
+                // 20 × 150ms = 3s max d'attente du body avant de déclencher quand même
+                _waitBody(20);
             } else if (data.status === 'done') {
                 // Prefetch done mais pas de spéculative — contexte prêt
                 console.log('[dialog] Prefetch done (A=' + data.a_count + ' B=' + data.b_count + ' C=' + data.c_count + ')');

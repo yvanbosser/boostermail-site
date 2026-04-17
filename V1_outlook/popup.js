@@ -57,25 +57,33 @@ var _companionAvailable = false;
 // DETECTION MODE — Avec API / Sans API (decision 09/04/2026)
 // ============================================================================
 
-function _checkModeBeforeDisplay() {
-    // Verifier si le Mode Standard (Graph API) est actif
+function _checkModeBeforeDisplay(attempt) {
+    attempt = attempt || 1;
+    var maxAttempts = 8;   // 8 × 800ms ≈ 6s de patience au démarrage Flask
+    var retryDelay = 800;
+
     fetch(_backendUrl + '/api/status')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data.authenticated) {
-                // Pas authentifie → lancer l'onboarding
                 _checkSetup();
             } else {
-                // Authentifie → initialiser le mode consommateur (SSE)
                 _initConsumerMode();
-                // Verifier si le bouton Outlook a ete active (etape 3)
                 _checkSetup();
             }
         })
         .catch(function() {
-            // Backend non disponible → ne pas afficher
-            document.body.innerHTML = '';
-            console.log('[popup] Backend non disponible.');
+            if (attempt < maxAttempts) {
+                console.log('[popup] Backend non disponible, retry ' + attempt + '/' + maxAttempts);
+                setTimeout(function() { _checkModeBeforeDisplay(attempt + 1); }, retryDelay);
+            } else {
+                document.body.innerHTML =
+                    '<div style="padding:20px;color:#c00;font-family:sans-serif;font-size:13px;">'
+                    + 'EasyMail : le serveur ne repond pas.<br>'
+                    + 'Verifiez que start_v1.bat est lance, puis rouvrez ce panneau.'
+                    + '</div>';
+                console.log('[popup] Backend indisponible apres ' + maxAttempts + ' tentatives.');
+            }
         });
 }
 
@@ -128,6 +136,9 @@ function _waitForOffice() {
 }
 
 function _initTaskpaneMode() {
+    // Démarrer le poll warmup (barre de progression au lancement)
+    _startWarmupProgressPoll();
+
     // Charger le mail courant
     _updateFromOfficeJs();
 
@@ -199,6 +210,9 @@ function _updateFromOfficeJs() {
 // ============================================================================
 
 function _initConsumerMode() {
+    // Démarrer le poll warmup (barre de progression au lancement)
+    _startWarmupProgressPoll();
+
     // Ouvrir SSE pour recevoir les events en temps reel
     _connectSSE();
 
@@ -465,6 +479,62 @@ function _updatePrefetchBar(data) {
         bar.textContent = 'Chargement contexte... A=' + (data.a || 0) + ' B=' + (data.b || 0) + ' C=' + (data.c || 0);
         bar.className = 'tp-prefetch active';
     }
+}
+
+// ============================================================================
+// WARMUP PROGRESS — poll /api/warmup_inbox/progress au démarrage
+// ============================================================================
+
+var _warmupPollTimer = null;
+
+function _startWarmupProgressPoll() {
+    var bar = document.getElementById('prefetchBar');
+    if (!bar) return;
+
+    bar.textContent = 'Demarrage EasyMail...';
+    bar.className = 'tp-prefetch active';
+
+    var maxPolls = 120;   // 120 × 1s = 2min max
+    var pollCount = 0;
+
+    function _poll() {
+        pollCount++;
+        if (pollCount > maxPolls) {
+            bar.className = 'tp-prefetch';
+            return;
+        }
+        fetch(_backendUrl + '/api/warmup_inbox/progress')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'done') {
+                    bar.textContent = 'EasyMail pret';
+                    bar.className = 'tp-prefetch active';
+                    setTimeout(function() { bar.className = 'tp-prefetch'; }, 2000);
+                    _warmupPollTimer = null;
+                } else if (data.status === 'error') {
+                    bar.textContent = 'Warmup echoue — reconnexion dans 60s';
+                    bar.className = 'tp-prefetch active';
+                    setTimeout(function() { bar.className = 'tp-prefetch'; }, 5000);
+                    _warmupPollTimer = null;
+                } else if (data.status === 'running') {
+                    var total = data.total || '?';
+                    var loaded = data.loaded || 0;
+                    var subj = data.current_subject ? (' — ' + data.current_subject.substring(0, 30)) : '';
+                    bar.textContent = 'Chargement ' + loaded + '/' + total + subj;
+                    bar.className = 'tp-prefetch active';
+                    _warmupPollTimer = setTimeout(_poll, 800);
+                } else {
+                    // status idle ou inconnu — réessayer plus lentement
+                    _warmupPollTimer = setTimeout(_poll, 1500);
+                }
+            })
+            .catch(function() {
+                // Backend pas encore prêt — réessayer
+                _warmupPollTimer = setTimeout(_poll, 1500);
+            });
+    }
+
+    _poll();
 }
 
 // ============================================================================

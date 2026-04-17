@@ -1001,6 +1001,21 @@ class Database:
             return json.loads(row[0])
         return None
 
+    def get_recent_email_cache(self, limit=10):
+        """Retourne les N emails les plus récents du cache DB (pour pré-charger _warmup_cache au démarrage)."""
+        c = self._conn().cursor()
+        c.execute(
+            "SELECT entry_id, email_json FROM email_cache ORDER BY cached_at DESC LIMIT ?",
+            (limit,)
+        )
+        results = []
+        for row in c.fetchall():
+            try:
+                results.append((row[0], json.loads(row[1])))
+            except Exception:
+                pass
+        return results
+
     def save_email_cache(self, entry_id, email_data):
         """Sauvegarde un email dans le cache DB."""
         conn = self._conn()
