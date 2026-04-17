@@ -2078,7 +2078,10 @@ def generate_reply():
     keyword_context = []
     contact_profile = None
     recent_corrections = []
-    learning_priorities = []
+    try:
+        learning_priorities = _get_cached_learning_priorities() or []
+    except Exception:
+        learning_priorities = []
 
     graph = get_graph()
 
