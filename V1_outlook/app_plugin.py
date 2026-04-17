@@ -7,6 +7,7 @@ import os
 import sys
 import json
 import re
+import unicodedata
 import logging
 import threading
 import time
@@ -1915,6 +1916,20 @@ def api_search():
 _last_generate_times = {}   # {message_id: timestamp} — rate limiting par mail (pas global)
 _last_generate_lock = threading.Lock()
 
+# --- Auto-apprentissage & recalibrage ----------------------------------------
+_sends_since_recal = 0
+_has_correction_since_recal = False
+_learning_priorities_cache = {'time': 0, 'value': None}
+
+# --- Profils contacts ---------------------------------------------------------
+_new_profile_toast = None
+_new_profile_toast_lock = threading.Lock()
+_CONTACT_MIN_MAILS = 1
+_CONTACT_ANALYSIS_SCHEDULE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 50, 75, 100, 150, 200]
+_contacts_recalibrating = False
+_contacts_recalib_step = ''
+_contacts_recalib_progress = {'done': 0, 'total': 0}
+
 @app.route('/generate_reply', methods=['POST'])
 def generate_reply():
     """
@@ -2872,24 +2887,597 @@ def api_post_send():
         errors.append(f"save_metric: {e}")
         logger.error(f"Post-envoi save_metric: {e}")
 
-    # 4. Apprentissage : sauvegarder la correction si le texte a changé
+    # 4. Apprentissage : diff proposé/envoyé + recalibrage adaptatif
+    global _sends_since_recal, _has_correction_since_recal
+    _sends_since_recal += 1
+    _has_correction = False
+    _greeting_closing_changed = False
     try:
         with _proposed_lock:
             proposed = _last_proposed.pop(message_id, '')
         if proposed and final_reply and proposed.strip() != final_reply.strip():
+            # Catégoriser la correction (appel Claude léger)
+            try:
+                categories = _ai.categorize_correction(proposed, final_reply)
+            except Exception:
+                categories = ''
             _db.save_correction(
                 proposed=proposed[:5000],
                 sent=final_reply[:5000],
                 correspondent=correspondent,
             )
-            logger.info(f"Correction sauvegardée pour {correspondent}")
+            _has_correction = True
+            _has_correction_since_recal = True
+            logger.info(f"Correction sauvegardée pour {correspondent} ({categories})")
+
+            # Correction registre → mise à jour profil immédiate
+            if 'passer_tutoiement' in (categories or ''):
+                _contact = correspondent.strip().lower()
+                if _contact:
+                    _profile = _db.get_contact_profile(_contact)
+                    if _profile:
+                        try:
+                            _pdata = (json.loads(_profile.get('profile_json', '{}'))
+                                      if isinstance(_profile.get('profile_json'), str)
+                                      else (_profile.get('profile_json') or {}))
+                            if _pdata.get('register') != 'tutoiement':
+                                _pdata['register'] = 'tutoiement'
+                                _db.save_contact_profile(_contact, _pdata)
+                                logger.info(f"[learning] {_contact} → forcé tutoiement")
+                        except Exception:
+                            pass
+
+            # Correction greeting/closing → forcer re-analyse contact
+            if 'modifier_ouverture' in (categories or '') or 'modifier_cloture' in (categories or ''):
+                _greeting_closing_changed = True
+            else:
+                prop_lines = [l.strip() for l in proposed.strip().split('\n') if l.strip()]
+                sent_lines = [l.strip() for l in final_reply.strip().split('\n') if l.strip()]
+                if prop_lines and sent_lines and prop_lines[0] != sent_lines[0]:
+                    _greeting_closing_changed = True
+                if prop_lines and sent_lines and prop_lines[-1] != sent_lines[-1]:
+                    _greeting_closing_changed = True
     except Exception as e:
         errors.append(f"save_correction: {e}")
         logger.error(f"Post-envoi save_correction: {e}")
 
+    # 5. Thread apprentissage BG : recalibrage + profil contact
+    def _post_send_learning():
+        # Recalibrage adaptatif (seuils 10/20/50)
+        try:
+            global _sends_since_recal, _has_correction_since_recal
+            _correction_total = _db.count_corrections()
+            _converged = _db.get_setting('writing_converged') == '1'
+            if _correction_total < 30:
+                _recal_threshold = 10
+            elif not _converged:
+                _recal_threshold = 20
+            else:
+                _recal_threshold = 50
+            if _sends_since_recal >= _recal_threshold and _has_correction_since_recal:
+                logger.info(f"[recalibrage] Trigger: {_sends_since_recal} envois >= {_recal_threshold}")
+                _recalibrate_style()
+                _sends_since_recal = 0
+                _has_correction_since_recal = False
+        except Exception as e:
+            logger.error(f"[recalibrage] Erreur: {e}")
+
+        # Profil contact
+        contact_email = correspondent.strip().lower()
+        if contact_email:
+            try:
+                if _greeting_closing_changed:
+                    existing = _db.get_contact_profile(contact_email)
+                    if existing:
+                        existing['sample_count'] = 0
+                        _db.save_contact_profile(contact_email, existing)
+                    logger.info(f"[learning] TRIGGER greeting/closing → re-analyse {contact_email}")
+                _maybe_analyze_contact(contact_email)
+            except Exception as e:
+                logger.error(f"[learning] Erreur: {e}")
+
+    threading.Thread(target=_post_send_learning, daemon=True).start()
+
     return jsonify({
         "status": "ok",
         "errors": errors if errors else None,
+    })
+
+
+# =============================================================================
+# AUTO-APPRENTISSAGE : STYLE & RECALIBRAGE
+# =============================================================================
+
+def _recalibrate_style():
+    """Recalibrage du style : scoring + enrichissement sections A/B/C."""
+    logger.info("[recalibrage] Recalibrage en cours...")
+
+    corrections = _db.get_recent_corrections(limit=50)
+    if not corrections:
+        logger.info("[recalibrage] Aucune correction disponible, abandon")
+        return
+
+    style_path = os.path.join(EASYMAIL_DIR, "style_profile.txt")
+    backup_path = os.path.join(EASYMAIL_DIR, "style_profile.bak")
+    current_profile = ""
+    if os.path.exists(style_path):
+        with open(style_path, "r", encoding="utf-8") as f:
+            current_profile = f.read()
+        try:
+            import shutil
+            shutil.copy2(style_path, backup_path)
+        except Exception as e:
+            logger.warning(f"[recalibrage] Erreur backup: {e}")
+
+    correction_lines = []
+    for i, c in enumerate(corrections, 1):
+        correction_lines.append(f"--- Correction {i} (dest: {c['correspondent']}) ---")
+        correction_lines.append(f"IA proposait:\n{c['proposed'][:500]}")
+        correction_lines.append(f"Utilisateur a envoye:\n{c['sent'][:500]}")
+        correction_lines.append("")
+
+    recent_sent = _db.get_recent_sent_mails(limit=10)
+    sent_lines = []
+    for i, m in enumerate(recent_sent, 1):
+        sent_lines.append(f"--- Mail envoye {i} (dest: {m['correspondent']}, objet: {m['subject'][:80]}) ---")
+        sent_lines.append(f"{m['body'][:500]}")
+        sent_lines.append("")
+
+    prompt = f"""=== ETAPE 1 — CLASSIFICATION DES CORRECTIONS ===
+
+Pour chacune des corrections ci-dessous, classe l'impact qualite.
+Retourne le resultat au DEBUT de ta reponse dans ce format :
+
+<<<CLASSIFICATIONS>>>
+1=AMELIORATION ou STYLE ou DEGRADATION
+2=AMELIORATION ou STYLE ou DEGRADATION
+...
+<<<END_CLASSIFICATIONS>>>
+
+Regles de classification :
+- AMELIORATION : l'utilisateur a enrichi le vocabulaire, affine la syntaxe, ameliore la structure, corrige une erreur de l'IA
+- STYLE : l'utilisateur a change le ton, le registre, l'ouverture, la cloture, la longueur (preference personnelle, pas un changement de qualite)
+- DEGRADATION : l'utilisateur a ajoute des fautes, casse la syntaxe, degrade la structure
+
+=== ETAPE 2 — MISE A JOUR DU PROFIL ===
+
+Voici le profil de style actuel d'un utilisateur (3 sections : A paires situationnelles, B regles, C mails representatifs) :
+
+{current_profile}
+
+Voici les corrections :
+
+{chr(10).join(correction_lines)}
+
+Voici les 10 derniers mails envoyes par l'utilisateur (avec ou sans correction) :
+
+{chr(10).join(sent_lines)}
+
+Mets a jour le profil en CONSERVANT EXACTEMENT la meme structure 3 sections (A/B/C).
+Modifications a appliquer :
+- SECTION A : si une correction revele un nouveau type de situation ou corrige une paire existante, mets a jour. Verifie aussi dans les mails envoyes recents si un NOUVEAU TYPE de situation n'est pas encore couvert. Si oui, ajoute une nouvelle paire.
+- SECTION B : affine les regles selon les patterns de correction et les mails recents. METS A JOUR les 3 descripteurs (Concision, Adaptabilite, Reactivite emotionnelle) si les corrections ou les mails recents revelent de nouvelles informations.
+- SECTION C : compare les 5 mails representatifs actuels avec les mails envoyes recents ET les corrections. Si un mail recent montre un meilleur exemple, remplace-le.
+
+IMPORTANT : les corrections montrent ce que l'utilisateur PREFERE. La version envoyee est TOUJOURS la bonne.
+
+NIVEAU REDACTIONNEL : {_db.get_setting('writing_level') or 'N7'}
+Applique les regles de ce niveau pour la regeneration des sections :
+- N1-N3 : paires REFORMULEES. Section B MINIMALE (5-7 lignes).
+- N4-N5 : paires MIX. Section B cite 2-5 formulations.
+- N6-N7 : paires QUASI VERBATIM. Section B DETAILLEE.
+- N8-N10 : paires 100% VERBATIM. Section B EXHAUSTIVE."""
+
+    try:
+        recal_system = ("Tu es un module interne d'EasyMail, un assistant email local et prive. "
+                        "Tu mets a jour le profil de style redactionnel de l'utilisateur en integrant ses corrections recentes. "
+                        "Les corrections montrent la difference entre ce que l'IA proposait et ce que l'utilisateur a reellement envoye.")
+        chunks = []
+        for _recal_attempt in range(3):
+            try:
+                chunks = []
+                with _ai.client.messages.stream(
+                    model="claude-sonnet-4-20250514", max_tokens=8000,
+                    system=recal_system,
+                    messages=[{"role": "user", "content": prompt}]
+                ) as stream:
+                    for text in stream.text_stream:
+                        chunks.append(text)
+                break
+            except Exception as _recal_err:
+                if 'overloaded' in str(_recal_err).lower() and _recal_attempt < 2:
+                    logger.warning(f"[recalibrage] Overloaded, retry {_recal_attempt+1}/2...")
+                    time.sleep(2 * (_recal_attempt + 1))
+                    continue
+                raise
+        new_profile = "".join(chunks).strip()
+        if new_profile:
+            # Parser les classifications D2
+            classif_match = re.search(r'<<<CLASSIFICATIONS>>>(.*?)<<<END_CLASSIFICATIONS>>>', new_profile, re.DOTALL)
+            if classif_match:
+                classif_block = classif_match.group(1).strip()
+                _recent_corrections = _db.get_recent_corrections_with_id(limit=50)
+                for line in classif_block.split('\n'):
+                    line = line.strip()
+                    if '=' in line:
+                        idx_str, quality_raw = line.split('=', 1)
+                        try:
+                            idx = int(idx_str.strip()) - 1
+                            quality_normalized = unicodedata.normalize('NFKD', quality_raw.strip().upper()).encode('ascii', 'ignore').decode('ascii')
+                            if 'AMELIORATION' in quality_normalized:
+                                quality = 'AMELIORATION'
+                            elif 'DEGRADATION' in quality_normalized:
+                                quality = 'DEGRADATION'
+                            else:
+                                quality = 'STYLE'
+                            if 0 <= idx < len(_recent_corrections):
+                                _db.update_correction_quality(_recent_corrections[idx]['id'], quality)
+                        except (ValueError, IndexError):
+                            pass
+                logger.info("[recalibrage] Classifications D2 parsees et sauvegardees")
+                new_profile = new_profile[:classif_match.start()] + new_profile[classif_match.end():]
+                new_profile = new_profile.strip()
+            else:
+                logger.warning("[recalibrage] WARN: Bloc <<<CLASSIFICATIONS>>> non trouve")
+
+            # Recalculer le scoring APRES les classifications
+            impacts = _db.count_quality_impacts(limit=10)
+            ameliorations = impacts.get('AMELIORATION', 0)
+            degradations = impacts.get('DEGRADATION', 0)
+            logger.info(f"[recalibrage] Post-classif: {ameliorations} AMELIORATION, {degradations} DEGRADATION")
+
+            _converged_now = _db.get_setting('writing_converged') == '1'
+            _seuil_now = 5 if _converged_now else 3
+            _delta = 0
+            if ameliorations >= _seuil_now and degradations < _seuil_now:
+                _delta = +3 if ameliorations >= 4 else +2
+            elif degradations >= _seuil_now and ameliorations < _seuil_now:
+                _delta = -2 if degradations >= 4 else -1
+
+            _current = int(_db.get_setting('writing_score') or '70')
+            _new = max(0, min(100, _current + _delta))
+            _db.save_setting('writing_score', str(_new))
+            logger.info(f"[recalibrage] Score: {_current} → {_new} (delta={_delta:+d})")
+
+            # Hysteresis ±3 aux frontières de niveau
+            _old_level = _db.get_setting('writing_level') or 'N7'
+            _old_level_num = int(_old_level[1:]) if _old_level.startswith('N') and _old_level[1:].isdigit() else 7
+            _new_level_raw = 1 if _new == 0 else min(10, max(1, (_new - 1) // 10 + 1))
+            _level_changed = False
+            if _new_level_raw > _old_level_num:
+                if _new >= _old_level_num * 10 + 3:
+                    _level_changed = True
+            elif _new_level_raw < _old_level_num:
+                if _new <= (_old_level_num - 1) * 10 - 3:
+                    _level_changed = True
+            if _level_changed:
+                _db.save_setting('writing_level', f'N{_new_level_raw}')
+                logger.info(f"[recalibrage] Niveau: {_old_level} → N{_new_level_raw}")
+
+            # Historique + convergence
+            _curr_level = _db.get_setting('writing_level') or _old_level
+            _db.save_score_history(_new, _curr_level, _delta)
+            _history = _db.get_score_history(limit=5)
+            if len(_history) >= 5:
+                _scores = [h['score'] for h in _history]
+                if max(_scores) - min(_scores) <= 3:
+                    if not _converged_now:
+                        _db.save_setting('writing_converged', '1')
+                        logger.info(f"[recalibrage] CONVERGENCE detectee (scores: {_scores})")
+                else:
+                    if _converged_now:
+                        _db.save_setting('writing_converged', '0')
+
+            # Sauvegarder le profil
+            if len(new_profile) >= 100:
+                with open(style_path, "w", encoding="utf-8") as f:
+                    f.write(new_profile)
+                try:
+                    _ai.reload_style(writing_level=_db.get_setting('writing_level'))
+                except Exception:
+                    pass
+                logger.info(f"[recalibrage] Profil recalibre ({len(new_profile)} chars)")
+            else:
+                logger.warning(f"[recalibrage] Profil trop court ({len(new_profile)} chars), abandon")
+    except Exception as e:
+        logger.error(f"[recalibrage] Erreur: {e}")
+
+
+def _get_cached_learning_priorities():
+    """Version cachée (5 min) des priorités d'apprentissage."""
+    if time.time() - _learning_priorities_cache['time'] < 300:
+        return _learning_priorities_cache['value']
+    result = _get_learning_priorities()
+    _learning_priorities_cache['value'] = result
+    _learning_priorities_cache['time'] = time.time()
+    return result
+
+
+def _get_learning_priorities():
+    """Identifie les axes faibles du score et génère des consignes d'amélioration."""
+    priorities = []
+
+    style_path = os.path.join(EASYMAIL_DIR, "style_profile.txt")
+    style_exists = os.path.exists(style_path)
+    corrections_count = _db.count_corrections()
+    profiles = _db.get_all_contact_profiles()
+    metrics = _db.get_metrics_summary()
+    total_mails_sent = metrics.get('total_mails', 0)
+    direct_rate = metrics.get('direct_send_rate', 0)
+
+    if not style_exists:
+        priorities.append("URGENT : Aucun profil de style — utilise un ton professionnel generique")
+    elif corrections_count < 5:
+        priorities.append("Peu de retour utilisateur — reste prudent sur le style, reste naturel et concis")
+
+    if len(profiles) < 3:
+        priorities.append("Peu de correspondants connus — analyse bien l'historique B pour deduire registre et ton")
+
+    if total_mails_sent >= 5 and direct_rate < 50:
+        priorities.append(f"Taux d'envoi direct faible ({direct_rate}%) — sois plus fidele au style naturel et plus concis.")
+    elif total_mails_sent >= 10 and direct_rate < 70:
+        priorities.append(f"Taux d'envoi direct moyen ({direct_rate}%) — continue a affiner ton/longueur")
+
+    if corrections_count >= 3:
+        recent = _db.get_recent_corrections(limit=5)
+        if recent:
+            all_texts = ' '.join(r.get('sent', '') for r in recent).lower()
+            proposed_texts = ' '.join(r.get('proposed', '') for r in recent).lower()
+            if len(all_texts) < len(proposed_texts) * 0.7:
+                priorities.append("L'utilisateur raccourcit souvent tes propositions — sois plus concis et direct")
+
+    return priorities if priorities else None
+
+
+# =============================================================================
+# AUTO-APPRENTISSAGE : PROFILS CONTACTS
+# =============================================================================
+
+def _should_analyze_contact(mail_count):
+    """Vérifie si le nombre de mails correspond à un point du schedule d'analyse."""
+    if mail_count in _CONTACT_ANALYSIS_SCHEDULE:
+        return True
+    if mail_count > 200 and mail_count % 50 == 0:
+        return True
+    return False
+
+
+def _maybe_analyze_contact(contact_email):
+    """Vérifie si un profil de contact doit être (re)analysé et le fait si nécessaire."""
+    if not contact_email:
+        return
+
+    mail_count = _db.count_mails_with_contact(contact_email)
+    if mail_count < _CONTACT_MIN_MAILS:
+        return
+
+    existing = _db.get_contact_profile(contact_email)
+    if existing:
+        if existing.get('manually_edited'):
+            return
+        if not _should_analyze_contact(mail_count):
+            return
+        logger.info(f"[learning] Re-analyse de {contact_email} (mail #{mail_count})")
+    else:
+        if not _should_analyze_contact(mail_count):
+            return
+        logger.info(f"[learning] Premiere analyse de {contact_email} (mail #{mail_count})")
+
+    threads = _db.get_threads_with_contact(contact_email, limit=25)
+    sent_mails = [t for t in threads if t['direction'] == 'sent']
+    received_mails = [t for t in threads if t['direction'] == 'received']
+
+    if not sent_mails:
+        return
+
+    corrections = _db.get_corrections_for_contact(contact_email, limit=10)
+
+    display_name = ""
+    if existing:
+        display_name = existing.get('display_name', '')
+    if not display_name:
+        display_name = contact_email.split('@')[0].replace('.', ' ').title()
+
+    profile = _ai.analyze_contact_profile(
+        email_address=contact_email,
+        display_name=display_name,
+        sent_mails=sent_mails,
+        received_mails=received_mails,
+        corrections=corrections
+    )
+
+    if profile:
+        # Garde post-IA : vérifier tutoiement/vouvoiement dans les mails envoyés
+        ai_register = profile.get('register', 'vouvoiement')
+        tu_markers = re.compile(r'\b(tu |te |ton |ta |tes |toi\b|t\')', re.IGNORECASE)
+        vous_markers = re.compile(r'\b(vous |votre |vos |v\')', re.IGNORECASE)
+        tu_count = 0
+        vous_count = 0
+        for m in sent_mails[:15]:
+            body = m.get('body', '')[:2000]
+            tu_count += len(tu_markers.findall(body))
+            vous_count += len(vous_markers.findall(body))
+        if ai_register == 'tutoiement' and tu_count == 0:
+            profile['register'] = 'vouvoiement'
+        elif ai_register == 'tutoiement' and vous_count > tu_count * 3:
+            profile['register'] = 'vouvoiement'
+        elif ai_register == 'vouvoiement' and tu_count > vous_count * 3 and tu_count >= 5:
+            profile['register'] = 'tutoiement'
+
+        is_new = not existing
+        profile['email'] = contact_email
+        _db.save_contact_profile(contact_email, profile)
+        logger.info(f"[learning] Profil sauvegarde: {contact_email} — {profile.get('category','?')}, {profile.get('register','?')}")
+
+        if is_new:
+            global _new_profile_toast
+            with _new_profile_toast_lock:
+                _new_profile_toast = {"name": display_name, "email": contact_email}
+
+
+# =============================================================================
+# ROUTES API — SCORE & MÉTRIQUES
+# =============================================================================
+
+@app.route('/api/knowledge_score')
+def api_knowledge_score():
+    """Score EasyMail 0-100 sur 5 axes + milestones gamification."""
+    style_path = os.path.join(EASYMAIL_DIR, "style_profile.txt")
+    style_exists = os.path.exists(style_path)
+    corrections_count = _db.count_corrections()
+    style_score = 0
+    if style_exists:
+        style_score += 20
+    style_score += min(corrections_count / 20, 1) * 5
+
+    profiles = _db.get_all_contact_profiles()
+    profiles_count = len(profiles)
+    contacts_score = min(profiles_count / 10, 1) * 20
+
+    thread_count = _db.count_threads()
+    mails_analyses_score = min(thread_count / 100, 1) * 15
+
+    corrections_score = min(corrections_count / 25, 1) * 20
+
+    metrics = _db.get_metrics_summary()
+    total_mails_sent = metrics.get('total_mails', 0)
+    direct_rate = metrics.get('direct_send_rate', 0)
+    if total_mails_sent >= 5:
+        direct_score = (direct_rate / 100) * 20
+    elif total_mails_sent > 0:
+        direct_score = (direct_rate / 100) * (total_mails_sent / 5) * 20
+    else:
+        direct_score = 0
+
+    total = round(style_score + contacts_score + mails_analyses_score + corrections_score + direct_score)
+    total = min(total, 100)
+
+    prev_milestone = int(_db.get_setting("last_milestone", "0") or 0)
+    current_milestone = (total // 10) * 10
+    new_milestone = current_milestone > prev_milestone and current_milestone > 0
+    if new_milestone:
+        _db.save_setting("last_milestone", str(current_milestone))
+
+    return jsonify({
+        "total": total,
+        "axes": {
+            "style": {"score": round(style_score), "max": 25, "label": "Style redactionnel"},
+            "contacts": {"score": round(contacts_score), "max": 20, "label": "Profils contacts"},
+            "mails": {"score": round(mails_analyses_score), "max": 15, "label": "Historique mails"},
+            "corrections": {"score": round(corrections_score), "max": 20, "label": "Corrections utilisateur"},
+            "direct": {"score": round(direct_score), "max": 20, "label": "Envoi sans correction"},
+        },
+        "new_milestone": new_milestone,
+        "milestone": current_milestone if new_milestone else None,
+        "details": {
+            "style_exists": style_exists,
+            "corrections_count": corrections_count,
+            "profiles_count": profiles_count,
+            "thread_count": thread_count,
+            "total_mails_sent": total_mails_sent,
+            "direct_rate": direct_rate
+        }
+    })
+
+
+@app.route('/api/metrics')
+def api_metrics():
+    """Métriques d'utilisation (agrégats DB)."""
+    try:
+        data = _db.get_metrics_summary()
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"api_metrics: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# =============================================================================
+# ROUTES API — CONTACTS (analyse auto + recalibrage + toast)
+# =============================================================================
+
+@app.route('/api/analyze_contact', methods=['POST'])
+def api_analyze_contact():
+    """Force l'analyse d'un contact spécifique."""
+    data = request.get_json(force=True) or {}
+    contact_email = data.get('email', '').strip().lower()
+    if not contact_email:
+        return jsonify({"error": "Email requis"}), 400
+
+    def _run():
+        try:
+            existing = _db.get_contact_profile(contact_email)
+            if existing:
+                existing['sample_count'] = 0
+                _db.save_contact_profile(contact_email, existing)
+            _maybe_analyze_contact(contact_email)
+        except Exception as e:
+            logger.error(f"analyze_contact: {e}")
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"status": "started"})
+
+
+@app.route('/api/new_profile_toast')
+def api_new_profile_toast():
+    """Retourne et consomme la notification one-shot de nouveau profil."""
+    global _new_profile_toast
+    with _new_profile_toast_lock:
+        toast = _new_profile_toast
+        _new_profile_toast = None
+    if toast:
+        return jsonify({"toast": toast})
+    return jsonify({"toast": None})
+
+
+@app.route('/api/recalibrate_contacts', methods=['POST'])
+def api_recalibrate_contacts():
+    """Recalibre un ou tous les contacts (thread BG)."""
+    global _contacts_recalibrating, _contacts_recalib_step, _contacts_recalib_progress
+    data = request.get_json(force=True) or {}
+    target_email = data.get('email', '').strip().lower()
+
+    if _contacts_recalibrating:
+        return jsonify({"status": "already_running"})
+
+    def _run():
+        global _contacts_recalibrating, _contacts_recalib_step, _contacts_recalib_progress
+        _contacts_recalibrating = True
+        try:
+            if target_email:
+                emails = [target_email]
+            else:
+                profiles = _db.get_all_contact_profiles()
+                emails = [p.get('email', '') for p in profiles if p.get('email')]
+
+            _contacts_recalib_progress = {'done': 0, 'total': len(emails)}
+            for i, email in enumerate(emails):
+                _contacts_recalib_step = email
+                try:
+                    existing = _db.get_contact_profile(email)
+                    if existing:
+                        existing['sample_count'] = 0
+                        _db.save_contact_profile(email, existing)
+                    _maybe_analyze_contact(email)
+                except Exception as e:
+                    logger.error(f"recalibrate_contacts {email}: {e}")
+                _contacts_recalib_progress['done'] = i + 1
+                time.sleep(0.3)
+        finally:
+            _contacts_recalibrating = False
+            _contacts_recalib_step = ''
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"status": "started"})
+
+
+@app.route('/api/recalibrate_contacts/status')
+def api_recalibrate_contacts_status():
+    """Statut du recalibrage contacts en cours."""
+    return jsonify({
+        "running": _contacts_recalibrating,
+        "current": _contacts_recalib_step,
+        "done": _contacts_recalib_progress.get('done', 0),
+        "total": _contacts_recalib_progress.get('total', 0),
     })
 
 
