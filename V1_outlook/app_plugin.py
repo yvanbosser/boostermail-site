@@ -11,7 +11,7 @@ import unicodedata
 import logging
 import threading
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from flask import Flask, send_from_directory, jsonify, request
 
@@ -1685,22 +1685,21 @@ def api_suggest_folder(message_id):
                 "source": _suggestions[0]['source'],
             })
 
-        # Tier 6 : IA fallback (top 3)
-        ai = get_ai()
-        if not ai:
+        # Tier 6 : IA fallback — ClaudeAssistant.suggest_folder() (pas AIProvider)
+        _builder = _get_prompt_builder()
+        if not _builder:
             return jsonify({"suggestion": None, "suggestions": [], "source": "none"})
 
         try:
             folders = graph.get_all_folders()
         except Exception:
             folders = []
-        folder_tree = '\n'.join([f"{'  ' * f.get('depth', 0)}{f.get('name', '')} ({f.get('id', '')})" for f in folders[:100]])
         _contact_profile = _db.get_contact_profile(contact_email)
         _recent = _db.get_recent_classifications(contact_email, domain, limit=10)
 
-        result = ai.suggest_folder(contact_email, subject, body_preview, folders,
-                                   recent_classifications=_recent,
-                                   contact_profile=_contact_profile)
+        result = _builder.suggest_folder(contact_email, subject, body_preview, folders,
+                                         recent_classifications=_recent,
+                                         contact_profile=_contact_profile)
         if result and result.get('folder_id'):
             return jsonify({
                 "suggestion": result,
@@ -1769,6 +1768,11 @@ def api_classify_email():
             _preemptive_cache.pop(message_id, None)
         with _prefetch_lock:
             _prefetch_cache.pop(message_id, None)
+        # Purger le cache DB email_cache pour ce mail
+        try:
+            _db.purge_email_cache_for(new_id)
+        except Exception:
+            pass
 
         return jsonify({
             "status": "ok",
@@ -2454,8 +2458,7 @@ def generate_reply():
             contact_corrections = _db.get_corrections_for_contact(correspondent, limit=3)
             general_corrections = _db.get_recent_corrections(limit=5)
             # Fusionner : contact spécifique en priorité, puis générales (dédoublonner)
-            # Clé = hash du contenu complet pour éviter les faux positifs
-            import hashlib
+            # Clé = hash du contenu complet pour éviter les faux positifs (hashlib importé en global)
             seen = set()
             for c in contact_corrections:
                 key = hashlib.md5((c.get('proposed', '') + c.get('sent', '')).encode()).hexdigest()
@@ -3438,6 +3441,14 @@ def api_post_send():
                 _maybe_analyze_contact(contact_email)
             except Exception as e:
                 logger.error(f"[learning] Erreur: {e}")
+
+        # Auto-annulation échéances si le correspondant nous a répondu (reply seulement)
+        if reply_mode in ('reply', 'reply_all') and from_email:
+            try:
+                _cached_email = {'from': from_email}
+                _auto_cancel_echeances_on_reply(to_email, subject, _cached_email)
+            except Exception as e:
+                logger.error(f"[learning] Erreur auto_cancel_echeances: {e}")
 
     threading.Thread(target=_post_send_learning, daemon=True).start()
 
