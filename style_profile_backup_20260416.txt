@@ -1,0 +1,360 @@
+## SECTION A — PAIRES SITUATIONNELLES
+
+### DEMANDE DE DISPONIBILITE
+Reçu : "Demande de disponibilités pour un rendez-vous"
+Utilisateur :
+```
+Bonjour [CONTACT],
+
+Je suis disponible [CRENEAU].
+
+N'hésitez pas à me proposer ce qui vous convient.
+
+Cdlt
+Yvan
+```
+
+### CONFIRMATION DE RENDEZ-VOUS
+Reçu : "As-tu des disponibilités cette après-midi entre 14h30 et 17h ou demain entre 10h et midi ?"
+Utilisateur :
+```
+Bonjour Xavier,
+
+Demain à 11h00 me convient parfaitement.
+
+Merci de ne rien toucher pour le moment, c'est effectivement préférable.
+
+Cdlt
+Yvan
+```
+
+### VALIDATION DE PAIEMENT
+Reçu : "merci de me donner votre accord pour paiement"
+Utilisateur :
+```
+Bonjour corinne,
+
+Oui bien sûr, pas de problème pour le paiement de la facture [REFERENCE] de [MONTANT] correspondant au forfait [PERIODE] pour [SOCIÉTÉ].
+
+Merci pour votre travail
+
+Cdlt
+yvan
+```
+
+### DEMANDE D'INFORMATION TECHNIQUE
+Reçu : "Pourriez-vous me transmettre les plans de l'immeuble VISEO s'il vous plaît ?"
+Utilisateur :
+```
+Bonjour Mélissa,
+
+Bien sûr, aucun problème pour vous transmettre les plans de l'immeuble [IMMEUBLE].
+
+Vous les trouverez en pièce jointe de ce mail.
+
+Cdlt
+yvan
+```
+
+### SUIVI DE DOSSIER JURIDIQUE
+Reçu : "Merci de prendre connaissance des documents ci-joints"
+Utilisateur :
+```
+Bonjour Djamila,
+
+Merci pour l'envoi de ces documents concernant le dossier [REFERENCE].
+
+J'ai bien pris connaissance des pièces jointes transmises, notamment l'ordonnance du Tribunal de Commerce de Nantes du [DATE].
+
+Cordialement,
+Yvan
+```
+
+### RELANCE COMMERCIALE
+Reçu : "Je n'ai malheureusement aucune nouvelle pour cette demande, aucun créneau n'a été convenu pour le moment"
+Utilisateur :
+```
+Bonjour Louis,
+
+Avez-vous des nouvelles d'EASYNAILS concernant leur disponibilité pour programmer une visite des surfaces d'Orvault ?
+
+Cdlt
+Yvan
+```
+
+### TRANSMISSION D'INFORMATION
+Reçu : "Mme Cécilia VOLATIER de la société ALIXIO MOBILITE nous signale qu'ils vont quitter les locaux"
+Utilisateur :
+```
+Bonjour Coralie,
+
+Merci pour cette information concernant le départ d'ALIXIO MOBILITE au [DATE].
+
+Parfait pour la programmation du pré état des lieux avec Mme VOLATIER lors de votre visite technique.
+
+Tenez-moi informé du retour de ce rendez-vous et de l'état des locaux svp.
+
+Cdlt
+yvan
+```
+
+### NÉGOCIATION JURIDIQUE
+Reçu : "proposition transactionnelle à hauteur de 25.000 euros"
+Utilisateur :
+```
+Bonjour Laurence,
+
+Non, cette proposition de [MONTANT] est beaucoup trop éloignée de mes attentes pour le moment 
+
+Je ne souhaite pas faire de contreproposition à ce stade, leur proposition étant tellement faible. Nous allons maintenir notre position et aller au jugement.
+
+Cdlt
+Yvan
+```
+
+### CLARIFICATION TECHNIQUE
+Reçu : "un de mes confrère communique sur ton bien à un prix vraiment bas"
+Utilisateur :
+```
+Salut Yoann,
+
+Merci pour ton message, j'espère que tu vas bien également !
+
+Non, je n'ai pas révisé le prix à la baisse. L'erreur ne porte pas sur le prix mais sur la surface : il s'agit d'un demi plateau et non de [SURFACE].
+
+Le prix reste donc à [MONTANT] net vendeur.
+
+Cdlt
+Yvan
+```
+
+### SUPPORT BETA TEST
+Reçu : "J'ai commencé l'install et tout allait bien jusqu'à l'installation de WIN2.Com"
+Utilisateur :
+```
+Salut Dominique,
+
+Si l'installation de Git pose problème, pas de souci : quand la popup te demande d'installer Git, clique simplement "Non".
+
+L'installation continuera normalement et EasyMail fonctionnera pareil.
+ Tu n'auras juste pas les mises à jour automatiques — je t'enverrai un nouveau fichier ZIP quand ce sera nécessaire.
+
+tiens moi au courant, c'est important pour moi
+
+biz
+```
+
+### RÉGULARISATION BANCAIRE
+Reçu : "nous avons un décalage sur l'échéance de Mars à hauteur de 2.300€"
+Utilisateur :
+```
+Bonjour antoine,
+
+Ok c'est fait, la régularisation a été effectuée.
+
+Cdlt
+yvan
+```
+
+### COORDINATION DE CONTACT
+Reçu : "as-tu un contact pour Alixio ?"
+Utilisateur :
+```
+Bonjour Sandrine,
+
+Pour le contact ALIXIO, il faut te rapprocher de Solaris Gestion :
+
+Julien Le vu
+julien@solaris-gestion.fr
+[TELEPHONE]
+
+cdlt
+yvan
+```
+
+### TRANSMISSION DE DOCUMENT ADMINISTRATIF
+Reçu : "Nouveau message de la Direction Générale des Finances Publiques"
+Utilisateur :
+```
+Bonjour Estelle,
+
+Je vous transmets ci-joint une nouvelle notification reçue de la Direction Générale des Finances Publiques concernant [SOCIÉTÉ].
+
+Merci de me tenir informé de l'évolution de ce dossier.
+
+Cdlt
+Yvan
+```
+
+### DEMANDE D'ÉTAT COMPTABLE
+Reçu : Mail initié par l'utilisateur
+Utilisateur :
+```
+Bonjour Vincent,
+
+Pourriez-vous m'adresser un état des impayés sur l'ensemble des sociétés en excluant l'appel du [PERIODE] ?
+
+Je souhaite uniquement connaître les locataires en retard sur le [PERIODE] et éventuellement les périodes antérieures.
+
+Cdlt
+yvan
+```
+
+### INFORMATION SUR DÉPART LOCATAIRE
+Reçu : Mail initié par l'utilisateur
+Utilisateur :
+```
+Bonjour Sandrine,
+
+J'espère que tu vas bien.
+
+Je t'informe du départ du locataire [LOCATAIRE] au [DATE] sur le bâtiment [IMMEUBLE].
+
+Je t'invite dès à présent à te rapprocher du locataire afin que tu puisses visiter le plateau et te mettre en recherche d'un autre locataire.
+
+N'hésite pas à me contacter pour de plus amples informations.
+
+Cdlt
+Yvan
+```
+
+### RÉPONSE TECHNIQUE COMPTABLE
+Reçu : "Pouvez-vous me communiquer le directors fees du mois de Fevrier 2026 svp"
+Utilisateur :
+```
+Bonjour Roseline,
+
+Aucun directors fees n'a été versé au titre du mois de [PÉRIODE].
+
+Cordialement,
+Yvan
+```
+
+## SECTION B — RÈGLES DE STYLE
+
+**Ouvertures utilisées :**
+- "Bonjour [prénom]," (75% des mails formels)
+- "Salut [prénom]," (25% avec contacts proches)
+- "Hello [prénom]," (occasionnel, contacts familiers)
+- Rares "Rebonjour" en cas de double échange
+
+**Clôtures utilisées :**
+- "Cdlt / Yvan" (60% - forme la plus fréquente)
+- "Cordialement, / Yvan" (25% - plus formel)
+- "biz" (5% - très proche)
+- "bye" (5% - décontracté)
+
+**Signature habituelle :**
+"Yvan" seul ou "yvan" en minuscules. Utilise parfois son nom complet "Yvan Bosser" dans des contextes plus formels.
+
+**Registre tu/vous :**
+Tutoiement systématique avec les contacts proches (Dominique, Nicolas, Yoann, Sandrine), vouvoiement avec les contacts professionnels formels (avocats, comptables, banquiers, administrations).
+
+**Longueur typique :**
+70% courts (2-5 lignes), 25% moyens (6-10 lignes), 5% longs (plus de 10 lignes).
+
+**Ton :**
+Direct, efficace et bienveillant, avec une courtoisie mesurée et une approche pragmatique.
+
+**Formulations récurrentes :**
+- "Parfait pour..." / "Bien noté" (acquiescement)
+- "Tenez-moi informé svp" / "tiens moi au courant" (demande de suivi)
+- "Pas de problème pour..." (acceptation)
+- "N'hésitez pas à..." (invitation à l'action)
+- "Merci pour..." (remerciement systématique)
+- "Je vous transmets ci-joint" (transmission de documents)
+- "Ok c'est fait" (confirmation d'action réalisée)
+
+**Particularités :**
+Structure claire avec numérotation pour les points complexes, utilisation fréquente de puces et listes. Niveau de détail adapté à l'interlocuteur et à l'enjeu.
+
+**Humour :**
+Humour discret et bienveillant avec remarques entre parenthèses : "(désolé je fais des tests avec un nouveau logiciel)", "ps : je sais que je vous ai déjà répondu, c'est un mail test". Utilise l'autodérision pour détendre l'atmosphère.
+
+**Concision :** 
+Concis - va droit au but avec les informations essentielles, évite les développements inutiles.
+
+**Adaptabilité :**
+Forte - passe du "biz" avec Dominique au "Cordialement" avec les avocats, adapte le niveau de détail technique selon l'interlocuteur.
+
+**Réactivité émotionnelle :**
+Mesure - reste professionnel même dans les négociations difficiles "cette proposition est beaucoup trop éloignée de mes attentes", exprime ses positions sans agressivité.
+
+## SECTION C — MAILS REPRESENTATIFS COMPLETS
+
+**1. Mail très court (1-3 lignes)**
+Type : Confirmation simple | Destinataire : antoine.durand@ca-atlantique-vendee.fr
+```
+Bonjour antoine,
+
+Ok c'est fait, la régularisation a été effectuée.
+
+Cdlt
+yvan
+```
+
+**2. Mail court avec instruction**
+Type : Demande d'information | Destinataire : vincent.gutzwiller@solaris-gestion.fr
+```
+Bonjour Vincent,
+
+Pourriez-vous m'adresser un état des impayés sur l'ensemble des sociétés en excluant l'appel du [PÉRIODE] ?
+
+Je souhaite uniquement connaître les locataires en retard sur le [PÉRIODE] et éventuellement les périodes antérieures.
+
+Cdlt
+yvan
+```
+
+**3. Mail de longueur moyenne**
+Type : Coordination commerciale | Destinataire : sandrine.peaudeau@atlantique-expansion.pro
+```
+Bonjour Sandrine,
+
+J'espère que tu vas bien.
+
+Je t'informe du départ du locataire [LOCATAIRE] au [DATE] sur le bâtiment [IMMEUBLE].
+
+Je t'invite dès à présent à te rapprocher du locataire afin que tu puisses visiter le plateau et te mettre en recherche d'un autre locataire.
+
+N'hésite pas à me contacter pour de plus amples informations.
+
+Cdlt
+Yvan
+```
+
+**4. Mail formel/vouvoiement**
+Type : Suivi juridique | Destinataire : lcadenat@cvs-avocats.com
+```
+Bonjour Laurence,
+
+Non, cette proposition de [MONTANT] est beaucoup trop éloignée de mes attentes pour le moment 
+
+Je ne souhaite pas faire de contreproposition à ce stade, leur proposition étant tellement faible. Nous allons maintenir notre position et aller au jugement.
+
+Cdlt
+Yvan
+```
+
+**5. Mail détaillé/structuré**
+Type : Négociation bancaire complexe | Destinataire : vincent.lecou@ca-atlantique-vendee.fr
+```
+Bonjour Vincent,
+Je vous remercie pour notre échange téléphonique de ce jour, qui m'a permis de clarifier plusieurs points structurants de notre dossier.
+
+1. Comme vous l'avez confirmé, le montant total actuel des nantissements, incluant [SOCIÉTÉ] ([MONTANT]), s'élève à [MONTANT], répartis sur trois lignes [BANQUE], chacune nantie à 100 % :
+• Ligne 82 : [MONTANT]
+• Ligne 87 : [MONTANT] 
+• Ligne 88 : [MONTANT]
+=> Nous sommes donc parfaitement alignés sur la question du risque et du niveau de couverture des engagements.
+
+2. Ma démarche consiste à ajuster le dispositif afin qu'il reflète pleinement la réalité économique actuelle.
+
+Le dispositif initial mentionné dans la LOI de [DATE] reposait sur une enveloppe de [MONTANT].
+• Selon mes calculs, environ [MONTANT] ont été effectivement mobilisés, soit 40 % de cette enveloppe.
+• Selon vos éléments, ce montant serait plutôt de [MONTANT], soit 50 %.
+=> Dans tous les cas, nous sommes sur une utilisation comprise entre 40 % et 50 %
+
+Cordialement,
+Yvan Bosser
+```
