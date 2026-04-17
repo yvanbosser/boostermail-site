@@ -11,7 +11,13 @@ import unicodedata
 import logging
 import threading
 import time
+import tempfile
+import mimetypes
+import subprocess
+import shutil
 from datetime import datetime, timedelta
+from urllib.parse import quote
+from werkzeug.utils import secure_filename
 
 from flask import Flask, send_from_directory, jsonify, request
 
@@ -1821,6 +1827,210 @@ def api_download_attachment(message_id, attachment_id):
 
 
 # =============================================================================
+# ROUTES API — EXTRACTION PJ (upload + extraction texte)
+# =============================================================================
+
+@app.route('/api/upload_attachment', methods=['POST'])
+def api_upload_attachment():
+    """Upload d'une PJ complementaire par l'utilisateur. Retourne le chemin temp."""
+    if 'file' not in request.files:
+        return jsonify({"error": "Pas de fichier"}), 400
+    f = request.files['file']
+    if not f.filename:
+        return jsonify({"error": "Nom de fichier vide"}), 400
+    original_name = f.filename
+    safe_name = secure_filename(f.filename) or 'upload'
+    upload_subdir = os.path.join(_upload_dir, str(int(time.time() * 1000)))
+    os.makedirs(upload_subdir, exist_ok=True)
+    filepath = os.path.join(upload_subdir, safe_name)
+    f.save(filepath)
+    return jsonify({
+        "name": original_name,
+        "path": filepath,
+        "size": os.path.getsize(filepath),
+    })
+
+
+@app.route('/api/extract_file_text', methods=['POST'])
+def api_extract_file_text():
+    """Extrait le texte d'un fichier (par chemin temp). Pour analyse PJ nouveau mail."""
+    data = request.get_json(silent=True) or {}
+    filepath = data.get('path', '')
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({"error": "Fichier introuvable"}), 404
+    # Validation anti path traversal
+    _tmp = os.path.normcase(os.path.realpath(tempfile.gettempdir()))
+    _up = os.path.normcase(os.path.realpath(_upload_dir))
+    _fp = os.path.normcase(os.path.realpath(filepath))
+    if not (_fp.startswith(_tmp) or _fp.startswith(_up)):
+        return jsonify({"error": "Invalid file path"}), 403
+    name = os.path.basename(filepath)
+    ext = os.path.splitext(name)[1].lower()
+    text = ''
+    _pdf_total = 0
+    _pdf_extracted = 0
+    try:
+        if ext in ('.txt', '.csv'):
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as _f:
+                text = _f.read()[:10000]
+        elif ext == '.pdf':
+            try:
+                import PyPDF2
+                with open(filepath, 'rb') as _f:
+                    reader = PyPDF2.PdfReader(_f)
+                    _pdf_total = len(reader.pages)
+                    _pdf_extracted = min(10, _pdf_total)
+                    text = '\n'.join(page.extract_text() or '' for page in reader.pages[:10])[:10000]
+                if _pdf_total > 10:
+                    print(f"[extract_file_text] PDF tronque: {_pdf_extracted}/{_pdf_total} pages", flush=True)
+            except ImportError:
+                text = '[PDF detecte mais PyPDF2 non installe]'
+        elif ext == '.docx':
+            try:
+                import docx as _docx
+                _doc = _docx.Document(filepath)
+                text = '\n'.join(p.text for p in _doc.paragraphs)[:10000]
+            except ImportError:
+                text = '[Word detecte mais python-docx non installe]'
+        elif ext == '.xlsx':
+            try:
+                import openpyxl as _openpyxl
+                _wb = _openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+                try:
+                    rows = []
+                    for ws in _wb.worksheets[:3]:
+                        for row in ws.iter_rows(max_row=50, values_only=True):
+                            rows.append(' | '.join(str(c or '') for c in row))
+                    text = '\n'.join(rows)[:10000]
+                finally:
+                    _wb.close()
+            except ImportError:
+                text = '[Excel detecte mais openpyxl non installe]'
+        elif ext in ('.doc', '.xls'):
+            text = f'[Format {ext} non supporte - convertir en {ext}x]'
+        elif ext in ('.htm', '.html'):
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as _f:
+                raw = _f.read()[:20000]
+            text = re.sub(r'<[^>]+>', ' ', raw)[:10000]
+    except Exception as e:
+        print(f"[extract_file_text] Erreur: {e}", flush=True)
+        text = ''
+    if not text.strip():
+        return jsonify({"name": name, "text": "", "supported": False})
+    result = {"name": name, "text": text, "supported": True}
+    if ext == '.pdf' and _pdf_total > 10:
+        result["warning"] = f"Seules {_pdf_extracted} pages sur {_pdf_total} analysees (PDF volumineux)"
+    return jsonify(result)
+
+
+@app.route('/api/extract_attachments/<path:entry_id>', methods=['POST'])
+def api_extract_attachments(entry_id):
+    """Extrait le texte des PJ d'un mail (par ID Graph).
+    Utilise le cache pre-extraction si disponible, sinon telechargement Graph a la demande."""
+    data = request.get_json(silent=True) or {}
+    indices = data.get('indices', None)
+    print(f"[extract] Demande extraction indices={indices}", flush=True)
+
+    # Cache pre-extraction (background)
+    _cached_pj = _pj_text_cache.get(entry_id)
+    if _cached_pj and _cached_pj.get('status') == 'done' and _cached_pj.get('results'):
+        if indices is not None and len(indices) == 1:
+            idx = indices[0]
+            for r in _cached_pj['results']:
+                if r.get('index') == idx:
+                    context = f"--- Piece jointe : {r['name']} ---\n{r['text'][:5000]}"
+                    print(f"[extract] Cache HIT: {r['name']}, {len(r['text'])} chars", flush=True)
+                    return jsonify({"ok": True, "pj_context": context, "count": 1, "warnings": []})
+
+    # Extraction via Graph
+    graph = get_graph()
+    if not graph:
+        return jsonify({"ok": False, "error": "Mode Standard requis"}), 403
+
+    try:
+        attachments = graph.get_attachments(entry_id)
+        doc_atts = [a for a in attachments if not a.get('is_inline', False)]
+        if indices is not None:
+            doc_atts = [a for i, a in enumerate(doc_atts) if i in indices]
+
+        parts = []
+        warnings = []
+        for att in doc_atts:
+            att_name = att.get('name', '')
+            att_id = att.get('id', '')
+            ext = os.path.splitext(att_name)[1].lower()
+            try:
+                content_bytes = graph.get_attachment_content(entry_id, att_id)
+            except Exception as e:
+                print(f"[extract] Erreur download {att_name}: {e}", flush=True)
+                continue
+
+            # Sauvegarder en temp + extraire
+            _tmp_path = os.path.join(_upload_dir, f"att_{att_id[:8]}_{att_name}")
+            try:
+                with open(_tmp_path, 'wb') as _f:
+                    _f.write(content_bytes)
+
+                text = ''
+                _pdf_total = 0
+                if ext == '.pdf':
+                    try:
+                        import PyPDF2
+                        with open(_tmp_path, 'rb') as _f:
+                            reader = PyPDF2.PdfReader(_f)
+                            _pdf_total = len(reader.pages)
+                            text = '\n'.join(p.extract_text() or '' for p in reader.pages[:10])[:5000]
+                        if _pdf_total > 10:
+                            warnings.append(f"Seules 10 pages sur {_pdf_total} pour {att_name}")
+                    except ImportError:
+                        text = '[PyPDF2 non installe]'
+                elif ext == '.docx':
+                    try:
+                        import docx as _docx
+                        _doc = _docx.Document(_tmp_path)
+                        text = '\n'.join(p.text for p in _doc.paragraphs)[:5000]
+                    except ImportError:
+                        text = '[python-docx non installe]'
+                elif ext == '.xlsx':
+                    try:
+                        import openpyxl as _openpyxl
+                        _wb = _openpyxl.load_workbook(_tmp_path, read_only=True, data_only=True)
+                        try:
+                            rows = []
+                            for ws in _wb.worksheets[:3]:
+                                for row in ws.iter_rows(max_row=50, values_only=True):
+                                    rows.append(' | '.join(str(c or '') for c in row))
+                            text = '\n'.join(rows)[:5000]
+                        finally:
+                            _wb.close()
+                    except ImportError:
+                        text = '[openpyxl non installe]'
+                elif ext in ('.txt', '.csv'):
+                    text = content_bytes.decode('utf-8', errors='ignore')[:5000]
+                elif ext in ('.htm', '.html'):
+                    text = re.sub(r'<[^>]+>', ' ', content_bytes.decode('utf-8', errors='ignore'))[:5000]
+
+                if text:
+                    parts.append(f"--- Piece jointe : {att_name} ---\n{text}")
+            finally:
+                try:
+                    os.remove(_tmp_path)
+                except Exception:
+                    pass
+
+        if parts:
+            context = '\n\n'.join(parts)
+            print(f"[extract] {len(parts)} PJ analysee(s), {len(context)} chars", flush=True)
+            return jsonify({"ok": True, "pj_context": context, "count": len(parts), "warnings": warnings})
+        return jsonify({"ok": True, "pj_context": "", "count": 0})
+    except GraphAuthError:
+        return jsonify({"ok": False, "error": "Token expire", "auth_required": True}), 401
+    except Exception as e:
+        print(f"[extract] Erreur: {e}", flush=True)
+        return jsonify({"ok": False, "error": _safe_err(e)}), 500
+
+
+# =============================================================================
 # ROUTES API — CLASSEMENT PJ (Mode Standard — OneDrive)
 # =============================================================================
 
@@ -2137,6 +2347,160 @@ def api_echeances_check_sender():
 
 
 # =============================================================================
+# ROUTES API — CLASSEMENT PJ WINDOWS (arborescence locale)
+# =============================================================================
+
+@app.route('/api/windows_folders')
+def api_windows_folders():
+    """Retourne l'arborescence des dossiers Windows (cache session)."""
+    try:
+        folders = _get_windows_folders_cached()
+        root = _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
+        return jsonify({"folders": folders or [], "root": root})
+    except Exception as e:
+        return jsonify({"error": _safe_err(e)}), 500
+
+
+@app.route('/api/suggest_pj_folder/<path:email_id>')
+def api_suggest_pj_folder(email_id):
+    """Suggere le dossier Windows pour les PJ d'un mail (3 tiers + IA fallback)."""
+    graph = get_graph()
+    if not graph:
+        return jsonify({"status": "no_graph"})
+
+    subject = request.args.get('subject', '')
+    from_email = request.args.get('from_email', '').strip().lower()
+    domain = from_email.split('@')[1] if '@' in from_email else ''
+
+    folders = _get_windows_folders_cached()
+    if not folders:
+        return jsonify({"status": "no_folders"})
+
+    # Recuperer les PJ depuis Graph
+    try:
+        attachments = graph.get_attachments(email_id)
+    except Exception:
+        attachments = []
+    _trim_dict_cache(_attachment_cache, _MAX_ATTACHMENT_CACHE)
+    _attachment_cache[email_id] = attachments
+    relevant_pj = [a for a in attachments if not a.get('is_inline', False)]
+    pj_names = [a['name'] for a in relevant_pj]
+
+    _pj_subj_kw = _extract_subject_keywords(subject)
+
+    # Tier 1 : regle auto (historique 3+)
+    rule = _db.get_pj_folder_suggestion(from_email, domain, subject_keywords=_pj_subj_kw)
+    if rule:
+        return jsonify({"status": "done", "source": "rule",
+            "folder_path": rule['dest_folder'], "confidence": 1.0,
+            "reason": f"Regle auto ({rule['count']} classements)",
+            "suggested_names": {}, "attachments": relevant_pj, "folders": folders})
+
+    # Tier 1 bis : keywords contact+sujet
+    if _pj_subj_kw:
+        kw_match = _db.get_pj_folder_by_keywords(from_email, _pj_subj_kw)
+        if kw_match:
+            return jsonify({"status": "done", "source": "rule",
+                "folder_path": kw_match['dest_folder'], "confidence": 0.9,
+                "reason": f"Contact + sujet ({kw_match['count']} classements similaires)",
+                "suggested_names": {}, "attachments": relevant_pj, "folders": folders})
+
+    # Tier 2 : correspondance mots-cles sujet → nom de dossier Windows
+    if subject:
+        _words = _pj_subj_kw.split() if _pj_subj_kw else []
+        best_match = None
+        best_score = 0
+        for f in folders:
+            fname = f['name'].lower()
+            fpath = f['path'].lower()
+            score = sum(1 for w in _words if w in fname)
+            path_score = sum(1 for w in _words if w in fpath)
+            total = score * 2 + path_score
+            if total > best_score and total >= 2:
+                best_score = total
+                best_match = f
+        if best_match:
+            return jsonify({"status": "done", "source": "match",
+                "folder_path": best_match['path'],
+                "confidence": min(best_score / 6, 1.0),
+                "reason": "Correspondance nom de dossier",
+                "suggested_names": {}, "attachments": relevant_pj, "folders": folders})
+
+    # Tier 3 : IA fallback (ClaudeAssistant.suggest_pj_folder)
+    if pj_names:
+        try:
+            _builder = _get_prompt_builder()
+            if _builder:
+                pj_history = _db.get_pj_classification_history(from_email, limit=20)
+                recent = _db.get_recent_pj_classifications(from_email, domain, limit=10)
+                cp = _db.get_contact_profile(from_email)
+                suggestion = _builder.suggest_pj_folder(from_email, subject, pj_names, folders,
+                                                         recent_pj_classifications=recent,
+                                                         contact_profile=cp,
+                                                         pj_history=pj_history)
+                if suggestion and suggestion.get('folder_path'):
+                    return jsonify({"status": "done", "source": "ai", **suggestion,
+                        "attachments": relevant_pj, "folders": folders})
+        except Exception as e:
+            logger.warning(f"[classify_pj] Erreur suggest IA: {e}")
+
+    return jsonify({"status": "no_suggestion", "attachments": relevant_pj, "folders": folders})
+
+
+@app.route('/api/smart_paperclip')
+def api_smart_paperclip():
+    """Hint rapide : quel dossier Windows pour ce contact+sujet (sans liste PJ)."""
+    email_addr = request.args.get('email', '').strip().lower()
+    subject = request.args.get('subject', '').strip()
+    domain = email_addr.split('@')[1] if '@' in email_addr else ''
+    _pj_subj_kw = _extract_subject_keywords(subject)
+
+    rule = _db.get_pj_folder_suggestion(email_addr, domain, subject_keywords=_pj_subj_kw)
+    if rule:
+        return jsonify({"folder_path": rule['dest_folder'], "source": "history"})
+
+    if _pj_subj_kw:
+        kw_match = _db.get_pj_folder_by_keywords(email_addr, _pj_subj_kw)
+        if kw_match:
+            return jsonify({"folder_path": kw_match['dest_folder'], "source": "history"})
+
+    folders = _get_windows_folders_cached()
+    if subject and folders:
+        _words = _pj_subj_kw.split() if _pj_subj_kw else []
+        best_match = None
+        best_score = 0
+        for f in folders:
+            fname = f['name'].lower()
+            fpath = f['path'].lower()
+            score = sum(1 for w in _words if w in fname)
+            path_score = sum(1 for w in _words if w in fpath)
+            total = score * 2 + path_score
+            if total > best_score and total >= 2:
+                best_score = total
+                best_match = f
+        if best_match:
+            return jsonify({"folder_path": best_match['path'], "source": "match"})
+
+    return jsonify({"folder_path": None})
+
+
+@app.route('/api/open_windows_folder')
+def api_open_windows_folder():
+    """Ouvre un dossier Windows dans l'explorateur (Windows uniquement)."""
+    folder_path = request.args.get('path', '')
+    root = _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
+    full_path = os.path.normpath(os.path.join(root, folder_path.replace('/', os.sep)))
+    # Securite path traversal
+    if not os.path.normcase(os.path.realpath(full_path)).startswith(
+            os.path.normcase(os.path.realpath(root))):
+        return jsonify({"error": "Chemin non autorise"}), 403
+    if os.path.isdir(full_path):
+        os.startfile(full_path)
+        return jsonify({"success": True})
+    return jsonify({"error": "Dossier introuvable"}), 404
+
+
+# =============================================================================
 # ROUTES API — RECHERCHE CONTEXTE (Mode Standard — Graph API)
 # =============================================================================
 
@@ -2273,6 +2637,124 @@ def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids
                       f"(correspondant a repondu, mots communs: {common})", flush=True)
             except Exception:
                 pass
+
+
+# --- PJ extraction & upload ---------------------------------------------------
+_pj_text_cache = {}        # email_id → {'status': 'running'|'done', 'results': [...], 'ts': float}
+
+_attachment_cache = {}     # email_id → [{'id', 'name', 'size', 'content_type', 'is_inline'}]
+_MAX_ATTACHMENT_CACHE = 30
+_upload_dir = os.path.join(tempfile.gettempdir(), 'easymail_uploads')
+os.makedirs(_upload_dir, exist_ok=True)
+
+# --- Classement PJ Windows ----------------------------------------------------
+_windows_folders_cache = None
+_PJ_ROOT_DEFAULT = r'C:\Users\yvanb\Documents'
+_WINDOWS_SKIP = {'.git', '__pycache__', '$recycle.bin', 'node_modules', '.claude', '.venv', 'venv', '.vs'}
+
+# --- MAJ automatique Git ------------------------------------------------------
+_update_available = False
+_update_message = ''
+_update_lock = threading.Lock()
+
+# --- Fonctions Windows folders ------------------------------------------------
+
+def _scan_windows_folders(root_path, max_depth=5):
+    """DFS des dossiers Windows jusqu'a max_depth. Skip .git, __pycache__, etc."""
+    folders = []
+    if not os.path.isdir(root_path):
+        return folders
+
+    def _natural_sort_key(name):
+        return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', name)]
+
+    def _scan(dir_path, rel_prefix, depth):
+        if depth > max_depth:
+            return
+        try:
+            children = [d for d in os.listdir(dir_path)
+                        if os.path.isdir(os.path.join(dir_path, d))
+                        and d.lower() not in _WINDOWS_SKIP and not d.startswith('.')]
+        except PermissionError:
+            return
+        children.sort(key=_natural_sort_key)
+        for d in children:
+            rel_path = (rel_prefix + '/' + d) if rel_prefix else d
+            folders.append({'path': rel_path, 'name': d, 'depth': depth})
+            _scan(os.path.join(dir_path, d), rel_path, depth + 1)
+
+    _scan(root_path, '', 1)
+    return folders
+
+
+def _get_windows_folders_cached():
+    """Retourne l'arborescence Windows (cache session, invalide si pj_root_folder change)."""
+    global _windows_folders_cache
+    if _windows_folders_cache is not None:
+        return _windows_folders_cache
+    root = _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
+    _windows_folders_cache = _scan_windows_folders(root)
+    return _windows_folders_cache
+
+
+# --- Fonction MAJ Git ---------------------------------------------------------
+
+def _check_git_updates():
+    """Thread background : verifie toutes les 2h si des commits sont disponibles sur origin."""
+    global _update_available, _update_message
+    time.sleep(30)  # Attendre 30s apres le demarrage
+    # cwd = racine du repo (C:\EasyMail\), pas V1_outlook/
+    _git_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    while True:
+        try:
+            _r = subprocess.run(
+                ['git', 'rev-parse', '--git-dir'],
+                capture_output=True, text=True, cwd=_git_dir, timeout=10
+            )
+            if _r.returncode != 0:
+                return  # Pas un repo Git
+
+            _branch = 'main'
+            for _b in ('main', 'master'):
+                _br = subprocess.run(
+                    ['git', 'rev-parse', '--verify', f'origin/{_b}'],
+                    capture_output=True, text=True, cwd=_git_dir, timeout=10
+                )
+                if _br.returncode == 0:
+                    _branch = _b
+                    break
+            else:
+                time.sleep(7200)
+                continue
+
+            subprocess.run(
+                ['git', 'fetch', '--quiet'],
+                capture_output=True, text=True, cwd=_git_dir, timeout=30
+            )
+
+            _log = subprocess.run(
+                ['git', 'log', f'HEAD..origin/{_branch}', '--oneline', '--format=%s'],
+                capture_output=True, text=True, cwd=_git_dir, timeout=15
+            )
+            if _log.returncode == 0 and _log.stdout.strip():
+                _commits = _log.stdout.strip().split('\n')
+                _last = _commits[0]
+                if _last.startswith('[FIX]'):
+                    _msg = 'Yvan vient de corriger un bug'
+                elif _last.startswith('[NEW]'):
+                    _msg = 'Yvan vient d\'ajouter une fonctionnalite'
+                else:
+                    _msg = 'Yvan vient d\'ameliorer EasyMail'
+                with _update_lock:
+                    _update_available = True
+                    _update_message = _msg
+                print(f'[update] MAJ disponible: {len(_commits)} commit(s) - {_last}', flush=True)
+            else:
+                with _update_lock:
+                    _update_available = False
+        except Exception as e:
+            print(f'[update] Erreur check: {e}', flush=True)
+        time.sleep(7200)  # 2 heures
 
 
 # --- Auto-apprentissage & recalibrage ----------------------------------------
@@ -2628,9 +3110,22 @@ INSTRUCTIONS ECHEANCES :
                 recent_corrections=recent_corrections,
                 learning_priorities=learning_priorities,
             )
-            # Ajouter le contexte PJ si présent (cappé à 5000 chars)
+            # Ajouter le contexte PJ si présent — bloc analyse 5 etapes
             if pj_context:
-                user_prompt += f"\n\n[CONTENU DES PIÈCES JOINTES]\n{pj_context[:5000]}"
+                user_prompt += (
+                    "\n\n[PIECES JOINTES ANALYSEES — REGLE ABSOLUE]\n"
+                    "L'utilisateur a joint des documents qu'il a CHOISI de te faire analyser. C'est une action deliberee.\n"
+                    "Tu DOIS demontrer une lecture APPROFONDIE du contenu. Le destinataire doit etre impressionne par ta maitrise du dossier.\n\n"
+                    "METHODE D'ANALYSE :\n"
+                    "1. IDENTIFIER le type de document (contrat, ordonnance, attestation, facture, courrier, rapport...)\n"
+                    "2. EXTRAIRE les donnees factuelles : dates precises, montants exacts, noms des parties, references juridiques, numeros de dossier\n"
+                    "3. SYNTHETISER l'essentiel en 3-5 points structures avec des bullet points\n"
+                    "4. ALERTER sur les points de vigilance : delais a respecter, incoherences, clauses inhabituelles, risques identifies\n"
+                    "5. PROPOSER les actions concretes : prochaines etapes, verifications a faire, questions a poser\n\n"
+                    "INTERDIT : ecrire 'ci-joint le document' ou 'je te transmets'. Le mail doit PROUVER que tu as lu, compris et analyse chaque document.\n"
+                    "OBLIGATOIRE : citer des elements SPECIFIQUES du document (dates, noms, montants, articles de loi).\n\n"
+                    f"{pj_context[:5000]}"
+                )
 
             # 12l — Instruction : NE PAS générer greeting/closing/signature
             user_prompt += (
@@ -4104,6 +4599,49 @@ def api_onboarding_status():
     })
 
 
+# =============================================================================
+# ROUTES API — MAJ AUTOMATIQUE GIT
+# =============================================================================
+
+@app.route('/api/check_update')
+def api_check_update():
+    """Retourne si une MAJ est disponible."""
+    with _update_lock:
+        return jsonify({"available": _update_available, "message": _update_message})
+
+
+@app.route('/api/apply_update', methods=['POST'])
+def api_apply_update():
+    """Applique la MAJ (git pull) et redémarre le serveur."""
+    global _update_available, _update_message
+    _git_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if os.path.exists(os.path.join(_git_dir, '.dev_mode')):
+        return jsonify({"success": False, "message": "Mode dev actif — MAJ desactivee"})
+    try:
+        _r = subprocess.run(
+            ['git', 'pull', '--quiet'],
+            capture_output=True, text=True, cwd=_git_dir, timeout=60
+        )
+        if _r.returncode == 0:
+            with _update_lock:
+                _update_available = False
+                _update_message = ''
+            print('[update] git pull OK — redemarrage...', flush=True)
+
+            def _restart():
+                time.sleep(1)
+                _python = sys.executable
+                subprocess.Popen([_python] + sys.argv, cwd=_git_dir)
+                os._exit(0)
+
+            threading.Thread(target=_restart, daemon=True).start()
+            return jsonify({"success": True, "message": "Mise a jour appliquee, redemarrage..."})
+        else:
+            return jsonify({"success": False, "message": f"Echec: {_r.stderr[:200]}"})
+    except Exception as e:
+        return jsonify({"success": False, "message": _safe_err(e)})
+
+
 # --- Démarrage ---------------------------------------------------------------
 
 if __name__ == '__main__':
@@ -4133,6 +4671,7 @@ if __name__ == '__main__':
     print(f"{'='*60}\n")
 
     _auto_trigger_warmup()  # Fix #5 : warmup automatique 3s après démarrage
+    threading.Thread(target=_check_git_updates, daemon=True).start()  # MAJ auto Git
 
     _is_dev = os.path.exists(os.path.join(EASYMAIL_DIR, '.dev_mode'))
     app.run(
