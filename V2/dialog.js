@@ -866,31 +866,28 @@ function _fetchGenerateReply(body) {
         }
         var reader = response.body.getReader();
         var decoder = new TextDecoder();
-        var _lineBuffer = ''; // Buffer anti-fragmentation : une ligne SSE peut être coupée par TCP
-        // Tracker le texte brut streamé (les \n sont perdus dans editor.textContent
-        // une fois insérés via insertAdjacentText dans un contenteditable).
-        window._streamedText = '';
+        var _lineBuffer = '';   // Buffer anti-fragmentation SSE
+        var streamedText = '';  // Texte brut accumulé pendant le stream (préserve \n)
 
         function read() {
             reader.read().then(function(result) {
                 if (result.done) {
-                    // fix #7 : vider le buffer restant (dernier chunk sans \n final)
+                    // Vider le buffer restant (dernier chunk sans \n final)
                     if (_lineBuffer.startsWith('data: ')) {
                         try {
                             var last = JSON.parse(_lineBuffer.substring(6));
                             if (last.chunk) {
                                 editor.insertAdjacentText('beforeend', last.chunk);
-                                window._streamedText += last.chunk;
+                                streamedText += last.chunk;
                             }
                         } catch(e) {}
                     }
-                    _onGenerationDone();
+                    _onGenerationDone(streamedText);
                     return;
                 }
-                // Accumuler dans le buffer pour reconstituer les lignes complètes
                 _lineBuffer += decoder.decode(result.value, { stream: true });
                 var lines = _lineBuffer.split('\n');
-                _lineBuffer = lines.pop(); // Garder la ligne incomplète pour le prochain chunk
+                _lineBuffer = lines.pop();
                 lines.forEach(function(line) {
                     if (line.startsWith('data: ')) {
                         try {
@@ -898,15 +895,12 @@ function _fetchGenerateReply(body) {
                             if (data.chunk) {
                                 spinner.classList.remove('active');
                                 document.getElementById('headerStatus').textContent = 'Generation en cours...';
-                                editor.insertAdjacentText('beforeend', data.chunk); /* #20 : pas de re-parse HTML */
-                                window._streamedText += data.chunk;
+                                editor.insertAdjacentText('beforeend', data.chunk);
+                                streamedText += data.chunk;
                             }
-                            if (data.done) {
-                                // NE PAS appeler _onGenerationDone() ici : d'autres chunks
-                                // peuvent arriver APRÈS (warnings, résidus du buffer SSE).
-                                // Le vrai reformatage se fait UNE SEULE fois dans result.done.
-                                return;
-                            }
+                            // data.done (événement applicatif) : on n'agit PAS ici.
+                            // Le reformatage final se fait UNE fois dans result.done
+                            // (vrai end-of-stream, après tous les chunks résiduels).
                             if (data.error) {
                                 spinner.classList.remove('active');
                                 editor.innerHTML = '<p style="color:#c00;">' + _escapeHtml(data.error) + '</p>';
@@ -916,7 +910,7 @@ function _fetchGenerateReply(body) {
                                 _onGenerationDone();
                                 return;
                             }
-                        } catch (e) { /* ignore parse errors */ }
+                        } catch (e) {}
                     }
                 });
                 read();
@@ -930,30 +924,32 @@ function _fetchGenerateReply(body) {
     });
 }
 
-function _onGenerationDone() {
+/**
+ * Finalise la génération / modification :
+ *   - réinitialise l'UI (spinner, status, boutons)
+ *   - si streamedText fourni, convertit le texte brut en <p>/<br> HTML propre
+ *
+ * streamedText (optionnel) : texte accumulé pendant le streaming SSE.
+ * Le contenteditable Chromium perd les \n via textContent/innerText, donc
+ * on s'appuie sur cette variable accumulée à la source.
+ */
+function _onGenerationDone(streamedText) {
     _isGenerating = false;
     document.getElementById('btnGenerate').disabled = (_mode === 'forward' && !document.getElementById('fieldTo').value.trim());
     document.getElementById('genSpinner').classList.remove('active');
 
-    // Status "Réponse prête • X.Xs" (comme mockup v14)
     var elapsed = _sendStartTime ? ((Date.now() - _sendStartTime) / 1000).toFixed(1) : '?';
     document.getElementById('headerStatus').textContent = 'Reponse prete \u2022 ' + elapsed + 's';
 
-    // Convertir le texte brut streamé en paragraphes pour une mise en page propre.
-    // IMPORTANT : on utilise window._streamedText (accumulé pendant le streaming)
-    // plutôt que editor.textContent/innerText, car le contenteditable Chromium
-    // perd les \n malgré white-space: pre-wrap.
+    // Structurer le texte streamé en paragraphes HTML pour l'envoi ET le rendu final.
     var editor = document.getElementById('editor');
-    var raw = window._streamedText || '';
-    if (raw && !editor.querySelector('p')) {
-        // Le contenu est du texte brut (pas de <p>) — le structurer
-        var paragraphs = raw.split(/\n\n+/).map(function(p) {
+    if (streamedText && !editor.querySelector('p')) {
+        var paragraphs = streamedText.split(/\n\n+/).map(function(p) {
             return '<p>' + p.replace(/\n/g, '<br>') + '</p>';
         }).join('');
         editor.innerHTML = paragraphs;
     }
 
-    // Activer les boutons post-génération
     document.getElementById('btnUndo').style.display = _undoStack.length > 0 ? '' : 'none';
     document.getElementById('btnSend').disabled = false;
     var btnRestore = document.getElementById('btnRestore');
@@ -1009,19 +1005,22 @@ function refineReply() {
         }
         var reader = response.body.getReader();
         var decoder = new TextDecoder();
-        var _lineBufferRefine = ''; // Buffer anti-fragmentation refine
+        var _lineBufferRefine = '';
+        var streamedText = '';   // Texte brut accumulé pendant le stream (préserve \n)
 
         function read() {
             reader.read().then(function(result) {
                 if (result.done) {
-                    // fix #7 : vider le buffer restant
                     if (_lineBufferRefine.startsWith('data: ')) {
                         try {
                             var last = JSON.parse(_lineBufferRefine.substring(6));
-                            if (last.chunk) editor.insertAdjacentText('beforeend', last.chunk);
+                            if (last.chunk) {
+                                editor.insertAdjacentText('beforeend', last.chunk);
+                                streamedText += last.chunk;
+                            }
                         } catch(e) {}
                     }
-                    _onGenerationDone();
+                    _onGenerationDone(streamedText);
                     document.getElementById('refineInput').value = '';
                     return;
                 }
@@ -1034,13 +1033,11 @@ function refineReply() {
                             var data = JSON.parse(line.substring(6));
                             if (data.chunk) {
                                 document.getElementById('genSpinner').classList.remove('active');
-                                editor.insertAdjacentText('beforeend', data.chunk); /* #20 : pas de re-parse HTML */
+                                editor.insertAdjacentText('beforeend', data.chunk);
+                                streamedText += data.chunk;
                             }
-                            if (data.done) {
-                                _onGenerationDone();
-                                document.getElementById('refineInput').value = '';
-                                return;
-                            }
+                            // Idem generate : on n'agit pas sur data.done — tout
+                            // se passe au vrai end-of-stream (result.done ci-dessus).
                             if (data.error) {
                                 document.getElementById('genSpinner').classList.remove('active');
                                 editor.innerHTML = '<p style="color:#c00;">' + _escapeHtml(data.error) + '</p>';
