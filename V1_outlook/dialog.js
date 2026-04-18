@@ -1842,11 +1842,43 @@ function _loadMailBodyStandalone() {
                 document.getElementById('mailBody').innerHTML = sanitized;
                 _receivedBody = body;
                 _mailBodyForGeneration = body;
+                var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
+            } else if (_messageId) {
+                // Pas de body dans /api/current_mail → fetch séparé via /api/email_body
+                // (flow New Outlook : autorunshared.js POST /open_dialog_native qui lance PyQt
+                //  sans passer par /api/event/message_read → body absent de _current_mail_data)
+                fetch(_backendUrl + '/api/email_body?messageId=' + encodeURIComponent(_messageId))
+                    .then(function(r) { return r.json(); })
+                    .then(function(ebody) {
+                        var _bs2 = document.getElementById('bodySpinner'); if (_bs2) _bs2.classList.remove('active');
+                        if (ebody && (ebody.body || ebody.html_body)) {
+                            var fullBody = ebody.html_body || ebody.body;
+                            var sanitized = fullBody
+                                .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                                .replace(/<iframe\b[^>]*>/gi, '<!-- blocked -->')
+                                .replace(/<object\b[^>]*>/gi, '<!-- blocked -->')
+                                .replace(/<embed\b[^>]*>/gi, '<!-- blocked -->')
+                                .replace(/on\w+\s*=/gi, 'data-blocked=');
+                            document.getElementById('mailBody').innerHTML = sanitized;
+                            // Pour la génération IA : utiliser le body texte (strippe par _normalize_email),
+                            // pas le HTML brut (trop bruyant pour Claude)
+                            _receivedBody = ebody.body || ebody.html_body || '';
+                            _mailBodyForGeneration = ebody.body || ebody.html_body || '';
+                        } else {
+                            document.getElementById('mailBody').innerHTML =
+                                '<p style="color:#999;">Contenu du mail non disponible.</p>';
+                        }
+                    })
+                    .catch(function(err) {
+                        var _bs2 = document.getElementById('bodySpinner'); if (_bs2) _bs2.classList.remove('active');
+                        document.getElementById('mailBody').innerHTML =
+                            '<p style="color:#c00;">Erreur chargement body : ' + _escapeHtml(err.message || '') + '</p>';
+                    });
             } else {
                 document.getElementById('mailBody').innerHTML =
                     '<p style="color:#999;">Body en attente (cliquez le bouton EasyMail dans Outlook).</p>';
+                var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
             }
-            var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
 
             // (O6) Pré-remplir les champs
             if (!document.getElementById('fieldTo').value && _fromEmail && (_mode === 'reply' || _mode === 'reply_all')) {

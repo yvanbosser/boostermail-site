@@ -1517,7 +1517,7 @@ def api_email_body():
     """
     Récupère le body HTML d'un email via Graph API.
     Appelé par le dialog pour afficher le mail reçu (panneau gauche).
-    Query param : messageId
+    Query param : messageId (Graph ID OU internetMessageId du type <xxx@yyy.com>)
     """
     message_id = request.args.get('messageId', '')
     if not message_id:
@@ -1528,7 +1528,13 @@ def api_email_body():
         return jsonify({"error": "Mode Standard requis pour récupérer le body via Graph"}), 403
 
     try:
-        email = graph.get_email_by_id(message_id)
+        # Détection : si le messageId ressemble à un internetMessageId
+        # (format RFC 2822 : <local@domain>) → utiliser get_email_by_internet_id
+        is_internet_id = message_id.startswith('<') and '@' in message_id
+        if is_internet_id:
+            email = graph.get_email_by_internet_id(message_id)
+        else:
+            email = graph.get_email_by_id(message_id)
         if not email:
             return jsonify({"error": "Email introuvable"}), 404
         return jsonify({
