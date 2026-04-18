@@ -947,11 +947,19 @@ def open_dialog_native():
             # Lancer le nouveau processus PyQt en arrière-plan (détaché)
             # CREATE_NO_WINDOW=0x08000000 pour ne pas afficher de console Windows
             creation_flags = 0x08000000 if sys.platform == 'win32' else 0
+            # Capturer stdout/stderr dans un fichier pour diagnostiquer les plantages PyQt
+            pyqt_log_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                'pyqt_dialog.log'
+            )
+            pyqt_log = open(pyqt_log_path, 'a', encoding='utf-8', buffering=1)
+            pyqt_log.write(f"\n\n=== {datetime.now().isoformat()} | subject={data.get('subject','')[:60]} ===\n")
+            pyqt_log.flush()
             _current_dialog_process = subprocess.Popen(
                 args,
                 creationflags=creation_flags,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=pyqt_log,
+                stderr=subprocess.STDOUT,
             )
 
         logger.info(f"Dialog PyQt lancé : mode={mode} subject={data.get('subject', '')[:50]}")
