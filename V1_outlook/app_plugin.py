@@ -1100,10 +1100,12 @@ def _run_prefetch(mail_data):
             # Fix #12 : ne pas utiliser le context manager du pool (shutdown wait=True bloque)
             # Utiliser submit() + cancel() explicite pour ne pas attendre les futures lentes
             pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+            _my_email_pre = _get_my_email()
             try:
                 future_a = pool.submit(_prefetch_context_a, graph, conversation_id) if conversation_id else None
                 future_b = pool.submit(graph.search_by_sender, from_email, 20)
-                future_c = pool.submit(_prefetch_context_c_with_table, keywords, graph) if keywords else None
+                future_c = pool.submit(_prefetch_context_c_with_table, keywords, graph,
+                                       from_email, _my_email_pre) if keywords else None
 
                 if future_a:
                     try:
@@ -1129,9 +1131,9 @@ def _run_prefetch(mail_data):
 
             # Phase 2.1 : normaliser tous les items pour _build_prompt()
             # (ajoute body_snippet, from_name, direction — corrige les bugs B1/B2/B3)
-            _my_email = _get_my_email()
-            context_a = _normalize_context_a(context_a, from_email, _my_email)
-            context_b = _normalize_context_b(context_b, from_email, _my_email)
+            # _my_email_pre est déjà récupéré plus haut (passé à _prefetch_context_c_with_table)
+            context_a = _normalize_context_a(context_a, from_email, _my_email_pre)
+            context_b = _normalize_context_b(context_b, from_email, _my_email_pre)
             # Note : context_c est déjà normalisé par _prefetch_context_c_with_table()
 
             _broadcast_sse('prefetch_progress', {'a': len(context_a), 'b': len(context_b), 'c': len(context_c)})
@@ -1146,7 +1148,9 @@ def _run_prefetch(mail_data):
                                      params={'email': from_email, 'max': '20'}, timeout=10)
                     # Contexte C : GetTable (nouvelle route) avec fallback /prefetch_subject
                     kw = _extract_prefetch_keywords(subject)
-                    fc = pool.submit(_prefetch_context_c_with_table, kw, None) if kw else None
+                    _my_email_deg = _get_my_email()
+                    fc = pool.submit(_prefetch_context_c_with_table, kw, None,
+                                     from_email, _my_email_deg) if kw else None
                     try:
                         resp_b = fb.result(timeout=15)
                         if resp_b.status_code == 200:
@@ -1419,16 +1423,20 @@ def _normalize_context_c(items, source='unknown', correspondent_email='', my_ema
             'from_email':   m.get('from_email', ''),
             'date':         m.get('date', ''),
             'direction':    direction,
-            # Préserver id Graph pour dédup (Audit fix)
-            'id':           m.get('id', ''),
+            # Préserver id Graph + internet_message_id pour dédup fiable (Audit fix)
+            'id':                  m.get('id', ''),
+            'internet_message_id': m.get('internet_message_id', ''),
         })
     return normalized
 
 
-def _prefetch_context_c_with_table(keywords, graph=None):
+def _prefetch_context_c_with_table(keywords, graph=None, correspondent_email='', my_email=''):
     """
     Contexte C : recherche par mots-clés via Companion GetTable (COM Outlook local).
     Fallback sur Graph API si le Companion est indisponible.
+
+    correspondent_email + my_email : utilisés pour déduire la direction des items
+    retournés (sent/received). Fallback 'received' si non fournis.
 
     Priorité : Companion GetTable > Graph search_emails > []
     Avantage GetTable : < 100ms, aucun quota Graph, fonctionne hors réseau.
@@ -1450,7 +1458,8 @@ def _prefetch_context_c_with_table(keywords, graph=None):
             data = resp.json()
             if data.get('status') == 'ok' and data.get('results'):
                 logger.info(f"Prefetch C via Companion GetTable : {len(data['results'])} résultats")
-                return _normalize_context_c(data['results'], 'get_table')
+                return _normalize_context_c(data['results'], 'get_table',
+                                            correspondent_email, my_email)
     except Exception as e:
         logger.debug(f"Companion GetTable indisponible : {e}")
 
@@ -1459,7 +1468,8 @@ def _prefetch_context_c_with_table(keywords, graph=None):
         try:
             results = graph.search_emails(f'subject:{keywords}', 20)
             logger.info(f"Prefetch C via Graph fallback : {len(results)} résultats")
-            return _normalize_context_c(results, 'graph')
+            return _normalize_context_c(results, 'graph',
+                                        correspondent_email, my_email)
         except Exception as e:
             logger.warning(f"Prefetch C Graph fallback error: {e}")
 
@@ -2722,22 +2732,24 @@ def api_echeances_pre_scan():
 
     # Cle de cache basee sur le contenu (hash du body tronque)
     scan_key = hashlib.md5((to_email + '|' + subject + '|' + _body_clean[:500]).encode()).hexdigest()
-    existing = _echeance_pre_scan_cache.get(scan_key)
-    if existing and existing.get('status') in ('running', 'done'):
-        return jsonify({"ok": True, "scan_key": scan_key})
-
-    _trim_dict_cache(_echeance_pre_scan_cache, _MAX_PRE_SCAN_CACHE)
-    _echeance_pre_scan_cache[scan_key] = {
-        'status': 'running', 'echeances': [], 'ts': time.time(),
-        'body': body, 'to': to_email, 'subject': subject
-    }
+    # Skip + réservation atomique sous lock (Audit fix : race condition)
+    with _echeance_pre_scan_lock:
+        existing = _echeance_pre_scan_cache.get(scan_key)
+        if existing and existing.get('status') in ('running', 'done'):
+            return jsonify({"ok": True, "scan_key": scan_key})
+        _trim_dict_cache(_echeance_pre_scan_cache, _MAX_PRE_SCAN_CACHE)
+        _echeance_pre_scan_cache[scan_key] = {
+            'status': 'running', 'echeances': [], 'ts': time.time(),
+            'body': body, 'to': to_email, 'subject': subject
+        }
 
     def _do_pre_scan():
         try:
             _builder = _get_prompt_builder()
             if not _builder:
-                _echeance_pre_scan_cache[scan_key] = {
-                    'status': 'done', 'echeances': [], 'ts': time.time()}
+                with _echeance_pre_scan_lock:
+                    _echeance_pre_scan_cache[scan_key] = {
+                        'status': 'done', 'echeances': [], 'ts': time.time()}
                 return
             mails_to_scan = [{
                 'entry_id': '',
@@ -2749,24 +2761,27 @@ def api_echeances_pre_scan():
                 'date': datetime.now().strftime("%Y-%m-%d")
             }]
             echeances = _builder.scan_echeances_batch(mails_to_scan)
-            _echeance_pre_scan_cache[scan_key] = {
-                'status': 'done', 'echeances': echeances or [], 'ts': time.time(),
-                'body': body, 'to': to_email, 'subject': subject
-            }
+            with _echeance_pre_scan_lock:
+                _echeance_pre_scan_cache[scan_key] = {
+                    'status': 'done', 'echeances': echeances or [], 'ts': time.time(),
+                    'body': body, 'to': to_email, 'subject': subject
+                }
             print(f"[echeances] Pre-scan termine: {len(echeances or [])} echeance(s)", flush=True)
         except Exception as e:
             print(f"[echeances] Erreur pre-scan: {e}", flush=True)
-            _echeance_pre_scan_cache[scan_key] = {
-                'status': 'done', 'echeances': [], 'ts': time.time()}
+            with _echeance_pre_scan_lock:
+                _echeance_pre_scan_cache[scan_key] = {
+                    'status': 'done', 'echeances': [], 'ts': time.time()}
 
     threading.Thread(target=_do_pre_scan, daemon=True).start()
 
-    # Nettoyage entrees > 120s
+    # Nettoyage entrees > 120s (sous lock)
     _now = time.time()
-    stale = [k for k, v in list(_echeance_pre_scan_cache.items())
-             if (_now - v.get('ts', 0)) > 120]
-    for k in stale:
-        _echeance_pre_scan_cache.pop(k, None)
+    with _echeance_pre_scan_lock:
+        stale = [k for k, v in list(_echeance_pre_scan_cache.items())
+                 if (_now - v.get('ts', 0)) > 120]
+        for k in stale:
+            _echeance_pre_scan_cache.pop(k, None)
 
     return jsonify({"ok": True, "scan_key": scan_key})
 
@@ -2876,8 +2891,9 @@ def api_suggest_pj_folder(email_id):
         attachments = graph.get_attachments(email_id)
     except Exception:
         attachments = []
-    _trim_dict_cache(_attachment_cache, _MAX_ATTACHMENT_CACHE)
-    _attachment_cache[email_id] = attachments
+    with _attachment_cache_lock:
+        _trim_dict_cache(_attachment_cache, _MAX_ATTACHMENT_CACHE)
+        _attachment_cache[email_id] = attachments
     relevant_pj = [a for a in attachments if not a.get('is_inline', False)]
     pj_names = [a['name'] for a in relevant_pj]
 
@@ -3046,6 +3062,7 @@ _classify_momentum = {}  # {'folder_name': str, 'folder_id': str, 'ts': float}
 
 # --- Échéances (pre-filtre heuristique, $0) ----------------------------------
 _echeance_pre_scan_cache = {}   # scan_key → {'status': 'running'|'done', 'echeances': [...], 'ts': float}
+_echeance_pre_scan_lock = threading.Lock()  # Audit : protège _echeance_pre_scan_cache
 _ECHEANCE_DATE_PATTERNS = re.compile(
     r'(?:'
     r'\d{1,2}[/\-\.]\d{1,2}(?:[/\-\.]\d{2,4})?'
@@ -3250,6 +3267,7 @@ def _start_pj_pre_extract_v2(message_id, attachments=None):
     threading.Thread(target=_bg_extract, daemon=True).start()
 
 _attachment_cache = {}     # email_id → [{'id', 'name', 'size', 'content_type', 'is_inline'}]
+_attachment_cache_lock = threading.Lock()  # Audit : protège _attachment_cache (accès BG vs main)
 _MAX_ATTACHMENT_CACHE = 30
 _upload_dir = os.path.join(tempfile.gettempdir(), 'easymail_uploads')
 os.makedirs(_upload_dir, exist_ok=True)
