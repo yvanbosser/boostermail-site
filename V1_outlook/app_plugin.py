@@ -675,6 +675,27 @@ def sse_stream():
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
+# --- Debug log add-in (diagnostic comportement côté serveur) -----------------
+
+_addin_debug_log_path = os.path.join(EASYMAIL_DIR, 'addin_debug.log')
+_addin_debug_lock = threading.Lock()
+
+@app.route('/api/debug_addin_log', methods=['POST'])
+def api_debug_addin_log():
+    """Journalise un événement envoyé par l'add-in dans addin_debug.log
+    pour diagnostic. Toujours 204 No Content, silencieux."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        evt = data.get('event', '?')
+        det = data.get('details', {})
+        with _addin_debug_lock:
+            with open(_addin_debug_log_path, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now().isoformat(timespec='seconds')} | {evt} | {json.dumps(det, ensure_ascii=False, default=str)}\n")
+    except Exception:
+        pass
+    return ('', 204)
+
+
 # --- Message read (turbo Office.js + auto-prefetch O8) -----------------------
 
 @app.route('/api/event/message_read', methods=['POST'])
@@ -1353,6 +1374,7 @@ _COMPANION_ALLOWED = {
     'current_selection', 'inject_reply', 'detect_compose', 'folders',
     'copy', 'status', 'prefetch_sender', 'prefetch_subject',
     'search', 'scan_folders', 'outlook_folders',
+    'open_dialog_native',   # Ouverture dialog PyQt natif (New Outlook)
 }
 
 @app.route('/api/companion/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE'])

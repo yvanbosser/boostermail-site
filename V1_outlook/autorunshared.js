@@ -13,6 +13,26 @@
 
 var _backendUrl = 'https://localhost:3443';
 
+/**
+ * Debug log : envoie un événement au backend qui l'écrit dans boostermail.log
+ * Permet de diagnostiquer le comportement de l'add-in côté serveur.
+ * Silencieux en cas d'échec (ne doit jamais casser le flux).
+ */
+function _debugLog(eventName, details) {
+    try {
+        fetch(_backendUrl + '/api/debug_addin_log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                event: eventName,
+                details: details || {},
+                ts: Date.now()
+            }),
+            keepalive: true
+        }).catch(function(){});
+    } catch(e) {}
+}
+
 // ============================================================================
 // INITIALISATION
 // ============================================================================
@@ -97,15 +117,25 @@ function _onItemChanged() {
  * Lit les métadonnées du mail, notifie le backend (turbo + prefetch), puis ouvre le dialog.
  */
 function openEasyMailDialog(event) {
+    // Trace début : confirme que le clic arrive dans le nouveau code
+    var _diag = (Office && Office.context && Office.context.mailbox && Office.context.mailbox.diagnostics) || {};
+    _debugLog('button_clicked', {
+        hostName: _diag.hostName || '?',
+        hostVersion: _diag.hostVersion || '?',
+        OWAView: _diag.OWAView || '?'
+    });
+
     var item = Office.context.mailbox.item;
 
     if (!item) {
+        _debugLog('button_clicked_but_no_item', {});
         event.completed();
         return;
     }
 
     // (P16) Détecter lecture vs compose
     var isCompose = (item.subject && typeof item.subject.getAsync === 'function');
+    _debugLog('mode_detected', { isCompose: isCompose });
 
     if (isCompose) {
         _openDialogFromCompose(item, event);
@@ -296,6 +326,8 @@ function _openDialogPlatformRouted(dialogUrl, data, getMailBody, fromName, fromE
     var platform = _detectOutlookPlatform();
 
     // --- New Outlook : Companion local + PyQt native ---
+    // IMPORTANT : on passe par le proxy HTTPS /api/companion/open_dialog_native
+    // Pas de fetch direct vers http://localhost:5051 (bloqué mixed-content HTTPS→HTTP)
     if (platform === 'newOutlook') {
         var payload = {
             mode: data.mode,
@@ -308,24 +340,24 @@ function _openDialogPlatformRouted(dialogUrl, data, getMailBody, fromName, fromE
             cc: data.cc,
             hasAttachments: data.hasAttachments ? '1' : '0'
         };
+        _debugLog('newOutlook_click', { platform: platform, payload: payload });
         try {
-            fetch('http://localhost:5051/open_dialog_native', {
+            fetch(_backendUrl + '/api/companion/open_dialog_native', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             }).then(function(r) {
+                _debugLog('newOutlook_fetch_result', { status: r.status, ok: r.ok });
                 if (!r.ok) {
                     console.error('BoosterMail: Companion a refusé le dialog (HTTP ' + r.status + ')');
                 }
             }).catch(function(err) {
-                console.error('BoosterMail: Companion inaccessible — installez/démarrez BoosterMail Companion. ' + err);
-                // Fallback : ouvrir via displayDialogAsync (avec la popup)
-                _openViaDisplayDialog(null, dialogUrl, data, getMailBody, fromName, fromEmail, event);
+                _debugLog('newOutlook_fetch_error', { error: String(err) });
+                console.error('BoosterMail: Companion inaccessible. ' + err);
             });
         } catch(e) {
+            _debugLog('newOutlook_fetch_exception', { error: String(e) });
             console.error('BoosterMail: fetch Companion impossible', e);
-            _openViaDisplayDialog(dialogUrl, data, getMailBody, fromName, fromEmail, event);
-            return true;
         }
         // Libérer le runtime immédiatement (le Companion gère la fenêtre)
         event.completed();
