@@ -804,20 +804,49 @@ function generateReply() {
     document.getElementById('headerStatus').textContent = 'Lecture du contexte...';
     _sendStartTime = Date.now();
 
-    var body = JSON.stringify({
-        message_id: _messageId,
-        brief: brief,
-        importance: _importance,
-        mode: _mode,
-        to: document.getElementById('fieldTo').value,
-        subject: document.getElementById('fieldSubject').value,
-        from_email: _fromEmail,
-        from_name: _fromName,
-        body: _mailBodyForGeneration,
-        pj_context: _extractedPjContext || '',
-        fwd_pj_indices: _fwdSelectedIndexes.length > 0 ? _fwdSelectedIndexes : undefined,
-    });
+    // SAFETY : si le body n'est pas encore chargé (click rapide avant fin du fetch async),
+    // le récupérer synchroniquement avant d'appeler Claude (sinon réponse vide/non pertinente)
+    var _proceedWithGeneration = function() {
+        console.log('[dialog] generateReply: body length =', (_mailBodyForGeneration || '').length);
+        var body = JSON.stringify({
+            message_id: _messageId,
+            brief: brief,
+            importance: _importance,
+            mode: _mode,
+            to: document.getElementById('fieldTo').value,
+            subject: document.getElementById('fieldSubject').value,
+            from_email: _fromEmail,
+            from_name: _fromName,
+            body: _mailBodyForGeneration,
+            pj_context: _extractedPjContext || '',
+            fwd_pj_indices: _fwdSelectedIndexes.length > 0 ? _fwdSelectedIndexes : undefined,
+        });
+        _fetchGenerateReply(body);
+    };
 
+    if (!_mailBodyForGeneration && _messageId && _mode !== 'new') {
+        // Récupérer le body manquant avant génération
+        document.getElementById('headerStatus').textContent = 'Chargement du mail...';
+        fetch(_backendUrl + '/api/email_body?messageId=' + encodeURIComponent(_messageId))
+            .then(function(r) { return r.json(); })
+            .then(function(ebody) {
+                if (ebody && (ebody.body || ebody.html_body)) {
+                    _mailBodyForGeneration = ebody.body || ebody.html_body || '';
+                    _receivedBody = _mailBodyForGeneration;
+                }
+                _proceedWithGeneration();
+            })
+            .catch(function() { _proceedWithGeneration(); });
+        return;
+    }
+
+    _proceedWithGeneration();
+}
+
+function _fetchGenerateReply(body) {
+    var editor = document.getElementById('editor');
+    var spinner = document.getElementById('genSpinner');
+    var btnGen = document.getElementById('btnGenerate');
     // SSE streaming
     fetch(_backendUrl + '/generate_reply', {
         method: 'POST',
