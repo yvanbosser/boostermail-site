@@ -6,7 +6,7 @@
 
 ### Organisation du projet
 - Rangement complet de l'arborescence (8 dossiers backup regroupés, corbeille/ créée, docs/ organisé)
-- V1_plugin/ archivé dans corbeille/ (remplacé par V1_outlook/)
+- V1_plugin/ archivé dans corbeille/ (remplacé par V2/)
 - 6 Setup ZIP anciens archivés (V6 conservé dans installer/)
 - STRUCTURE_PROJET.md créé (carte complète du projet)
 - NOUVELLE_SESSION.md créé (guide démarrage + méthode de travail)
@@ -108,7 +108,7 @@ ne pas accumuler les couches, séparer recherche et implémentation,
 
 C'est le cœur du produit. Le dialog est prêt (forme 95%). Le backend est prêt (47 routes). Le core/ est prêt (claude_provider fonctionne). Il manque le cerveau : la construction du prompt WOW (blocs A→F) adaptée aux données Graph API.
 
-Voir `V1_outlook/TODO_SESSION_SUIVANTE.md` pour le détail.
+Voir `V2/TODO_SESSION_SUIVANTE.md` pour le détail.
 
 ---
 

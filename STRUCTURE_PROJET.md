@@ -27,40 +27,52 @@ EasyMail/
 
 ---
 
-## V1_outlook/ — Code actif V1 Outlook (port 3443 HTTPS)
+## V2/ — Package V2 AUTONOME (port 3443 HTTPS)
+
+**Renommé de `V1_outlook/` → `V2/` le 18/04/2026.** Depuis ce renommage, V2 est
+**indépendant du proto** : libs Python locales, DB locale, caches locaux. Le proto
+reste accessible à la racine `C:\EasyMail\` pour les beta-testeurs.
 
 ```
-V1_outlook/
-├── app_plugin.py           ← Backend V1 (47+ routes, SSE, Graph API)
+V2/
+├── app_plugin.py           ← Backend V2 (67 routes, SSE, Graph API)
 ├── auth_microsoft.py       ← OAuth2 Microsoft (MSAL)
 ├── outlook_graph.py        ← Wrapper Microsoft Graph API
 │
+│   === Libs copiées depuis la racine (autonomie totale) ===
+├── database.py             ← DB manager (copie de celle racine, même code)
+├── claude_ai.py            ← Moteur Claude (copie)
+├── templates_mail.py       ← Templates mail (copie)
+├── core/                   ← AI providers, auth base, email provider (copies)
+│
+│   === Frontend plugin Outlook ===
 ├── manifest.xml            ← Manifest Office Add-in (V1.3)
 ├── commands.html / .js     ← Handler boutons ruban/compose
 ├── autorun.html            ← Container LaunchEvent
 ├── autorunshared.js        ← Shared runtime (ItemChanged, OnNewMessageCompose)
+├── popup.html / popup.js   ← État 1 — overlay (taskpane/PyQt/extension)
+├── dialog.html / .js / .css ← État 2 — dialog réponse (Office.js ou standalone)
+├── taskpane.html           ← Wrapper iframe vers popup.html
+├── assets/                 ← Icônes plugin
 │
-├── popup.html / popup.js   ← État 1 — overlay (chargé dans taskpane/PyQt/extension)
-├── dialog.html / .js / .css ← État 2 — dialog réponse (mode Office.js ou standalone)
-├── taskpane.html / .js     ← Wrapper iframe pour popup.html
+│   === Extension navigateur (Outlook Web) ===
+├── extension/              ← Chrome/Edge/Firefox — INSTALL.md + manifest.json
 │
+│   === Données locales (non commit, .gitignore) ===
+├── boostermail.db          ← DB SQLite V2 (indépendante du proto)
+├── addin_debug.log         ← Logs diagnostic add-in
+├── prefetch_cache_v2.json  ← Cache préfetch persistant (TTL 48h)
+├── localhost.crt / .key    ← Certificat HTTPS auto-signé
+│
+│   === Scripts & installation ===
+├── start_v2.bat            ← Lanceur V2 (Backend + Companion)
 ├── generate_cert.py        ← Génération certificat HTTPS localhost
-├── localhost.crt / .key    ← Certificat auto-signé
-├── start_v1.bat            ← Lanceur V1 (PyQt + Companion + Backend)
+├── install/                ← Package d'installation
+│   ├── INSTALLATION.md     ← Guide d'installation client
+│   └── boostermail_v2.1.zip ← ZIP déployable (91 fichiers)
 │
-├── SPEC_UI_TABLEAUX_V10.docx        ← Référence UI exhaustive (toutes solutions)
-├── SPEC_UI_ETAT1_LECTURE.md          ← Spec complète État 1 + alimentation
-├── PLAN_ACTION_PHASE_2.md            ← Phase 2 terminée (07/04)
-├── PLAN_ACTION_PHASE_3.md            ← Phase 3 (refonte UI non-intrusive)
-├── PLAN_FINALISATION_OUTLOOK.md      ← Plan finalisation 3 plateformes
-├── TODO_SESSION_SUIVANTE.md          ← Tâches prochaine session
-│
-├── SPEC_PHASE2_AI_PROVIDER.md        ← Spec AI provider (Claude/OpenAI)
-├── SPEC_PHASE2_AUTH.md               ← Spec authentification OAuth2
-├── SPEC_PHASE2_COMPANION.md          ← Spec Companion Windows
-├── SPEC_PHASE2_DECISIONS.md          ← Décisions architecturales Phase 2
-├── SPEC_PHASE2_DIALOG.md             ← Spec dialog split-screen
-└── SPEC_PHASE2_GRAPH.md              ← Spec Microsoft Graph API
+│   === Archive ===
+└── _deprecated_16avril/    ← Ancienne ébauche V2 abandonnée (moteur_v2, etc.)
 ```
 
 ---
@@ -226,7 +238,7 @@ backup/
 
 ```
 corbeille/
-├── V1_plugin/               ← Ancien dossier V1 (remplacé par V1_outlook)
+├── V1_plugin/               ← Ancien dossier V1 (remplacé par V2)
 ├── db_orphelins/            ← Fichiers .db-shm/.db-wal orphelins
 ├── docs_anciens/            ← Presentation V1, pricing V1, Git.docx, install.bat...
 ├── scripts_generation/      ← Scripts one-shot (generate_*.py, pricing_gen.js)

@@ -41,7 +41,7 @@
 
 ### Étape 3a — Créer autorun.html ✅ FAIT
 
-**Fichier** : `V1_outlook/autorun.html`
+**Fichier** : `V2/autorun.html`
 **Dépendances** : aucune
 **Quoi** : page HTML minimale (Office.js + autorunshared.js). Le Runtime resid du manifest V1_1 pointe vers ce fichier.
 **Critère de validation** : le fichier se charge sans erreur dans un navigateur.
@@ -50,7 +50,7 @@
 
 ### Étape 3b — Corriger autorunshared.js ✅ FAIT
 
-**Fichier** : `V1_outlook/autorunshared.js` (existe déjà, créé le 08/04/2026)
+**Fichier** : `V2/autorunshared.js` (existe déjà, créé le 08/04/2026)
 **Dépendances** : aucune
 **Modifications** :
 1. Retirer le bloc `Office.addin.showAsTaskpane()` (lignes 187-194)
@@ -65,7 +65,7 @@
 
 ### Étape 3c — Corriger manifest.xml (V1_1 uniquement) ✅ FAIT
 
-**Fichier** : `V1_outlook/manifest.xml`
+**Fichier** : `V2/manifest.xml`
 **Dépendances** : étape 3a (autorun.html doit exister)
 **Le bloc V1_0 (lignes 50-106) reste INTACT.**
 **Modifications V1_1** :
@@ -82,7 +82,7 @@
 
 ### Étape 3d — Créer popup.html + popup.js (DRY État 1) ✅ FAIT
 
-**Fichier** : `V1_outlook/popup.html` + `V1_outlook/popup.js`
+**Fichier** : `V2/popup.html` + `V2/popup.js`
 **Dépendances** : aucune (testable indépendamment)
 **Quoi** : une seule page pour l'État 1 (contact, PJ, échéances, boutons), chargée dans 3 conteneurs.
 **Sous-tâches** :
@@ -100,7 +100,7 @@
 
 ### Étape 3e — Enrichir les routes backend ✅ FAIT
 
-**Fichier** : `V1_outlook/app_plugin.py` + `V1_outlook/outlook_graph.py`
+**Fichier** : `V2/app_plugin.py` + `V2/outlook_graph.py`
 **Dépendances** : aucune (testable via curl)
 **Sous-tâches** :
 1. `GET /api/current_compose` — TTL 60s (P7)
@@ -123,7 +123,7 @@
 
 ### Étape 3f — Mode standalone dans dialog.js ✅ FAIT
 
-**Fichier** : `V1_outlook/dialog.js` (+ `V1_outlook/dialog.html` pour B8)
+**Fichier** : `V2/dialog.js` (+ `V2/dialog.html` pour B8)
 **Dépendances** : étape 3e (routes backend nécessaires)
 **Sous-tâches** :
 1. Détection contexte `_isOfficeContext` au chargement
@@ -316,4 +316,4 @@ C'est desormais la **Phase 2 ter** dans `PLAN_ACTION_GLOBAL.md`.
 
 → Voir `NOUVELLE_SESSION.md` pour le contexte complet des decisions du 10/04/2026.
 → Voir `docs/sessions/BILAN_SESSION_20260410.md` pour le bilan detaille.
-→ Voir `V1_outlook/TODO_SESSION_SUIVANTE.md` pour les priorites de la prochaine session.
+→ Voir `V2/TODO_SESSION_SUIVANTE.md` pour les priorites de la prochaine session.

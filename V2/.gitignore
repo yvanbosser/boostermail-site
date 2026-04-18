@@ -1,0 +1,34 @@
+# V2 — fichiers à exclure du suivi Git
+
+# Base de données locale (générée au 1er démarrage, spécifique utilisateur)
+boostermail.db
+boostermail.db-shm
+boostermail.db-wal
+
+# Logs (rotation locale)
+addin_debug.log
+boostermail.log
+
+# Caches runtime (recréés à chaque session)
+prefetch_cache_v2.json
+__pycache__/
+*.pyc
+*.pyo
+
+# Certificats HTTPS auto-générés (un par machine)
+localhost.crt
+localhost.key
+
+# Flags d'installation (un par machine)
+.deps_v2_installed
+.dev_mode
+
+# Dossier archive de l'ancien V2 abandonné — conservé pour historique mais hors suivi
+_deprecated_16avril/
+
+# Dossier install (packages ZIP générés)
+install/*.zip
+
+# Certificats Qt WebEngine, cache navigateur
+QtWebEngineProcess/
+EBWebView/

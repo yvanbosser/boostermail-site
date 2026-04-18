@@ -1,6 +1,6 @@
 """
 EasyMail Core — AI Provider (Interface abstraite)
-Partagé entre V1_outlook et V1_gmail (futur).
+Partagé entre V2 et V1_gmail (futur).
 
 Fournit :
 - AIProvider     : interface abstraite que chaque modèle IA implémente

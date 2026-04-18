@@ -1,6 +1,6 @@
 # Plan — Squelette 100% + Ingrédients 100%
 
-**Cible** : V2 (`V1_outlook/app_plugin.py`, port 3443)
+**Cible** : V2 (`V2/app_plugin.py`, port 3443)
 **Référence** : Proto (`app.py`, port 5050) — LECTURE SEULE
 **Créé le** : 18/04/2026
 **Terminé le** : 18/04/2026

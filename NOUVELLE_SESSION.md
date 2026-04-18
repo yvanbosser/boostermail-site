@@ -18,8 +18,8 @@ Ces fichiers donnent 80% du contexte en 20% des tokens.
 |---|---------|--------|----------|
 | 1 | `CLAUDE.md` | 166 | Règles du projet, architecture, contraintes, étanchéité proto/V1 |
 | 2 | `STRUCTURE_PROJET.md` | 235 | Carte complète du projet — où trouver quoi |
-| 3 | `V1_outlook/TODO_SESSION_SUIVANTE.md` | — | Ce qui reste à faire, bugs ouverts, état des flux, priorités ordonnées |
-| 4 | `V1_outlook/PLAN_FINALISATION_OUTLOOK.md` | 209 | Avancement par plateforme, tableau de bord, ordre d'exécution |
+| 3 | `V2/TODO_SESSION_SUIVANTE.md` | — | Ce qui reste à faire, bugs ouverts, état des flux, priorités ordonnées |
+| 4 | `V2/PLAN_FINALISATION_OUTLOOK.md` | 209 | Avancement par plateforme, tableau de bord, ordre d'exécution |
 | 5 | `docs/RAPPORT_AUDIT_SESSION_20260413.md` | — | Bilan session 12-13/04 (VF.1-VF.8, audit complet, bugs corriges) |
 | 6 | `docs/COMPARATIF_PROTO_V1.md` | — | Plan de branchement V1 en 15 etapes + ecarts proto vs V1 |
 
@@ -32,10 +32,10 @@ Ces fichiers donnent 80% du contexte en 20% des tokens.
 | Sujet de la session | Fichier à lire |
 |---|---|
 | **Plan d'action complet (toutes les phases)** | **`docs/PLAN_ACTION_CONSOLIDE.docx`** |
-| Travail sur le dialog ou l'overlay | `V1_outlook/PLAN_ACTION_PHASE_3.md` |
-| Décisions UI (pourquoi telle solution) | `V1_outlook/SPEC_UI_ETAT1_LECTURE.md` |
-| Référence UI exhaustive (toutes les solutions) | `V1_outlook/SPEC_UI_TABLEAUX_V10.docx` |
-| Décisions architecture Phase 2 | `V1_outlook/SPEC_PHASE2_DECISIONS.md` |
+| Travail sur le dialog ou l'overlay | `V2/PLAN_ACTION_PHASE_3.md` |
+| Décisions UI (pourquoi telle solution) | `V2/SPEC_UI_ETAT1_LECTURE.md` |
+| Référence UI exhaustive (toutes les solutions) | `V2/SPEC_UI_TABLEAUX_V10.docx` |
+| Décisions architecture Phase 2 | `V2/SPEC_PHASE2_DECISIONS.md` |
 | Comprendre le moteur IA (prompt, blocs) | `specs/SPEC_SYSTEM_PROMPT.md` + `specs/SPEC_FONCTIONNALITES_PROTO.md` |
 | Routes API du proto | `specs/SPEC_ROUTES_API.md` |
 | Historique des décisions | `specs/HISTORIQUE_DECISIONS.md` |
@@ -52,11 +52,11 @@ Ces fichiers donnent 80% du contexte en 20% des tokens.
 
 | Sujet | Fichier |
 |---|---|
-| Graph API (routes, $batch, tokens) | `V1_outlook/SPEC_PHASE2_GRAPH.md` |
-| AI Provider (Claude/OpenAI, streaming) | `V1_outlook/SPEC_PHASE2_AI_PROVIDER.md` |
-| Dialog split-screen (Office.js vs standalone) | `V1_outlook/SPEC_PHASE2_DIALOG.md` |
-| Companion COM (Windows) | `V1_outlook/SPEC_PHASE2_COMPANION.md` |
-| Auth OAuth2 Microsoft | `V1_outlook/SPEC_PHASE2_AUTH.md` |
+| Graph API (routes, $batch, tokens) | `V2/SPEC_PHASE2_GRAPH.md` |
+| AI Provider (Claude/OpenAI, streaming) | `V2/SPEC_PHASE2_AI_PROVIDER.md` |
+| Dialog split-screen (Office.js vs standalone) | `V2/SPEC_PHASE2_DIALOG.md` |
+| Companion COM (Windows) | `V2/SPEC_PHASE2_COMPANION.md` |
+| Auth OAuth2 Microsoft | `V2/SPEC_PHASE2_AUTH.md` |
 | Résumé Phase 2 complète | `specs/SPEC_PHASE2_RESUME.md` |
 | Scoring rédactionnel (N1-N10) | `algorithme/SPEC_SCORING_REDACTIONNEL.md` |
 | Base de données (tables) | `specs/SPEC_TABLES_DB.md` |
@@ -67,14 +67,14 @@ Ces fichiers donnent 80% du contexte en 20% des tokens.
 
 | Ce qu'on touche | Fichier(s) à lire |
 |---|---|
-| Backend V1 | `V1_outlook/app_plugin.py` |
-| Dialog (UI + logique) | `V1_outlook/dialog.html` + `dialog.js` + `dialog.css` |
-| Overlay/Popup | `V1_outlook/popup.html` + `popup.js` |
+| Backend V1 | `V2/app_plugin.py` |
+| Dialog (UI + logique) | `V2/dialog.html` + `dialog.js` + `dialog.css` |
+| Overlay/Popup | `V2/popup.html` + `popup.js` |
 | Popup PyQt (desktop) | `companion/popup_pyqt.py` |
 | Companion | `companion/companion.py` |
-| Shared runtime (events) | `V1_outlook/autorunshared.js` |
+| Shared runtime (events) | `V2/autorunshared.js` |
 | Extension Chrome | `extension/content.js` |
-| Manifest Outlook | `V1_outlook/manifest.xml` |
+| Manifest Outlook | `V2/manifest.xml` |
 | Moteur IA proto | `claude_ai.py` (LECTURE SEULE) |
 | Proto complet | `app.py` (LECTURE SEULE) |
 | Template de référence | `templates/email_detail.html` (LECTURE SEULE) |
@@ -217,7 +217,7 @@ Vérifier l'étanchéité à chaque fin de session (git diff).
 ### Règle 7 — SOCLE COMMUN GMAIL
 
 Le code dans core/ doit rester provider-agnostic.
-V1_outlook/ = spécifique Outlook. V1_gmail/ = spécifique Gmail (futur).
+V2/ = spécifique Outlook. V1_gmail/ = spécifique Gmail (futur).
 
 ### Règle 8 — AUDIT SYSTÉMATIQUE
 
@@ -239,11 +239,11 @@ Après toute session de code significative :
 - DB `boostermail.db` neuve et saine (emails.db = corrompue par OneDrive)
 
 ### Fichiers modifiés lors de l'audit
-- `V1_outlook/app_plugin.py` — _db.init(), locks, CORS, secret key, debug conditionnel, proxy whitelist
-- `V1_outlook/manifest.xml` — FunctionFile V1.1 → autorunHtmlUrl
-- `V1_outlook/autorunshared.js` — body.getAsync dans callback
-- `V1_outlook/dialog.js` — _escapeAttr, URLs _backendUrl, sanitization renforcée
-- `V1_outlook/outlook_graph.py` — gestion 403 Forbidden
+- `V2/app_plugin.py` — _db.init(), locks, CORS, secret key, debug conditionnel, proxy whitelist
+- `V2/manifest.xml` — FunctionFile V1.1 → autorunHtmlUrl
+- `V2/autorunshared.js` — body.getAsync dans callback
+- `V2/dialog.js` — _escapeAttr, URLs _backendUrl, sanitization renforcée
+- `V2/outlook_graph.py` — gestion 403 Forbidden
 - `core/claude_provider.py` — format prompt sync harmonisé + last_error
 - `database.py` — busy_timeout + SQL borné (rétrocompatible)
 - `companion/companion.py` — DASL injection sanitisée
@@ -264,7 +264,7 @@ Après toute session de code significative :
 
 ### Comment tester BoosterMail aujourd'hui
 
-1. Lancer le backend : `C:\Users\yvanb\OneDrive\Desktop\EasyMail\V1_outlook\start_v1.bat`
+1. Lancer le backend : `C:\Users\yvanb\OneDrive\Desktop\EasyMail\V2\start_v1.bat`
 2. Lancer la popup PyQt (optionnel) : `py -3 C:\Users\yvanb\OneDrive\Desktop\EasyMail\companion\popup_pyqt.py`
 3. Ouvrir Outlook (New Outlook)
 4. Cliquer le bouton BoosterMail dans la barre d'actions du mail
@@ -338,8 +338,8 @@ Chaque clic sur le bouton BoosterMail dans Outlook y écrit automatiquement plus
 
 ### Code source
 
-- **Émission** : `V1_outlook/autorunshared.js` → fonction `_debugLog(event, details)` en haut du fichier
-- **Réception** : `V1_outlook/app_plugin.py` → route `POST /api/debug_addin_log`
+- **Émission** : `V2/autorunshared.js` → fonction `_debugLog(event, details)` en haut du fichier
+- **Réception** : `V2/app_plugin.py` → route `POST /api/debug_addin_log`
 - **Whitelist proxy Companion** : `_COMPANION_ALLOWED` inclut `open_dialog_native` (permet le fetch HTTPS → proxy → Companion)
 
 ### Ajouter un nouvel événement

@@ -1,6 +1,6 @@
 """
 EasyMail Core — Email Provider (Interface abstraite)
-Partagé entre V1_outlook (Graph API) et V1_gmail (Gmail API, futur).
+Partagé entre V2 (Graph API) et V1_gmail (Gmail API, futur).
 
 Définit le contrat que tout provider mail doit respecter :
 - Lecture emails (par ID, recherche, envoyés, reçus)

@@ -89,7 +89,7 @@ Aucune dépendance Node/npm — l'extension est 100% vanilla JS.
 1. Ouvrir `chrome://extensions/` (ou `edge://extensions/` pour Edge, etc.)
 2. Activer **Mode développeur** (toggle en haut à droite)
 3. Cliquer **Charger l'extension non empaquetée**
-4. Naviguer jusqu'à `C:\EasyMail\V1_outlook\extension\` et valider
+4. Naviguer jusqu'à `C:\EasyMail\V2\extension\` et valider
 5. L'icône BoosterMail ✉ apparaît dans la barre d'extensions
 6. **Épingler l'icône** (clic sur la pièce de puzzle → punaise à côté de BoosterMail)
    pour qu'elle soit toujours visible
@@ -98,7 +98,7 @@ Aucune dépendance Node/npm — l'extension est 100% vanilla JS.
 
 1. Ouvrir `about:debugging#/runtime/this-firefox`
 2. Cliquer **Charger un module complémentaire temporaire**
-3. Sélectionner le fichier `C:\EasyMail\V1_outlook\extension\manifest.json`
+3. Sélectionner le fichier `C:\EasyMail\V2\extension\manifest.json`
 4. L'extension est chargée jusqu'à la fermeture de Firefox
 5. Pour une installation permanente en dev, signer le package via
    [web-ext](https://github.com/mozilla/web-ext) et l'auto-publier en AMO unlisted.
@@ -182,7 +182,7 @@ Dans la console du service worker (check 3), tu dois voir :
 
 ## Packaging production
 
-Script pour créer un zip prêt à publier (à exécuter dans `C:\EasyMail\V1_outlook\`) :
+Script pour créer un zip prêt à publier (à exécuter dans `C:\EasyMail\V2\`) :
 
 ```powershell
 # PowerShell (Windows)
@@ -222,7 +222,7 @@ Fichiers requis dans `extension/icons/` :
 | `icon-48.png`  | 48×48    | Page des extensions                      |
 | `icon-128.png` | 128×128  | Chrome Web Store / install dialog        |
 
-Les icônes actuelles sont copiées depuis `V1_outlook/assets/`. Pour personnaliser :
+Les icônes actuelles sont copiées depuis `V2/assets/`. Pour personnaliser :
 
 1. Concevoir un logo carré sur fond transparent
 2. Exporter en 4 tailles (16/32/48/128) en PNG

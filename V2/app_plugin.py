@@ -26,11 +26,11 @@ PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 EASYMAIL_DIR = os.path.dirname(PLUGIN_DIR)  # Dossier parent (C:\EasyMail) — pour config.json + style_profile.txt partagés
 PORT = 3443
 
-# V2 AUTONOME — Option B : indépendance du code (libs copiées dans V1_outlook/)
-# + DB SÉPARÉE (V1_outlook/boostermail.db) + caches V2 SÉPARÉS (prefetch_cache, addin_debug.log).
-# config.json (clé API) et style_profile.txt (style appris) restent PARTAGÉS au niveau parent
-# car ce sont des données "utilisateur" uniques, pas des données d'app.
-# Les libs Python (database, claude_ai, templates_mail, core) sont chargées depuis V1_outlook/.
+# V2 AUTONOME — dossier V2/ est un package indépendant livrable seul.
+# Libs Python locales : database.py, claude_ai.py, templates_mail.py, core/ (copies).
+# DB locale : V2/boostermail.db (séparée du proto).
+# Caches locaux : prefetch_cache_v2.json, addin_debug.log dans V2/.
+# Partagés au niveau parent : config.json (clé API) + style_profile.txt (style utilisateur).
 # On force PLUGIN_DIR en tête de sys.path pour garantir les imports locaux prioritaires.
 sys.path.insert(0, PLUGIN_DIR)
 
@@ -115,7 +115,7 @@ from auth_microsoft import MicrosoftAuthProvider
 
 # DB V2 autonome (Option B) — fichier séparé de celui du proto
 # Le proto utilise C:\EasyMail\boostermail.db
-# V2 utilise C:\EasyMail\V1_outlook\boostermail.db
+# V2 utilise C:\EasyMail\V2\boostermail.db
 _db = Database(os.path.join(PLUGIN_DIR, 'boostermail.db'))
 _db.init()
 
@@ -3341,7 +3341,7 @@ def _check_git_updates():
     """Thread background : verifie toutes les 2h si des commits sont disponibles sur origin."""
     global _update_available, _update_message
     time.sleep(30)  # Attendre 30s apres le demarrage
-    # cwd = racine du repo (C:\EasyMail\), pas V1_outlook/
+    # cwd = racine du repo (C:\EasyMail\), pas V2/
     _git_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     while True:
         try:

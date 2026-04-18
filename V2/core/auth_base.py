@@ -1,6 +1,6 @@
 """
 EasyMail Core — Auth Base
-Logique d'authentification générique, partagée entre V1_outlook et V1_gmail (futur).
+Logique d'authentification générique, partagée entre V2 et V1_gmail (futur).
 
 Fournit :
 - Chiffrement / déchiffrement des tokens (Fernet)

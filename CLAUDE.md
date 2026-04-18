@@ -8,7 +8,7 @@ Assistant email intelligent integre a Outlook (plugin + Graph API). Claude AI ge
 
 ```
 Proto : app.py port 5050 (beta-testeurs, NE PAS TOUCHER)
-V1 Outlook : V1_outlook/app_plugin.py port 3443 (HTTPS)
+V1 Outlook : V2/app_plugin.py port 3443 (HTTPS)
 Companion : companion/companion.py port 5051 (HTTP, localhost)
 Core partage : core/ (auth_base, ai_provider, claude_provider, openai_provider, email_provider)
 DB : database.py + boostermail.db (WAL, retrocompatible proto + V1) — emails.db = corrompue OneDrive
@@ -115,8 +115,8 @@ GetTable (Windows Search), com_run() thread unique, AdvancedSearch evenementiel,
 15 etapes, 38 routes, ~80 anomalies corrigees. Architecture DRY : popup.html (Etat 1) + dialog.html (Etat 2). Office.js = source PRIMAIRE, Companion = regulateur. Prefetch Graph parallele 200ms (80x vs proto).
 
 → detail dans `specs/SPEC_PHASE2_RESUME.md`
-→ specs techniques dans `V1_outlook/SPEC_PHASE2_*.md`
-→ plan UI dans `V1_outlook/SPEC_UI_ETAT1_LECTURE.md`
+→ specs techniques dans `V2/SPEC_PHASE2_*.md`
+→ plan UI dans `V2/SPEC_UI_ETAT1_LECTURE.md`
 
 ---
 
@@ -125,7 +125,7 @@ GetTable (Windows Search), com_run() thread unique, AdvancedSearch evenementiel,
 Taskpane pinable REJETE → overlay non-intrusif. 5 solutions par plateforme (#3 ruban, #7b action bar, #8 PyQt, #12 extension Chrome, #19 LaunchEvent). 10 etapes, 65 points resolus, 15 audits.
 
 → detail dans `.claude/plans/snuggly-gathering-rabin.md`
-→ plan finalisation dans `V1_outlook/PLAN_FINALISATION_OUTLOOK.md`
+→ plan finalisation dans `V2/PLAN_FINALISATION_OUTLOOK.md`
 
 ---
 

@@ -1,7 +1,7 @@
 # Rapport d'audit — Phases 1 à 4 (Squelette + Ingrédients 100%)
 
 **Date** : 18/04/2026
-**Fichier audité** : `C:\EasyMail\V1_outlook\app_plugin.py`
+**Fichier audité** : `C:\EasyMail\V2\app_plugin.py`
 **Commits audités** : `158255f`, `adc80ff`, `4189ae2`, `686c77b`, `e0e25c0`
 **Commits de correction** : `48db198`, `8b61eb0`
 **Auditeur** : Claude (Sonnet 4.6) + 4 agents d'audit spécialisés en parallèle
@@ -199,7 +199,7 @@ Ordre d'acquisition analysé : pas de cycle détecté.
 
 ## Tests effectués
 
-1. **Vérification syntaxique** : `python -m py_compile V1_outlook/app_plugin.py` → ✅ OK à chaque étape
+1. **Vérification syntaxique** : `python -m py_compile V2/app_plugin.py` → ✅ OK à chaque étape
 2. **Audit initial** : 3 agents en parallèle (flux techniques / ingrédients / phases 3-4)
 3. **Corrections critiques** : 7 fixes appliqués
 4. **Audit de vérification** : 1 agent → 3 anomalies restantes identifiées

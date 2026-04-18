@@ -99,24 +99,24 @@ generation IA fonctionnelle, envoi teste et valide, caches optimises.
 6. Tests Classic Outlook et Outlook Web
 7. Phase 3 — Post-envoi complet (recalibrage, contacts, corrections)
 8. Phase 4 — Onboarding complet via Graph API
-9. Rangement du projet V2 (fichiers dans V1_outlook/ → V2/)
+9. Rangement du projet V2 (fichiers dans V2/ → V2/)
 
 ---
 
 ## Fichiers modifies pendant la session
 
 ### Backend
-- `V1_outlook/app_plugin.py` — refactoring majeur (cache, cycle de vie, speculation, brouillon, detection Outlook)
-- `V1_outlook/outlook_graph.py` — fix $filter encoding, fix $orderby, profondeur dossiers
+- `V2/app_plugin.py` — refactoring majeur (cache, cycle de vie, speculation, brouillon, detection Outlook)
+- `V2/outlook_graph.py` — fix $filter encoding, fix $orderby, profondeur dossiers
 
 ### Frontend
-- `V1_outlook/dialog.html` — bouton Retour Outlook, version JS
-- `V1_outlook/dialog.js` — mise en page HTML, resume, brouillon, boutons post-envoi, speculation
-- `V1_outlook/dialog.css` — espacement paragraphes, bouton close, boutons succes
+- `V2/dialog.html` — bouton Retour Outlook, version JS
+- `V2/dialog.js` — mise en page HTML, resume, brouillon, boutons post-envoi, speculation
+- `V2/dialog.css` — espacement paragraphes, bouton close, boutons succes
 
 ### Outlook
-- `V1_outlook/autorunshared.js` — gestion actions close/sent/next_message
-- `V1_outlook/manifest.xml` — version autorunshared.js
+- `V2/autorunshared.js` — gestion actions close/sent/next_message
+- `V2/manifest.xml` — version autorunshared.js
 
 ### Proto
 - `app.py` — brouillon (routes /api/save_draft, /api/get_draft, persistance JSON)

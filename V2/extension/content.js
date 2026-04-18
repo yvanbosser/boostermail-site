@@ -7,7 +7,7 @@
  *
  * Rôle :
  *  1. Écouter les messages type='boostermail-open-dialog' émis par l'add-in
- *     (autorunshared.js dans V1_outlook/)
+ *     (autorunshared.js dans V2/)
  *  2. Renvoyer un ACK pour que l'add-in sache que l'extension est présente
  *  3. Relayer la demande au background service worker qui ouvrira la fenêtre
  */

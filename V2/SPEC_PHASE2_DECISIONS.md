@@ -15,10 +15,10 @@
 - `templates_mail.py` — partagé, ne modifier QUE si rétrocompatible
 
 **Le code V1 est organisé en 2 dossiers :**
-- `core/` — Modules partagés entre V1_outlook et V1_gmail (futur) : auth_base.py, ai_provider.py, email_provider.py
-- `V1_outlook/` — Code spécifique au plugin Outlook : manifest.xml, taskpane, dialog, commands, auth_microsoft.py, outlook_graph.py
+- `core/` — Modules partagés entre V2 et V1_gmail (futur) : auth_base.py, ai_provider.py, email_provider.py
+- `V2/` — Code spécifique au plugin Outlook : manifest.xml, taskpane, dialog, commands, auth_microsoft.py, outlook_graph.py
 
-Le backend V1 est `V1_outlook/app_plugin.py`, un serveur séparé sur un port différent (HTTPS :3443). Les deux coexistent sur la même machine sans interférence.
+Le backend V1 est `V2/app_plugin.py`, un serveur séparé sur un port différent (HTTPS :3443). Les deux coexistent sur la même machine sans interférence.
 
 ---
 
@@ -220,7 +220,7 @@ Le backend V1 est `V1_outlook/app_plugin.py`, un serveur séparé sur un port di
 
 ## Décision 13 : Architecture multi-provider (Outlook + Gmail futur)
 
-**Choix** : séparer le code en `core/` (générique) et `V1_outlook/` (Outlook-spécifique), dès la Phase 2.
+**Choix** : séparer le code en `core/` (générique) et `V2/` (Outlook-spécifique), dès la Phase 2.
 
 **Contexte** : EasyMail a vocation à être porté sur Gmail après la V1 Outlook. Coder tout dans un seul dossier obligerait à démêler le code générique du code Outlook lors du portage Gmail.
 
@@ -235,7 +235,7 @@ core/                          ← 100% générique (partagé Outlook + Gmail)
 ├── email_provider.py          ← Interface abstraite mail (futur 12d)
 └── prompt_builder.py          ← Construction prompts (futur, extrait de claude_ai.py)
 
-V1_outlook/                    ← Outlook-spécifique
+V2/                    ← Outlook-spécifique
 ├── app_plugin.py              ← Serveur Flask Outlook (HTTPS :3443)
 ├── auth_microsoft.py          ← OAuth2 Microsoft (MSAL, hérite auth_base)
 ├── outlook_graph.py           ← Graph API client (futur 12d, implémente email_provider)
@@ -261,7 +261,7 @@ V1_gmail/ (futur)              ← Gmail-spécifique
 - Interface AIProvider (generate_reply, refine_reply, analyze_contact, etc.)
 - Interface EmailProvider (get_email, send_reply, search, get_folders, etc.)
 
-**Ce qui est dans V1_outlook/ (spécifique Outlook)** :
+**Ce qui est dans V2/ (spécifique Outlook)** :
 - MSAL Python, endpoints Microsoft, scopes Graph API
 - Office.js, manifest.xml, taskpane, dialog, commands
 - outlook_graph.py (Graph API spécifique Microsoft)
@@ -274,4 +274,4 @@ V1_gmail/ (futur)              ← Gmail-spécifique
 **Surcoût Phase 2** : ~2-3h (séparer les fichiers, créer les interfaces)
 **Économie V1 Gmail** : ~15-20h (pas de refactoring, juste implémenter les interfaces)
 
-**Ancien nom du dossier** : `V1_plugin/` → renommé `V1_outlook/` le 07/04/2026. La route HTTP `/plugin/` est conservée (transparente pour le manifest.xml et Office.js).
+**Ancien nom du dossier** : `V1_plugin/` → renommé `V2/` le 07/04/2026. La route HTTP `/plugin/` est conservée (transparente pour le manifest.xml et Office.js).

@@ -4,7 +4,7 @@
 
 ## Phase 2 — Plugin Outlook + Graph API (TERMINÉE le 07/04/2026)
 
-**Documentation complète** : `V1_outlook/PLAN_ACTION_PHASE_2.md` + `V1_outlook/SPEC_PHASE2_*.md`
+**Documentation complète** : `V2/PLAN_ACTION_PHASE_2.md` + `V2/SPEC_PHASE2_*.md`
 
 ### Architecture V1 (anticipation Gmail)
 
@@ -17,7 +17,7 @@ core/                          <- Modules partagés (Outlook + futur Gmail)
 ├── openai_provider.py         <- Implémentation OpenAI GPT (streaming, retry)
 └── email_provider.py          <- Interface Email (EmailProvider, format normalisé)
 
-V1_outlook/                    <- Code spécifique Outlook
+V2/                    <- Code spécifique Outlook
 ├── manifest.xml               <- Plugin Outlook (XML, VersionOverrides 1.0+1.1, SupportsPinning)
 ├── taskpane.html + taskpane.js <- Panneau latéral pinable (649 lignes JS)
 ├── dialog.html + dialog.css + dialog.js <- Dialog popup split-screen V9 (1092 lignes JS)
@@ -42,7 +42,7 @@ companion/                     <- Service Windows (agnostique mail)
 **Le prototype est en production avec des bêta-testeurs. NE JAMAIS MODIFIER les fichiers du prototype.**
 
 - Prototype = `app.py` sur HTTP localhost:5050 (bêta-testeurs, NE PAS TOUCHER)
-- V1 Outlook = `V1_outlook/app_plugin.py` sur HTTPS localhost:3443
+- V1 Outlook = `V2/app_plugin.py` sur HTTPS localhost:3443
 - Companion = `companion/companion.py` sur HTTP localhost:5051
 - Code partagé : `database.py` + `templates_mail.py` (rétrocompatible)
 - `claude_ai.py` importé en LECTURE SEULE par app_plugin.py (prompt construction uniquement)
@@ -192,24 +192,24 @@ Une modif de popup.html ou dialog.html → s'applique sur toutes les plateformes
 
 | Fichier | Action |
 |---|---|
-| `V1_outlook/autorun.html` | CRÉER (Runtime HTML pour Event-Based) |
-| `V1_outlook/autorunshared.js` | CORRIGER (retirer showAsTaskpane, ajouter conversationId, detection isCompose) |
-| `V1_outlook/manifest.xml` | CORRIGER V1_1 (Runtime, LaunchEvent, Menu, ComposeCommandSurface, ReadWriteItem) |
-| `V1_outlook/popup.html` + `popup.js` | CRÉER (DRY État 1, remplace taskpane comme UI) |
-| `V1_outlook/taskpane.html` | CONSERVER comme wrapper iframe vers popup.html (rétrocompat V1_0) |
-| `V1_outlook/app_plugin.py` | ENRICHIR (9 routes + prefetch parallèle + SSE) |
-| `V1_outlook/outlook_graph.py` | ENRICHIR (get_conversation_thread, batch_request, conversationId) |
-| `V1_outlook/dialog.js` | MODIFIER (mode standalone, speculative SSE, _preloadMailData, chargement conditionnel Office.js) |
+| `V2/autorun.html` | CRÉER (Runtime HTML pour Event-Based) |
+| `V2/autorunshared.js` | CORRIGER (retirer showAsTaskpane, ajouter conversationId, detection isCompose) |
+| `V2/manifest.xml` | CORRIGER V1_1 (Runtime, LaunchEvent, Menu, ComposeCommandSurface, ReadWriteItem) |
+| `V2/popup.html` + `popup.js` | CRÉER (DRY État 1, remplace taskpane comme UI) |
+| `V2/taskpane.html` | CONSERVER comme wrapper iframe vers popup.html (rétrocompat V1_0) |
+| `V2/app_plugin.py` | ENRICHIR (9 routes + prefetch parallèle + SSE) |
+| `V2/outlook_graph.py` | ENRICHIR (get_conversation_thread, batch_request, conversationId) |
+| `V2/dialog.js` | MODIFIER (mode standalone, speculative SSE, _preloadMailData, chargement conditionnel Office.js) |
 | `companion/companion.py` | ENRICHIR (/inject_reply, /current_selection, /prefetch_*, COM+AppleScript) |
 | `companion/popup_pyqt.py` | CRÉER (conteneur QWebEngineView minimal + pré-chargement dialog) |
 | `extension/` | CRÉER (manifest.json, background.js, content.js — Shadow DOM + window.open) |
 
-**Documentation complète** : `V1_outlook/SPEC_UI_ETAT1_LECTURE.md` + `V1_outlook/SPEC_UI_TABLEAUX_V8.docx`
+**Documentation complète** : `V2/SPEC_UI_ETAT1_LECTURE.md` + `V2/SPEC_UI_TABLEAUX_V8.docx`
 **Plan de conception détaillé** : `.claude/plans/snuggly-gathering-rabin.md` (Version 15, 65 points résolus, 15 audits)
 
 ### Prochaines étapes
 
-1. **Implémenter la Phase 3** selon `V1_outlook/PLAN_ACTION_PHASE_3.md` (10 étapes)
+1. **Implémenter la Phase 3** selon `V2/PLAN_ACTION_PHASE_3.md` (10 étapes)
 2. **Créer l'App Registration Azure** (portal.azure.com → Entra ID → App registrations)
 3. **Ajouter dans config.json** : `{"microsoft": {"client_id": "...", "client_secret": "...", "redirect_uri": "https://localhost:3443/auth/callback"}}`
 4. **Tester end-to-end** : popup → dialog → génération → envoi → classement

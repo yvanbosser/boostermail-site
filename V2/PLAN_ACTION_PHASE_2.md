@@ -22,10 +22,10 @@
 
 **Le code V1 est organisé en 2 dossiers :**
 - `core/` — Modules partagés (auth, AI, email provider) — réutilisables pour V1_gmail (futur)
-- `V1_outlook/` — Code spécifique Outlook (manifest, taskpane, dialog, commands, auth Microsoft, Graph API)
+- `V2/` — Code spécifique Outlook (manifest, taskpane, dialog, commands, auth Microsoft, Graph API)
 
 - Prototype = `app.py` sur HTTP localhost:5050 (bêta-testeurs, ne pas toucher)
-- V1 Outlook = `V1_outlook/app_plugin.py` sur HTTPS localhost:3443 (développement)
+- V1 Outlook = `V2/app_plugin.py` sur HTTPS localhost:3443 (développement)
 - Les deux coexistent sur la même machine sans interférence
 
 ---
@@ -53,12 +53,12 @@ CLIENT (rien à installer sauf le plugin)
 │           ├── dialog.html + dialog.js + dialog.css
 │           │
 │           ├─── appelle ──→ CLOUD BACKEND (HTTPS :3443)
-│           │                ├── V1_outlook/app_plugin.py (routes API V1)
-│           │                ├── core/auth_base.py + V1_outlook/auth_microsoft.py (OAuth2)
+│           │                ├── V2/app_plugin.py (routes API V1)
+│           │                ├── core/auth_base.py + V2/auth_microsoft.py (OAuth2)
 │           │                ├── core/ai_provider.py (interface IA commune)
 │           │                │   ├── core/claude_provider.py (défaut)
 │           │                │   └── core/openai_provider.py (alternatif)
-│           │                ├── V1_outlook/outlook_graph.py (Graph API)
+│           │                ├── V2/outlook_graph.py (Graph API)
 │           │                ├── database.py (partagé, DB par utilisateur)
 │           │                └── templates_mail.py (partagé, 45 templates)
 │           │
@@ -331,18 +331,18 @@ Faire les workflows AVANT l'envoi dans le dialog.
 
 **Objectif** : le bouton EasyMail apparaît dans le ruban Outlook, un clic ouvre le dialog.
 
-**⚠️ ÉTANCHÉITÉ** : on ne touche PAS à app.py. On crée app_plugin.py dans V1_outlook/.
+**⚠️ ÉTANCHÉITÉ** : on ne touche PAS à app.py. On crée app_plugin.py dans V2/.
 
-**Fichiers à créer dans V1_outlook/** :
+**Fichiers à créer dans V2/** :
 - `manifest.xml` : déclare le bouton ruban (MessageReadCommandSurface), FunctionFile, icônes, AppDomains (inclure `https://localhost:5060`)
 - `commands.html` : page minimale chargeant Office.js + commands.js
 - `commands.js` : handler du clic → `Office.context.ui.displayDialogAsync(url, {width: 80, height: 80})`, appeler `event.completed()` après ouverture
 - `dialog.html` : squelette minimal affichant "EasyMail — Connecté" + version
 - `assets/icon-16.png`, `icon-32.png`, `icon-80.png` : icônes placeholder
-- `app_plugin.py` : serveur Flask HTTPS sur port 3443, sert les fichiers V1_outlook/ en statique
+- `app_plugin.py` : serveur Flask HTTPS sur port 3443, sert les fichiers V2/ en statique
 
 **Backend V1 (app_plugin.py)** :
-- Nouveau serveur Flask indépendant dans V1_outlook/
+- Nouveau serveur Flask indépendant dans V2/
 - Route `/plugin/<path:filename>` pour servir manifest, dialog, commands, assets
 - Démarrage HTTPS : `app.run(port=5060, ssl_context=('localhost.crt', 'localhost.key'))`
 - Importe database.py et templates_mail.py depuis le dossier parent (code partagé)
@@ -350,7 +350,7 @@ Faire les workflows AVANT l'envoi dans le dialog.
 
 **Certificat HTTPS** :
 - Générer : `npx office-addin-dev-certs install` ou `mkcert localhost`
-- Fichiers cert dans V1_outlook/ (pas à la racine pour ne pas perturber le proto)
+- Fichiers cert dans V2/ (pas à la racine pour ne pas perturber le proto)
 
 **Tests** :
 - TEST : `https://localhost:5060/plugin/dialog.html` accessible dans le navigateur
@@ -374,12 +374,12 @@ Faire les workflows AVANT l'envoi dans le dialog.
 
 **Fichiers créés** :
 - `core/auth_base.py` : logique auth générique (chiffrement Fernet, TokenStore, session, Blueprint, middleware require_auth) — réutilisable V1_gmail
-- `V1_outlook/auth_microsoft.py` : OAuth2 Microsoft via MSAL Python (hérite AuthProvider)
-- Intégré dans `V1_outlook/app_plugin.py` (Blueprint enregistré, factory get_auth_provider)
+- `V2/auth_microsoft.py` : OAuth2 Microsoft via MSAL Python (hérite AuthProvider)
+- Intégré dans `V2/app_plugin.py` (Blueprint enregistré, factory get_auth_provider)
 
 **Architecture** :
 - `core/auth_base.py` → TokenEncryptor, TokenStore, AuthProvider (interface), create_auth_blueprint(), require_auth()
-- `V1_outlook/auth_microsoft.py` → MicrosoftAuthProvider (MSAL, cache sérialisé, refresh auto)
+- `V2/auth_microsoft.py` → MicrosoftAuthProvider (MSAL, cache sérialisé, refresh auto)
 - Tokens chiffrés Fernet en DB (table settings, clé `auth_token_cache`)
 - Cookie session signé Flask (7 jours), state anti-CSRF
 
@@ -412,7 +412,7 @@ Faire les workflows AVANT l'envoi dans le dialog.
 - `claude_provider.py` : `ClaudeProvider(AIProvider)` — SDK Anthropic, streaming, prompt caching, retry 3x, OCR Vision
 - `openai_provider.py` : `OpenAIProvider(AIProvider)` — SDK OpenAI (optionnel), streaming, retry 3x
 
-**Intégration dans `V1_outlook/app_plugin.py`** :
+**Intégration dans `V2/app_plugin.py`** :
 - Factory `get_ai()` : singleton lazy, lit le choix modèle en DB (clé `ai_model`)
 - `reset_ai_provider()` : force recréation après changement de modèle
 - Routes API :
@@ -434,14 +434,14 @@ Faire les workflows AVANT l'envoi dans le dialog.
 
 **Fichiers à créer** :
 - `core/email_provider.py` : interface abstraite `EmailProvider` (réutilisable Gmail) — format de retour normalisé
-- `V1_outlook/outlook_graph.py` : `GraphClient(EmailProvider)` — implémentation Graph API Microsoft
+- `V2/outlook_graph.py` : `GraphClient(EmailProvider)` — implémentation Graph API Microsoft
 
 **Découpage en 7 blocs** :
 
 | Bloc | Contenu | Fichiers | Durée |
 |---|---|---|---|
 | **12d-1** | Interface abstraite `EmailProvider` + format retour normalisé | `core/email_provider.py` | 30 min |
-| **12d-2** | Squelette `GraphClient` + helpers (retry 429, headers, URL) + `get_user_info()` | `V1_outlook/outlook_graph.py` | 30 min |
+| **12d-2** | Squelette `GraphClient` + helpers (retry 429, headers, URL) + `get_user_info()` | `V2/outlook_graph.py` | 30 min |
 | **12d-3** | Lecture : `get_email_by_id()`, `search_emails()`, `get_sent_emails()`, `get_received_emails()` | idem | 2h |
 | **12d-4** | Envoi : `send_reply()`, `send_reply_all()`, `send_forward()`, `send_new_email()` + PJ (createReply+attach+send) | idem | 3h |
 | **12d-5** | Dossiers : `get_all_folders()` récursif, `move_to_folder()`, `copy_to_folder()` | idem | 1h |
@@ -491,7 +491,7 @@ Faire les workflows AVANT l'envoi dans le dialog.
 
 **⚠️ ÉTANCHÉITÉ** : on ne touche PAS à app.py. app_plugin.py est un serveur indépendant.
 
-**Écriture dans V1_outlook/app_plugin.py** (créé en 12a, enrichi ici) :
+**Écriture dans V2/app_plugin.py** (créé en 12a, enrichi ici) :
 - Routes API : `/generate_reply`, `/send_reply`, `/refine_reply`, `/api/classify_email`, `/api/classify_pj`, `/api/folders`, `/api/contact_profiles`, `/api/echeances/*`, etc.
 - Utilise `ai_provider.generate_reply()` pour la génération IA
 - Utilise `outlook_graph.xxx()` pour les opérations mail (Mode Standard)
@@ -786,9 +786,9 @@ WHERE System.Kind = 'email'
 | # | Sous-étape | Durée | Dépendances |
 |---|---|---|---|
 | 12a | Manifest + HTTPS + dialog vide | 2h | — | ✅ |
-| 12b | Auth server-side OAuth2 (core/ + V1_outlook/) | 3h | 12a | ✅ |
+| 12b | Auth server-side OAuth2 (core/ + V2/) | 3h | 12a | ✅ |
 | 12c | ai_provider.py + refactor (core/) | 2h | — (parallélisable) | ✅ |
-| 12d | email_provider.py (core/) + outlook_graph.py (V1_outlook/) — 7 blocs | 8-10h | 12b | ✅ |
+| 12d | email_provider.py (core/) + outlook_graph.py (V2/) — 7 blocs | 8-10h | 12b | ✅ |
 | 12e | Routes API dans app_plugin.py (29 routes) | 3h | 12c + 12d | ✅ |
 | 12f | Dialog UI split-screen V9 (dialog.html/css/js) | 3h | 12a | ✅ |
 | 12g | Génération + éditeur SSE (prompt WOW + contexte B/C Graph) | 3h | 12e + 12f | ✅ |
@@ -861,10 +861,10 @@ Toute la logique métier EasyMail est conservée à l'identique :
 | 07/04 | InsightMessage limité | Fonctionne en lecture UNIQUEMENT sur Classic Outlook Windows. Ignoré silencieusement ailleurs |
 | 07/04 | Largeur taskpane | Imposée par Outlook (~300px), non redimensionnable. CSS à optimiser |
 | 07/04 | Sideloading | Via outlook.office365.com/mail/inclientstore → Mes compléments → Compléments personnalisés → Ajouter à partir d'un fichier |
-| 07/04 | **Architecture multi-provider** | V1_plugin/ → V1_outlook/ + core/. Anticipation V1_gmail. Voir Décision 13 dans SPEC_PHASE2_DECISIONS.md |
-| 07/04 | **12b terminé** | Auth OAuth2 : core/auth_base.py (générique) + V1_outlook/auth_microsoft.py (MSAL). Intégré dans app_plugin.py. Tokens Fernet en DB |
+| 07/04 | **Architecture multi-provider** | V1_plugin/ → V2/ + core/. Anticipation V1_gmail. Voir Décision 13 dans SPEC_PHASE2_DECISIONS.md |
+| 07/04 | **12b terminé** | Auth OAuth2 : core/auth_base.py (générique) + V2/auth_microsoft.py (MSAL). Intégré dans app_plugin.py. Tokens Fernet en DB |
 | 07/04 | **12c terminé** | AI Provider : core/ai_provider.py (interface) + claude_provider.py (Anthropic) + openai_provider.py (GPT). Factory + routes /api/ai_model dans app_plugin.py |
-| 07/04 | **12d terminé** | Email Provider : core/email_provider.py (interface, 16 méthodes) + V1_outlook/outlook_graph.py (GraphClient, 24 méthodes). Format retour normalisé. 7 blocs : interface, squelette, lecture, envoi+PJ, dossiers, PJ download, OneDrive |
+| 07/04 | **12d terminé** | Email Provider : core/email_provider.py (interface, 16 méthodes) + V2/outlook_graph.py (GraphClient, 24 méthodes). Format retour normalisé. 7 blocs : interface, squelette, lecture, envoi+PJ, dossiers, PJ download, OneDrive |
 | 07/04 | **12e terminé** | 29 routes API dans app_plugin.py. Factory GraphClient, mode detection, routes DB (contacts, settings, échéances), routes Graph (email_body, folders, classify, PJ, OneDrive, search), squelettes SSE (generate_reply, refine_reply, send_reply) |
 | 07/04 | **12f terminé** | Dialog split-screen V9 : dialog.html (structure) + dialog.css (styles) + dialog.js (logique). Panneau gauche mail reçu (onglets Mail/PJ), panneau droit éditeur (champs, brief, importance, format bar, editor contenteditable, toolbar actions). Garde forward, SSE streaming, undo, refine, envoi 2 modes |
 | 07/04 | **12g terminé** | Prompt WOW connecté : import claude_ai.py (lecture seule), _build_prompt() avec blocs D→B→A→C→D2→E, _build_refine_prompt() avec registre. Contexte B/C via Graph API (Mode Standard). Max tokens R/S/H (600/1000/1500). Corrections D2 fusionnées (contact + général). Fix config case-insensitive |

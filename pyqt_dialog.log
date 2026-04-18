@@ -1,0 +1,40 @@
+
+
+=== 2026-04-18T09:47:38.914243 | subject=test diag pyqt ===
+2026-04-18 09:47:39,876 [popup-pyqt] INFO — PyQt direct dialog — mode=reply
+2026-04-18 09:47:40,075 [popup-pyqt] INFO — PyQt direct dialog visible — mode=reply
+
+
+=== 2026-04-18T09:51:19.768106 | subject=Re: Point global [Public] ===
+2026-04-18 09:51:21,066 [popup-pyqt] INFO — PyQt direct dialog — mode=reply
+2026-04-18 09:51:21,283 [popup-pyqt] INFO — PyQt direct dialog visible — mode=reply
+
+
+=== 2026-04-18T09:51:49.454952 | subject=Re: Point global [Public] ===
+2026-04-18 09:51:50,471 [popup-pyqt] INFO — PyQt direct dialog — mode=reply
+2026-04-18 09:51:50,668 [popup-pyqt] INFO — PyQt direct dialog visible — mode=reply
+
+
+=== 2026-04-18T09:54:06.439494 | subject=Re: Point global [Public] ===
+2026-04-18 09:54:07,379 [popup-pyqt] INFO — PyQt direct dialog — mode=reply
+2026-04-18 09:54:07,564 [popup-pyqt] INFO — PyQt direct dialog visible — mode=reply
+
+
+=== 2026-04-18T09:54:17.873919 | subject=Re: Point global [Public] ===
+2026-04-18 09:54:18,780 [popup-pyqt] INFO — PyQt direct dialog — mode=reply
+2026-04-18 09:54:18,967 [popup-pyqt] INFO — PyQt direct dialog visible — mode=reply
+
+
+=== 2026-04-18T09:54:36.467508 | subject=Re: Point global [Public] ===
+2026-04-18 09:54:37,356 [popup-pyqt] INFO — PyQt direct dialog — mode=reply
+2026-04-18 09:54:37,565 [popup-pyqt] INFO — PyQt direct dialog visible — mode=reply
+
+
+=== 2026-04-18T09:58:09.680004 | subject=Re: Point global [Public] ===
+2026-04-18 09:58:10,594 [popup-pyqt] INFO — PyQt direct dialog — mode=reply
+2026-04-18 09:58:10,786 [popup-pyqt] INFO — PyQt direct dialog visible — mode=reply
+
+
+=== 2026-04-18T10:00:55.794653 | subject=Re: Point global [Public] ===
+2026-04-18 10:00:56,789 [popup-pyqt] INFO — PyQt direct dialog — mode=reply
+2026-04-18 10:00:56,987 [popup-pyqt] INFO — PyQt direct dialog visible — mode=reply

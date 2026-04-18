@@ -32,8 +32,8 @@ _NW = 0x08000000  # CREATE_NO_WINDOW
 _MUTEX_HANDLE = None  # Handle mutex Windows (eviter GC)
 
 PROCESSES = [
-    {'name': 'Companion',  'script': os.path.join(EASYMAIL_DIR, 'companion', 'companion.py'),       'port': 5051, 'delay': 0},
-    {'name': 'Backend V2', 'script': os.path.join(EASYMAIL_DIR, 'V1_outlook', 'app_plugin.py'),     'port': 3443, 'delay': 1},
+    {'name': 'Companion',  'script': os.path.join(EASYMAIL_DIR, 'companion', 'companion.py'),  'port': 5051, 'delay': 0},
+    {'name': 'Backend V2', 'script': os.path.join(EASYMAIL_DIR, 'V2', 'app_plugin.py'),        'port': 3443, 'delay': 1},
 ]
 
 # Proto + Tray : lances UNIQUEMENT si Classic Outlook est installe
@@ -197,7 +197,7 @@ def validate_prerequisites():
                 errors.append("Cle Anthropic manquante dans config.json")
         except Exception as e:
             errors.append(f"config.json invalide: {e}")
-    cert = os.path.join(EASYMAIL_DIR, 'V1_outlook', 'localhost.crt')
+    cert = os.path.join(EASYMAIL_DIR, 'V2', 'localhost.crt')
     if not os.path.exists(cert):
         errors.append("Certificat HTTPS introuvable")
     for p in PROCESSES:

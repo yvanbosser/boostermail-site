@@ -104,11 +104,11 @@ fonctionner a plein regime (qualite generation, vitesse, speculation).
 
 | Fichier | Modifications principales |
 |---------|-------------------------|
-| V1_outlook/app_plugin.py | next_untreated, onboarding complet, recalibrage, Bloc E, import_proto, _html_to_text, fix greeting/closing |
-| V1_outlook/dialog.js | _resetForNewMail, _nextMessage, handshake dialog_ready, overlay warmup, polling 8s |
-| V1_outlook/dialog.html | Overlay warmup (desactive) |
-| V1_outlook/autorunshared.js | Handshake dialog_ready |
-| V1_outlook/outlook_graph.py | get_received_emails /me/messages, fallback $filter |
+| V2/app_plugin.py | next_untreated, onboarding complet, recalibrage, Bloc E, import_proto, _html_to_text, fix greeting/closing |
+| V2/dialog.js | _resetForNewMail, _nextMessage, handshake dialog_ready, overlay warmup, polling 8s |
+| V2/dialog.html | Overlay warmup (desactive) |
+| V2/autorunshared.js | Handshake dialog_ready |
+| V2/outlook_graph.py | get_received_emails /me/messages, fallback $filter |
 | companion/companion.py | Fix inject_reply mode new |
 | companion/popup_pyqt.py | Positionnement Outlook (tentatives) |
 | database.py | get_all_cached_emails() |

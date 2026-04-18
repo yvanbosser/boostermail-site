@@ -71,7 +71,7 @@
 **Contexte** : le taskpane pinable 320px est jugé trop intrusif. Pivot vers une architecture non-intrusive avec popup flottante, extension navigateur, et dialog automatique.
 
 **Plan de conception** : `.claude/plans/snuggly-gathering-rabin.md` (Version 15, 65 points résolus, 15 audits)
-**Plan d'implémentation** : `V1_outlook/PLAN_ACTION_PHASE_3.md` (10 étapes détaillées)
+**Plan d'implémentation** : `V2/PLAN_ACTION_PHASE_3.md` (10 étapes détaillées)
 
 | # | Fonctionnalité | Détail | Statut |
 |---|---|---|---|

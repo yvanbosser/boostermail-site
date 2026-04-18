@@ -129,7 +129,7 @@ class EmailProvider:
     def upload_to_cloud(self, folder_path, filename, content) → dict: ...
 ```
 
-### 2. Implémentation Outlook — `V1_outlook/outlook_graph.py`
+### 2. Implémentation Outlook — `V2/outlook_graph.py`
 
 ```python
 class GraphClient(EmailProvider):

@@ -2,8 +2,9 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 # === Configuration ===
+# NB : chemin EasyMail a change — anciennement sur OneDrive\Desktop, desormais C:\EasyMail
 $boosterMailExe = "C:\Users\yvanb\AppData\Local\BoosterMail\BoosterMail.exe"
-$startV1Bat = "C:\Users\yvanb\OneDrive\Desktop\EasyMail\V1_outlook\start_v1.bat"
+$startV2Bat = "C:\EasyMail\V2\start_v2.bat"
 $outlookProcesses = @("olk", "outlook")
 
 # === Fonction : Outlook tourne ? ===
@@ -71,8 +72,8 @@ $btnYes.ForeColor = [System.Drawing.Color]::White
 $btnYes.Add_Click({
     # Lancer BoosterMail.exe (overlay PyQt)
     Start-Process -FilePath $boosterMailExe -WindowStyle Hidden
-    # Lancer le backend + companion
-    Start-Process -FilePath $startV1Bat -WindowStyle Hidden
+    # Lancer le backend V2 + companion
+    Start-Process -FilePath $startV2Bat -WindowStyle Hidden
     # Fermer le launcher
     $form.Close()
 })
