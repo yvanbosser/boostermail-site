@@ -408,6 +408,10 @@ def _execute_warmup(graph):
 
         # Lancer la spéculation préemptive TIER 1 (contacts connus dans les 20 premiers mails)
         threading.Thread(target=_run_preemptive_bg, args=(mails,), daemon=True).start()
+
+        # Phase 1.5 : Préchargement BG des contextes A/B/C pour tous les mails non traités
+        # (au-delà des 5 premiers déjà prefetchés). Tourne en fond, throttle 2s.
+        threading.Thread(target=_background_preload_loop, daemon=True).start()
     except Exception as e:
         with _warmup_lock:
             _warmup_progress["status"] = "error"
@@ -432,6 +436,137 @@ def _execute_warmup(graph):
                     _warmup_progress["status"] = "error"
                 logger.warning("Warmup retry: token toujours indisponible")
         threading.Thread(target=_retry, daemon=True).start()
+
+
+# Phase 1.5 : Event pour interrompre le préchargement BG quand l'utilisateur
+# interagit activement (clique un mail). Reset après 30s d'inactivité.
+_preload_pause = threading.Event()  # set = préchargement pausé
+_preload_last_activity = [0.0]      # timestamp dernière activité utilisateur
+
+
+def _signal_user_activity():
+    """Signale qu'une activité utilisateur interactive vient d'avoir lieu
+    (ex: /generate_reply appelé). Met en pause le préchargement BG 30s."""
+    _preload_last_activity[0] = time.time()
+    _preload_pause.set()
+
+
+def _preload_neighbors(message_id):
+    """
+    Phase 1.6 — Pré-charge les contextes A/B/C des mails voisins (N+1, N-1)
+    quand l'utilisateur ouvre un mail. Source d'ordre = _warmup_cache.
+    Pas de refetch Graph : utilise les mails déjà connus au démarrage.
+    """
+    try:
+        with _warmup_lock:
+            mails_list = list(_warmup_cache.values())
+        if not mails_list or not message_id:
+            return
+        # Trouver l'index du mail courant
+        current_idx = -1
+        for i, em in enumerate(mails_list):
+            if em.get('id') == message_id:
+                current_idx = i
+                break
+        if current_idx < 0:
+            return
+        # Pré-charger N+1 puis N-1 (N+1 plus probable en usage naturel)
+        for offset in (1, -1):
+            target_idx = current_idx + offset
+            if not (0 <= target_idx < len(mails_list)):
+                continue
+            target = mails_list[target_idx]
+            target_id = target.get('id', '')
+            if not target_id:
+                continue
+            with _prefetch_lock:
+                existing = _prefetch_cache.get(target_id)
+                if existing and existing.get('status') in ('running', 'done'):
+                    continue
+            mail_data = {
+                'from_email': target.get('from_email', ''),
+                'from_name': target.get('from_name', ''),
+                'subject': target.get('subject', ''),
+                'body': target.get('body') or target.get('body_preview', ''),
+                'message_id': target_id,
+                'conversation_id': target.get('conversation_id', ''),
+            }
+            if mail_data['from_email']:
+                threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True).start()
+    except Exception as e:
+        logger.debug(f"[preload-neighbor] Erreur : {e}")
+
+
+def _background_preload_loop():
+    """
+    Phase 1.5 — Préchargement continu en background des contextes A/B/C
+    pour les mails non traités.
+
+    Se lance après le warmup. Interruptible : si _preload_pause est set
+    (activité utilisateur), pause 30s avant de reprendre.
+    Throttle 2s entre chaque mail pour ne pas saturer Graph.
+    """
+    try:
+        time.sleep(8)  # Laisser le warmup + prefetch initiaux finir
+        graph = get_graph()
+        if not graph:
+            return
+        try:
+            mails = graph.get_received_emails(limit=50)
+        except Exception as _e:
+            logger.debug(f"[preload-ctx] Graph get_received_emails échoué : {_e}")
+            return
+        preloaded = 0
+        for msg in mails:
+            # Interruption : attendre si l'utilisateur est actif
+            while _preload_pause.is_set():
+                # Reset automatique après 30s d'inactivité
+                if time.time() - _preload_last_activity[0] > 30:
+                    _preload_pause.clear()
+                    break
+                time.sleep(2)
+            mid = msg.get('id', '')
+            if not mid:
+                continue
+            # Déjà traité ?
+            try:
+                if _db.is_treated(mid):
+                    continue
+            except Exception:
+                pass
+            # Déjà dans le cache ?
+            with _prefetch_lock:
+                existing = _prefetch_cache.get(mid)
+                if existing and existing.get('status') in ('running', 'done'):
+                    continue
+            # Lancer le prefetch
+            mail_data = {
+                'from_email': msg.get('from_email', ''),
+                'from_name': msg.get('from_name', ''),
+                'subject': msg.get('subject', ''),
+                'body': msg.get('body') or msg.get('body_preview', ''),
+                'message_id': mid,
+                'conversation_id': msg.get('conversation_id', ''),
+            }
+            if not mail_data['from_email']:
+                continue
+            try:
+                _run_prefetch(mail_data)
+                preloaded += 1
+                if preloaded % 5 == 0:
+                    logger.info(f"[preload-ctx] {preloaded} mails pré-chargés...")
+                time.sleep(2)  # Throttle : 2s entre mails
+            except Exception:
+                pass
+        if preloaded:
+            logger.info(f"[preload-ctx] Terminé : {preloaded} mails avec contexte A/B/C prêt")
+            inbox_ids = {m.get('id', '') for m in mails if m.get('id')}
+            try:
+                _save_prefetch_cache(inbox_ids=inbox_ids)
+            except Exception as _e:
+                logger.debug(f"[preload-ctx] Save cache échoué : {_e}")
+    except Exception as e:
+        logger.warning(f"[preload-ctx] Erreur loop : {e}")
 
 
 def _auto_trigger_warmup():
@@ -836,6 +971,11 @@ def api_event_message_read():
     # (O8) Auto-prefetch
     if new_data.get('from_email'):
         threading.Thread(target=_run_prefetch, args=(new_data,), daemon=True).start()
+
+    # Phase 1.6 : préchargement du mail voisin (N+1, N-1)
+    if new_data.get('message_id'):
+        threading.Thread(target=_preload_neighbors,
+                         args=(new_data['message_id'],), daemon=True).start()
 
     return jsonify({"status": "ok"})
 
@@ -2927,6 +3067,7 @@ def generate_reply():
     - Contact connu + cache préemptif disponible → stream depuis cache (T+0.1s)
     - Sinon → génération normale (T+5-8s)
     """
+    _signal_user_activity()  # Phase 1.5 : pause le préchargement BG (30s)
     data = request.get_json() or {}
     message_id = data.get('message_id', '')
     brief = data.get('brief', '')[:2000]

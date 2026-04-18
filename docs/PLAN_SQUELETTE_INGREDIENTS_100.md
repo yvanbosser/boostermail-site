@@ -34,18 +34,18 @@ Atteindre la **parité structurelle** entre V2 et le proto avant de commencer la
 
 ## Phase 1 — Squelette transversal
 
-**Effort estimé : 4h30** · **Statut : ⏳ À lancer**
+**Effort estimé : 4h30** · **Statut : ✅ Terminée**
 
 Les éléments d'infrastructure qui servent à tous les scénarios. Les poser AVANT les ingrédients garantit que les caches et threads BG sont prêts à être peuplés quand on adressera les contextes.
 
 | # | Item | Source proto (app.py) | Cible V2 (app_plugin.py) | Effort | Statut |
 |---|------|---|---|---|---|
-| 1.1 | Warmup synchrone au démarrage (inbox 91 + dossiers 396 + emails DB) | `warmup()` ~ligne 1050 | nouvelle fonction `_warmup_synchronous()` + thread BG au boot | 1h | ⏳ |
-| 1.2 | Route `/api/warmup_status` (popup marketing bloquant inbox.html tant que warmup pas fini) | `api_warmup_status()` ~ligne 1120 | nouvelle route V2 | 30 min | ⏳ |
-| 1.3 | Route `/api/mark_treated` (mail sort de l'état "actif" après envoi, pour spéculation) | `api_mark_treated()` ~ligne 3900 | nouvelle route V2 | 20 min | ⏳ |
-| 1.4 | Préfetch cache persistant JSON (sauvegarde `_prefetch_cache` sur disque à la fermeture, rechargement au démarrage, TTL 48h) | `_save_prefetch_cache()` + `_load_prefetch_cache()` + `atexit.register()` ~ligne 870 | fonctions + hook atexit en V2 | 45 min | ⏳ |
-| 1.5 | Préchargement BG des mails non traités (spéculation continue quand l'utilisateur n'interagit pas) | `_background_prefetch_loop()` ~ligne 920 | thread daemon en V2 | 1h30 | ⏳ |
-| 1.6 | Préchargement du mail voisin (après spéculation consommée, charge le suivant/précédent) | `_preload_neighbor()` ~ligne 950 | fonction V2 appelée après `/generate_reply` | 30 min | ⏳ |
+| 1.1 | Warmup synchrone au démarrage (inbox 91 + dossiers 396 + emails DB) | `warmup()` ~ligne 1050 | déjà présent (`_auto_trigger_warmup()` ligne 4763) | 1h | ✅ déjà là |
+| 1.2 | Route `/api/warmup_status` (popup marketing bloquant inbox.html tant que warmup pas fini) | `api_warmup_status()` ~ligne 3555 | ajouté route alias mappant `_warmup_progress` au format proto | 30 min | ✅ ajouté |
+| 1.3 | Route `/api/mark_treated` (mail sort de l'état "actif" après envoi, pour spéculation) | `db.mark_treated()` appel interne | déjà présent dans `send_reply` ligne 3568 | 20 min | ✅ déjà là |
+| 1.4 | Préfetch cache persistant JSON (sauvegarde `_prefetch_cache` sur disque à la fermeture, rechargement au démarrage, TTL 48h) | `_save_prefetch_cache()` + `_load_prefetch_cache()` + `atexit.register()` ~ligne 487 | ajouté (adapté au format V2 `context_a/b/c`) + hook atexit + appel load dans `__main__` | 45 min | ✅ ajouté |
+| 1.5 | Préchargement BG des mails non traités (spéculation continue quand l'utilisateur n'interagit pas) | logique fin warmup (`_warmup`) ~ligne 5820 | `_background_preload_loop()` + `_preload_pause` event + `_signal_user_activity()` dans `/generate_reply` | 1h30 | ✅ ajouté |
+| 1.6 | Préchargement du mail voisin (après spéculation consommée, charge le suivant/précédent) | `_preload_nearby_mails()` ~ligne 1381 | `_preload_neighbors()` appelé depuis `/api/event/message_read` | 30 min | ✅ ajouté |
 
 **Livrable Phase 1** : V2 démarre avec les caches chauds, sauvegarde entre sessions, spécule en BG comme le proto.
 
@@ -120,8 +120,8 @@ Seulement après que les 4 phases ci-dessus soient terminées. 10 scénarios typ
 
 | Phase | Statut | Début | Fin | Commit |
 |-------|--------|-------|-----|--------|
-| 1 — Squelette transversal | ⏳ À lancer | — | — | — |
-| 2 — Ingrédients critiques génération | ⏳ Bloquée | — | — | — |
+| 1 — Squelette transversal | ✅ Terminée | 18/04/2026 | 18/04/2026 | 158255f + (this commit) |
+| 2 — Ingrédients critiques génération | ⏳ À lancer | — | — | — |
 | 3 — Ingrédients qualité sortie | ⏳ Bloquée | — | — | — |
 | 4 — PJ & finitions | ⏳ Bloquée | — | — | — |
 
