@@ -2915,7 +2915,18 @@ def generate_reply():
     builder = _get_prompt_builder()
 
     # Construire l'email entrant pour _build_prompt()
-    raw_body = data.get('body', '')[:10000]  # Cap 10K chars (sécurité)
+    # Filet de sécurité : si le frontend envoie du HTML brut (fallback ancien chemin),
+    # le dépouiller pour que Claude voie le texte réel et non le CSS Outlook.
+    raw_body = data.get('body', '')
+    if raw_body and raw_body.strip().startswith('<'):
+        raw_body = re.sub(r'<style[^>]*>.*?</style>', ' ', raw_body, flags=re.DOTALL | re.IGNORECASE)
+        raw_body = re.sub(r'<script[^>]*>.*?</script>', ' ', raw_body, flags=re.DOTALL | re.IGNORECASE)
+        raw_body = re.sub(r'<br\s*/?>|</p>|</div>|</tr>', '\n', raw_body, flags=re.IGNORECASE)
+        raw_body = re.sub(r'<[^>]+>', '', raw_body)
+        raw_body = raw_body.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+        raw_body = re.sub(r'[ \t]+', ' ', raw_body)
+        raw_body = re.sub(r'\n{3,}', '\n\n', raw_body).strip()
+    raw_body = raw_body[:10000]  # Cap 10K chars (sécurité)
     incoming_email = {
         'from': from_email,
         'from_name': from_name,

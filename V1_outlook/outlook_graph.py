@@ -14,6 +14,7 @@ Rate limits Graph API :
 - Retry auto sur HTTP 429 avec header Retry-After
 """
 
+import re
 import time
 import json
 import logging
@@ -206,6 +207,38 @@ class GraphClient(EmailProvider):
                 'is_inline': att.get('isInline', False),
             })
 
+        # Extraction body — Graph renvoie toujours en HTML pour les vrais emails
+        # → si HTML : extraire le texte lisible pour la génération IA (sinon le CSS Outlook
+        #   dépasse facilement la limite 10K chars et Claude ne voit plus le vrai contenu)
+        _raw_content = body_obj.get('content', '')
+        _ctype = (body_obj.get('contentType') or '').lower()
+        if _ctype == 'text':
+            _body_plain = _raw_content
+            _body_html = ''
+        elif _ctype == 'html':
+            _body_html = _raw_content
+            # Supprimer <style> et <script> (CSS Outlook = plusieurs Ko inutiles)
+            _stripped = re.sub(r'<style[^>]*>.*?</style>', ' ', _raw_content,
+                               flags=re.DOTALL | re.IGNORECASE)
+            _stripped = re.sub(r'<script[^>]*>.*?</script>', ' ', _stripped,
+                               flags=re.DOTALL | re.IGNORECASE)
+            # Convertir <br> et <p> en sauts de ligne avant de retirer les autres balises
+            _stripped = re.sub(r'<br\s*/?>|</p>|</div>|</tr>', '\n', _stripped,
+                               flags=re.IGNORECASE)
+            # Retirer toutes les balises HTML restantes
+            _stripped = re.sub(r'<[^>]+>', '', _stripped)
+            # Décoder les entités HTML courantes
+            _stripped = (_stripped.replace('&nbsp;', ' ').replace('&amp;', '&')
+                         .replace('&lt;', '<').replace('&gt;', '>').replace('&quot;', '"')
+                         .replace('&#39;', "'"))
+            # Normaliser les espaces et sauts de ligne multiples
+            _stripped = re.sub(r'[ \t]+', ' ', _stripped)
+            _stripped = re.sub(r'\n{3,}', '\n\n', _stripped).strip()
+            _body_plain = _stripped
+        else:
+            _body_plain = _raw_content
+            _body_html = _raw_content
+
         return {
             'id': graph_email.get('id', ''),
             'internet_message_id': graph_email.get('internetMessageId', ''),
@@ -216,8 +249,8 @@ class GraphClient(EmailProvider):
             'to': to_list,
             'cc': cc_list,
             'date': graph_email.get('receivedDateTime', ''),
-            'body': body_obj.get('content', '') if body_obj.get('contentType') == 'text' else '',
-            'html_body': body_obj.get('content', '') if body_obj.get('contentType') == 'html' else '',
+            'body': _body_plain,          # texte lisible (pour IA + affichage fallback)
+            'html_body': _body_html,      # HTML original (pour affichage panneau gauche)
             'body_preview': graph_email.get('bodyPreview', ''),
             'has_attachments': graph_email.get('hasAttachments', False),
             'attachments': attachments,
