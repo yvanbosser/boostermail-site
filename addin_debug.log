@@ -1,0 +1,123 @@
+
+2026-04-18T14:27:53 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T14:28:19 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T14:28:20 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T14:28:20 | mode_detected | {"isCompose": false}
+2026-04-18T14:28:20 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<CABHUURbpB0rD9E8tvrv9BhznkJ0qjWO8oSinzLFTbGJ3zJJ-Vw@mail.gmail.com>", "subject": "Re: Point global [Public]", "fromName": "Florian Paugam", "fromEmail": "florian.paugam@phiwest.com", "from": "florian.paugam@phiwest.com", "to": "rywan.sadaoui@ca-indosuez.lu", "cc": "romain.fonck@ca-indosuez.lu,anaelle.delannay@ca-indosuez.lu", "hasAttachments": "0"}}
+2026-04-18T14:28:20 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T14:28:20 | mode_detected | {"isCompose": false}
+2026-04-18T14:28:20 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<CABHUURbpB0rD9E8tvrv9BhznkJ0qjWO8oSinzLFTbGJ3zJJ-Vw@mail.gmail.com>", "subject": "Re: Point global [Public]", "fromName": "Florian Paugam", "fromEmail": "florian.paugam@phiwest.com", "from": "florian.paugam@phiwest.com", "to": "rywan.sadaoui@ca-indosuez.lu", "cc": "romain.fonck@ca-indosuez.lu,anaelle.delannay@ca-indosuez.lu", "hasAttachments": "0"}}
+2026-04-18T14:28:22 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T14:28:27 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T14:38:35 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T14:38:37 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T14:38:37 | mode_detected | {"isCompose": false}
+2026-04-18T14:38:37 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<CABHUURbpB0rD9E8tvrv9BhznkJ0qjWO8oSinzLFTbGJ3zJJ-Vw@mail.gmail.com>", "subject": "Re: Point global [Public]", "fromName": "Florian Paugam", "fromEmail": "florian.paugam@phiwest.com", "from": "florian.paugam@phiwest.com", "to": "rywan.sadaoui@ca-indosuez.lu", "cc": "romain.fonck@ca-indosuez.lu,anaelle.delannay@ca-indosuez.lu", "hasAttachments": "0"}}
+2026-04-18T14:38:42 | newOutlook_fetch_result | {"status": 503, "ok": false}
+2026-04-18T14:39:21 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T14:39:28 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T14:39:28 | mode_detected | {"isCompose": false}
+2026-04-18T14:39:28 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<CABHUURbpB0rD9E8tvrv9BhznkJ0qjWO8oSinzLFTbGJ3zJJ-Vw@mail.gmail.com>", "subject": "Re: Point global [Public]", "fromName": "Florian Paugam", "fromEmail": "florian.paugam@phiwest.com", "from": "florian.paugam@phiwest.com", "to": "rywan.sadaoui@ca-indosuez.lu", "cc": "romain.fonck@ca-indosuez.lu,anaelle.delannay@ca-indosuez.lu", "hasAttachments": "0"}}
+2026-04-18T14:39:33 | newOutlook_fetch_result | {"status": 503, "ok": false}
+2026-04-18T14:39:46 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T14:39:48 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T14:39:48 | mode_detected | {"isCompose": false}
+2026-04-18T14:39:48 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<CABHUURbpB0rD9E8tvrv9BhznkJ0qjWO8oSinzLFTbGJ3zJJ-Vw@mail.gmail.com>", "subject": "Re: Point global [Public]", "fromName": "Florian Paugam", "fromEmail": "florian.paugam@phiwest.com", "from": "florian.paugam@phiwest.com", "to": "rywan.sadaoui@ca-indosuez.lu", "cc": "romain.fonck@ca-indosuez.lu,anaelle.delannay@ca-indosuez.lu", "hasAttachments": "0"}}
+2026-04-18T14:39:52 | newOutlook_fetch_result | {"status": 503, "ok": false}
+2026-04-18T14:42:19 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T14:42:21 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T14:42:21 | mode_detected | {"isCompose": false}
+2026-04-18T14:42:21 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<CABHUURbpB0rD9E8tvrv9BhznkJ0qjWO8oSinzLFTbGJ3zJJ-Vw@mail.gmail.com>", "subject": "Re: Point global [Public]", "fromName": "Florian Paugam", "fromEmail": "florian.paugam@phiwest.com", "from": "florian.paugam@phiwest.com", "to": "rywan.sadaoui@ca-indosuez.lu", "cc": "romain.fonck@ca-indosuez.lu,anaelle.delannay@ca-indosuez.lu", "hasAttachments": "0"}}
+2026-04-18T14:42:24 | newOutlook_fetch_result | {"status": 405, "ok": false}
+2026-04-18T14:42:39 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T14:42:39 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T14:42:43 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T14:42:43 | mode_detected | {"isCompose": false}
+2026-04-18T14:42:44 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<CABHUURbpB0rD9E8tvrv9BhznkJ0qjWO8oSinzLFTbGJ3zJJ-Vw@mail.gmail.com>", "subject": "Re: Point global [Public]", "fromName": "Florian Paugam", "fromEmail": "florian.paugam@phiwest.com", "from": "florian.paugam@phiwest.com", "to": "rywan.sadaoui@ca-indosuez.lu", "cc": "romain.fonck@ca-indosuez.lu,anaelle.delannay@ca-indosuez.lu", "hasAttachments": "0"}}
+2026-04-18T14:42:49 | newOutlook_fetch_result | {"status": 405, "ok": false}
+2026-04-18T14:58:16 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T14:58:17 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T14:58:17 | mode_detected | {"isCompose": false}
+2026-04-18T14:58:17 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<CABHUURbpB0rD9E8tvrv9BhznkJ0qjWO8oSinzLFTbGJ3zJJ-Vw@mail.gmail.com>", "subject": "Re: Point global [Public]", "fromName": "Florian Paugam", "fromEmail": "florian.paugam@phiwest.com", "from": "florian.paugam@phiwest.com", "to": "rywan.sadaoui@ca-indosuez.lu", "cc": "romain.fonck@ca-indosuez.lu,anaelle.delannay@ca-indosuez.lu", "hasAttachments": "0"}}
+2026-04-18T14:58:19 | newOutlook_fetch_result | {"status": 405, "ok": false}
+2026-04-18T15:00:20 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T15:00:21 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T15:00:21 | mode_detected | {"isCompose": false}
+2026-04-18T15:00:21 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<CABHUURbpB0rD9E8tvrv9BhznkJ0qjWO8oSinzLFTbGJ3zJJ-Vw@mail.gmail.com>", "subject": "Re: Point global [Public]", "fromName": "Florian Paugam", "fromEmail": "florian.paugam@phiwest.com", "from": "florian.paugam@phiwest.com", "to": "rywan.sadaoui@ca-indosuez.lu", "cc": "romain.fonck@ca-indosuez.lu,anaelle.delannay@ca-indosuez.lu", "hasAttachments": "0"}}
+2026-04-18T15:00:23 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T15:02:24 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T15:02:24 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T15:02:24 | mode_detected | {"isCompose": false}
+2026-04-18T15:02:24 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<CABHUURbpB0rD9E8tvrv9BhznkJ0qjWO8oSinzLFTbGJ3zJJ-Vw@mail.gmail.com>", "subject": "Re: Point global [Public]", "fromName": "Florian Paugam", "fromEmail": "florian.paugam@phiwest.com", "from": "florian.paugam@phiwest.com", "to": "rywan.sadaoui@ca-indosuez.lu", "cc": "romain.fonck@ca-indosuez.lu,anaelle.delannay@ca-indosuez.lu", "hasAttachments": "0"}}
+2026-04-18T15:02:30 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T15:02:46 | generate_reply_received | {"body_len": 2422, "body_preview": "Nous devions nous appeler lundi (je ne suis pas tombé au moment opportun)Puis, vous deviez planifier", "from_email": "florian.paugam@phiwest.com", "subject": "Re: Point global [Public]", "mode": "reply"}
+2026-04-18T15:03:15 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T15:03:15 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T15:03:15 | mode_detected | {"isCompose": false}
+2026-04-18T15:03:15 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<PAZP264MB3304BB777CB10EABA494B21AA8202@PAZP264MB3304.FRAP264.PROD.OUTLOOK.COM>", "subject": "SC OFEC - Bilan au 31/12/2025", "fromName": "Estelle DOUILLARD", "fromEmail": "estelle.douillard@airbee-conseil.fr", "from": "estelle.douillard@airbee-conseil.fr", "to": "yvan.bosser@groupe-bosser.fr", "cc": "ronan.fouin@airbee-conseil.fr,contact@airbee-conseil.fr,manon.rabiller@airbee-conseil.fr", "hasAttachments": "1"}}
+2026-04-18T15:03:24 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T15:03:57 | generate_reply_received | {"body_len": 881, "body_preview": "Bonjour Yvan,\n \nVous trouverez ci-joint les éléments relatifs au bilan de la SC OFEC clos au 31/12/2", "from_email": "estelle.douillard@airbee-conseil.fr", "subject": "Re: SC OFEC - Bilan au 31/12/2025", "mode": "reply"}
+2026-04-18T15:06:51 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T15:06:52 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T15:06:52 | mode_detected | {"isCompose": false}
+2026-04-18T15:06:52 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<PAZP264MB3304BB777CB10EABA494B21AA8202@PAZP264MB3304.FRAP264.PROD.OUTLOOK.COM>", "subject": "SC OFEC - Bilan au 31/12/2025", "fromName": "Estelle DOUILLARD", "fromEmail": "estelle.douillard@airbee-conseil.fr", "from": "estelle.douillard@airbee-conseil.fr", "to": "yvan.bosser@groupe-bosser.fr", "cc": "ronan.fouin@airbee-conseil.fr,contact@airbee-conseil.fr,manon.rabiller@airbee-conseil.fr", "hasAttachments": "1"}}
+2026-04-18T15:06:54 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T15:07:01 | generate_reply_received | {"body_len": 881, "body_preview": "Bonjour Yvan,\n \nVous trouverez ci-joint les éléments relatifs au bilan de la SC OFEC clos au 31/12/2", "from_email": "estelle.douillard@airbee-conseil.fr", "subject": "Re: SC OFEC - Bilan au 31/12/2025", "mode": "reply"}
+2026-04-18T15:08:15 | generate_reply_received | {"body_len": 881, "body_preview": "Bonjour Yvan,\n \nVous trouverez ci-joint les éléments relatifs au bilan de la SC OFEC clos au 31/12/2", "from_email": "estelle.douillard@airbee-conseil.fr", "subject": "Re: SC OFEC - Bilan au 31/12/2025", "mode": "reply"}
+2026-04-18T15:09:13 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T15:09:13 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T15:09:13 | mode_detected | {"isCompose": false}
+2026-04-18T15:09:13 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<PAZP264MB3304BB777CB10EABA494B21AA8202@PAZP264MB3304.FRAP264.PROD.OUTLOOK.COM>", "subject": "SC OFEC - Bilan au 31/12/2025", "fromName": "Estelle DOUILLARD", "fromEmail": "estelle.douillard@airbee-conseil.fr", "from": "estelle.douillard@airbee-conseil.fr", "to": "yvan.bosser@groupe-bosser.fr", "cc": "ronan.fouin@airbee-conseil.fr,contact@airbee-conseil.fr,manon.rabiller@airbee-conseil.fr", "hasAttachments": "1"}}
+2026-04-18T15:09:16 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T15:09:23 | generate_reply_received | {"body_len": 881, "body_preview": "Bonjour Yvan,\n \nVous trouverez ci-joint les éléments relatifs au bilan de la SC OFEC clos au 31/12/2", "from_email": "estelle.douillard@airbee-conseil.fr", "subject": "Re: SC OFEC - Bilan au 31/12/2025", "mode": "reply"}
+2026-04-18T15:12:18 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T15:12:21 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T15:12:21 | mode_detected | {"isCompose": false}
+2026-04-18T15:12:21 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<PAZP264MB3304BB777CB10EABA494B21AA8202@PAZP264MB3304.FRAP264.PROD.OUTLOOK.COM>", "subject": "SC OFEC - Bilan au 31/12/2025", "fromName": "Estelle DOUILLARD", "fromEmail": "estelle.douillard@airbee-conseil.fr", "from": "estelle.douillard@airbee-conseil.fr", "to": "yvan.bosser@groupe-bosser.fr", "cc": "ronan.fouin@airbee-conseil.fr,contact@airbee-conseil.fr,manon.rabiller@airbee-conseil.fr", "hasAttachments": "1"}}
+2026-04-18T15:12:23 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T15:12:33 | generate_reply_received | {"body_len": 881, "body_preview": "Bonjour Yvan,\n \nVous trouverez ci-joint les éléments relatifs au bilan de la SC OFEC clos au 31/12/2", "from_email": "estelle.douillard@airbee-conseil.fr", "subject": "Re: SC OFEC - Bilan au 31/12/2025", "mode": "reply"}
+2026-04-18T15:13:00 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T15:13:00 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T15:13:00 | mode_detected | {"isCompose": false}
+2026-04-18T15:13:00 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<PAZP264MB3304BB777CB10EABA494B21AA8202@PAZP264MB3304.FRAP264.PROD.OUTLOOK.COM>", "subject": "SC OFEC - Bilan au 31/12/2025", "fromName": "Estelle DOUILLARD", "fromEmail": "estelle.douillard@airbee-conseil.fr", "from": "estelle.douillard@airbee-conseil.fr", "to": "yvan.bosser@groupe-bosser.fr", "cc": "ronan.fouin@airbee-conseil.fr,contact@airbee-conseil.fr,manon.rabiller@airbee-conseil.fr", "hasAttachments": "1"}}
+2026-04-18T15:13:02 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T15:14:00 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T15:14:01 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T15:14:01 | mode_detected | {"isCompose": false}
+2026-04-18T15:14:01 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<PAZP264MB3304BB777CB10EABA494B21AA8202@PAZP264MB3304.FRAP264.PROD.OUTLOOK.COM>", "subject": "SC OFEC - Bilan au 31/12/2025", "fromName": "Estelle DOUILLARD", "fromEmail": "estelle.douillard@airbee-conseil.fr", "from": "estelle.douillard@airbee-conseil.fr", "to": "yvan.bosser@groupe-bosser.fr", "cc": "ronan.fouin@airbee-conseil.fr,contact@airbee-conseil.fr,manon.rabiller@airbee-conseil.fr", "hasAttachments": "1"}}
+2026-04-18T15:14:03 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T15:17:26 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T15:17:26 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T15:17:26 | mode_detected | {"isCompose": false}
+2026-04-18T15:17:26 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<CABHUURbpB0rD9E8tvrv9BhznkJ0qjWO8oSinzLFTbGJ3zJJ-Vw@mail.gmail.com>", "subject": "Re: Point global [Public]", "fromName": "Florian Paugam", "fromEmail": "florian.paugam@phiwest.com", "from": "florian.paugam@phiwest.com", "to": "rywan.sadaoui@ca-indosuez.lu", "cc": "romain.fonck@ca-indosuez.lu,anaelle.delannay@ca-indosuez.lu", "hasAttachments": "0"}}
+2026-04-18T15:17:29 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T15:21:07 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T15:21:07 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T15:21:07 | mode_detected | {"isCompose": false}
+2026-04-18T15:21:07 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<PAZP264MB3304BB777CB10EABA494B21AA8202@PAZP264MB3304.FRAP264.PROD.OUTLOOK.COM>", "subject": "SC OFEC - Bilan au 31/12/2025", "fromName": "Estelle DOUILLARD", "fromEmail": "estelle.douillard@airbee-conseil.fr", "from": "estelle.douillard@airbee-conseil.fr", "to": "yvan.bosser@groupe-bosser.fr", "cc": "ronan.fouin@airbee-conseil.fr,contact@airbee-conseil.fr,manon.rabiller@airbee-conseil.fr", "hasAttachments": "1"}}
+2026-04-18T15:21:10 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T15:21:16 | generate_reply_received | {"body_len": 881, "body_preview": "Bonjour Yvan,\n \nVous trouverez ci-joint les éléments relatifs au bilan de la SC OFEC clos au 31/12/2", "from_email": "estelle.douillard@airbee-conseil.fr", "subject": "Re: SC OFEC - Bilan au 31/12/2025", "mode": "reply"}
+2026-04-18T15:24:00 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T15:24:02 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T15:24:02 | mode_detected | {"isCompose": false}
+2026-04-18T15:24:02 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<PAZP264MB3304BB777CB10EABA494B21AA8202@PAZP264MB3304.FRAP264.PROD.OUTLOOK.COM>", "subject": "SC OFEC - Bilan au 31/12/2025", "fromName": "Estelle DOUILLARD", "fromEmail": "estelle.douillard@airbee-conseil.fr", "from": "estelle.douillard@airbee-conseil.fr", "to": "yvan.bosser@groupe-bosser.fr", "cc": "ronan.fouin@airbee-conseil.fr,contact@airbee-conseil.fr,manon.rabiller@airbee-conseil.fr", "hasAttachments": "1"}}
+2026-04-18T15:24:14 | generate_reply_received | {"body_len": 881, "body_preview": "Bonjour Yvan,\n \nVous trouverez ci-joint les éléments relatifs au bilan de la SC OFEC clos au 31/12/2", "from_email": "estelle.douillard@airbee-conseil.fr", "subject": "Re: SC OFEC - Bilan au 31/12/2025", "mode": "reply"}
+2026-04-18T15:24:16 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T15:26:17 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T15:26:18 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T15:26:18 | mode_detected | {"isCompose": false}
+2026-04-18T15:26:18 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<PAZP264MB3304BB777CB10EABA494B21AA8202@PAZP264MB3304.FRAP264.PROD.OUTLOOK.COM>", "subject": "SC OFEC - Bilan au 31/12/2025", "fromName": "Estelle DOUILLARD", "fromEmail": "estelle.douillard@airbee-conseil.fr", "from": "estelle.douillard@airbee-conseil.fr", "to": "yvan.bosser@groupe-bosser.fr", "cc": "ronan.fouin@airbee-conseil.fr,contact@airbee-conseil.fr,manon.rabiller@airbee-conseil.fr", "hasAttachments": "1"}}
+2026-04-18T15:26:22 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T15:26:27 | generate_reply_received | {"body_len": 881, "body_preview": "Bonjour Yvan,\n \nVous trouverez ci-joint les éléments relatifs au bilan de la SC OFEC clos au 31/12/2", "from_email": "estelle.douillard@airbee-conseil.fr", "subject": "Re: SC OFEC - Bilan au 31/12/2025", "mode": "reply"}
+2026-04-18T15:28:20 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T15:28:21 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T15:28:21 | mode_detected | {"isCompose": false}
+2026-04-18T15:28:21 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<PAZP264MB3304BB777CB10EABA494B21AA8202@PAZP264MB3304.FRAP264.PROD.OUTLOOK.COM>", "subject": "SC OFEC - Bilan au 31/12/2025", "fromName": "Estelle DOUILLARD", "fromEmail": "estelle.douillard@airbee-conseil.fr", "from": "estelle.douillard@airbee-conseil.fr", "to": "yvan.bosser@groupe-bosser.fr", "cc": "ronan.fouin@airbee-conseil.fr,contact@airbee-conseil.fr,manon.rabiller@airbee-conseil.fr", "hasAttachments": "1"}}
+2026-04-18T15:28:23 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T15:28:29 | generate_reply_received | {"body_len": 881, "body_preview": "Bonjour Yvan,\n \nVous trouverez ci-joint les éléments relatifs au bilan de la SC OFEC clos au 31/12/2", "from_email": "estelle.douillard@airbee-conseil.fr", "subject": "Re: SC OFEC - Bilan au 31/12/2025", "mode": "reply"}
+2026-04-18T15:38:53 | js_loaded | {"version": "v3-complete-after-fetch"}
+2026-04-18T15:38:53 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "20260410002.37", "OWAView": "ThreeColumns"}
+2026-04-18T15:38:53 | mode_detected | {"isCompose": false}
+2026-04-18T15:38:53 | newOutlook_click | {"platform": "newOutlook", "payload": {"mode": "reply", "messageId": "<PAZP264MB3304BB777CB10EABA494B21AA8202@PAZP264MB3304.FRAP264.PROD.OUTLOOK.COM>", "subject": "SC OFEC - Bilan au 31/12/2025", "fromName": "Estelle DOUILLARD", "fromEmail": "estelle.douillard@airbee-conseil.fr", "from": "estelle.douillard@airbee-conseil.fr", "to": "yvan.bosser@groupe-bosser.fr", "cc": "ronan.fouin@airbee-conseil.fr,contact@airbee-conseil.fr,manon.rabiller@airbee-conseil.fr", "hasAttachments": "1"}}
+2026-04-18T15:38:57 | newOutlook_fetch_result | {"status": 200, "ok": true}
+2026-04-18T15:39:02 | generate_reply_received | {"body_len": 881, "body_preview": "Bonjour Yvan,\n \nVous trouverez ci-joint les éléments relatifs au bilan de la SC OFEC clos au 31/12/2", "from_email": "estelle.douillard@airbee-conseil.fr", "subject": "Re: SC OFEC - Bilan au 31/12/2025", "mode": "reply"}

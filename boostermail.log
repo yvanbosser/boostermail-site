@@ -732,3 +732,337 @@ ModuleNotFoundError: No module named 'clr'
 2026-04-18 08:14:46 [superviseur] Companion: arrete
 2026-04-18 08:14:48 [superviseur] Backend V2: arrete
 2026-04-18 08:14:49 [superviseur] Proto arrete
+2026-04-18 08:14:49 [superviseur] Tray arrete
+2026-04-18 08:14:49 [superviseur] Retour en mode attente Outlook...
+2026-04-18 08:14:49 [superviseur] ==================================================
+2026-04-18 08:14:49 [superviseur] BoosterMail Superviseur demarre (mode watcher)
+2026-04-18 08:14:49 [superviseur] Repertoire: C:\EasyMail
+2026-04-18 08:14:49 [superviseur] Pas de superviseur en cours
+2026-04-18 08:14:49 [superviseur] pythonw: C:\Users\yvanb\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe
+2026-04-18 08:14:49 [superviseur] En attente d'Outlook...
+2026-04-18 08:14:49 [superviseur] Attente 10s que les fenetres Outlook disparaissent...
+2026-04-18 08:15:18 [superviseur] Outlook detecte (new_outlook) !
+2026-04-18 08:15:25 [superviseur] Popup marketing lancee (processus separe)
+2026-04-18 08:15:26 [superviseur] Attente clic utilisateur sur la popup...
+2026-04-18 08:16:02 [superviseur] Signal 'Lancer' recu !
+2026-04-18 08:16:02 [superviseur] Lancement des backends...
+2026-04-18 08:16:03 [superviseur] Companion: lance (PID 18344, port 5051)
+2026-04-18 08:16:06 [superviseur] Port 3443: PID 17260 tue
+2026-04-18 08:16:08 [superviseur] Backend V2: lance (PID 36488, port 3443)
+2026-04-18 08:16:08 [superviseur] Attente des ports...
+2026-04-18 08:16:25 [superviseur] Ports prets: [5051, 3443]
+2026-04-18 08:16:25 [superviseur] Classic Outlook detecte \u2192 lancement Proto + icone tray
+2026-04-18 08:16:26 [superviseur] Proto lance (PID 37876, port 5050)
+2026-04-18 08:16:26 [superviseur] Icone tray lancee (PID 41024)
+2026-04-18 08:16:26 [tray] Classic Outlook detecte — lancement icone tray
+2026-04-18 08:16:26 [tray] Icone tray demarree
+2026-04-18 08:49:45 [superviseur] Backend V2: mort detecte
+2026-04-18 08:49:45 [superviseur] Backend V2: relance (1/5)
+2026-04-18 08:49:46 [superviseur] Port 3443: PID 36488 tue
+2026-04-18 08:49:46 [superviseur] Backend V2: lance (PID 22040, port 3443)
+2026-04-18 08:51:18 [superviseur] Backend V2: mort detecte
+2026-04-18 08:51:18 [superviseur] Backend V2: relance (2/5)
+2026-04-18 08:51:19 [superviseur] Port 3443: PID 26928 tue
+2026-04-18 08:51:19 [superviseur] Backend V2: lance (PID 39052, port 3443)
+2026-04-18 08:51:52 [superviseur] Companion: mort detecte
+2026-04-18 08:51:52 [superviseur] Companion: relance (1/5)
+2026-04-18 08:51:55 [superviseur] Companion: lance (PID 28896, port 5051)
+2026-04-18 08:52:28 [superviseur] Backend V2: mort detecte
+2026-04-18 08:52:28 [superviseur] Backend V2: relance (3/5)
+2026-04-18 08:52:28 [superviseur] Port 3443: PID 36488 tue
+2026-04-18 08:52:29 [superviseur] Backend V2: lance (PID 26420, port 3443)
+2026-04-18 09:00:02 [superviseur] Outlook ferme — arret des backends
+2026-04-18 09:00:02 [superviseur] Arret des backends...
+2026-04-18 09:00:02 [superviseur] Companion: arrete
+2026-04-18 09:00:02 [superviseur] Backend V2: arrete
+2026-04-18 09:00:02 [superviseur] Tray arrete
+2026-04-18 09:00:02 [superviseur] Retour en mode attente Outlook...
+2026-04-18 09:00:02 [superviseur] ==================================================
+2026-04-18 09:00:02 [superviseur] BoosterMail Superviseur demarre (mode watcher)
+2026-04-18 09:00:02 [superviseur] Repertoire: C:\EasyMail
+2026-04-18 09:00:02 [superviseur] Pas de superviseur en cours
+2026-04-18 09:00:02 [superviseur] pythonw: C:\Users\yvanb\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe
+2026-04-18 09:00:02 [superviseur] En attente d'Outlook...
+2026-04-18 09:00:02 [superviseur] Attente 10s que les fenetres Outlook disparaissent...
+2026-04-18 09:00:37 [superviseur] Outlook detecte (new_outlook) !
+2026-04-18 09:00:39 [superviseur] Popup marketing lancee (processus separe)
+2026-04-18 09:00:40 [superviseur] Attente clic utilisateur sur la popup...
+2026-04-18 09:01:43 [superviseur] Popup non cliquee apres 60s — lancement automatique
+2026-04-18 09:01:43 [superviseur] Lancement des backends...
+2026-04-18 09:01:44 [superviseur] Companion: lance (PID 26352, port 5051)
+2026-04-18 09:01:45 [superviseur] Port 3443: PID 26420 tue
+2026-04-18 09:01:46 [superviseur] Backend V2: lance (PID 21408, port 3443)
+2026-04-18 09:01:46 [superviseur] Attente des ports...
+2026-04-18 09:01:46 [superviseur] Ports prets: [5051, 3443]
+2026-04-18 09:01:46 [superviseur] Classic Outlook detecte \u2192 lancement Proto + icone tray
+2026-04-18 09:01:47 [superviseur] Proto lance (PID 21696, port 5050)
+2026-04-18 09:01:47 [superviseur] Icone tray lancee (PID 23808)
+2026-04-18 09:01:47 [tray] Classic Outlook detecte — lancement icone tray
+2026-04-18 09:01:47 [tray] Icone tray demarree
+2026-04-18 09:01:57 [superviseur] Outlook ferme — arret des backends
+2026-04-18 09:01:57 [superviseur] Arret des backends...
+2026-04-18 09:01:57 [superviseur] Companion: arrete
+2026-04-18 09:01:58 [superviseur] Backend V2: arrete
+2026-04-18 09:01:58 [superviseur] Proto arrete
+2026-04-18 09:01:58 [superviseur] Tray arrete
+2026-04-18 09:01:58 [superviseur] Retour en mode attente Outlook...
+2026-04-18 09:01:58 [superviseur] ==================================================
+2026-04-18 09:01:58 [superviseur] BoosterMail Superviseur demarre (mode watcher)
+2026-04-18 09:01:58 [superviseur] Repertoire: C:\EasyMail
+2026-04-18 09:01:58 [superviseur] Pas de superviseur en cours
+2026-04-18 09:01:58 [superviseur] pythonw: C:\Users\yvanb\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe
+2026-04-18 09:01:58 [superviseur] En attente d'Outlook...
+2026-04-18 09:01:58 [superviseur] Attente 10s que les fenetres Outlook disparaissent...
+2026-04-18 09:03:57 [superviseur] Outlook detecte (new_outlook) !
+2026-04-18 09:04:01 [superviseur] Popup marketing lancee (processus separe)
+2026-04-18 09:04:02 [superviseur] Attente clic utilisateur sur la popup...
+2026-04-18 09:04:04 [superviseur] Signal 'Lancer' recu !
+2026-04-18 09:04:04 [superviseur] Lancement des backends...
+2026-04-18 09:04:05 [superviseur] Companion: lance (PID 11268, port 5051)
+2026-04-18 09:04:15 [superviseur] Port 3443: PID 22040 tue
+2026-04-18 09:04:16 [superviseur] Backend V2: lance (PID 32032, port 3443)
+2026-04-18 09:04:16 [superviseur] Attente des ports...
+2026-04-18 09:04:16 [superviseur] Ports prets: [5051, 3443]
+2026-04-18 09:04:16 [superviseur] Classic Outlook detecte \u2192 lancement Proto + icone tray
+2026-04-18 09:04:18 [superviseur] Proto lance (PID 16788, port 5050)
+2026-04-18 09:04:18 [superviseur] Icone tray lancee (PID 32040)
+2026-04-18 09:04:18 [tray] Classic Outlook detecte — lancement icone tray
+2026-04-18 09:04:18 [tray] Icone tray demarree
+2026-04-18 09:05:44 [superviseur] Outlook ferme — arret des backends
+2026-04-18 09:05:44 [superviseur] Arret des backends...
+2026-04-18 09:05:44 [superviseur] Companion: arrete
+2026-04-18 09:05:44 [superviseur] Backend V2: arrete
+2026-04-18 09:05:44 [superviseur] Proto arrete
+2026-04-18 09:05:44 [superviseur] Tray arrete
+2026-04-18 09:05:44 [superviseur] Retour en mode attente Outlook...
+2026-04-18 09:05:44 [superviseur] ==================================================
+2026-04-18 09:05:44 [superviseur] BoosterMail Superviseur demarre (mode watcher)
+2026-04-18 09:05:44 [superviseur] Repertoire: C:\EasyMail
+2026-04-18 09:05:44 [superviseur] Pas de superviseur en cours
+2026-04-18 09:05:44 [superviseur] pythonw: C:\Users\yvanb\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe
+2026-04-18 09:05:44 [superviseur] En attente d'Outlook...
+2026-04-18 09:05:44 [superviseur] Attente 10s que les fenetres Outlook disparaissent...
+2026-04-18 09:06:18 [superviseur] Outlook detecte (new_outlook) !
+2026-04-18 09:06:20 [superviseur] Popup marketing lancee (processus separe)
+2026-04-18 09:06:21 [superviseur] Attente clic utilisateur sur la popup...
+2026-04-18 09:06:23 [superviseur] Signal 'Lancer' recu !
+2026-04-18 09:06:23 [superviseur] Lancement des backends...
+2026-04-18 09:06:24 [superviseur] Companion: lance (PID 27072, port 5051)
+2026-04-18 09:06:25 [superviseur] Port 3443: PID 22040 tue
+2026-04-18 09:06:26 [superviseur] Backend V2: lance (PID 41920, port 3443)
+2026-04-18 09:06:26 [superviseur] Attente des ports...
+2026-04-18 09:06:26 [superviseur] Ports prets: [5051, 3443]
+2026-04-18 09:06:26 [superviseur] Classic Outlook detecte \u2192 lancement Proto + icone tray
+2026-04-18 09:06:28 [superviseur] Proto lance (PID 39152, port 5050)
+2026-04-18 09:06:28 [superviseur] Icone tray lancee (PID 29008)
+2026-04-18 09:06:28 [tray] Classic Outlook detecte — lancement icone tray
+2026-04-18 09:06:28 [tray] Icone tray demarree
+2026-04-18 09:11:46 [superviseur] Outlook ferme — arret des backends
+2026-04-18 09:11:46 [superviseur] Arret des backends...
+2026-04-18 09:11:46 [superviseur] Companion: arrete
+2026-04-18 09:11:46 [superviseur] Backend V2: arrete
+2026-04-18 09:11:46 [superviseur] Proto arrete
+2026-04-18 09:11:46 [superviseur] Tray arrete
+2026-04-18 09:11:46 [superviseur] Retour en mode attente Outlook...
+2026-04-18 09:11:46 [superviseur] ==================================================
+2026-04-18 09:11:46 [superviseur] BoosterMail Superviseur demarre (mode watcher)
+2026-04-18 09:11:46 [superviseur] Repertoire: C:\EasyMail
+2026-04-18 09:11:46 [superviseur] Pas de superviseur en cours
+2026-04-18 09:11:46 [superviseur] pythonw: C:\Users\yvanb\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe
+2026-04-18 09:11:46 [superviseur] En attente d'Outlook...
+2026-04-18 09:11:46 [superviseur] Attente 10s que les fenetres Outlook disparaissent...
+2026-04-18 09:12:37 [superviseur] Outlook detecte (new_outlook) !
+2026-04-18 09:12:39 [superviseur] Popup marketing lancee (processus separe)
+2026-04-18 09:12:40 [superviseur] Attente clic utilisateur sur la popup...
+2026-04-18 09:12:42 [superviseur] Signal 'Lancer' recu !
+2026-04-18 09:12:42 [superviseur] Lancement des backends...
+2026-04-18 09:12:44 [superviseur] Companion: lance (PID 40596, port 5051)
+2026-04-18 09:12:45 [superviseur] Port 3443: PID 22040 tue
+2026-04-18 09:12:45 [superviseur] Backend V2: lance (PID 32192, port 3443)
+2026-04-18 09:12:45 [superviseur] Attente des ports...
+2026-04-18 09:12:45 [superviseur] Ports prets: [5051, 3443]
+2026-04-18 09:12:45 [superviseur] Classic Outlook detecte \u2192 lancement Proto + icone tray
+2026-04-18 09:12:46 [superviseur] Proto lance (PID 41964, port 5050)
+2026-04-18 09:12:46 [superviseur] Icone tray lancee (PID 28336)
+2026-04-18 09:12:47 [tray] Classic Outlook detecte — lancement icone tray
+2026-04-18 09:12:47 [tray] Icone tray demarree
+2026-04-18 09:26:33 [superviseur] Outlook ferme — arret des backends
+2026-04-18 09:26:33 [superviseur] Arret des backends...
+2026-04-18 09:26:33 [superviseur] Companion: arrete
+2026-04-18 09:26:33 [superviseur] Backend V2: arrete
+2026-04-18 09:26:33 [superviseur] Proto arrete
+2026-04-18 09:26:33 [superviseur] Tray arrete
+2026-04-18 09:26:33 [superviseur] Retour en mode attente Outlook...
+2026-04-18 09:26:33 [superviseur] ==================================================
+2026-04-18 09:26:33 [superviseur] BoosterMail Superviseur demarre (mode watcher)
+2026-04-18 09:26:33 [superviseur] Repertoire: C:\EasyMail
+2026-04-18 09:26:33 [superviseur] Pas de superviseur en cours
+2026-04-18 09:26:33 [superviseur] pythonw: C:\Users\yvanb\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe
+2026-04-18 09:26:33 [superviseur] En attente d'Outlook...
+2026-04-18 09:26:33 [superviseur] Attente 10s que les fenetres Outlook disparaissent...
+2026-04-18 09:26:46 [superviseur] Outlook detecte (new_outlook) !
+2026-04-18 09:26:48 [superviseur] Popup marketing lancee (processus separe)
+2026-04-18 09:26:49 [superviseur] Attente clic utilisateur sur la popup...
+2026-04-18 09:26:53 [superviseur] Signal 'Lancer' recu !
+2026-04-18 09:26:53 [superviseur] Lancement des backends...
+2026-04-18 09:26:54 [superviseur] Companion: lance (PID 35812, port 5051)
+2026-04-18 09:26:56 [superviseur] Port 3443: PID 32192 tue
+2026-04-18 09:26:56 [superviseur] Backend V2: lance (PID 17064, port 3443)
+2026-04-18 09:26:56 [superviseur] Attente des ports...
+2026-04-18 09:26:58 [superviseur] Ports prets: [5051, 3443]
+2026-04-18 09:26:58 [superviseur] Classic Outlook detecte \u2192 lancement Proto + icone tray
+2026-04-18 09:26:59 [superviseur] Proto lance (PID 38200, port 5050)
+2026-04-18 09:26:59 [superviseur] Icone tray lancee (PID 7104)
+2026-04-18 09:26:59 [tray] Classic Outlook detecte — lancement icone tray
+2026-04-18 09:27:00 [tray] Icone tray demarree
+2026-04-18 09:36:47 [superviseur] Outlook ferme — arret des backends
+2026-04-18 09:36:47 [superviseur] Arret des backends...
+2026-04-18 09:36:47 [superviseur] Companion: arrete
+2026-04-18 09:36:47 [superviseur] Backend V2: arrete
+2026-04-18 09:36:47 [superviseur] Proto arrete
+2026-04-18 09:36:47 [superviseur] Tray arrete
+2026-04-18 09:36:47 [superviseur] Retour en mode attente Outlook...
+2026-04-18 09:36:48 [superviseur] ==================================================
+2026-04-18 09:36:48 [superviseur] BoosterMail Superviseur demarre (mode watcher)
+2026-04-18 09:36:48 [superviseur] Repertoire: C:\EasyMail
+2026-04-18 09:36:48 [superviseur] Pas de superviseur en cours
+2026-04-18 09:36:48 [superviseur] pythonw: C:\Users\yvanb\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe
+2026-04-18 09:36:48 [superviseur] En attente d'Outlook...
+2026-04-18 09:36:48 [superviseur] Attente 10s que les fenetres Outlook disparaissent...
+2026-04-18 09:36:58 [superviseur] Outlook detecte (new_outlook) !
+2026-04-18 09:37:00 [superviseur] Popup marketing lancee (processus separe)
+2026-04-18 09:37:01 [superviseur] Attente clic utilisateur sur la popup...
+2026-04-18 09:37:02 [superviseur] Signal 'Lancer' recu !
+2026-04-18 09:37:02 [superviseur] Lancement des backends...
+2026-04-18 09:37:03 [superviseur] Companion: lance (PID 22164, port 5051)
+2026-04-18 09:37:04 [superviseur] Port 3443: PID 17064 tue
+2026-04-18 09:37:05 [superviseur] Backend V2: lance (PID 41032, port 3443)
+2026-04-18 09:37:05 [superviseur] Attente des ports...
+2026-04-18 09:37:05 [superviseur] Ports prets: [5051, 3443]
+2026-04-18 09:37:05 [superviseur] Classic Outlook detecte \u2192 lancement Proto + icone tray
+2026-04-18 09:37:06 [superviseur] Proto lance (PID 33976, port 5050)
+2026-04-18 09:37:06 [superviseur] Icone tray lancee (PID 23260)
+2026-04-18 09:37:06 [tray] Classic Outlook detecte — lancement icone tray
+2026-04-18 09:37:06 [tray] Icone tray demarree
+2026-04-18 09:40:02 [superviseur] Outlook ferme — arret des backends
+2026-04-18 09:40:02 [superviseur] Arret des backends...
+2026-04-18 09:40:02 [superviseur] Companion: arrete
+2026-04-18 09:40:02 [superviseur] Backend V2: arrete
+2026-04-18 09:40:03 [superviseur] Proto arrete
+2026-04-18 09:40:03 [superviseur] Tray arrete
+2026-04-18 09:40:03 [superviseur] Retour en mode attente Outlook...
+2026-04-18 09:40:03 [superviseur] ==================================================
+2026-04-18 09:40:03 [superviseur] BoosterMail Superviseur demarre (mode watcher)
+2026-04-18 09:40:03 [superviseur] Repertoire: C:\EasyMail
+2026-04-18 09:40:03 [superviseur] Pas de superviseur en cours
+2026-04-18 09:40:03 [superviseur] pythonw: C:\Users\yvanb\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe
+2026-04-18 09:40:03 [superviseur] En attente d'Outlook...
+2026-04-18 09:40:03 [superviseur] Attente 10s que les fenetres Outlook disparaissent...
+2026-04-18 09:40:37 [superviseur] Outlook detecte (new_outlook) !
+2026-04-18 09:40:39 [superviseur] Popup marketing lancee (processus separe)
+2026-04-18 09:40:40 [superviseur] Attente clic utilisateur sur la popup...
+2026-04-18 09:40:40 [superviseur] Signal 'Lancer' recu !
+2026-04-18 09:40:40 [superviseur] Lancement des backends...
+2026-04-18 09:40:41 [superviseur] Companion: lance (PID 31184, port 5051)
+2026-04-18 09:40:43 [superviseur] Port 3443: PID 32192 tue
+2026-04-18 09:40:43 [superviseur] Backend V2: lance (PID 23500, port 3443)
+2026-04-18 09:40:43 [superviseur] Attente des ports...
+2026-04-18 09:40:43 [superviseur] Ports prets: [5051, 3443]
+2026-04-18 09:40:43 [superviseur] Classic Outlook detecte \u2192 lancement Proto + icone tray
+2026-04-18 09:40:44 [superviseur] Proto lance (PID 7236, port 5050)
+2026-04-18 09:40:44 [superviseur] Icone tray lancee (PID 19504)
+2026-04-18 09:40:44 [tray] Classic Outlook detecte — lancement icone tray
+2026-04-18 09:40:45 [tray] Icone tray demarree
+2026-04-18 09:46:15 [superviseur] Companion: mort detecte
+2026-04-18 09:46:15 [superviseur] Companion: relance (1/5)
+2026-04-18 09:46:16 [superviseur] Companion: lance (PID 4444, port 5051)
+2026-04-18 09:47:16 [superviseur] Companion: mort detecte
+2026-04-18 09:47:16 [superviseur] Companion: relance (2/5)
+2026-04-18 09:47:17 [superviseur] Companion: lance (PID 33696, port 5051)
+2026-04-18 09:50:17 [superviseur] Companion: mort detecte
+2026-04-18 09:50:17 [superviseur] Companion: relance (3/5)
+2026-04-18 09:50:17 [superviseur] Port 5051: PID 5544 tue
+2026-04-18 09:50:18 [superviseur] Companion: lance (PID 32540, port 5051)
+2026-04-18 09:50:48 [superviseur] Outlook ferme — arret des backends
+2026-04-18 09:50:48 [superviseur] Arret des backends...
+2026-04-18 09:50:48 [superviseur] Companion: arrete
+2026-04-18 09:50:48 [superviseur] Backend V2: arrete
+2026-04-18 09:50:48 [superviseur] Proto arrete
+2026-04-18 09:50:48 [superviseur] Tray arrete
+2026-04-18 09:50:48 [superviseur] Retour en mode attente Outlook...
+2026-04-18 09:50:48 [superviseur] ==================================================
+2026-04-18 09:50:48 [superviseur] BoosterMail Superviseur demarre (mode watcher)
+2026-04-18 09:50:48 [superviseur] Repertoire: C:\EasyMail
+2026-04-18 09:50:48 [superviseur] Pas de superviseur en cours
+2026-04-18 09:50:48 [superviseur] pythonw: C:\Users\yvanb\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe
+2026-04-18 09:50:48 [superviseur] En attente d'Outlook...
+2026-04-18 09:50:48 [superviseur] Attente 10s que les fenetres Outlook disparaissent...
+2026-04-18 09:50:58 [superviseur] Outlook detecte (new_outlook) !
+2026-04-18 09:51:00 [superviseur] Popup marketing lancee (processus separe)
+2026-04-18 09:51:01 [superviseur] Attente clic utilisateur sur la popup...
+2026-04-18 09:51:02 [superviseur] Signal 'Lancer' recu !
+2026-04-18 09:51:02 [superviseur] Lancement des backends...
+2026-04-18 09:51:03 [superviseur] Companion: lance (PID 33308, port 5051)
+2026-04-18 09:51:05 [superviseur] Port 3443: PID 23500 tue
+2026-04-18 09:51:05 [superviseur] Backend V2: lance (PID 36656, port 3443)
+2026-04-18 09:51:05 [superviseur] Attente des ports...
+2026-04-18 09:51:05 [superviseur] Ports prets: [5051, 3443]
+2026-04-18 09:51:05 [superviseur] Classic Outlook detecte \u2192 lancement Proto + icone tray
+2026-04-18 09:51:06 [superviseur] Proto lance (PID 19840, port 5050)
+2026-04-18 09:51:06 [superviseur] Icone tray lancee (PID 22180)
+2026-04-18 09:51:07 [tray] Classic Outlook detecte — lancement icone tray
+2026-04-18 09:51:07 [tray] Icone tray demarree
+2026-04-18 10:03:07 [superviseur] Backend V2: mort detecte
+2026-04-18 10:03:07 [superviseur] Backend V2: relance (1/5)
+2026-04-18 10:03:07 [superviseur] Port 3443: PID 36656 tue
+2026-04-18 10:03:08 [superviseur] Backend V2: lance (PID 33976, port 3443)
+2026-04-18 10:03:43 [superviseur] Outlook ferme — arret des backends
+2026-04-18 10:03:43 [superviseur] Arret des backends...
+2026-04-18 10:03:43 [superviseur] Companion: arrete
+2026-04-18 10:03:43 [superviseur] Backend V2: arrete
+2026-04-18 10:03:43 [superviseur] Proto arrete
+2026-04-18 10:03:43 [superviseur] Tray arrete
+2026-04-18 10:03:43 [superviseur] Retour en mode attente Outlook...
+2026-04-18 10:03:43 [superviseur] ==================================================
+2026-04-18 10:03:43 [superviseur] BoosterMail Superviseur demarre (mode watcher)
+2026-04-18 10:03:43 [superviseur] Repertoire: C:\EasyMail
+2026-04-18 10:03:43 [superviseur] Pas de superviseur en cours
+2026-04-18 10:03:43 [superviseur] pythonw: C:\Users\yvanb\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe
+2026-04-18 10:03:43 [superviseur] En attente d'Outlook...
+2026-04-18 10:03:43 [superviseur] Attente 10s que les fenetres Outlook disparaissent...
+2026-04-18 10:03:56 [superviseur] Outlook detecte (new_outlook) !
+2026-04-18 10:03:58 [superviseur] Popup marketing lancee (processus separe)
+2026-04-18 10:03:59 [superviseur] Attente clic utilisateur sur la popup...
+2026-04-18 10:04:01 [superviseur] Signal 'Lancer' recu !
+2026-04-18 10:04:01 [superviseur] Lancement des backends...
+2026-04-18 10:04:02 [superviseur] Companion: lance (PID 35100, port 5051)
+2026-04-18 10:04:03 [superviseur] Port 3443: PID 14760 tue
+2026-04-18 10:04:04 [superviseur] Backend V2: lance (PID 31708, port 3443)
+2026-04-18 10:04:04 [superviseur] Attente des ports...
+2026-04-18 10:04:04 [superviseur] Ports prets: [5051, 3443]
+2026-04-18 10:04:04 [superviseur] Classic Outlook detecte \u2192 lancement Proto + icone tray
+2026-04-18 10:04:05 [superviseur] Proto lance (PID 30188, port 5050)
+2026-04-18 10:04:05 [superviseur] Icone tray lancee (PID 26360)
+2026-04-18 10:04:05 [tray] Classic Outlook detecte — lancement icone tray
+2026-04-18 10:04:05 [tray] Icone tray demarree
+2026-04-18 14:22:03 [superviseur] Outlook ferme — arret des backends
+2026-04-18 14:22:03 [superviseur] Arret des backends...
+2026-04-18 14:22:03 [superviseur] Companion: arrete
+2026-04-18 14:22:03 [superviseur] Backend V2: arrete
+2026-04-18 14:22:03 [superviseur] Tray arrete
+2026-04-18 14:22:03 [superviseur] Retour en mode attente Outlook...
+2026-04-18 14:22:03 [superviseur] ==================================================
+2026-04-18 14:22:03 [superviseur] BoosterMail Superviseur demarre (mode watcher)
+2026-04-18 14:22:03 [superviseur] Repertoire: C:\EasyMail
+2026-04-18 14:22:03 [superviseur] Pas de superviseur en cours
+2026-04-18 14:22:03 [superviseur] PREREQUIS: Certificat HTTPS introuvable
+2026-04-18 14:22:03 [superviseur] PREREQUIS: Script introuvable: C:\EasyMail\V1_outlook\app_plugin.py
+2026-04-18 14:22:03 [superviseur] Prerequis non remplis — abandon
+2026-04-18 14:42:30 [superviseur] ==================================================
+2026-04-18 14:42:30 [superviseur] BoosterMail Superviseur demarre (mode watcher)
+2026-04-18 14:42:30 [superviseur] Repertoire: C:\EasyMail
+2026-04-18 14:42:30 [superviseur] Pas de superviseur en cours
+2026-04-18 14:42:30 [superviseur] pythonw: C:\Users\yvanb\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe
+2026-04-18 14:42:30 [superviseur] En attente d'Outlook...
+2026-04-18 14:42:30 [superviseur] Outlook deja ouvert — attente qu'il se ferme d'abord (max 5 min)...
+2026-04-18 14:42:54 [superviseur] Outlook ferme. En attente d'une NOUVELLE ouverture...

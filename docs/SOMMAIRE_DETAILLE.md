@@ -131,6 +131,7 @@ docs/
 | `STRUCTURE_PROJET.md` | Carte complète du projet (arborescence, rôle de chaque fichier) | `structure`, `carte`, `où est` |
 | `SOMMAIRE_DETAILLE.md` | **CE FICHIER** — index maître | `sommaire`, `index`, `table des matières` |
 | `_TEMPLATE_NOUVEAU_DOC.md` | Template à utiliser pour tout nouveau doc (règle M2 de CLAUDE.md) | `template`, `nouveau doc` |
+| `PLUS_TARD.md` | Liste des fonctionnalités/bugs reportés sciemment (dette technique assumée) | `plus tard`, `reporté`, `dette` |
 
 ---
 
@@ -228,6 +229,7 @@ docs/
 | `PLAN_1_APPLICATION_DOCUMENTATION.md` | Plan consolidation + datation + maintenance doc (5 phases, ~4h) | `plan1`, `doc`, `consolidation` |
 | `PLAN_2_OPTIMISATION_FLUX.md` | Plan flux optimal : templates + caches + smart spec (7 phases, ~9h15) — **plan d'exécution de référence** | `plan2`, `flux`, `templates`, `caches` |
 | `PLAN_3_INVENTAIRE_CACHES_ET_PORTAGE.md` | Inventaire technique caches V2 vs proto + plan baseline 5 phases (référence) | `plan3`, `inventaire`, `caches`, `portage` |
+| `PLAN_SQUELETTE_INGREDIENTS_100.md` | Plan "squelette + ingrédients 100%" — parité structurelle V2 vs proto | `squelette`, `parité`, `ingrédients` |
 
 ---
 
@@ -239,6 +241,7 @@ docs/
 | `SPEC_CHATBOT_INSTALLATION.md` | Chatbot guidant l'installation étape par étape | `chatbot`, `installation`, `guide` |
 | `GUIDE_INSTALLATION_PLUGIN.md` | Guide admin/utilisateur pour installer le plugin | `guide`, `plugin`, `admin` |
 | `MAIL_DEMANDE_ADMIN_DEPLOY.md` | Mail type pour demander le deploy admin | `admin`, `deploy`, `mail` |
+| `SPEC_INSTALLATION_COMMERCIALE.md` | Spec de l'installation côté commercial / go-to-market | `commercial`, `installation`, `gtm` |
 
 ---
 
@@ -248,17 +251,25 @@ docs/
 
 | Fichier | Date | Sujet |
 |---|---|---|
-| `BILAN_SESSION_20260410.md` | 10/04/2026 | Décisions stratégiques (une seule version V1, popup marketing, chatbot) |
+| `SESSION_RECAP_20260323.md` | 23/03/2026 | Récapitulatif session du 23 mars |
+| `SESSION_RECAP_20260325.md` | 25/03/2026 | Récapitulatif session du 25 mars |
+| `BILAN_SESSION_20260410.md` | 10/04/2026 | Décisions stratégiques (une seule version, popup marketing, chatbot) |
 | `RECHERCHE_MOTEUR_IA_11_AVRIL.md` | 11/04/2026 | Recherches moteur IA |
-| `BUG_STR_GET_20260413.md` | 13/04/2026 | Bug str.get documenté |
+| `BUG_STR_GET_20260413.md` | 13/04/2026 | Bug `str.get` documenté |
 | `RAPPORT_AUDIT_SESSION_20260413.md` | 13/04/2026 | Audit complet session VF.1-VF.8 |
+| `BILAN_SESSION_V2_20260414.md` | 14/04/2026 | Bilan de session V2 (état travaux plugin) |
+| `BILAN_SESSION_20260416.md` | 16/04/2026 | Bilan de session 16/04 |
 | **`BILAN_SESSION_20260418.md`** | **18/04/2026** | **Consolidation doc + Plan 1 exécuté + règles M1-M4 + préparation Plans 2/3** |
 
 ---
 
 ### J. Audits (`docs/audits/`)
 
-*(vide pour l'instant — les rapports d'audit sont dans `sessions/`)*
+| Fichier | Date | Sujet |
+|---|---|---|
+| `RAPPORT_AUDIT_29_MARS_2026.md` | 29/03/2026 | Rapport d'audit codebase |
+| `RAPPORT_AUDIT_COMPLEMENTAIRE_29_MARS_2026.md` | 29/03/2026 | Audit complémentaire |
+| `RAPPORT_AUDIT_PHASES_1_A_4.md` | 14-16/04/2026 | Audit des phases 1 à 4 du squelette/ingrédients V2 |
 
 ---
 
