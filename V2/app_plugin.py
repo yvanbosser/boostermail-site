@@ -288,8 +288,15 @@ def is_standard_mode() -> bool:
 
 @app.route('/plugin/<path:filename>')
 def serve_plugin_file(filename):
-    """Sert les fichiers du plugin (manifest, dialog, commands, assets)."""
-    return send_from_directory(PLUGIN_DIR, filename)
+    """Sert les fichiers du plugin (manifest, dialog, commands, assets).
+    Cache-Control: no-cache sur JS/CSS/HTML pour éviter que PyQt WebEngine cache
+    d'anciennes versions (problème observé avec QWebEngineProfile.defaultProfile())."""
+    resp = send_from_directory(PLUGIN_DIR, filename)
+    if filename.endswith(('.js', '.css', '.html')):
+        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        resp.headers['Pragma'] = 'no-cache'
+        resp.headers['Expires'] = '0'
+    return resp
 
 
 # --- Route status (santé du serveur) ----------------------------------------
