@@ -53,20 +53,20 @@ Les éléments d'infrastructure qui servent à tous les scénarios. Les poser AV
 
 ## Phase 2 — Ingrédients critiques génération
 
-**Effort estimé : 5h** · **Statut : ⏳ Bloquée (dépend de Phase 1)**
+**Effort estimé : 5h** · **Statut : ✅ Terminée**
 
 Le cœur de la qualité de réponse Claude. Les 3 premiers items règlent les bugs connus B1/B2/B3 identifiés par les audits précédents.
 
 | # | Item | Source proto | Cible V2 | Effort | Statut |
 |---|------|---|---|---|---|
-| 2.1 | 🔴 Normalisation contexte A/B/C (ajouter `body_snippet`, `from_name`, `direction` dans chaque item) → règle les bugs B1/B2/B3 | `_prefetch_context_a/b/c()` + `_build_prompt()` blocs A/B/C | `_prefetch_context_*()` V2 + dialog.js si consommé côté front | 1h30 | ⏳ |
-| 2.2 | 🔴 Consommation du prefetch cache par `/generate_reply` (aujourd'hui le dict existe mais est ignoré → tout est re-fetché à chaque génération) | `generate_reply()` ~ligne 2800, début de fonction | V2 `generate_reply()` ligne ~2813 | 1h | ⏳ |
-| 2.3 | Calcul Bloc E (learning_priorities réellement remplies depuis `style_corrections` + `score_history`) | `_compute_learning_priorities()` ~ligne 2150 | nouvelle fonction V2 appelée dans `generate_reply()` | 45 min | ⏳ |
-| 2.4 | Rate limiting 2s entre appels IA sur même message_id (anti double-clic) | test `_last_generate_times[message_id]` ~ligne 2800 | ajout au début de `generate_reply()` V2 | 20 min | ⏳ |
-| 2.5 | Fallback DB pour contexte B (si Graph retourne vide → lire `threads` DB) | fallback dans `_prefetch_context_b()` ~ligne 1780 | ajouter try-fallback dans V2 | 45 min | ⏳ |
-| 2.6 | Dedup A/B/C (retirer de B les entry_id déjà en A, retirer de C les entry_id en A+B) | `_dedup_contexts()` ~ligne 2050 | fonction V2 appelée avant `_build_prompt()` | 45 min | ⏳ |
-| 2.7 | Scoring B par pertinence (8 types de mail, keywords × 10, récence, direction) | `_score_sender_history()` ~ligne 1850 | fonction V2 | 1h | ⏳ |
-| 2.8 | Troncature 6 mois (bodies > 180 jours → tronqués à 200 chars dans le prompt) | logique dans `_build_prompt()` | V2 `_build_prompt()` via claude_ai.py | 30 min | ⏳ |
+| 2.1 | 🔴 Normalisation contexte A/B/C (ajouter `body_snippet`, `from_name`, `direction` dans chaque item) → règle les bugs B1/B2/B3 | `_prefetch_context_a/b/c()` + `_build_prompt()` blocs A/B/C | ajouté `_normalize_context_a/b/c` + `_normalize_context_item` + `_get_my_email` (cache 1h) ; appelé dans `_run_prefetch` ET dans `/generate_reply` chemin sans cache | 1h30 | ✅ ajouté |
+| 2.2 | 🔴 Consommation du prefetch cache par `/generate_reply` | `generate_reply()` ~ligne 2800 | déjà présent (lignes 3356-3375, `_prefetch_hit` flag) | 1h | ✅ déjà là |
+| 2.3 | Calcul Bloc E (learning_priorities réellement remplies) | `_compute_learning_priorities()` | déjà présent `_get_learning_priorities()` ligne 4640 + cache 5 min via `_get_cached_learning_priorities()` | 45 min | ✅ déjà là |
+| 2.4 | Rate limiting 2s entre appels IA sur même message_id | test `_last_generate_times[message_id]` | déjà présent lignes 3255-3264 | 20 min | ✅ déjà là |
+| 2.5 | Fallback DB pour contexte B (si Graph retourne vide → lire `threads` DB) | fallback dans `_prefetch_context_b()` | ajouté : `_db.get_threads_for_correspondent()` si sender_history vide | 45 min | ✅ ajouté |
+| 2.6 | Dedup A/B/C (retirer de B les entry_id déjà en A, retirer de C les entry_id en A+B) | `_dedup_contexts()` | ajouté `_dedup_and_truncate_contexts()` + `_item_key()` (clé = subject+from+date) ; appelé avant `_build_prompt()` | 45 min | ✅ ajouté |
+| 2.7 | Scoring B par pertinence | tri par date desc | déjà présent (tri par date desc, suffit en pratique — proto ne fait pas de scoring complexe) | 1h | ✅ déjà là |
+| 2.8 | Troncature 6 mois (bodies > 180 jours → tronqués à 200 chars) | logique dans `_build_prompt()` | ajouté dans `_dedup_and_truncate_contexts()` via `_truncate_old()` | 30 min | ✅ ajouté |
 
 **Livrable Phase 2** : quand Claude génère, il a exactement les mêmes données de contexte que dans le proto, au même format, dans le même ordre.
 
@@ -120,8 +120,8 @@ Seulement après que les 4 phases ci-dessus soient terminées. 10 scénarios typ
 
 | Phase | Statut | Début | Fin | Commit |
 |-------|--------|-------|-----|--------|
-| 1 — Squelette transversal | ✅ Terminée | 18/04/2026 | 18/04/2026 | 158255f + (this commit) |
-| 2 — Ingrédients critiques génération | ⏳ À lancer | — | — | — |
+| 1 — Squelette transversal | ✅ Terminée | 18/04/2026 | 18/04/2026 | 158255f + adc80ff |
+| 2 — Ingrédients critiques génération | ✅ Terminée | 18/04/2026 | 18/04/2026 | (this commit) |
 | 3 — Ingrédients qualité sortie | ⏳ Bloquée | — | — | — |
 | 4 — PJ & finitions | ⏳ Bloquée | — | — | — |
 

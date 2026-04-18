@@ -1118,6 +1118,13 @@ def _run_prefetch(mail_data):
             finally:
                 pool.shutdown(wait=False)  # Ne pas bloquer — les threads non-annulables se terminent seuls
 
+            # Phase 2.1 : normaliser tous les items pour _build_prompt()
+            # (ajoute body_snippet, from_name, direction — corrige les bugs B1/B2/B3)
+            _my_email = _get_my_email()
+            context_a = _normalize_context_a(context_a, from_email, _my_email)
+            context_b = _normalize_context_b(context_b, from_email, _my_email)
+            # Note : context_c est déjà normalisé par _prefetch_context_c_with_table()
+
             _broadcast_sse('prefetch_progress', {'a': len(context_a), 'b': len(context_b), 'c': len(context_c)})
 
         else:
@@ -1192,6 +1199,159 @@ def _prefetch_context_a(graph, conversation_id):
     return graph.get_conversation_thread(conversation_id, max_results=20)
 
 
+# Phase 2.1 — Cache session de l'email utilisateur courant (évite appel /me répété)
+_my_email_cache = {'email': '', 'timestamp': 0.0}
+_my_email_lock = threading.Lock()
+
+
+def _get_my_email():
+    """Retourne l'email de l'utilisateur authentifié (cache 1h).
+    Utilisé pour déterminer direction (received/sent) dans les items contexte."""
+    with _my_email_lock:
+        if _my_email_cache['email'] and time.time() - _my_email_cache['timestamp'] < 3600:
+            return _my_email_cache['email']
+    try:
+        graph = get_graph()
+        if graph:
+            info = graph.get_user_info()
+            email = (info.get('email') or '').lower()
+            with _my_email_lock:
+                _my_email_cache['email'] = email
+                _my_email_cache['timestamp'] = time.time()
+            return email
+    except Exception:
+        pass
+    return ''
+
+
+def _normalize_context_item(m, correspondent_email='', my_email=''):
+    """
+    Phase 2.1 — Normalisation commune d'un item contexte (A, B ou C) au format
+    attendu par _build_prompt() et par le frontend :
+    {subject, body_snippet, body, from_name, from_email, date, direction}
+
+    _build_prompt() lit m['direction'] sans .get() → KeyError si absent.
+    _build_prompt() lit body_snippet → vide si absent = contexte inutile.
+
+    direction : 'received' si from_email == correspondent, 'sent' si == my_email.
+    Fallback : 'received' si indéterminable.
+    """
+    from_email = (m.get('from_email') or '').strip().lower()
+    from_name = m.get('from_name') or ''
+    # Fallback from_name = local part de l'email si absent
+    if not from_name and from_email:
+        from_name = from_email.split('@')[0].replace('.', ' ').title()
+
+    # Déterminer direction
+    if my_email and from_email == my_email.lower():
+        direction = 'sent'
+    elif correspondent_email and from_email == correspondent_email.lower():
+        direction = 'received'
+    else:
+        direction = 'received'  # fallback
+
+    # body_snippet = version tronquée lisible du body
+    body_snippet = (
+        m.get('body_snippet')
+        or m.get('body_preview')
+        or m.get('body', '')
+    )
+    if body_snippet and len(body_snippet) > 500:
+        body_snippet = body_snippet[:500]
+
+    return {
+        'subject': m.get('subject', ''),
+        'body_snippet': body_snippet,
+        'body': body_snippet,  # alias pour code qui lit 'body'
+        'from_name': from_name,
+        'from_email': m.get('from_email', ''),
+        'date': m.get('date', ''),
+        'direction': direction,
+    }
+
+
+def _normalize_context_a(items, correspondent_email='', my_email=''):
+    """Phase 2.1 — Normalisation contexte A (thread conversation).
+    Les items viennent de graph.get_conversation_thread() → mix received + sent."""
+    return [_normalize_context_item(m, correspondent_email, my_email) for m in (items or [])]
+
+
+def _item_key(m):
+    """Phase 2.6 — Clé quasi-unique pour dédup d'items contexte.
+    (subject + from_email + premiers 40 chars date) — suffit à identifier les doublons Graph."""
+    return (
+        (m.get('subject') or '').strip().lower()[:80],
+        (m.get('from_email') or '').strip().lower(),
+        (m.get('date') or '')[:19],  # "2026-04-18T10:30:00"
+    )
+
+
+def _dedup_and_truncate_contexts(context_a, context_b, context_c):
+    """
+    Phase 2.6 + 2.8 — Dédup A/B/C et troncature 6 mois.
+
+    Priorité de conservation : A > B > C (si un mail est dans A, on le retire de B et C).
+    Troncature : mails > 180 jours → body_snippet tronqué à 200 chars (gardent du contexte
+    sans saturer la fenêtre prompt).
+
+    Retourne (context_a, context_b, context_c) nettoyés.
+    """
+    def _truncate_old(items, threshold_days=180, max_chars=200):
+        try:
+            now = datetime.now()
+            for m in items:
+                d = m.get('date', '')
+                if not d:
+                    continue
+                try:
+                    # Supporter formats ISO avec ou sans microsecondes/timezone
+                    d_clean = d[:19]  # "2026-04-18T10:30:00"
+                    dt = datetime.strptime(d_clean, '%Y-%m-%dT%H:%M:%S')
+                    age_days = (now - dt).days
+                    if age_days > threshold_days:
+                        if m.get('body_snippet') and len(m['body_snippet']) > max_chars:
+                            m['body_snippet'] = m['body_snippet'][:max_chars] + '...'
+                        if m.get('body') and len(m['body']) > max_chars:
+                            m['body'] = m['body'][:max_chars] + '...'
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return items
+
+    a = list(context_a or [])
+    b = list(context_b or [])
+    c = list(context_c or [])
+
+    # Étape 1 : dédup interne par liste (au cas où)
+    seen_a = set()
+    a = [m for m in a if not (_item_key(m) in seen_a or seen_a.add(_item_key(m)))]
+    seen_b = set()
+    b = [m for m in b if not (_item_key(m) in seen_b or seen_b.add(_item_key(m)))]
+    seen_c = set()
+    c = [m for m in c if not (_item_key(m) in seen_c or seen_c.add(_item_key(m)))]
+
+    # Étape 2 : priorité A > B > C
+    a_keys = set(_item_key(m) for m in a)
+    b = [m for m in b if _item_key(m) not in a_keys]
+    b_keys = set(_item_key(m) for m in b)
+    ab_keys = a_keys | b_keys
+    c = [m for m in c if _item_key(m) not in ab_keys]
+
+    # Étape 3 : troncature 6 mois
+    a = _truncate_old(a)
+    b = _truncate_old(b)
+    c = _truncate_old(c)
+
+    return a, b, c
+
+
+def _normalize_context_b(items, correspondent_email='', my_email=''):
+    """Phase 2.1 — Normalisation contexte B (historique correspondant).
+    Les items viennent de graph.search_by_sender() → received ou sent selon."""
+    return [_normalize_context_item(m, correspondent_email, my_email) for m in (items or [])]
+
+
 def _normalize_context_c(items, source='unknown'):
     """
     Normalise les items contexte C au format attendu par _build_prompt() :
@@ -1206,6 +1366,7 @@ def _normalize_context_c(items, source='unknown'):
         normalized.append({
             'subject':      m.get('subject', ''),
             'body_snippet': m.get('body_snippet') or m.get('body_preview') or m.get('body', ''),
+            'body':         m.get('body_snippet') or m.get('body_preview') or m.get('body', ''),
             'from_name':    m.get('from_name') or m.get('from_email', '').split('@')[0],
             'from_email':   m.get('from_email', ''),
             'date':         m.get('date', ''),
@@ -3284,38 +3445,44 @@ def generate_reply():
                             f"(A={len(ctx_a)} B={len(ctx_b)} C={len(ctx_c)})")
 
     if not _prefetch_hit and graph and correspondent:
+        # Phase 2.1 : utiliser _normalize_context_a/b/c pour garantir le format
+        # (body_snippet, from_name, direction) attendu par _build_prompt()
+        _my_email_v = _get_my_email()
+
         # Contexte B : historique avec le correspondant (Mode Standard)
         # Inclut les mails REÇUS de ce correspondant ET les mails ENVOYÉS à ce correspondant
         try:
-            # Mails reçus du correspondant
             b_received = graph.search_by_sender(correspondent, max_results=10)
-            for m in b_received:
-                sender_history.append({
-                    'subject': m.get('subject', ''),
-                    'body_snippet': m.get('body_preview', m.get('body', '')),
-                    'body': m.get('body_preview', m.get('body', '')),
-                    'from': m.get('from_email', ''),
-                    'from_name': m.get('from_name', m.get('from_email', '').split('@')[0]),
-                    'date': m.get('date', ''),
-                    'direction': 'received',
-                })
-            # Mails envoyés au correspondant (recherche KQL "to:email")
             b_sent = graph.search_emails(f'to:{correspondent}', max_results=10)
-            for m in b_sent:
-                sender_history.append({
-                    'subject': m.get('subject', ''),
-                    'body_snippet': m.get('body_preview', m.get('body', '')),
-                    'body': m.get('body_preview', m.get('body', '')),
-                    'from': m.get('from_email', ''),
-                    'from_name': m.get('from_name', m.get('from_email', '').split('@')[0]),
-                    'date': m.get('date', ''),
-                    'direction': 'sent',
-                })
+            sender_history = _normalize_context_b(b_received + b_sent, correspondent, _my_email_v)
             # Trier par date décroissante, garder les 15 plus récents
             sender_history.sort(key=lambda x: x.get('date', ''), reverse=True)
             sender_history = sender_history[:15]
         except Exception as e:
             logger.warning(f"Erreur contexte B: {e}")
+
+        # Phase 2.5 : Fallback DB pour contexte B si Graph n'a rien retourné
+        # (ex: Graph search rate-limited, token expiré, ou correspondant nouveau mais
+        #  threads stockés en DB par l'onboarding / envois précédents)
+        if not sender_history:
+            try:
+                db_threads = _db.get_threads_for_correspondent(correspondent, limit=15)
+                if db_threads:
+                    _db_items = []
+                    for t in db_threads:
+                        _direction = t.get('direction', 'received')
+                        _db_items.append({
+                            'subject': t.get('subject', ''),
+                            'body': t.get('body', ''),
+                            'body_snippet': t.get('body', '')[:500],
+                            'from_email': correspondent if _direction == 'received' else _my_email_v,
+                            'from_name': '',
+                            'date': t.get('created_at', ''),
+                        })
+                    sender_history = _normalize_context_b(_db_items, correspondent, _my_email_v)
+                    logger.info(f"Contexte B : fallback DB ({len(sender_history)} threads)")
+            except Exception as e:
+                logger.debug(f"Fallback DB contexte B échoué : {e}")
 
         # Bloc A : conversation thread (même sujet, même correspondant)
         if subject:
@@ -3326,16 +3493,7 @@ def generate_reply():
                         f'subject:"{clean_subj}" from:{correspondent} OR to:{correspondent}',
                         max_results=12
                     )
-                    conversation_history = [
-                        {'subject': m.get('subject', ''),
-                         'body_snippet': m.get('body_preview', m.get('body', '')),
-                         'body': m.get('body_preview', m.get('body', '')),
-                         'from': m.get('from_email', ''),
-                         'from_name': m.get('from_name', m.get('from_email', '').split('@')[0]),
-                         'date': m.get('date', ''),
-                         'direction': 'received' if m.get('from_email', '').lower() == correspondent.lower() else 'sent'}
-                        for m in a_results
-                    ]
+                    conversation_history = _normalize_context_a(a_results, correspondent, _my_email_v)
                     # Trier chronologiquement (plus ancien en premier = fil de conversation)
                     conversation_history.sort(key=lambda x: x.get('date', ''))
             except Exception as e:
@@ -3344,20 +3502,10 @@ def generate_reply():
         # Contexte C : mails liés au sujet (Mode Standard, sauf importance R)
         if importance_int >= 2 and subject:
             try:
-                # Extraire les mots-clés du sujet
                 clean_subject = re.sub(r'^(Re|Fw|Fwd|Tr)\s*:\s*', '', subject, flags=re.IGNORECASE).strip()
                 if clean_subject and len(clean_subject) > 3:
                     c_results = graph.search_by_subject(clean_subject, max_results=10)
-                    keyword_context = [
-                        {'subject': m.get('subject', ''),
-                         'body_snippet': m.get('body_preview', m.get('body', '')),
-                         'body': m.get('body_preview', m.get('body', '')),
-                         'from': m.get('from_email', ''),
-                         'from_name': m.get('from_name', m.get('from_email', '').split('@')[0]),
-                         'date': m.get('date', ''),
-                         'direction': 'received' if m.get('from_email', '').lower() == correspondent.lower() else 'sent'}
-                        for m in c_results
-                    ]
+                    keyword_context = _normalize_context_c(c_results, 'subject_search')
             except Exception as e:
                 logger.warning(f"Erreur contexte C: {e}")
 
@@ -3398,6 +3546,11 @@ INSTRUCTIONS ECHEANCES :
                 print(f"[generate] Bloc F: {len(echeances_actives)} echeance(s) injectee(s) pour {_ech_correspondent}", flush=True)
         except Exception as _e:
             logger.warning(f"Erreur Bloc F echéances: {_e}")
+
+    # Phase 2.6 + 2.8 : dédup A/B/C + troncature 6 mois avant construction du prompt
+    conversation_history, sender_history, keyword_context = _dedup_and_truncate_contexts(
+        conversation_history, sender_history, keyword_context
+    )
 
     # Construire le prompt via ClaudeAssistant._build_prompt()
     if builder:
