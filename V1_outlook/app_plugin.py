@@ -2824,6 +2824,17 @@ def generate_reply():
     message_id = data.get('message_id', '')
     brief = data.get('brief', '')[:2000]
 
+    # DEBUG : tracer la longueur du body reçu pour diagnostic add-in
+    try:
+        _dbg_body = data.get('body', '') or ''
+        _dbg_len = len(_dbg_body)
+        with _addin_debug_lock:
+            with open(_addin_debug_log_path, 'a', encoding='utf-8') as _f:
+                _f.write(f"{datetime.now().isoformat(timespec='seconds')} | generate_reply_received | "
+                         f"{json.dumps({'body_len': _dbg_len, 'body_preview': _dbg_body[:100], 'from_email': data.get('from_email',''), 'subject': data.get('subject','')[:80], 'mode': data.get('mode','')}, ensure_ascii=False)}\n")
+    except Exception:
+        pass
+
     # Fix #16 : vérifier le cache préemptif AVANT le rate limiting
     # (un cache hit ne coûte rien → pas de raison de le bloquer au double-clic)
     if message_id and not brief:
