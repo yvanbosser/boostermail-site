@@ -555,6 +555,8 @@ body {
     margin-bottom: 8px;
     min-height: 120px;
     outline: none;
+    /* Préserver les sauts de ligne natifs du texte généré par Claude (streaming) */
+    white-space: pre-wrap;
 }
 .em-editor:empty::before {
     content: attr(data-placeholder);
