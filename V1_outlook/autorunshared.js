@@ -254,6 +254,127 @@ function _openDialogFromCompose(item, event) {
  * Construit l'URL du dialog et l'ouvre via displayDialogAsync.
  * Partagé entre _openDialogFromRead et _openDialogFromCompose.
  */
+/**
+ * Détecte la plateforme Outlook en cours.
+ * Retourne : 'classic' | 'newOutlook' | 'web' | 'mac' | 'mobile' | 'unknown'
+ *
+ * Stratégie d'ouverture du dialog par plateforme :
+ *  - classic    → displayDialogAsync + promptBeforeOpen:false (overlay natif, aucune popup)
+ *  - newOutlook → POST localhost:5051/open_dialog_native → PyQt native (zéro popup)
+ *  - web        → postMessage vers extension BoosterMail (zéro popup)
+ *  - mac/mobile → fallback displayDialogAsync (meilleur effort)
+ */
+function _detectOutlookPlatform() {
+    try {
+        var diag = Office.context.mailbox && Office.context.mailbox.diagnostics;
+        var host = diag ? (diag.hostName || '') : '';
+        if (host === 'newOutlookWindows') return 'newOutlook';
+        if (host === 'newOutlookMac') return 'newOutlook';
+        if (host === 'OutlookWebApp' || host === 'OutlookWeb') return 'web';
+        if (host === 'Outlook') {
+            // Classic Windows desktop
+            var plat = Office.context.platform;
+            if (plat === Office.PlatformType.Mac) return 'mac';
+            return 'classic';
+        }
+        if (host === 'OutlookIOS' || host === 'OutlookAndroid') return 'mobile';
+        // Fallback via Office.context.platform
+        if (Office.context.platform === Office.PlatformType.OfficeOnline) return 'web';
+        if (Office.context.platform === Office.PlatformType.PC) return 'classic';
+        return 'unknown';
+    } catch (e) {
+        return 'unknown';
+    }
+}
+
+/**
+ * Ouvre le dialog en routant vers la stratégie adaptée à la plateforme.
+ * Retourne true si la stratégie plateforme-spécifique a été utilisée (New/Web),
+ * false si on doit tomber sur displayDialogAsync (Classic/fallback).
+ */
+function _openDialogPlatformRouted(dialogUrl, data, getMailBody, fromName, fromEmail, event) {
+    var platform = _detectOutlookPlatform();
+
+    // --- New Outlook : Companion local + PyQt native ---
+    if (platform === 'newOutlook') {
+        var payload = {
+            mode: data.mode,
+            messageId: data.messageId,
+            subject: data.subject,
+            fromName: data.fromName,
+            fromEmail: data.from,
+            from: data.from,
+            to: data.to,
+            cc: data.cc,
+            hasAttachments: data.hasAttachments ? '1' : '0'
+        };
+        try {
+            fetch('http://localhost:5051/open_dialog_native', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(function(r) {
+                if (!r.ok) {
+                    console.error('BoosterMail: Companion a refusé le dialog (HTTP ' + r.status + ')');
+                }
+            }).catch(function(err) {
+                console.error('BoosterMail: Companion inaccessible — installez/démarrez BoosterMail Companion. ' + err);
+                // Fallback : ouvrir via displayDialogAsync (avec la popup)
+                _openViaDisplayDialog(null, dialogUrl, data, getMailBody, fromName, fromEmail, event);
+            });
+        } catch(e) {
+            console.error('BoosterMail: fetch Companion impossible', e);
+            _openViaDisplayDialog(dialogUrl, data, getMailBody, fromName, fromEmail, event);
+            return true;
+        }
+        // Libérer le runtime immédiatement (le Companion gère la fenêtre)
+        event.completed();
+        return true;
+    }
+
+    // --- Outlook Web : postMessage vers extension BoosterMail ---
+    if (platform === 'web') {
+        try {
+            // L'extension écoute sur window.parent (ou window.top) via content-script
+            var extensionPayload = {
+                type: 'boostermail-open-dialog',
+                version: 1,
+                dialogUrl: dialogUrl,
+                data: data
+            };
+            // postMessage sur parent ET top pour maximiser les chances (iframe imbriqué)
+            try { window.parent.postMessage(extensionPayload, '*'); } catch(e){}
+            try { if (window.top !== window.parent) window.top.postMessage(extensionPayload, '*'); } catch(e){}
+
+            // Handshake : attendre un ACK de l'extension (max 500ms)
+            var _ackReceived = false;
+            var _ackHandler = function(ev) {
+                if (ev.data && ev.data.type === 'boostermail-ack') {
+                    _ackReceived = true;
+                    window.removeEventListener('message', _ackHandler);
+                }
+            };
+            window.addEventListener('message', _ackHandler);
+            setTimeout(function() {
+                window.removeEventListener('message', _ackHandler);
+                if (!_ackReceived) {
+                    console.warn('BoosterMail: extension non détectée — fallback displayDialogAsync');
+                    _openViaDisplayDialog(null, dialogUrl, data, getMailBody, fromName, fromEmail, event);
+                } else {
+                    event.completed();
+                }
+            }, 500);
+        } catch (e) {
+            console.error('BoosterMail: postMessage extension échoué', e);
+            _openViaDisplayDialog(dialogUrl, data, getMailBody, fromName, fromEmail, event);
+        }
+        return true;
+    }
+
+    // --- Classic ou fallback : displayDialogAsync ---
+    return false;
+}
+
 function _buildAndOpenDialog(item, event, data, getMailBody, fromName, fromEmail, onDialogOpen) {
     var params = [
         'subject=' + encodeURIComponent(data.subject),
@@ -268,6 +389,16 @@ function _buildAndOpenDialog(item, event, data, getMailBody, fromName, fromEmail
     ];
     var dialogUrl = _backendUrl + '/plugin/dialog.html?' + params.join('&');
 
+    // Routing plateforme : New Outlook → Companion PyQt, Web → extension, Classic → dialog
+    if (_openDialogPlatformRouted(dialogUrl, data, getMailBody, fromName, fromEmail, event)) {
+        return;
+    }
+
+    // Classic / fallback : dialog Office.js natif
+    _openViaDisplayDialog(item, dialogUrl, data, getMailBody, fromName, fromEmail, event, onDialogOpen);
+}
+
+function _openViaDisplayDialog(item, dialogUrl, data, getMailBody, fromName, fromEmail, event, onDialogOpen) {
     Office.context.ui.displayDialogAsync(
         dialogUrl,
         { width: 80, height: 74, promptBeforeOpen: false },

@@ -1,0 +1,324 @@
+PLAN D'INTÉGRATION FONCTIONNALITÉS PROTO → V2
+===============================================
+Version : 1.0 — Audit consolidé du 17/04/2026
+Source   : app.py (5890 lignes, 52 routes, ~35 fonctions)
+Cible    : V1_outlook/app_plugin.py (V2, port 3443, Graph API)
+
+PRINCIPE : Tout le code existe dans app.py. Il s'agit de COPIER-ADAPTER,
+           pas de réécrire. Temps estimé : ~12h
+
+================================================================
+RÉSUMÉ EXÉCUTIF — CE QUE V2 N'A PAS ENCORE
+================================================================
+
+Absent de V2 (à porter) :
+  A) Auto-apprentissage style (diff proposé/envoyé → recalibrage adaptatif)
+  B) Score EasyMail 0-100 + métriques (route /api/knowledge_score)
+  C) Profils contacts auto-analyse (schedule [1,2,3,5,7,9...], toast, batch)
+  D) Classement 8 tiers complet (tiers 2/3/4/5 partiels ou absents)
+  E) Classement PJ Windows (arborescence, renommage, règle auto)
+  F) Échéances avancées (pre-scan, Bloc F, auto-annulation, relance adaptative)
+  G) Génération améliorée (5 variations style, Bloc F, garde post-génération)
+  H) Analyse PJ popup 2 temps (pré-extraction BG, extraction multi-format)
+  I) Métriques route exposée (/api/metrics)
+  J) MAJ Git auto (thread 2h, routes check/apply)
+
+Partiellement dans V2 (à compléter) :
+  - Classement mail : tiers 1/1bis/6 OK, tiers 2/3/4 à ajouter
+  - Échéances : base OK, pre-scan + Bloc F + auto-cancel absents
+  - Prefetch : contexte C présent, filtres intelligents à ajouter
+
+================================================================
+CHANTIER A : AUTO-APPRENTISSAGE & RECALIBRAGE (1h)
+================================================================
+
+Objectif : Que V2 apprenne du diff proposé/envoyé et se recalibre.
+
+ÉTAPE A1 — Diff learning dans send_reply (20min)
+  Source : app.py lignes ~3800-3850 (dans send_reply)
+  Copier :
+    - Comparaison _last_proposed[email_id] vs final_reply
+    - Appel ai.categorize_correction()
+    - Gestion cas spéciaux : passer_tutoiement, modifier_ouverture, modifier_cloture
+    - Stockage en DB + incrément _sends_since_recal
+  Adapter :
+    - Variables globales _last_proposed, _sends_since_recal déjà présentes en V2 ? À vérifier.
+
+ÉTAPE A2 — Recalibrage adaptatif (30min)
+  Source : app.py _recalibrate_style() (~150 lignes)
+  Copier :
+    - Classifications D2 (AMELIORATION/STYLE/DEGRADATION)
+    - Delta score ±3 par palier
+    - Hysteresis ±3 aux frontières de niveau
+    - Historique convergence (écart max 3 sur 5 derniers)
+  Adapter :
+    - Les appels DB sont identiques (même database.py)
+    - L'appel Claude utilise le même client
+
+ÉTAPE A3 — Priorités d'apprentissage (10min)
+  Source : app.py _get_learning_priorities() + _get_cached_learning_priorities()
+  Copier tel quel, injection dans generate_reply déjà câblée en V2
+
+DÉCLENCHEUR : Seuils 10/20/50 envois dans send_reply (déjà dans app.py)
+
+================================================================
+CHANTIER B : SCORING EASYMAIL 0-100 + MÉTRIQUES (45min)
+================================================================
+
+Objectif : Exposer le score gamification et les métriques d'usage.
+
+ÉTAPE B1 — Route /api/knowledge_score (20min)
+  Source : app.py api_knowledge_score() + db.get_knowledge_score_data()
+  5 axes : style (25pts), contacts (20pts), mails (15pts), corrections (20pts), direct_rate (20pts)
+  Milestones gamification par tranche de 10
+  Copier quasi tel quel
+
+ÉTAPE B2 — Route /api/metrics (10min)
+  Source : app.py api_metrics() → db.get_metrics_summary()
+  Route simple, copier tel quel
+
+ÉTAPE B3 — Route /api/scoring (15min)
+  Vérifier que db.save_metric() est bien appelé dans send_reply V2
+  Si absent, ajouter (1 ligne)
+
+================================================================
+CHANTIER C : PROFILS CONTACTS AUTO-ANALYSE (1h)
+================================================================
+
+Objectif : V2 analyse automatiquement les contacts à chaque envoi.
+
+ÉTAPE C1 — _maybe_analyze_contact() (20min)
+  Source : app.py ~100 lignes
+  Schedule d'analyse : [1,2,3,4,5,7,9,13,17,25,50,75,100,150,200] puis %50 après 200
+  Copier _maybe_analyze_contact() + _should_analyze_contact()
+  Appeler depuis send_reply après envoi
+
+ÉTAPE C2 — Garde tu/vous post-IA (10min)
+  Source : app.py _force_analyze_single_contact()
+  Compte marqueurs tu/vous dans le résultat IA, force correction si erreur
+  Copier la logique de validation post-analyse
+
+ÉTAPE C3 — Toast notification nouveau profil (15min)
+  Source : app.py _new_profile_toast + api_new_profile_toast()
+  Variable globale + lock + route GET /api/new_profile_toast
+  Copier tel quel
+
+ÉTAPE C4 — Recalibrage contacts batch (15min)
+  Source : app.py api_recalibrate_contacts() + api_recalibrate_contacts_status()
+  Thread BG, throttle 0.3s entre contacts
+  Copier quasi tel quel
+
+================================================================
+CHANTIER D : CLASSEMENT MAIL 8 TIERS COMPLET (1h)
+================================================================
+
+Objectif : V2 a tiers 1/1bis/6, il manque tiers 2/3/4 et le momentum global.
+
+ÉTAPE D1 — Tier 2 : folder name matching (20min)
+  Source : app.py dans api_suggest_folder()
+  Normalisation NFD sans accents, feuilles seulement, noms > 5 chars + espace
+  Liste noire _COMMON_FOLDER_NAMES (Inbox, Sent, etc.)
+  Copier la logique (~30 lignes)
+
+ÉTAPE D2 — Tier 3 : règle domaine (15min)
+  Source : app.py db.get_domain_rule_folder()
+  12 domaines publics exclus (gmail, outlook, hotmail, yahoo, orange, free, sfr...)
+  Copier la logique de filtrage
+
+ÉTAPE D3 — Tier 4 : cross-contact keywords (10min)
+  Source : app.py db.get_cross_contact_folder()
+  3+ contacts, mêmes mots-clés → même dossier
+  Copier l'appel DB
+
+ÉTAPE D4 — Momentum global (15min)
+  Source : app.py _classify_momentum (variable globale, BUG corrigé session 13/04)
+  Dict {folder_path, folder_id, ts}, TTL 30min
+  ATTENTION : doit être déclaré global dans classify_email + suggest_folder
+
+================================================================
+CHANTIER E : CLASSEMENT PJ WINDOWS (1.5h)
+================================================================
+
+Objectif : V2 permet de classer les PJ dans l'arborescence Windows.
+
+ÉTAPE E1 — Scan arborescence Windows (20min)
+  Source : app.py _scan_windows_folders() + _get_windows_folders_cached()
+  DFS, max_depth=5, skip .git/__pycache__/node_modules/etc.
+  Invalidation cache si pj_root_folder change dans settings
+  Copier tel quel
+
+ÉTAPE E2 — Routes PJ Windows (30min)
+  Source : app.py 6 routes
+    GET  /api/windows_folders
+    GET  /api/suggest_pj_folder/<email_id>
+    POST /api/classify_pj
+    GET  /api/pj_classification/post_send/<email_id>
+    GET  /api/smart_paperclip
+    GET  /api/open_windows_folder
+  Copier quasi tel quel, adapter les appels COM si nécessaire
+
+ÉTAPE E3 — Logique de suggestion PJ (40min)
+  Source : app.py api_suggest_pj_folder() : règle auto, Tier 1 bis keywords,
+           matching mots-clés sujet dans arborescence, IA fallback
+  Croisement mail→PJ (extrait entité chemin Outlook, matche dans Windows)
+  Copier la logique ~80 lignes
+
+================================================================
+CHANTIER F : ÉCHÉANCES AVANCÉES (1.5h)
+================================================================
+
+Objectif : Compléter les échéances V2 avec pre-scan, Bloc F et auto-annulation.
+
+ÉTAPE F1 — Pre-filtre heuristique (15min)
+  Source : app.py _has_echeance_pattern()
+  3 regex compilées (dates futures, mots d'engagement, références passées)
+  Évite appels Claude inutiles ($0 par pre-filtre)
+  Copier tel quel
+
+ÉTAPE F2 — Pre-scan (20min)
+  Source : app.py api_echeances_pre_scan()
+  Lancé pendant la relecture (pendant que l'utilisateur lit)
+  Cache TTL 120s, réutilisé au post-envoi
+  Copier + adapter route POST /api/echeances/pre_scan
+
+ÉTAPE F3 — Bloc F injection (20min)
+  Source : app.py dans generate_reply()
+  db.get_echeances_for_contact(contact_email) → formate avec statut (dépassée/aujourd'hui/dans N jours)
+  Injecte dans le brief avec instructions spécifiques
+  Copier la logique ~20 lignes
+
+ÉTAPE F4 — Auto-annulation sur réponse (15min)
+  Source : app.py _auto_cancel_echeances_on_reply()
+  Si le correspondant répond, termine ses échéances (overlap mots ≥3)
+  Appeler depuis la route d'ouverture d'email ou depuis send_reply
+  Copier tel quel
+
+ÉTAPE F5 — Routes manquantes (20min)
+  Vérifier présence en V2 : /api/echeances/<id>/relance, /api/echeances/purge_archives,
+  /api/echeances/search_relance_mail, /api/echeances/check_sender
+  Ajouter les absentes (~5 lignes chacune)
+
+================================================================
+CHANTIER G : GÉNÉRATION AMÉLIORÉE (45min)
+================================================================
+
+Objectif : Enrichir la génération V2 avec variations et gardes.
+
+ÉTAPE G1 — 5 variations de style (15min)
+  Source : app.py _variation_styles[] + logique dans generate_reply
+  Variations 1-5 : ouverture différente / angle / plus direct / ton différent / réécriture
+  Copier le dict + la logique de sélection (~15 lignes)
+
+ÉTAPE G2 — Gardes post-génération (20min)
+  Source : app.py dans generate_sse() interne à generate_reply
+  Gardes : register, greeting présent, closing présent, markers IA absents, longueur minimum
+  Copier les 5 gardes de validation (~30 lignes)
+
+ÉTAPE G3 — Nettoyage markdown (10min)
+  Source : app.py dans generate_sse()
+  Suppression des balises markdown (**bold**, # titre, etc.) du corps de mail
+  Copier ou vérifier si déjà présent en V2
+
+================================================================
+CHANTIER H : ANALYSE PJ POPUP 2 TEMPS (2h)
+================================================================
+
+Objectif : V2 peut extraire et analyser les PJ avant génération.
+
+ÉTAPE H1 — Pré-extraction BG (45min)
+  Source : app.py _start_pj_pre_extract()
+  Attend bodies+C avant d'occuper la queue COM
+  Max 3 PDF, PyPDF2 + OCR Claude fallback si < 50 chars
+  Adapter : en V2, les fichiers viennent de Graph (pas COM) → adapter la source
+
+ÉTAPE H2 — Routes extraction (45min)
+  Source : app.py 5 routes
+    POST /api/save_original_attachments/<email_id>
+    POST /api/upload_attachment
+    POST /api/extract_file_text
+    POST /api/extract_attachments/<entry_id>
+    GET  /api/download_attachment/<entry_id>/<att_index>
+  Copier quasi tel quel, adapter les sources (Graph vs COM)
+
+ÉTAPE H3 — Injection dans generate_reply (30min)
+  Source : app.py dans generate_reply
+  Récupère textes PJ sélectionnées, inject avec 5 instructions d'analyse
+  Copier la logique ~25 lignes
+
+================================================================
+CHANTIER I : MAJ GIT AUTO (30min)
+================================================================
+
+Objectif : V2 vérifie automatiquement les nouvelles versions.
+
+ÉTAPE I1 — Thread BG git check (15min)
+  Source : app.py _check_git_updates()
+  Thread daemon toutes les 2h : git fetch, compare HEAD vs origin
+  Copier tel quel
+
+ÉTAPE I2 — Routes MAJ (15min)
+  Source : app.py 2 routes
+    GET  /api/check_update
+    POST /api/apply_update
+  Copier tel quel
+
+================================================================
+RÉCAPITULATIF DES CHANTIERS
+================================================================
+
+Chantier  Description                           Durée   Priorité
+---------  ------------------------------------  ------  --------
+A          Auto-apprentissage & recalibrage       1h00    P1 (haute)
+B          Scoring EasyMail + métriques           0h45    P1 (haute)
+C          Profils contacts auto-analyse          1h00    P1 (haute)
+D          Classement mail 8 tiers complet        1h00    P1 (haute)
+E          Classement PJ Windows                  1h30    P2 (normale)
+F          Échéances avancées                     1h30    P1 (haute)
+G          Génération améliorée                   0h45    P2 (normale)
+H          Analyse PJ popup 2 temps               2h00    P2 (normale)
+I          MAJ Git auto                           0h30    P3 (faible)
+---------  ------------------------------------  ------  --------
+TOTAL                                            10h00
+
+================================================================
+ORDRE D'IMPLÉMENTATION RECOMMANDÉ
+================================================================
+
+JOUR 1 (P1 — ~4h) :
+  1. Chantier A : Auto-apprentissage & recalibrage
+  2. Chantier B : Scoring + métriques
+  3. Chantier C : Profils contacts
+
+JOUR 2 (P1+P2 — ~4h) :
+  4. Chantier D : Classement mail 8 tiers
+  5. Chantier F : Échéances avancées
+  6. Chantier G : Génération améliorée
+
+JOUR 3 (P2+P3 — ~2.5h) :
+  7. Chantier H : Analyse PJ
+  8. Chantier E : Classement PJ Windows
+  9. Chantier I : MAJ Git
+
+================================================================
+RÈGLES DE PORTAGE
+================================================================
+
+1. NE PAS modifier app.py (proto = lecture seule, beta-testeurs en production)
+2. Toute logique COM dans app.py → vérifier si Graph fait mieux en V2
+3. Les appels database.py sont identiques (même fichier partagé)
+4. Les appels ai/claude_ai sont identiques (même module)
+5. Les variables globales doivent être déclarées au niveau module dans app_plugin.py
+6. Utiliser com_run() pour tout appel COM résiduel en V2
+
+================================================================
+FICHIERS SOURCES DE RÉFÉRENCE
+================================================================
+
+app.py                            → Proto complet (NE PAS MODIFIER)
+V1_outlook/app_plugin.py          → V2 à enrichir
+database.py                       → DB partagée (même fichier)
+claude_ai.py / core/              → IA partagée
+companion/companion.py            → Companion port 5051
+templates_mail.py                 → Templates mail (partagé)
+
+================================================================

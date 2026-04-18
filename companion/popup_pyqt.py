@@ -83,13 +83,26 @@ class LocalhostPage(QWebEnginePage):
 
 class EasyMailPopup(QMainWindow):
 
-    def __init__(self):
+    def __init__(self, direct_dialog_params=None):
+        """
+        direct_dialog_params : dict optionnel { mode, messageId, subject, fromName, fromEmail, to, cc }
+            Si fourni → mode "direct dialog" (New Outlook) : skip overlay+warmup, ouvre directement le dialog
+            Si None → mode normal (Classic) : overlay + warmup + dialog sur clic
+        """
         super().__init__()
         self.setWindowTitle('BoosterMail')
-        self.setWindowFlags(
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
-        )
+
+        self._direct_mode = direct_dialog_params is not None
+
+        # Mode direct : fenêtre centrale sans StaysOnTop (fenêtre normale redimensionnable)
+        # Mode overlay : petite fenêtre haut-droite toujours au-dessus
+        if self._direct_mode:
+            self.setWindowFlags(Qt.WindowType.Window)
+        else:
+            self.setWindowFlags(
+                Qt.WindowType.WindowStaysOnTopHint |
+                Qt.WindowType.Tool
+            )
 
         self._screen = QApplication.primaryScreen().availableGeometry()
         self._overlay_w = min(max(int(self._screen.width() * 0.22), 280), 380)
@@ -103,6 +116,38 @@ class EasyMailPopup(QMainWindow):
 
         self._stack = QStackedWidget()
         layout.addWidget(self._stack)
+
+        if self._direct_mode:
+            # --- MODE DIRECT (New Outlook) : juste le dialog, plein écran ---
+            self._dialog_view = QWebEngineView()
+            self._dialog_page = LocalhostPage(QWebEngineProfile.defaultProfile(), self._dialog_view)
+            self._dialog_view.setPage(self._dialog_page)
+            self._dialog_page.easymail_action = self._on_easymail_action
+            self._stack.addWidget(self._dialog_view)
+
+            # Construire l'URL du dialog avec les params
+            from urllib.parse import urlencode
+            query = {'standalone': '1', **{k: v for k, v in direct_dialog_params.items() if v}}
+            dialog_url = f'{BACKEND_URL}/plugin/dialog.html?' + urlencode(query)
+            self._dialog_view.load(QUrl(dialog_url))
+            self._stack.setCurrentIndex(0)
+
+            # Fenêtre centrée, 80% écran (comme le dialog Office.js)
+            w = min(1200, int(self._screen.width() * 0.80))
+            h = min(800, int(self._screen.height() * 0.80))
+            self.resize(w, h)
+            self.move((self._screen.width() - w) // 2, (self._screen.height() - h) // 2)
+
+            # Timer detection fermeture Outlook (même comportement qu'en overlay)
+            self._outlook_check_timer = QTimer()
+            self._outlook_check_timer.timeout.connect(self._check_outlook_alive)
+            self._outlook_fail_count = 0
+            self._outlook_check_timer.start(5000)
+
+            logger.info(f"PyQt direct dialog — mode={direct_dialog_params.get('mode', 'reply')}")
+            return
+
+        # --- MODE OVERLAY (Classic/fallback) : 3 vues stackées ---
 
         # --- Vue 0 : Ecran chargement (barre de progression) ---
         self._loading = self._build_loading_screen()
@@ -379,13 +424,17 @@ class EasyMailPopup(QMainWindow):
 
     def closeEvent(self, event):
         # P9 : stopper TOUS les timers pour eviter segfault
-        self._outlook_check_timer.stop()
+        if hasattr(self, '_outlook_check_timer'):
+            self._outlook_check_timer.stop()
         if hasattr(self, '_warmup_timer'):
             self._warmup_timer.stop()
         # P2 : signaler au thread worker de s'arreter
         if hasattr(self, '_wp'):
             self._wp['done'] = True
         event.accept()
+        # Mode direct : quitter l'application quand la fenêtre se ferme
+        if getattr(self, '_direct_mode', False):
+            QApplication.quit()
 
 
 # =============================================================================
@@ -441,14 +490,56 @@ def _is_outlook_running():
 # =============================================================================
 
 def main():
+    """
+    Usage :
+      python popup_pyqt.py                          → mode overlay (Classic, démarrage)
+      python popup_pyqt.py --direct-dialog --mode=reply --messageId=xxx --subject="..." ...
+                                                    → mode direct dialog (New Outlook, clic bouton)
+    """
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--direct-dialog', action='store_true',
+                        help='Ouvre directement le dialog (skip overlay+warmup)')
+    parser.add_argument('--mode', default='reply',
+                        help='Mode du dialog : reply/reply_all/forward/new')
+    parser.add_argument('--messageId', default='')
+    parser.add_argument('--subject', default='')
+    parser.add_argument('--fromName', default='')
+    parser.add_argument('--fromEmail', default='')
+    parser.add_argument('--from', dest='from_addr', default='')
+    parser.add_argument('--to', default='')
+    parser.add_argument('--cc', default='')
+    parser.add_argument('--hasAttachments', default='0')
+    args = parser.parse_args()
+
     app = QApplication(sys.argv)
     app.setApplicationName('BoosterMail')
     app.setOrganizationName('BoosterMail')
     app.setStyle('Fusion')
 
-    popup = EasyMailPopup()
-    popup.show()
-    logger.info(f"Overlay PyQt visible — backend: {BACKEND_URL}")
+    if args.direct_dialog:
+        # Mode New Outlook : dialog direct, pas d'overlay
+        direct_params = {
+            'mode': args.mode,
+            'messageId': args.messageId,
+            'subject': args.subject,
+            'fromName': args.fromName,
+            'fromEmail': args.fromEmail or args.from_addr,
+            'from': args.from_addr or args.fromEmail,
+            'to': args.to,
+            'cc': args.cc,
+            'hasAttachments': args.hasAttachments,
+        }
+        popup = EasyMailPopup(direct_dialog_params=direct_params)
+        popup.show()
+        popup.raise_()
+        popup.activateWindow()
+        logger.info(f"PyQt direct dialog visible — mode={args.mode}")
+    else:
+        # Mode overlay classique
+        popup = EasyMailPopup()
+        popup.show()
+        logger.info(f"Overlay PyQt visible — backend: {BACKEND_URL}")
 
     sys.exit(app.exec())
 

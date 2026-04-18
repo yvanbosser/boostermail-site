@@ -900,6 +900,69 @@ def api_get_table():
 
 
 # =============================================================================
+# DIALOG NATIVE — lance popup_pyqt.py en mode direct pour New Outlook
+# =============================================================================
+
+import subprocess
+import threading as _th
+_dialog_process_lock = _th.Lock()
+_current_dialog_process = None   # Singleton : une seule fenêtre dialog à la fois
+
+@app.route('/open_dialog_native', methods=['POST'])
+def open_dialog_native():
+    """
+    Ouvre une fenêtre PyQt native affichant le dialog BoosterMail.
+    Appelé par l'add-in Outlook sur New Outlook Windows (où displayDialogAsync
+    déclenche une popup de confirmation non désirable).
+
+    Body JSON attendu : { mode, messageId, subject, fromName, fromEmail, to, cc, hasAttachments }
+    """
+    global _current_dialog_process
+    try:
+        data = request.get_json(force=True) or {}
+        # Valider le mode
+        mode = data.get('mode', 'reply')
+        if mode not in ('reply', 'reply_all', 'forward', 'new'):
+            mode = 'reply'
+
+        # Localiser popup_pyqt.py (même dossier que ce fichier)
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'popup_pyqt.py')
+        if not os.path.exists(script_path):
+            return jsonify({"status": "error", "reason": "popup_pyqt.py introuvable"}), 500
+
+        # Construire la commande
+        args = [sys.executable, script_path, '--direct-dialog', '--mode', mode]
+        for key in ('messageId', 'subject', 'fromName', 'fromEmail', 'to', 'cc', 'hasAttachments'):
+            val = data.get(key, '')
+            if val:
+                args.extend([f'--{key}', str(val)])
+
+        # Fermer la précédente fenêtre dialog si encore active (évite empilement)
+        with _dialog_process_lock:
+            if _current_dialog_process and _current_dialog_process.poll() is None:
+                try:
+                    _current_dialog_process.terminate()
+                except Exception:
+                    pass
+            # Lancer le nouveau processus PyQt en arrière-plan (détaché)
+            # CREATE_NO_WINDOW=0x08000000 pour ne pas afficher de console Windows
+            creation_flags = 0x08000000 if sys.platform == 'win32' else 0
+            _current_dialog_process = subprocess.Popen(
+                args,
+                creationflags=creation_flags,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+        logger.info(f"Dialog PyQt lancé : mode={mode} subject={data.get('subject', '')[:50]}")
+        return jsonify({"status": "ok", "pid": _current_dialog_process.pid})
+
+    except Exception as e:
+        logger.error(f"open_dialog_native error: {e}")
+        return jsonify({"status": "error", "reason": str(e)}), 500
+
+
+# =============================================================================
 # DÉMARRAGE
 # =============================================================================
 
