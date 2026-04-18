@@ -44,3 +44,21 @@ PLAN_DE_TESTS*.md
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Runtime du 18/04 — fichiers vivants, ne pas committer
+.boostermail.launch
+.boostermail.pid
+addin_debug.log
+boostermail.log
+pyqt_dialog.log
+prefetch_cache_v2.json
+boostermail.db-shm
+boostermail.db-wal
+
+# Autres worktrees Claude (embedded git repos)
+.claude/worktrees/distracted-visvesvaraya-*
+.claude/worktrees/nifty-neumann-*
+.claude/worktrees/compassionate-easley
+.claude/worktrees/elegant-saha
+.claude/worktrees/dreamy-ishizaka
+.claude/worktrees/vibrant-poincare
