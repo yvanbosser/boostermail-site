@@ -517,6 +517,19 @@ def main():
     app.setOrganizationName('BoosterMail')
     app.setStyle('Fusion')
 
+    # Purger le cache WebEngine PyQt à chaque lancement pour garantir
+    # que le dernier dialog.html/js/css est chargé (évite les décalages après
+    # modification du code plugin). Backend V2 sert déjà Cache-Control: no-cache
+    # mais le profil par défaut persiste quand même certains assets entre sessions.
+    _profile = QWebEngineProfile.defaultProfile()
+    try:
+        _profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.NoCache)
+        _profile.clearHttpCache()
+        _profile.clearAllVisitedLinks()
+        logger.info("WebEngine cache purge (NoCache + clearHttpCache)")
+    except Exception as _e:
+        logger.debug(f"WebEngine cache purge failed: {_e}")
+
     if args.direct_dialog:
         # Mode New Outlook : dialog direct, pas d'overlay
         direct_params = {
