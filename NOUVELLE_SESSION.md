@@ -77,7 +77,7 @@ Voir `docs/SOMMAIRE_DETAILLE.md` pour la liste des décisions qui ont bougé ré
 | Chatbot d'installation | `docs/installation/SPEC_CHATBOT_INSTALLATION.md` |
 | Guide d'installation (admin/user) | `docs/installation/GUIDE_INSTALLATION_PLUGIN.md` |
 
-**Note** : Pour une vue d'ensemble rapide, combiner `docs/plans/PLAN_ACTION_GLOBAL.md` + `docs/v1_outlook_specs/PLAN_ACTION_PHASE_2.md` + `docs/v1_outlook_specs/PLAN_ACTION_PHASE_3.md`.
+**Note** : Pour une vue d'ensemble rapide, combiner `docs/plans/PLAN_ACTION_GLOBAL.md` + `docs/v1_outlook_specs/PLAN_ACTION_PHASE_3.md`. (⚠️ `PLAN_ACTION_PHASE_2.md` est marqué HISTORIQUE FIGÉ — bilan terminé 07/04.)
 
 ---
 
@@ -85,14 +85,16 @@ Voir `docs/SOMMAIRE_DETAILLE.md` pour la liste des décisions qui ont bougé ré
 
 | Sujet | Fichier |
 |---|---|
-| Graph API (routes, $batch, tokens) | `docs/v1_outlook_specs/SPEC_PHASE2_GRAPH.md` |
+| Graph API (routes, $batch, tokens) | `docs/v1_outlook_specs/SPEC_PHASE2_GRAPH.md` ⚠️ (partiellement périmé) |
 | AI Provider (Claude/OpenAI, streaming) | `docs/v1_outlook_specs/SPEC_PHASE2_AI_PROVIDER.md` |
-| Dialog split-screen (Office.js vs standalone) | `docs/v1_outlook_specs/SPEC_PHASE2_DIALOG.md` |
+| Dialog split-screen (Office.js vs standalone) | `docs/v1_outlook_specs/SPEC_PHASE2_DIALOG.md` ⚠️ (périmé) |
 | Companion COM (Windows) | `docs/v1_outlook_specs/SPEC_PHASE2_COMPANION.md` |
 | Auth OAuth2 Microsoft | `docs/v1_outlook_specs/SPEC_PHASE2_AUTH.md` |
-| Résumé Phase 2 complète | `docs/specs_proto/SPEC_PHASE2_RESUME.md` |
+| Résumé Phase 2 complète | `docs/specs_proto/SPEC_PHASE2_RESUME.md` ⚠️ (HISTORIQUE FIGÉ 07/04) |
 | Scoring rédactionnel (N1-N10) | `docs/algorithme/SPEC_SCORING_REDACTIONNEL.md` |
 | Base de données (tables) | `docs/specs_proto/SPEC_TABLES_DB.md` |
+
+**⚠️ Docs marqués PÉRIMÉS** (bandeau en en-tête) : les consulter prudemment — voir `docs/SOMMAIRE_DETAILLE.md` section « Docs explicitement marqués PÉRIMÉS » pour la liste complète.
 
 ---
 
@@ -100,14 +102,14 @@ Voir `docs/SOMMAIRE_DETAILLE.md` pour la liste des décisions qui ont bougé ré
 
 | Ce qu'on touche | Fichier(s) à lire |
 |---|---|
-| Backend V1 | `V1_outlook/app_plugin.py` |
-| Dialog (UI + logique) | `V1_outlook/dialog.html` + `dialog.js` + `dialog.css` |
-| Overlay/Popup | `V1_outlook/popup.html` + `popup.js` |
+| Backend V2 | `V2/app_plugin.py` |
+| Dialog (UI + logique) | `V2/dialog.html` + `dialog.js` + `dialog.css` |
+| Overlay/Popup | `V2/popup.html` + `popup.js` |
 | Popup PyQt (desktop) | `companion/popup_pyqt.py` |
 | Companion | `companion/companion.py` |
-| Shared runtime (events) | `V1_outlook/autorunshared.js` |
+| Shared runtime (events) | `V2/autorunshared.js` |
 | Extension Chrome | `extension/content.js` |
-| Manifest Outlook | `V1_outlook/manifest.xml` |
+| Manifest Outlook | `V2/manifest.xml` |
 | Moteur IA proto | `claude_ai.py` (LECTURE SEULE) |
 | Proto complet | `app.py` (LECTURE SEULE) |
 | Template de référence | `templates/email_detail.html` (LECTURE SEULE) |
@@ -163,7 +165,7 @@ Le plus grand risque pour BoosterMail n'est PAS technique — c'est l'abandon à
 - La fenêtre Microsoft SSO pré-remplit l'email et propose le compte déjà connecté
 - Dans 90% des cas : 0 mot de passe à taper (Windows SSO)
 - Un chatbot d'installation guide étape par étape les 10% restants
-- Parcours complet documenté dans `docs/SPEC_ONBOARDING_COMPLET.md`
+- Parcours complet documenté dans `docs/installation/SPEC_ONBOARDING_COMPLET.md`
 
 ### 3. La popup de lancement = outil marketing
 
@@ -181,15 +183,17 @@ Pas de bouton Annuler. Réapparaît tant que l'activation n'est pas faite.
 
 Chaque étape enrichit la précédente sans rien casser.
 
-### 5. Nouvelle approche V1 (decision 13/04/2026)
+### 5. Approche V2 finale (décisions 13-18/04/2026)
 
-**Idee cle** : Outlook = declencheur + expediteur. Le proto = moteur.
-Le bouton dans Outlook ouvre le dialog, mais le dialog appelle le proto (localhost:5050) au lieu d'un backend V1 separe. Tout le moteur IA (109 processus, caches, speculation) est deja pret.
+**Évolution de l'approche** :
+- **13/04** : « Outlook = déclencheur, proto = moteur » (V2 appelle le proto en localhost)
+- **18/04** : V2 devient **autonome** — libs et DB copiées localement dans `V2/`, plus de dépendance au proto
 
-| Chantier | Etat | Priorite |
+| Chantier | État | Priorité |
 |---|---|---|
-| **Connecter dialog V1 au proto** | A faire (~10h) | **#1** |
-| **Lancement instantane** (popup au demarrage) | Non resolu | #2 |
+| **Moteur IA V2** | ✅ Branché et autonome (18/04) | Fait |
+| **Templates + caches + smart spec** (Plan 2, 9h15) | À faire | **#1** |
+| **Lancement instantané popup** | Non résolu | #2 |
 | **Overlay auto + detection auto** | Attente admin deploy | #3 |
 
 ### 6. Projet deplace hors OneDrive (decision 12/04/2026)
@@ -250,7 +254,7 @@ Vérifier l'étanchéité à chaque fin de session (git diff).
 ### Règle 7 — SOCLE COMMUN GMAIL
 
 Le code dans core/ doit rester provider-agnostic.
-V1_outlook/ = spécifique Outlook. V1_gmail/ = spécifique Gmail (futur).
+V2/ = spécifique Outlook. V2_gmail/ = spécifique Gmail (futur).
 
 ### Règle 8 — AUDIT SYSTÉMATIQUE
 
@@ -262,6 +266,12 @@ Après toute session de code significative :
 
 ## ÉTAT DU CODE APRÈS L'AUDIT DU 10/04/2026
 
+> ⚠️ **Section historique** — depuis l'audit du 10/04, plusieurs évolutions majeures :
+> - VF.1 à VF.8 (12-13/04) — voir `docs/sessions/RAPPORT_AUDIT_SESSION_20260413.md`
+> - Renommage V1_outlook → V2 + autonomie V2 (14-18/04) — voir `docs/sessions/BILAN_SESSION_20260418.md`
+>
+> Les chemins `V1_outlook/` ci-dessous sont tous **devenus `V2/`**.
+
 ### Audit complet réalisé (2 passes, 8 audits parallèles)
 
 - **103 points analysés** sur tout le codebase
@@ -272,24 +282,26 @@ Après toute session de code significative :
 - DB `boostermail.db` neuve et saine (emails.db = corrompue par OneDrive)
 
 ### Fichiers modifiés lors de l'audit
-- `V1_outlook/app_plugin.py` — _db.init(), locks, CORS, secret key, debug conditionnel, proxy whitelist
-- `V1_outlook/manifest.xml` — FunctionFile V1.1 → autorunHtmlUrl
-- `V1_outlook/autorunshared.js` — body.getAsync dans callback
-- `V1_outlook/dialog.js` — _escapeAttr, URLs _backendUrl, sanitization renforcée
-- `V1_outlook/outlook_graph.py` — gestion 403 Forbidden
+- `V2/app_plugin.py` — _db.init(), locks, CORS, secret key, debug conditionnel, proxy whitelist
+- `V2/manifest.xml` — FunctionFile V1.1 → autorunHtmlUrl
+- `V2/autorunshared.js` — body.getAsync dans callback
+- `V2/dialog.js` — _escapeAttr, URLs _backendUrl, sanitization renforcée
+- `V2/outlook_graph.py` — gestion 403 Forbidden
 - `core/claude_provider.py` — format prompt sync harmonisé + last_error
 - `database.py` — busy_timeout + SQL borné (rétrocompatible)
 - `companion/companion.py` — DASL injection sanitisée
 - `companion/popup_pyqt.py` — réécriture complète (loading screen, warmup non-bloquant, pas de QSettings)
 
-### Problèmes NON résolus
+### Problèmes NON résolus (au 18/04/2026)
 
 | Problème | Statut | Impact |
 |---|---|---|
-| **Lancement instantané popup** | Non résolu (VBS/registre/PyInstaller ont échoué) | UX au démarrage |
+| **22 manques V2 vs proto** | Identifiés (`docs/analyses_proto_v2/V2_vs_PROTO_GAPS.md`) — Plan 2 en attente | **Priorité #1** |
+| **Lancement instantané popup** | Non résolu (VBS/registre/PyInstaller ont échoué) — sera partiellement résolu par Phase 4 Plan 2 (PyQt chaud) | UX au démarrage |
 | **Overlay non alimentée** | Code prêt mais pas connecté bout en bout | UX overlay |
-| **Moteur IA pas branché** | Routes squelettes dans app_plugin.py | **Bloquant — priorité #1** |
 | **Admin deploy** | Mail envoyé à Compta Santé, en attente | LaunchEvent, overlay auto |
+
+> ✅ **Moteur IA V2 branché** (18/04) — V2 a ses propres libs (`V2/claude_ai.py`, `V2/database.py`, etc.) et sa propre DB.
 
 ---
 
@@ -297,8 +309,8 @@ Après toute session de code significative :
 
 ### Comment tester BoosterMail aujourd'hui
 
-1. Lancer le backend : `C:\Users\yvanb\OneDrive\Desktop\EasyMail\V1_outlook\start_v1.bat`
-2. Lancer la popup PyQt (optionnel) : `py -3 C:\Users\yvanb\OneDrive\Desktop\EasyMail\companion\popup_pyqt.py`
+1. Lancer le backend : `C:\EasyMail\V2\start_v2.bat`
+2. Lancer la popup PyQt (optionnel) : `py -3 C:\EasyMail\companion\popup_pyqt.py`
 3. Ouvrir Outlook (New Outlook)
 4. Cliquer le bouton BoosterMail dans la barre d'actions du mail
 5. Le dialog s'ouvre
@@ -313,7 +325,7 @@ Le sideload est en place. Le Mode Complet (Graph API) est activé. Pas besoin de
 | Registre HKCU\Run | Vidé (pas de lancement auto) |
 | launcher.ps1 | Existe mais non référencé (orphelin) |
 | BoosterMail.exe (PyInstaller) | Existe dans AppData/Local mais non utilisé |
-| start_v1.bat | Lance backend + companion uniquement |
+| start_v2.bat | Lance backend + companion uniquement |
 
 Le lancement de la popup PyQt est MANUEL pour le moment (`py -3 popup_pyqt.py`).
 
@@ -321,4 +333,4 @@ Le lancement de la popup PyQt est MANUEL pour le moment (`py -3 popup_pyqt.py`).
 
 ## Mémoire persistante
 
-Le dossier `C:\Users\yvanb\.claude\projects\C--Users-yvanb-OneDrive-Desktop\memory\` contient la mémoire inter-sessions (profil utilisateur, feedbacks, préférences). MEMORY.md est chargé automatiquement par Claude Code.
+Le dossier `C:\Users\yvanb\.claude\projects\C--EasyMail\memory\` contient la mémoire inter-sessions (profil utilisateur, feedbacks, préférences). MEMORY.md est chargé automatiquement par Claude Code.
