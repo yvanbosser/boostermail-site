@@ -534,6 +534,37 @@ def main():
         popup.show()
         popup.raise_()
         popup.activateWindow()
+
+        # Forcer la fenêtre au PREMIER PLAN (devant Outlook).
+        # Sur Windows, popup.raise_() ne suffit pas car un autre process (Outlook)
+        # a le focus → trick : activer brièvement WindowStaysOnTopHint puis le retirer.
+        def _bring_to_front():
+            try:
+                popup.setWindowFlags(popup.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+                popup.show()
+                popup.raise_()
+                popup.activateWindow()
+                # Retirer le flag 200ms plus tard pour que la fenêtre soit focusable
+                # normalement et passe derrière si l'utilisateur clique ailleurs
+                def _clear_topmost():
+                    popup.setWindowFlags(popup.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
+                    popup.show()
+                QTimer.singleShot(200, _clear_topmost)
+
+                # Windows : force SetForegroundWindow via Win32 API (ultime recours)
+                if sys.platform == 'win32':
+                    try:
+                        import ctypes
+                        hwnd = int(popup.winId())
+                        # ASFW_ANY : autorise tout process à prendre le foreground
+                        ctypes.windll.user32.AllowSetForegroundWindow(-1)
+                        ctypes.windll.user32.SetForegroundWindow(hwnd)
+                    except Exception as _e:
+                        logger.debug(f"SetForegroundWindow failed: {_e}")
+            except Exception as e:
+                logger.error(f"_bring_to_front: {e}")
+
+        QTimer.singleShot(50, _bring_to_front)
         logger.info(f"PyQt direct dialog visible — mode={args.mode}")
     else:
         # Mode overlay classique
