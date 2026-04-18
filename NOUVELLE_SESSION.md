@@ -4,6 +4,24 @@
 
 ---
 
+## 🎯 PROCHAINE SESSION — objectif immédiat
+
+**Enchaîner Plan 3 puis Plan 2 (dans cet ordre)** :
+
+1. **Plan 3** — `docs/plans/PLAN_3_INVENTAIRE_CACHES_ET_PORTAGE.md` (référence technique)
+   - Objectif : valider avec l'utilisateur l'inventaire des caches V2 vs proto
+   - Confirmer les 6 filtres Smart Speculative à porter
+   - Confirmer les 5 caches manquants à porter
+2. **Plan 2** — `docs/plans/PLAN_2_OPTIMISATION_FLUX.md` (plan d'exécution, 9h15)
+   - Phase 0 : Popup moderne PyQt
+   - Phase 1 ⭐ : Templates 45 fixes + appris (pipeline $0/50ms)
+   - Phase 2 : Caches (purge événementielle + 6 filtres + 5 manquants)
+   - Phase 3-6 : Warmup / PyQt chaud / Dialog direct / BG speculation
+
+**Bilan de la dernière session (18/04)** : `docs/sessions/BILAN_SESSION_20260418.md` (Plan 1 exécuté, doc consolidée dans `docs/`, règles M1-M4 en place)
+
+---
+
 ## Principe
 
 Ce document liste les fichiers à lire **dans l'ordre** pour démarrer une session avec le maximum de contexte et le minimum de tokens. Ne pas tout lire d'un coup — suivre la hiérarchie.
@@ -16,14 +34,31 @@ Ces fichiers donnent 80% du contexte en 20% des tokens.
 
 | # | Fichier | Lignes | Pourquoi |
 |---|---------|--------|----------|
-| 1 | `CLAUDE.md` | 166 | Règles du projet, architecture, contraintes, étanchéité proto/V1 |
-| 2 | `STRUCTURE_PROJET.md` | 235 | Carte complète du projet — où trouver quoi |
-| 3 | `V1_outlook/TODO_SESSION_SUIVANTE.md` | — | Ce qui reste à faire, bugs ouverts, état des flux, priorités ordonnées |
-| 4 | `V1_outlook/PLAN_FINALISATION_OUTLOOK.md` | 209 | Avancement par plateforme, tableau de bord, ordre d'exécution |
-| 5 | `docs/RAPPORT_AUDIT_SESSION_20260413.md` | — | Bilan session 12-13/04 (VF.1-VF.8, audit complet, bugs corriges) |
-| 6 | `docs/COMPARATIF_PROTO_V1.md` | — | Plan de branchement V1 en 15 etapes + ecarts proto vs V1 |
+| 1 | `CLAUDE.md` | ~300 | Règles du projet, architecture, contraintes, étanchéité proto/V2, règles de maintenance M1-M4 |
+| 2 | **`docs/SOMMAIRE_DETAILLE.md`** | — | **Index MAÎTRE de toute la doc** — à consulter EN PREMIER pour savoir où aller selon le sujet |
+| 3 | **`docs/sessions/BILAN_SESSION_20260418.md`** | — | **Bilan dernière session** — ce qui a été fait, décisions prises, objectif suivant |
+| 4 | **`docs/plans/PLAN_3_INVENTAIRE_CACHES_ET_PORTAGE.md`** | — | **Plan à exécuter en premier** — inventaire caches V2 vs proto |
+| 5 | **`docs/plans/PLAN_2_OPTIMISATION_FLUX.md`** | — | **Plan à exécuter en second** — templates + caches + smart spec (9h15) |
+| 6 | `docs/v1_outlook_specs/TODO_SESSION_SUIVANTE.md` | — | État courant des flux, priorités ordonnées |
+| 7 | `docs/sessions/RAPPORT_AUDIT_SESSION_20260413.md` | — | Bilan session 12-13/04 (VF.1-VF.8, audit complet) |
 
 **Total : ~1000 lignes — suffisant pour 90% des sessions.**
+
+**⚠️ IMPORTANT** : Toute la documentation a été consolidée dans `docs/` (18/04/2026). Le fichier `docs/SOMMAIRE_DETAILLE.md` est le point d'entrée OBLIGATOIRE — il recense et classe tous les docs par thème (specs_proto, v1_outlook_specs, analyses_proto_v2, algorithme, plans, installation, sessions, tests, commercial, scripts_archive) et indique où aller selon le sujet. **Consulter ce sommaire AVANT toute recherche de doc.**
+
+**⚠️ ATTENTION — Docs potentiellement périmés** : certaines décisions ont évolué entre deux documents. Un doc ancien peut décrire un choix qui a été **remplacé** depuis.
+
+**🔑 Règle d'or** : si deux docs se contredisent sur un même sujet, retenir la **PLUS RÉCENTE** — mais **TOUJOURS alerter l'utilisateur** avant de s'appuyer dessus (ex: « ⚠️ Contradiction : `docX` (12/04) dit A, `docY` (15/04) dit B. Je retiens B, OK ? »).
+
+Ordre de priorité complémentaire (si dates équivalentes ou absentes) :
+1. `CLAUDE.md` (vérité actuelle)
+2. `NOUVELLE_SESSION.md` section « DÉCISIONS STRATÉGIQUES »
+3. `docs/v1_outlook_specs/TODO_SESSION_SUIVANTE.md` (état courant)
+4. `docs/sessions/` les plus récents
+5. `docs/specs_proto/HISTORIQUE_DECISIONS.md`
+6. Les specs thématiques (seulement si cohérentes avec ce qui précède)
+
+Voir `docs/SOMMAIRE_DETAILLE.md` pour la liste des décisions qui ont bougé récemment.
 
 ---
 
@@ -31,20 +66,18 @@ Ces fichiers donnent 80% du contexte en 20% des tokens.
 
 | Sujet de la session | Fichier à lire |
 |---|---|
-| **Plan d'action complet (toutes les phases)** | **`docs/PLAN_ACTION_CONSOLIDE.docx`** |
-| Travail sur le dialog ou l'overlay | `V1_outlook/PLAN_ACTION_PHASE_3.md` |
-| Décisions UI (pourquoi telle solution) | `V1_outlook/SPEC_UI_ETAT1_LECTURE.md` |
-| Référence UI exhaustive (toutes les solutions) | `V1_outlook/SPEC_UI_TABLEAUX_V10.docx` |
-| Décisions architecture Phase 2 | `V1_outlook/SPEC_PHASE2_DECISIONS.md` |
-| Comprendre le moteur IA (prompt, blocs) | `specs/SPEC_SYSTEM_PROMPT.md` + `specs/SPEC_FONCTIONNALITES_PROTO.md` |
-| Routes API du proto | `specs/SPEC_ROUTES_API.md` |
-| Historique des décisions | `specs/HISTORIQUE_DECISIONS.md` |
-| Vision globale produit | `PLAN_ACTION_GLOBAL.md` |
-| Parcours d'onboarding utilisateur | `docs/SPEC_ONBOARDING_COMPLET.md` |
-| Chatbot d'installation | `docs/SPEC_CHATBOT_INSTALLATION.md` |
-| Guide d'installation (admin/user) | `docs/GUIDE_INSTALLATION_PLUGIN.md` |
+| Travail sur le dialog ou l'overlay | `docs/v1_outlook_specs/PLAN_ACTION_PHASE_3.md` |
+| Décisions UI (pourquoi telle solution) | `docs/v1_outlook_specs/SPEC_UI_ETAT1_LECTURE.md` |
+| Décisions architecture Phase 2 | `docs/v1_outlook_specs/SPEC_PHASE2_DECISIONS.md` |
+| Comprendre le moteur IA (prompt, blocs) | `docs/specs_proto/SPEC_SYSTEM_PROMPT.md` + `docs/specs_proto/SPEC_FONCTIONNALITES_PROTO.md` |
+| Routes API du proto | `docs/specs_proto/SPEC_ROUTES_API.md` |
+| Historique des décisions | `docs/specs_proto/HISTORIQUE_DECISIONS.md` |
+| Vision globale produit | `docs/plans/PLAN_ACTION_GLOBAL.md` |
+| Parcours d'onboarding utilisateur | `docs/installation/SPEC_ONBOARDING_COMPLET.md` |
+| Chatbot d'installation | `docs/installation/SPEC_CHATBOT_INSTALLATION.md` |
+| Guide d'installation (admin/user) | `docs/installation/GUIDE_INSTALLATION_PLUGIN.md` |
 
-**Note** : `docs/PLAN_ACTION_CONSOLIDE.docx` fusionne les 3 fichiers historiques (PLAN_ACTION_GLOBAL.md + PLAN_ACTION_PHASE_2.md + PLAN_ACTION_PHASE_3.md) en un seul document. Pour une vue d'ensemble rapide, ce document suffit.
+**Note** : Pour une vue d'ensemble rapide, combiner `docs/plans/PLAN_ACTION_GLOBAL.md` + `docs/v1_outlook_specs/PLAN_ACTION_PHASE_2.md` + `docs/v1_outlook_specs/PLAN_ACTION_PHASE_3.md`.
 
 ---
 
@@ -52,14 +85,14 @@ Ces fichiers donnent 80% du contexte en 20% des tokens.
 
 | Sujet | Fichier |
 |---|---|
-| Graph API (routes, $batch, tokens) | `V1_outlook/SPEC_PHASE2_GRAPH.md` |
-| AI Provider (Claude/OpenAI, streaming) | `V1_outlook/SPEC_PHASE2_AI_PROVIDER.md` |
-| Dialog split-screen (Office.js vs standalone) | `V1_outlook/SPEC_PHASE2_DIALOG.md` |
-| Companion COM (Windows) | `V1_outlook/SPEC_PHASE2_COMPANION.md` |
-| Auth OAuth2 Microsoft | `V1_outlook/SPEC_PHASE2_AUTH.md` |
-| Résumé Phase 2 complète | `specs/SPEC_PHASE2_RESUME.md` |
-| Scoring rédactionnel (N1-N10) | `algorithme/SPEC_SCORING_REDACTIONNEL.md` |
-| Base de données (tables) | `specs/SPEC_TABLES_DB.md` |
+| Graph API (routes, $batch, tokens) | `docs/v1_outlook_specs/SPEC_PHASE2_GRAPH.md` |
+| AI Provider (Claude/OpenAI, streaming) | `docs/v1_outlook_specs/SPEC_PHASE2_AI_PROVIDER.md` |
+| Dialog split-screen (Office.js vs standalone) | `docs/v1_outlook_specs/SPEC_PHASE2_DIALOG.md` |
+| Companion COM (Windows) | `docs/v1_outlook_specs/SPEC_PHASE2_COMPANION.md` |
+| Auth OAuth2 Microsoft | `docs/v1_outlook_specs/SPEC_PHASE2_AUTH.md` |
+| Résumé Phase 2 complète | `docs/specs_proto/SPEC_PHASE2_RESUME.md` |
+| Scoring rédactionnel (N1-N10) | `docs/algorithme/SPEC_SCORING_REDACTIONNEL.md` |
+| Base de données (tables) | `docs/specs_proto/SPEC_TABLES_DB.md` |
 
 ---
 
