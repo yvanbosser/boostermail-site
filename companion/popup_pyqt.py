@@ -517,14 +517,11 @@ def main():
     app.setOrganizationName('BoosterMail')
     app.setStyle('Fusion')
 
-    # Purger uniquement le cache HTTP au démarrage (ressources JS/CSS/HTML obsolètes).
-    # NE PAS utiliser NoCache : ça casse la session SSL du certificat auto-signé
-    # localhost (observé : handshake failed, dialog blanc).
-    try:
-        QWebEngineProfile.defaultProfile().clearHttpCache()
-        logger.info("WebEngine HTTP cache purged")
-    except Exception as _e:
-        logger.debug(f"WebEngine cache purge failed: {_e}")
+    # Cache : on ne touche PAS au profil WebEngine (ni clearHttpCache ni NoCache).
+    # Toute manipulation du cache casse la session SSL du cert auto-signé localhost
+    # (observé : dialog blanc, aucune requête atteint V2).
+    # Le Cache-Control: no-cache cote V2 (commit 3461fc5) suffit à forcer le rechargement
+    # des assets JS/CSS/HTML à chaque ouverture du dialog.
 
     if args.direct_dialog:
         # Mode New Outlook : dialog direct, pas d'overlay
