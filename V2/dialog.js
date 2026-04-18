@@ -902,7 +902,9 @@ function _fetchGenerateReply(body) {
                                 window._streamedText += data.chunk;
                             }
                             if (data.done) {
-                                _onGenerationDone();
+                                // NE PAS appeler _onGenerationDone() ici : d'autres chunks
+                                // peuvent arriver APRÈS (warnings, résidus du buffer SSE).
+                                // Le vrai reformatage se fait UNE SEULE fois dans result.done.
                                 return;
                             }
                             if (data.error) {
