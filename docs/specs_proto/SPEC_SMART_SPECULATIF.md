@@ -2,6 +2,12 @@
 
 > **Dernière mise à jour** : 12/04/2026 (git)
 
+> ⚠️ **DOCUMENT PARTIELLEMENT PÉRIMÉ** — voir les corrections de la session 18/04 :
+> - **Le proto implémente 5 filtres, pas 6** (le filtre n°5 "mail ouvert 2+ fois" n'existe pas dans `app.py`). Pour V2 : 5 filtres à porter + 1 à créer. Voir [docs/plans/PLAN_3_INVENTAIRE_CACHES_ET_PORTAGE.md §9.2](../plans/PLAN_3_INVENTAIRE_CACHES_ET_PORTAGE.md).
+> - **Cache brouillon fusionné** avec `_preemptive_cache` dans un cache unifié `_reply_cache`. La notion de TTL 24 h est **abandonnée** au profit d'une purge événementielle pure + safety net 4 semaines. Voir [Plan 3 §9.1](../plans/PLAN_3_INVENTAIRE_CACHES_ET_PORTAGE.md).
+> - **Motif `postmaster`** est présent dans le code proto ([app.py:1145](../../app.py#L1145)) mais pas listé dans la table ci-dessous. À conserver dans le port V2.
+> - **Règles d'invalidation** (§2 "Durée du cache") : caduques. Seules subsistent les purges événementielles (classify/send/delete/archive/reply-externe/cohesion).
+
 ## Principe
 
 Deux optimisations combinées :

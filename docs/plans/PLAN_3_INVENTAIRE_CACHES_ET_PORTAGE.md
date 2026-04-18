@@ -1,6 +1,6 @@
 # PLAN 3 — Inventaire des caches V2 et portage depuis le proto
 
-> **Dernière mise à jour** : 18/04/2026 (création session 18/04)
+> **Dernière mise à jour** : 18/04/2026 (session validation + corrections)
 
 > **Objectif** : référence technique exhaustive de tous les caches V2 vs proto, avec les manques identifiés et le plan de portage associé.
 >
@@ -15,6 +15,21 @@
 
 ---
 
+## ✅ MISE À JOUR 18/04/2026 — Validation + corrections
+
+Session de validation interactive : chaque section a été ground-truthée contre le code V2 et proto. Voir le **§9 Récapitulatif des décisions validées** en fin de document pour la synthèse.
+
+**Points clés** :
+- TTL 30 min **supprimé complètement** (pas de safety net en lecture)
+- Cache **unifié `_reply_cache`** — absorbe spéculation + brouillon édité (un seul cache, pas deux)
+- Purge **purement événementielle** + **safety net 4 semaines** (28 jours)
+- **5 filtres Smart Speculative à porter + 1 à créer** (le filtre "open_count" n'existe pas en proto)
+- Popup **4 modes** (user × cache) au lieu du simple "chaque démarrage"
+- 2 divergences Plan 3 vs code corrigées (voir §4 mis à jour)
+- Régression détectée : code brouillon `drafts_v2.json` perdu entre 17/04 et 18/04 — à restaurer ou ré-implémenter dans le cache unifié
+
+---
+
 ## 1. Le `_preemptive_cache` — explication
 
 C'est le **cache spéculatif** : quand l'utilisateur a ouvert le mail d'un contact connu, BoosterMail lance secrètement la génération Claude **en tâche de fond**, avant même que l'utilisateur clique Générer. La réponse pré-générée est stockée dans `_preemptive_cache[message_id]`.
@@ -26,35 +41,61 @@ C'est le **cache spéculatif** : quand l'utilisateur a ouvert le mail d'un conta
 | **TTL 30 minutes** (proto initial) | Réponse jetée après 30 min si pas consommée. Risque : ~$0.04 gaspillé par génération non consommée. | 🔴 **Abandonné** |
 | **Purge événementielle** (Plan 2) | Entrée supprimée au moment où le mail est **traité** (classé / supprimé / répondu). Cache suit l'inbox active, zéro gaspillage. | 🟢 **Retenu** |
 
-**Décision utilisateur (18/04)** : adopter le modèle événementiel.
+**Décision utilisateur (18/04)** : adopter le modèle événementiel **pur** — TTL 30 min **supprimé complètement**, **pas de safety net en lecture**. Purge strictement événementielle + safety net global 4 semaines (28 jours) sur l'ensemble du cache unifié `_reply_cache`.
+
+**État V2 audité** ([V2/app_plugin.py](../../V2/app_plugin.py)) :
+- ✅ Déjà en place : purge sur `classify_email` ([ligne 2286](../../V2/app_plugin.py#L2286)), `send_reply` ([ligne 4186](../../V2/app_plugin.py#L4186)), consommation ([ligne 3473](../../V2/app_plugin.py#L3473))
+- 🟡 Encore présent : TTL 30 min en lecture ([ligne 3470](../../V2/app_plugin.py#L3470)) — **à supprimer**
+- ❌ Hooks manquants à ajouter :
+  - `api_delete_email` (purge)
+  - Archive / déplacement hors inbox (hors classify)
+  - Réponse directe dans Outlook (hors BoosterMail)
+  - Cohésion au refresh inbox (purge des entrées orphelines)
+- Table `processed_emails` (id, processed_at, action) comme source de vérité (validé)
 
 ---
 
-## 2. Les 6 filtres Smart Speculative (proto)
+## 2. Les 6 filtres Smart Speculative — ground truth 18/04
 
-Le spec proto (`docs/specs_proto/SPEC_SMART_SPECULATIF.md`) définit 6 filtres pour éviter de générer spéculativement dans le vide :
+Le spec proto (`docs/specs_proto/SPEC_SMART_SPECULATIF.md`) définit **6 filtres**, mais l'audit du 18/04 montre que **le proto n'en implémente que 5**.
 
-| # | Filtre | Action |
-|---|---|---|
-| 1 | Mail > 7 jours | → skip génération |
-| 2 | Mail déjà traité | → skip génération |
-| 3 | Expéditeur automatique (no-reply, newsletter, notification) | → skip génération |
-| 4 | Body < 10 chars sans "?" | → skip génération |
-| 5 | Mail ouvert 2+ fois sans réponse | → skip génération |
-| 6 | User en CC pas en TO | → skip génération |
+| # | Filtre | Statut proto | Statut V2 |
+|---|---|---|---|
+| 1 | Mail > 7 jours | ✅ [app.py:1129](../../app.py#L1129) | ❌ absent |
+| 2 | Mail déjà traité (`db.is_treated`) | ✅ [app.py:1139](../../app.py#L1139) | ❌ absent |
+| 3 | Expéditeur automatique (no-reply, noreply, newsletter, notification, mailer-daemon, **postmaster**) | ✅ [app.py:1143](../../app.py#L1143) | ❌ absent |
+| 4 | Body < 10 chars sans "?" | ✅ [app.py:1149](../../app.py#L1149) | ❌ absent |
+| 5 | Mail ouvert 2+ fois sans réponse (`open_count`) | ❌ **Absent du proto** (pas de compteur) | ❌ absent |
+| 6 | User en CC pas en TO | ✅ [app.py:1155](../../app.py#L1155) | ❌ absent |
 
 **Règle importante** : si un filtre matche, on ne génère pas la réponse, mais **on garde le prefetch A/B/C**. Résultat : si l'user clique quand même Générer, attente **3-5s** au lieu de 8-10s.
 
-**Statut** : les 6 filtres existent dans le proto, **pas encore portés en V2**. À faire.
+**Statut corrigé** : **5 filtres à porter depuis le proto + 1 filtre à créer en V2** (le n°5 "open_count" — compteur en mémoire en V2, ~5 min de dev supplémentaires). Effort total révisé : ~50 min.
+
+**Nota bene** : le motif `postmaster` (présent dans le proto mais pas listé dans la spec `SPEC_SMART_SPECULATIF.md`) est **gardé** tel quel dans le port V2.
 
 ---
 
-## 3. Décisions UX validées
+## 3. Décisions UX validées (18/04)
 
-| Question | Décision |
-|---|---|
-| **Q1** : Fréquence popup lancement | Popup à **chaque ouverture d'Outlook** (outil marketing) ✅ |
-| **Q2** : Bouton « Essayer une autre réponse » | Garder **bas-droite** du dialog ✅ |
+### Q1 — Fréquence popup lancement
+
+Popup affichée **à chaque démarrage Outlook** (Q1 initiale confirmée), mais avec **4 modes** selon l'état du user et du cache :
+
+| État user | Cache `prefetch_cache_v2.json` < 48 h | Rôle dominant | Affichage |
+|---|---|---|---|
+| **Pas activé** | Cache froid | Marketing + temporisateur | CTA bloquant « Activez en 2 min » **+** barre progression warmup |
+| **Pas activé** | Cache chaud | Marketing | CTA bloquant seul |
+| **Activé** | Cache froid | Temporisateur + feedback | « BoosterMail prépare vos mails… » + barre progression (~8 s) |
+| **Activé** | Cache chaud | Feedback flash | Popup flash (<500 ms) puis disparition |
+
+**La popup n'est jamais skippée** — elle sert aussi de **temporisateur** pendant que le warmup tourne en arrière-plan.
+
+**Définition "activé"** : onboarding complet = token OAuth Microsoft valide **ET** `style_profile.txt` généré **ET** flag `user_activated=1` en DB.
+
+### Q2 — Bouton « Essayer une autre réponse »
+
+Position **bas-droite** du dialog (validé), **visible en permanence** (même quand le user a édité sa réponse — le user n'est jamais coincé sur un template qui ne lui convient pas).
 
 ---
 
@@ -65,9 +106,9 @@ Le spec proto (`docs/specs_proto/SPEC_SMART_SPECULATIF.md`) définit 6 filtres p
 | **Inbox 10 derniers mails** | ✅ `_warmup_cache` + `email_cache` DB | Graph `/messages` | Affichage + base spéculation |
 | **Prefetch contexte A** (thread) | ✅ `_prefetch_cache` (par message_id) | Graph `conversationId` | Bloc A prompt |
 | **Prefetch contexte B** (historique) | ✅ `_prefetch_cache` | Graph `search_by_sender` + fallback DB `threads` | Bloc B prompt |
-| **Prefetch contexte C** (keywords sujet) | 🟡 **Partiel** — pas de cache keyword 24h | Graph `search_by_subject` / Companion GetTable | Bloc C prompt |
+| **Prefetch contexte C** (keywords sujet) | ✅ **Corrigé 18/04** — `_c_keyword_cache` présent en V2 ([app_plugin.py:391](../../V2/app_plugin.py#L391), TTL 24 h / 86400 s) | Graph `search_by_subject` / Companion GetTable | Bloc C prompt |
 | **Arborescence dossiers Outlook** | ✅ DB `folder_cache` (396 dossiers persistants, rescan 60min BG) | Graph `get_all_folders` | Classement post-envoi |
-| **Arborescence dossiers Windows** | ✅ `_windows_folders_cache` (session, ~2000 dossiers) | Scan disque `pj_root_folder` | Classement PJ Windows |
+| **Arborescence dossiers Windows** | ❌ **Corrigé 18/04** — absent de V2 (existe seulement en proto). À porter pour la proposition de classement auto PJ | Scan disque `pj_root_folder` | Classement auto PJ Windows |
 | **Contacts profiles** | ✅ DB `contact_profiles` (103 contacts, persistant) | DB | Registre, greeting, closing, ton |
 | **Style profile utilisateur** | ✅ Fichier `style_profile.txt` (8084 chars) | Fichier disque | Sections A/B/C Claude |
 | **Settings utilisateur** (28 keys) | ✅ DB `settings` (migrés depuis proto le 18/04) | DB | user_name, writing_level, scores |
@@ -78,8 +119,8 @@ Le spec proto (`docs/specs_proto/SPEC_SMART_SPECULATIF.md`) définit 6 filtres p
 | **Prefetch persistant 48h** | ✅ `prefetch_cache_v2.json` | Fichier disque | Saut du warmup si session récente |
 | **_my_email** | ✅ `_my_email_cache` (TTL 1h) | Graph `/me` | Direction sent/received dans contextes |
 | **Spéculation contacts connus** (réponses Claude pré-générées) | 🟡 **Existe** `_preemptive_cache` MAIS les 6 filtres `SPEC_SMART_SPECULATIF` ne sont pas encore portés | Claude stream | Affichage instantané cas A |
-| **Cache C keywords 24h** | ❌ **Manquant** (existe en proto : `_c_keyword_cache`) | GetTable / Graph | Réutiliser les recherches C entre mails du même sujet |
-| **Cache brouillon 24h** (dernière version modifiée par user) | ❌ **Manquant** en V2 (spec proto prévoit) | Memory + DB optionnelle | Si user revient sur un mail, retrouve sa dernière édition |
+| ~~**Cache C keywords 24h**~~ | ✅ **Corrigé 18/04 — déjà présent en V2** | — | — |
+| **Cache brouillon unifié (ex-24h)** | ❌ **Code perdu entre 17/04 et 18/04** (drafts_v2.json existe toujours sur disque, code disparu de V2). À restaurer OU ré-implémenter dans le **cache unifié `_reply_cache`** (cf. §9) | Memory + disque | User retrouve sa dernière édition (purge événementielle + safety net 4 semaines) |
 | **HTML rendu + inline images** | ❌ **Pas nécessaire en V2** (HTML via dialog.html) | — | Spécifique proto (`_html_cache`, `_inline_images_cache`) |
 | **Classification post-envoi** | ❌ **Manquant** (`_classification_post_send_cache` en proto) | Claude | Éviter de re-générer la suggestion classement après send |
 | **Post-send échéances** | ❌ **Manquant** (`_echeance_post_send_cache` en proto) | Claude | Éviter re-scan échéances après send |
@@ -96,18 +137,21 @@ Le spec proto (`docs/specs_proto/SPEC_SMART_SPECULATIF.md`) définit 6 filtres p
 
 ---
 
-## 5. Résumé des manques à combler côté V2
+## 5. Résumé des manques à combler côté V2 (révisé 18/04)
 
-| Priorité | Cache manquant | Effort | Impact |
+| Priorité | Manque | Effort | Impact |
 |---|---|---|---|
-| 🔴 Haute | **6 filtres Smart Speculative** | 45 min | **Évite de gaspiller ~$0.88/jour en générations non consommées** |
-| 🟠 Moyenne | **Cache brouillon 24h** | 1 h | Si user quitte un mail sans envoyer, retrouve son édition plus tard |
-| 🟠 Moyenne | **Cache C keywords 24h** | 30 min | Réutilise les recherches C entre mails similaires |
+| 🔴 Haute | **Smart Speculative : 5 filtres à porter + 1 à créer** (filtre n°5 `open_count`, compteur mémoire) | 50 min | Évite de gaspiller ~$0.88/jour en générations non consommées |
+| 🟠 Moyenne | **`_windows_folders_cache`** — arborescence Windows pour la proposition de classement auto PJ (à porter **maintenant** dans Plan 2) | 30 min | Suggestion classement PJ intelligente, pas de rescan disque |
+| 🟠 Moyenne | **Cache unifié `_reply_cache`** (remplace `_preemptive_cache` + ex-cache brouillon) : une seule structure qui porte spéculation + édition user, purge événementielle pure + safety net 4 semaines (28 j) sur disque | 1 h | Zero gaspillage + restauration brouillons + architecture simplifiée |
 | 🟢 Basse | **Classification post-envoi cache** | 20 min | Évite re-appel Claude si user change d'avis |
 | 🟢 Basse | **Post-send échéances cache** | 15 min | Idem |
 | 🟢 Basse | **Suggestion classement 5 min** | 15 min | Idem |
 
-**Total à porter** : **~3 h de dev** — tout existe déjà dans le proto, c'est du portage propre.
+**Total révisé** : **~3 h 10 de dev**.
+
+> ⚠️ **Liste retirée** : ~~Cache C keywords 24 h~~ — **déjà présent en V2** (audit 18/04, faux négatif du Plan 3 initial).
+> ⚠️ **Liste ajoutée** : `_windows_folders_cache` — absent de V2 (faux positif du Plan 3 initial).
 
 ---
 
@@ -154,3 +198,72 @@ Le **Plan 2** ajoute/corrige par rapport à ce Plan 3 :
 ---
 
 *Créé le 18/04/2026 — baseline technique avant enrichissement Plan 2.*
+
+---
+
+## 9. Récapitulatif des décisions validées (18/04/2026)
+
+Synthèse des décisions prises pendant la session de validation interactive du Plan 3.
+
+### 9.1 Cache `_reply_cache` unifié
+
+**Avant** : deux caches séparés (`_preemptive_cache` + cache brouillon 24 h), TTL 30 min + TTL 24 h.
+**Après** : **un seul cache** `_reply_cache[message_id]` qui porte :
+
+| Champ | Rôle |
+|---|---|
+| `text` | Dernière version de la réponse (générée OU éditée) |
+| `status` | `generated` / `edited` / `sent` |
+| `source` | `bg_speculation` / `user_edit` |
+| `timestamp` | Mise à jour à chaque modification |
+| `contact`, `importance` | Métadonnées |
+
+**Règles d'invalidation** :
+- **Purge événementielle pure** : classify / send / delete / archive / reply-externe / cohesion-refresh inbox
+- **Safety net** : entrées > **4 semaines** (28 jours) purgées automatiquement (évite croissance indéfinie)
+- **Pas de TTL court** : ni 30 min ni 24 h
+
+### 9.2 Smart Speculative
+
+**5 filtres à porter depuis le proto** (Mail > 7 j, déjà traité, expéditeur auto, body < 10 chars, user en CC) + **1 filtre à créer** (open_count, compteur mémoire). Motif `postmaster` gardé.
+
+### 9.3 Popup de lancement — 4 modes
+
+| État user | Cache chaud (<48 h) | Popup |
+|---|---|---|
+| Pas activé + froid | | Marketing bloquant + barre warmup |
+| Pas activé + chaud | | Marketing bloquant |
+| Activé + froid | | Temporisateur + barre ~8 s |
+| Activé + chaud | | Flash <500 ms |
+
+**Toujours affichée** — elle sert aussi de temporisateur pendant le warmup.
+**Définition "activé"** : OAuth Microsoft valide + `style_profile.txt` + flag `user_activated=1`.
+
+### 9.4 Bouton « Essayer une autre réponse »
+
+Bas-droite du dialog, **visible en permanence** (même après édition user).
+
+### 9.5 Corrections du tableau Section 4
+
+| # | Cache | Avant | Après audit |
+|---|---|---|---|
+| 6 | `_windows_folders_cache` | ✅ présent V2 | ❌ absent V2 — à porter (classement auto PJ, dans Plan 2) |
+| 17 | `_c_keyword_cache` 24 h | ❌ manquant | ✅ présent V2 depuis 14/04 ([app_plugin.py:391](../../V2/app_plugin.py#L391)) |
+
+### 9.6 Régression détectée
+
+Le code **brouillon** documenté dans `BILAN_SESSION_V2_20260414.md` (routes `/api/save_draft`, `/api/get_draft`, persistance `drafts_v2.json`) a **disparu de V2** entre le 17/04 (dernière écriture dans `drafts_v2.json`) et le 18/04 (consolidation doc).
+
+**Le fichier `C:/EasyMail/drafts_v2.json` existe toujours** avec des brouillons réels datés du 17/04, mais plus aucun code ne le lit/écrit. **À restaurer depuis `git show 25d4629:V2/app_plugin.py` OU à ré-implémenter dans le cache unifié `_reply_cache`** lors du Plan 2.
+
+### 9.7 Contradictions inter-doc à résoudre
+
+| Doc ancien | Doc récent (fait foi) | Décision |
+|---|---|---|
+| `SPEC_SMART_SPECULATIF.md` dit "6 filtres" | Code proto = 5 filtres, audit 18/04 | **5 port + 1 création** |
+| `SPEC_SMART_SPECULATIF.md` dit "TTL 24 h brouillon" | `BILAN_SESSION_V2_20260414.md` dit "7 jours" | **Caduc — nouveau modèle = purge événementielle + safety net 4 semaines** |
+| Plan 3 dit "popup à chaque démarrage" | Décision 18/04 matrice 4 modes | **Matrice 4 modes** |
+
+---
+
+*Mis à jour le 18/04/2026 — session de validation interactive avant exécution Plan 2.*

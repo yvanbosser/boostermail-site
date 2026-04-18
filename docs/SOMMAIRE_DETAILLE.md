@@ -1,6 +1,6 @@
 # SOMMAIRE DÉTAILLÉ — Documentation BoosterMail/EasyMail
 
-> **Dernière mise à jour** : 18/04/2026 (création session 18/04)
+> **Dernière mise à jour** : 18/04/2026 (session validation Plan 3)
 
 > **Objectif** : index unique de TOUTE la documentation du projet.
 > À lire en début de session pour savoir **où trouver quoi** sans relire les docs entiers.
@@ -43,6 +43,10 @@ En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux
 - Backend V1 séparé → **ABANDONNÉ** au profit de « Outlook = déclencheur, proto = moteur » (13/04)
 - V1_outlook/ → **RENOMMÉ V2/** (session 14-18/04)
 - OneDrive → **MIGRATION HORS OneDrive** vers `C:\EasyMail\` (12/04)
+- Cache brouillon 24 h + `_preemptive_cache` 30 min → **FUSIONNÉS** en cache unifié `_reply_cache` (18/04)
+- TTL des caches de réponses → **SUPPRIMÉS** au profit d'une purge événementielle pure + safety net 4 semaines (18/04)
+- Smart Speculative « 6 filtres » de la spec → **CORRIGÉ** : 5 à porter + 1 à créer en V2 (filtre open_count absent du proto) (18/04)
+- Popup « à chaque démarrage Outlook » → **AFFINÉE** : matrice 4 modes user × cache, toujours affichée mais contenu adapté (18/04)
 
 Les docs antérieurs à ces décisions peuvent décrire l'ancien état. **Ne pas les utiliser comme source pour le code actuel sans vérifier.**
 
