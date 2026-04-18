@@ -4,7 +4,7 @@
 
 > ⚠️ **DOCUMENT PÉRIMÉ** (12/04/2026)
 > Contient des concepts **remplacés depuis** : taskpane pinable (rejeté 08/04), Mode Standard (renommé Mode Complet le 10/04), V1_outlook/ (renommé V2/ en 14-18/04).
-> Pour létat actuel, voir `CLAUDE.md` et `docs/v1_outlook_specs/TODO_SESSION_SUIVANTE.md`.
+> Pour létat actuel, voir `CLAUDE.md` et `docs/v2_specs/TODO_SESSION_SUIVANTE.md`.
 
 *Ce fichier documente POURQUOI chaque décision a été prise, les alternatives étudiées et rejetées, et les contraintes techniques découvertes. Ne pas remettre en question ces décisions sans relire le raisonnement.*
 

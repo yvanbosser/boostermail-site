@@ -117,8 +117,8 @@ GetTable (Windows Search), com_run() thread unique, AdvancedSearch evenementiel,
 15 etapes, 38 routes, ~80 anomalies corrigees. Architecture DRY : popup.html (Etat 1) + dialog.html (Etat 2). Office.js = source PRIMAIRE, Companion = regulateur. Prefetch Graph parallele 200ms (80x vs proto).
 
 → detail dans `docs/specs_proto/SPEC_PHASE2_RESUME.md`
-→ specs techniques dans `docs/v1_outlook_specs/SPEC_PHASE2_*.md`
-→ plan UI dans `docs/v1_outlook_specs/SPEC_UI_ETAT1_LECTURE.md`
+→ specs techniques dans `docs/v2_specs/SPEC_PHASE2_*.md`
+→ plan UI dans `docs/v2_specs/SPEC_UI_ETAT1_LECTURE.md`
 
 ---
 
@@ -127,7 +127,7 @@ GetTable (Windows Search), com_run() thread unique, AdvancedSearch evenementiel,
 Taskpane pinable REJETE → overlay non-intrusif. 5 solutions par plateforme (#3 ruban, #7b action bar, #8 PyQt, #12 extension Chrome, #19 LaunchEvent). 10 etapes, 65 points resolus, 15 audits.
 
 → detail dans `.claude/plans/snuggly-gathering-rabin.md`
-→ plan finalisation dans `docs/v1_outlook_specs/PLAN_FINALISATION_OUTLOOK.md`
+→ plan finalisation dans `docs/v2_specs/PLAN_FINALISATION_OUTLOOK.md`
 
 ---
 
@@ -212,7 +212,7 @@ La connexion Microsoft est OBLIGATOIRE pour une utilisation normale.
 - **Lancement instantane** : NON RESOLU (VBS/registre/PyInstaller ont echoue)
 - **Admin deploy** : mail envoye a Compta Sante, en attente
 
-→ detail dans `NOUVELLE_SESSION.md`, `docs/sessions/BILAN_SESSION_20260410.md`
+→ detail dans `NOUVELLE_SESSION_V2.md`, `docs/sessions/BILAN_SESSION_20260410.md`
 
 ---
 
@@ -319,7 +319,7 @@ dialog V1 connecte au proto (~10h). Detail dans `docs/analyses_proto_v2/COMPARAT
 
 ### Consolidation doc (18/04)
 - Toute la doc regroupée dans `docs/` (63 fichiers .md)
-- Sous-dossiers thématiques : `specs_proto/`, `v1_outlook_specs/`, `analyses_proto_v2/`, `algorithme/`, `plans/`, `installation/`, `sessions/`, `audits/`, `tests/`, `commercial/`, `scripts_archive/`
+- Sous-dossiers thématiques : `specs_proto/`, `v2_specs/`, `analyses_proto_v2/`, `algorithme/`, `plans/`, `installation/`, `sessions/`, `audits/`, `tests/`, `commercial/`, `scripts_archive/`
 - Index maître : `docs/SOMMAIRE_DETAILLE.md` (point d'entrée obligatoire)
 - Règle d'or documentée : en cas de contradiction entre docs, retenir la plus récente et alerter l'utilisateur
 - Datation systématique : en-tête `> **Dernière mise à jour** : JJ/MM/AAAA` sur les 63 docs

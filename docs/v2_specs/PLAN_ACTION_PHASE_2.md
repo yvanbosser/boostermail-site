@@ -2,7 +2,7 @@
 
 > ⚠️ **DOCUMENT HISTORIQUE — FIGÉ** (Phase 2 terminée le 07/04/2026)
 > Décrit létat de la Phase 2 au moment de sa clôture. **Ne pas utiliser comme source pour létat actuel du code.**
-> Concepts évoqués (V1_outlook, Mode Standard, taskpane pinable) **ont évolué depuis** — voir `docs/v1_outlook_specs/TODO_SESSION_SUIVANTE.md` et `CLAUDE.md` pour létat courant.
+> Concepts évoqués (V1_outlook, Mode Standard, taskpane pinable) **ont évolué depuis** — voir `docs/v2_specs/TODO_SESSION_SUIVANTE.md` et `CLAUDE.md` pour létat courant.
 
 **STATUT : ✅ TERMINÉE le 07/04/2026**
 

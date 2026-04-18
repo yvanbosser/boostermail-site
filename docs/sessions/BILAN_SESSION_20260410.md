@@ -9,7 +9,7 @@
 - V1_plugin/ archivé dans corbeille/ (remplacé par V1_outlook/)
 - 6 Setup ZIP anciens archivés (V6 conservé dans installer/)
 - STRUCTURE_PROJET.md créé (carte complète du projet)
-- NOUVELLE_SESSION.md créé (guide démarrage + méthode de travail)
+- NOUVELLE_SESSION_V2.md créé (guide démarrage + méthode de travail)
 - SPEC_UI_TABLEAUX_V10.docx généré (consolide V7/V8/V9, anciens supprimés)
 
 ### Audit complet du codebase
@@ -95,7 +95,7 @@ Pas de bouton Annuler. Réapparaît tant que non activé.
 3. Overlay auto + détection auto (attente admin deploy)
 
 ### 7. Méthode de travail
-8 règles documentées dans NOUVELLE_SESSION.md :
+8 règles documentées dans NOUVELLE_SESSION_V2.md :
 tester avant de promettre, prototyper petit, identifier les risques,
 ne pas accumuler les couches, séparer recherche et implémentation,
 étanchéité proto, socle Gmail, audit systématique.

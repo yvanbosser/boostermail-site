@@ -316,6 +316,6 @@ C'est desormais la **Phase 2 ter** dans `PLAN_ACTION_GLOBAL.md`.
 
 **Decision : une seule version V1.** La V1.1 (hybride COM+Office.js) a ete abandonnee car COM ne fonctionne pas sur New Outlook.
 
-→ Voir `NOUVELLE_SESSION.md` pour le contexte complet des decisions du 10/04/2026.
+→ Voir `NOUVELLE_SESSION_V2.md` pour le contexte complet des decisions du 10/04/2026.
 → Voir `docs/sessions/BILAN_SESSION_20260410.md` pour le bilan detaille.
 → Voir `V2/TODO_SESSION_SUIVANTE.md` pour les priorites de la prochaine session.

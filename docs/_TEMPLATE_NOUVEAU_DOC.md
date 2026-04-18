@@ -45,7 +45,7 @@ Pourquoi ce document existe et ce qu'il couvre.
 CHECKLIST AVANT DE COMMITER CE DOC :
 - [ ] Date en en-tête à jour
 - [ ] Référencé dans docs/SOMMAIRE_DETAILLE.md
-- [ ] Placé dans le bon sous-dossier (specs_proto / v1_outlook_specs / analyses_proto_v2 / algorithme / plans / installation / sessions / audits / tests / commercial)
+- [ ] Placé dans le bon sous-dossier (specs_proto / v2_specs / analyses_proto_v2 / algorithme / plans / installation / sessions / audits / tests / commercial)
 - [ ] Si décision stratégique : entrée ajoutée dans docs/specs_proto/HISTORIQUE_DECISIONS.md
 - [ ] Si ce doc remplace un autre : l'ancien est marqué PÉRIMÉ avec renvoi vers celui-ci
 -->

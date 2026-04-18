@@ -2,7 +2,7 @@
 
 > **Objectif** : finaliser la consolidation doc (18/04/2026) et mettre en place les garde-fous pour qu'elle reste propre dans le temps.
 >
-> **Contexte** : consolidation initiale terminée (63 fichiers .md déplacés dans `docs/`, SOMMAIRE_DETAILLE.md créé, NOUVELLE_SESSION.md mis à jour). Il reste à dater, valider les périmés, rafraîchir les specs maîtres et installer des règles de maintenance.
+> **Contexte** : consolidation initiale terminée (63 fichiers .md déplacés dans `docs/`, SOMMAIRE_DETAILLE.md créé, NOUVELLE_SESSION_V2.md mis à jour). Il reste à dater, valider les périmés, rafraîchir les specs maîtres et installer des règles de maintenance.
 >
 > **Durée estimée** : ~4h (dont ~1h avec l'utilisateur pour valider les docs périmés)
 
@@ -82,7 +82,7 @@ Les 3 docs « vérité actuelle » doivent refléter l'état réel du projet.
 |---|---|---|---|
 | 4.1 | `CLAUDE.md` | Vérifier et actualiser : V1_outlook → V2, flux optimal, autonomie V2, 22 manques identifiés | ⏳ À faire |
 | 4.2 | `docs/analyses_proto_v2/V2_MASTER_SPEC.md` | Aligner avec l'état du 18/04 (DB séparée, libs locales, 3 plateformes) | ⏳ À faire |
-| 4.3 | `docs/v1_outlook_specs/TODO_SESSION_SUIVANTE.md` | Actualiser avec les 22 manques + les 2 plans d'action | ⏳ À faire |
+| 4.3 | `docs/v2_specs/TODO_SESSION_SUIVANTE.md` | Actualiser avec les 22 manques + les 2 plans d'action | ⏳ À faire |
 | 4.4 | `docs/SOMMAIRE_DETAILLE.md` | Mettre à jour après Phase 3 (liste des archives, nouveaux docs) | ⏳ À faire |
 
 ### Livrable

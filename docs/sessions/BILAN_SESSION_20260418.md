@@ -31,7 +31,7 @@ docs/
 │
 ├── specs_proto/          (24 fichiers — ex-specs/)
 ├── algorithme/           (1 — ex-algorithme/)
-├── v1_outlook_specs/     (11 — ex-V1_outlook/*.md)
+├── v2_specs/     (11 — ex-V1_outlook/*.md)
 ├── analyses_proto_v2/    (16 — ex-racine)
 ├── plans/                (4 — PLAN_1/2/3 + PLAN_ACTION_GLOBAL)
 ├── installation/         (4)
@@ -53,11 +53,11 @@ docs/
 
 | Doc | Bandeau |
 |---|---|
-| `v1_outlook_specs/PLAN_ACTION_PHASE_2.md` | 🔴 HISTORIQUE FIGÉ (Phase 2 terminée 07/04) |
+| `v2_specs/PLAN_ACTION_PHASE_2.md` | 🔴 HISTORIQUE FIGÉ (Phase 2 terminée 07/04) |
 | `specs_proto/SPEC_PHASE2_RESUME.md` | 🔴 HISTORIQUE FIGÉ |
-| `v1_outlook_specs/SPEC_PHASE2_DECISIONS.md` | 🟠 PÉRIMÉ |
-| `v1_outlook_specs/SPEC_PHASE2_DIALOG.md` | 🟠 PÉRIMÉ |
-| `v1_outlook_specs/SPEC_PHASE2_GRAPH.md` | 🟡 PARTIELLEMENT PÉRIMÉ |
+| `v2_specs/SPEC_PHASE2_DECISIONS.md` | 🟠 PÉRIMÉ |
+| `v2_specs/SPEC_PHASE2_DIALOG.md` | 🟠 PÉRIMÉ |
+| `v2_specs/SPEC_PHASE2_GRAPH.md` | 🟡 PARTIELLEMENT PÉRIMÉ |
 | `STRUCTURE_PROJET.md` | 🟠 PÉRIMÉ |
 
 ### 4. Mise à jour 3 docs niveau 1 (option B — update vocabulaire)
@@ -70,7 +70,7 @@ docs/
 
 - Architecture : V1 Outlook → V2 autonome (libs + DB locales)
 - Règle #6 ajoutée : « V2 autonome — ne plus faire référence au proto pour les imports »
-- 16 chemins de specs mis à jour (specs/→docs/specs_proto/, algorithme/→docs/algorithme/, V1_outlook/→docs/v1_outlook_specs/)
+- 16 chemins de specs mis à jour (specs/→docs/specs_proto/, algorithme/→docs/algorithme/, V1_outlook/→docs/v2_specs/)
 - « V1 Backend » → « V2 Backend »
 - Section « Session 14-18/04/2026 » ajoutée (80 lignes — renommage V2, autonomie, 3 plans, 22 manques)
 - Section « Règles de maintenance doc » ajoutée (M1-M4)
@@ -135,10 +135,10 @@ Voir `C:/EasyMail_backups/worktree_modest-keller_20260418/` (ZIP).
 
 | Besoin | Doc |
 |---|---|
-| Démarrer la session | `NOUVELLE_SESSION.md` (à la racine) |
+| Démarrer la session | `NOUVELLE_SESSION_V2.md` (à la racine) |
 | Règles du projet | `CLAUDE.md` |
 | Index maître | `docs/SOMMAIRE_DETAILLE.md` |
 | Plan 3 (à attaquer en premier) | `docs/plans/PLAN_3_INVENTAIRE_CACHES_ET_PORTAGE.md` |
 | Plan 2 (à attaquer en second) | `docs/plans/PLAN_2_OPTIMISATION_FLUX.md` |
-| État courant des flux | `docs/v1_outlook_specs/TODO_SESSION_SUIVANTE.md` |
+| État courant des flux | `docs/v2_specs/TODO_SESSION_SUIVANTE.md` |
 | 22 manques V2 vs proto | `docs/analyses_proto_v2/V2_vs_PROTO_GAPS.md` |

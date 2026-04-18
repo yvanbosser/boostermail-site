@@ -239,5 +239,5 @@ Voir `PLAN_ACTION_GLOBAL.md` (Phase 2 ter) et `TODO_SESSION_SUIVANTE.md`.
 - `docs/GUIDE_INSTALLATION_PLUGIN.md` — guide admin/user/sideload
 - `docs/MAIL_DEMANDE_ADMIN_DEPLOY.md` — mail envoye
 - `docs/sessions/BILAN_SESSION_20260410.md` — bilan complet
-- `NOUVELLE_SESSION.md` — guide demarrage session + methode de travail
+- `NOUVELLE_SESSION_V2.md` — guide demarrage session + methode de travail
 - `STRUCTURE_PROJET.md` — carte du projet

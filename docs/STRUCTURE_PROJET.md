@@ -1,239 +1,230 @@
 # BoosterMail — Structure du projet
 
-> ⚠️ **DOCUMENT PÉRIMÉ** (10/04/2026)
-> Les chemins `V1_outlook/` mentionnés sont obsolètes — le dossier a été **renommé `V2/`** en session 14-18/04.
-> Pour une carte à jour, voir directement larborescence du projet ou demander à Claude.
-
-*Mis à jour le 10/04/2026*
+> **Dernière mise à jour** : 18/04/2026
+> Carte de l'arborescence du projet — où trouver quoi.
 
 ---
 
-## Racine — Proto (INTOUCHABLE, bêta-testeurs)
+## Vue d'ensemble
 
 ```
-EasyMail/
-├── app.py                  ← Serveur proto (port 5050) — NE PAS MODIFIER
-├── claude_ai.py            ← Moteur IA proto — NE PAS MODIFIER
-├── outlook_com.py          ← Interface Outlook COM — NE PAS MODIFIER
-├── database.py             ← DB partagée (proto + V1, rétrocompat uniquement)
-├── templates_mail.py       ← 45 templates email (partagé, rétrocompat uniquement)
-├── analyze_style.py        ← Analyse du style rédactionnel utilisateur
-├── easymail.db             ← Base de données SQLite (proto)
-├── emails.db               ← Base de données emails
-├── config.json             ← Configuration globale
-├── style_profile.txt       ← Profil rédactionnel utilisateur
-├── requirements.txt        ← Dépendances Python
-├── start.bat               ← Lanceur proto
-├── CLAUDE.md               ← Instructions pour Claude Code
-├── PLAN_ACTION_GLOBAL.md   ← Vision globale du projet
-└── STRUCTURE_PROJET.md     ← CE FICHIER
-```
-
----
-
-## V1_outlook/ — Code actif V1 Outlook (port 3443 HTTPS)
-
-```
-V1_outlook/
-├── app_plugin.py           ← Backend V1 (47+ routes, SSE, Graph API)
-├── auth_microsoft.py       ← OAuth2 Microsoft (MSAL)
-├── outlook_graph.py        ← Wrapper Microsoft Graph API
+C:\EasyMail\
+├── CLAUDE.md                       ← Règles absolues, architecture
+├── NOUVELLE_SESSION_V2.md          ← Guide de démarrage Claude
 │
-├── manifest.xml            ← Manifest Office Add-in (V1.3)
-├── commands.html / .js     ← Handler boutons ruban/compose
-├── autorun.html            ← Container LaunchEvent
-├── autorunshared.js        ← Shared runtime (ItemChanged, OnNewMessageCompose)
+├── app.py                          ← PROTO (LECTURE SEULE) — moteur bêta-testeurs
+├── claude_ai.py                    ← PROTO (LECTURE SEULE) — moteur IA proto
+├── outlook_com.py                  ← PROTO (LECTURE SEULE) — COM Outlook
+├── database.py                     ← DB proto (rétrocompatible V2)
+├── boostermail.db                  ← DB proto (ne PAS toucher depuis V2)
+├── start.bat                       ← Lance le proto
 │
-├── popup.html / popup.js   ← État 1 — overlay (chargé dans taskpane/PyQt/extension)
-├── dialog.html / .js / .css ← État 2 — dialog réponse (mode Office.js ou standalone)
-├── taskpane.html / .js     ← Wrapper iframe pour popup.html
+├── V2/                             ← Plugin V2 AUTONOME (cible active)
+├── companion/                      ← Companion COM (Windows local)
+├── core/                           ← Socle partagé provider-agnostic
+├── docs/                           ← TOUTE la documentation consolidée
 │
-├── generate_cert.py        ← Génération certificat HTTPS localhost
-├── localhost.crt / .key    ← Certificat auto-signé
-├── start_v1.bat            ← Lanceur V1 (PyQt + Companion + Backend)
-│
-├── SPEC_UI_TABLEAUX_V10.docx        ← Référence UI exhaustive (toutes solutions)
-├── SPEC_UI_ETAT1_LECTURE.md          ← Spec complète État 1 + alimentation
-├── PLAN_ACTION_PHASE_2.md            ← Phase 2 terminée (07/04)
-├── PLAN_ACTION_PHASE_3.md            ← Phase 3 (refonte UI non-intrusive)
-├── PLAN_FINALISATION_OUTLOOK.md      ← Plan finalisation 3 plateformes
-├── TODO_SESSION_SUIVANTE.md          ← Tâches prochaine session
-│
-├── SPEC_PHASE2_AI_PROVIDER.md        ← Spec AI provider (Claude/OpenAI)
-├── SPEC_PHASE2_AUTH.md               ← Spec authentification OAuth2
-├── SPEC_PHASE2_COMPANION.md          ← Spec Companion Windows
-├── SPEC_PHASE2_DECISIONS.md          ← Décisions architecturales Phase 2
-├── SPEC_PHASE2_DIALOG.md             ← Spec dialog split-screen
-└── SPEC_PHASE2_GRAPH.md              ← Spec Microsoft Graph API
+├── extension/                      ← Extension Chrome (Outlook Web)
+├── installer/                      ← Packages d'installation
+├── landing/                        ← Page marketing
+├── templates/                      ← Templates HTML proto (LECTURE SEULE)
+└── tests/                          ← Tests unitaires
 ```
 
 ---
 
-## core/ — Modules partagés (réutilisables pour V1_gmail futur)
+## Racine — le proto
 
-```
-core/
-├── auth_base.py            ← Classe abstraite authentification
-├── ai_provider.py          ← Interface commune IA (Claude/OpenAI)
-├── claude_provider.py      ← Provider Claude (streaming, retry, caching)
-├── openai_provider.py      ← Provider OpenAI (alternatif)
-└── email_provider.py       ← Interface commune email
-```
+**Règle** : le proto est INTOUCHABLE (bêta-testeurs en production). Lecture seule depuis V2.
 
----
-
-## companion/ — Companion Windows (port 5051 HTTP, localhost)
-
-```
-companion/
-├── companion.py            ← Serveur Companion (COM, filesystem, Windows Search)
-└── popup_pyqt.py           ← Popup PyQt6 (always-on-top, écran accueil, dialog)
-```
-
----
-
-## extension/ — Extension Chrome/Edge pour Outlook Web
-
-```
-extension/
-├── manifest.json           ← Manifest extension navigateur
-├── content.js              ← Content script (overlay injecté dans Outlook Web)
-└── background.js           ← Service worker
-```
+| Fichier | Rôle |
+|---|---|
+| `app.py` | Backend Flask du proto (port 5050) — moteur IA complet |
+| `claude_ai.py` | Assemblage des blocs A→F du prompt WOW |
+| `outlook_com.py` | Accès COM Outlook (GetTable, AdvancedSearch, PropertyAccessor) |
+| `database.py` | Couche SQLite (9 tables, WAL, cache 8 Mo) — **rétrocompatible proto + V2** |
+| `templates_mail.py` | 45 templates fixes + système de templates appris |
+| `analyze_style.py` | Onboarding style (300 envoyés + 500 reçus) |
+| `boostermail.db` | DB du proto |
+| `config.json` | Clé API Anthropic — **JAMAIS COMMITER** |
+| `start.bat` | Lance le proto (port 5050) |
+| `style_profile.txt` | Profil style utilisateur (8 Ko, sections A/B/C) |
+| `prefetch_cache.json` | Cache prefetch persistant proto |
+| `prefetch_cache_v2.json` | Cache prefetch persistant V2 |
+| `boostermail_service.py` | Superviseur (relance V2 si crash) |
+| `boostermail_popup.py` | Popup desktop |
+| `boostermail_tray.py` | Icône système |
+| `addin_debug.log` | Logs du clic bouton Outlook (plugin) |
 
 ---
 
-## templates/ — Templates HTML du proto
+## `V2/` — plugin autonome (cible active)
 
-```
-templates/
-├── email_detail.html       ← LE TEMPLATE DE RÉFÉRENCE (dialog proto, 3629 lignes)
-├── inbox.html              ← Inbox proto
-└── ...                     ← Autres templates proto
-```
+**V2 est autonome depuis le 18/04/2026** : ses propres libs et sa propre DB. Plus aucune dépendance au proto pour les imports.
 
----
+### Backend + Auth
 
-## specs/ — Spécifications techniques (proto + moteur)
+| Fichier | Rôle |
+|---|---|
+| `V2/app_plugin.py` | Backend Flask V2 (port 3443 HTTPS) — 38 routes initiales + 9 routes Phase 3 |
+| `V2/auth_microsoft.py` | OAuth2 Microsoft (MSAL) + chiffrement Fernet en DB |
+| `V2/outlook_graph.py` | Graph API (lectures, envoi, dossiers, $batch parallèle) |
+| `V2/generate_cert.py` | Génération du certificat localhost HTTPS |
+| `V2/localhost.crt` + `V2/localhost.key` | Certificat auto-signé pour HTTPS localhost |
 
-```
-specs/
-├── SPEC_FONCTIONNALITES_PROTO.md     ← Fonctionnalités complètes du proto
-├── SPEC_SYSTEM_PROMPT.md             ← System prompt IA (3 phases, 8 priorités)
-├── SPEC_ROUTES_API.md                ← Routes API du proto
-├── SPEC_TABLES_DB.md                 ← Schéma base de données
-├── SPEC_OUTLOOK_COM.md               ← Interface Outlook COM (com_run, thread dédié)
-├── SPEC_PHASE2_RESUME.md             ← Résumé Phase 2 (architecture V1)
-├── HISTORIQUE_DECISIONS.md           ← Historique décisions techniques
-│
-├── SPEC_SCORING_REDACTIONNEL.md      → Voir aussi algorithme/
-├── SPEC_SMART_SPECULATIF.md          ← Speculative streaming
-├── SPEC_RECALIBRAGE_ADAPTATIF.md     ← Recalibrage auto (tous les 10/20/50 envois)
-├── SPEC_CONTACTS_ADAPTATIF.md        ← Profils contacts auto-learning
-├── SPEC_D2_FUSION_RECALIBRAGE.md     ← Fusion D2 + recalibrage
-├── SPEC_PREINJECTION.md              ← Pré-injection ouverture/clôture/signature
-├── SPEC_TEMPLATES.md                 ← Templates email (45 modèles)
-│
-├── SPEC_CLASSIFICATION_MAIL.md       ← Classement mail dans dossiers Outlook
-├── SPEC_CLASSIFICATION_PJ.md         ← Classement PJ (OneDrive, local, NAS)
-├── SPEC_CLASSIFICATION_ENRICHIE.md   ← Classement enrichi (hybride)
-├── SPEC_DOUBLON_CLASSEMENT.md        ← Détection doublons classement
-├── SPEC_CACHE_DOSSIERS.md            ← Cache dossiers Outlook
-│
-├── SPEC_ECHEANCES_OPTIMISATION.md    ← Échéances (scan, validation, popup)
-├── SPEC_RESCAN_CONDITIONNEL.md       ← Rescan conditionnel échéances
-├── SPEC_IMAGES_INLINE.md             ← Images inline (base64, CID)
-├── SPEC_OCR_LIMITE.md                ← OCR limites (PDF Vision, Word, Excel)
-├── SPEC_PRIORITES_15_16_17.md        ← Priorités moteur 15-17
-└── SPEC_PRIORITES_18_22.md           ← Priorités moteur 18-22
-```
+### Libs locales (autonomie V2)
 
----
+| Fichier | Rôle |
+|---|---|
+| `V2/database.py` | Copie locale de la DB layer (priorité via `sys.path`) |
+| `V2/claude_ai.py` | Copie locale du moteur IA |
+| `V2/templates_mail.py` | Copie locale des templates |
+| `V2/core/` | Copie locale du socle partagé (Claude/OpenAI providers) |
+| `V2/boostermail.db` | DB propre à V2 (21 settings migrés depuis proto) |
 
-## algorithme/ — Scoring rédactionnel
+### UI — socle commun (partagé par les 3 plateformes Outlook)
 
-```
-algorithme/
-└── SPEC_SCORING_REDACTIONNEL.md      ← Scoring 0-100, 5 axes, 10 niveaux N1-N10
-```
+| Fichier | Rôle |
+|---|---|
+| `V2/manifest.xml` | Manifest Office Add-in |
+| `V2/autorun.html` + `V2/autorunshared.js` | Point d'entrée Office.js (détection plateforme, debug logging) |
+| `V2/commands.html` + `V2/commands.js` | Commandes Outlook |
+| `V2/taskpane.html` + `V2/taskpane.js` | Taskpane (ouverture dialog) |
+| `V2/popup.html` + `V2/popup.js` | Popup d'activation / warmup |
+| `V2/dialog.html` + `V2/dialog.js` + `V2/dialog.css` | Dialog principal split-screen (mail reçu 30 % / éditeur 70 %) |
+| `V2/assets/` | Images, icônes, ressources |
+| `V2/mockups/` | Maquettes HTML (historique des versions d'UI v9-v14) |
+
+### Divers
+
+| Dossier | Rôle |
+|---|---|
+| `V2/extension/` | Extension Chrome (pour Outlook Web — P3) |
+| `V2/install/` | Package d'installation ZIP pour clients |
+| `V2/_deprecated_16avril/` | Code ancien conservé au cas où (à nettoyer) |
+| `V2/start_v2.bat` | Lance le backend V2 |
 
 ---
 
-## docs/ — Documentation (non-technique)
+## `companion/` — Companion COM (Windows)
+
+Processus local Windows qui fournit les opérations COM à V2 (New Outlook n'a pas de COM natif).
+
+| Fichier | Rôle |
+|---|---|
+| `companion/companion.py` | Backend Companion (port 5051 HTTP localhost) — 4 routes Phase 3 |
+| `companion/popup_pyqt.py` | Popup desktop PyQt6 (loading screen, warmup non-bloquant) |
+| `companion/launcher.ps1` | Script PowerShell de lancement |
+| `companion/dist/` | Exécutable compilé PyInstaller |
+
+---
+
+## `core/` — socle provider-agnostic
+
+**Règle** : le code dans `core/` doit rester indépendant du provider (pour préparer Gmail).
+
+| Fichier | Rôle |
+|---|---|
+| `core/ai_provider.py` | Interface abstraite + factory (Claude / OpenAI) |
+| `core/auth_base.py` | Base pour authentification OAuth |
+| `core/claude_provider.py` | Implémentation Claude (streaming SSE, retry, caching) |
+| `core/openai_provider.py` | Implémentation OpenAI (GPT-4o-mini, fallback) |
+| `core/email_provider.py` | Interface abstraite email (Outlook / Gmail futur) |
+
+---
+
+## `docs/` — toute la documentation consolidée
+
+**Règle** : tous les `.md` du projet sont regroupés dans `docs/` (sauf `CLAUDE.md` et `NOUVELLE_SESSION_V2.md` à la racine). Point d'entrée : `docs/SOMMAIRE_DETAILLE.md`.
 
 ```
 docs/
-├── schema_outlook.html               ← Schéma visuel architecture Outlook
+├── SOMMAIRE_DETAILLE.md        ← Index maître (obligatoire au démarrage)
+├── STRUCTURE_PROJET.md         ← CE FICHIER
+├── _TEMPLATE_NOUVEAU_DOC.md    ← Template pour tout nouveau doc
 │
-├── commercial/
-│   ├── EasyMail_Presentation_v2.docx ← Présentation commerciale
-│   ├── Analyse_Concurrentielle_EasyMail.docx
-│   ├── pricing_easymail_v2.docx      ← Grille tarifaire
-│   └── EasyMail_Tests_Report.docx    ← Rapport de tests
-│
-├── tests/
-│   ├── PLAN_DE_TESTS_EASYMAIL.md     ← Plan de tests complet
-│   ├── TESTS_SCENARIOS.md            ← Scénarios de base
-│   ├── TESTS_SCENARIOS_AVANCES.md    ← Scénarios avancés
-│   ├── TESTS_SCENARIOS_DIABOLIQUES.md ← Scénarios edge cases
-│   ├── TESTS_SCENARIOS_EXPERT.md     ← Scénarios expert (immobilier, finance)
-│   └── tests_comparatifs/            ← Benchmarks Claude vs GPT
-│
-├── audits/
-│   ├── RAPPORT_AUDIT_29_MARS_2026.md
-│   └── RAPPORT_AUDIT_COMPLEMENTAIRE_29_MARS_2026.md
-│
-└── sessions/
-    ├── SESSION_RECAP_20260323.md
-    └── SESSION_RECAP_20260325.md
+├── specs_proto/                ← 24 specs moteur IA + proto
+├── v2_specs/                   ← 11 specs V2 (Phase 2 Outlook)
+├── analyses_proto_v2/          ← 16 analyses comparatives proto vs V2
+├── algorithme/                 ← Scoring rédactionnel N1-N10
+├── plans/                      ← Plans d'action (1, 2, 3, GLOBAL)
+├── installation/               ← Onboarding + chatbot + admin deploy
+├── sessions/                   ← Bilans de sessions datés
+├── audits/                     ← Rapports d'audit dédiés
+├── tests/                      ← Plans et scénarios de tests
+├── commercial/                 ← Présentations, pricing, concurrentiel
+└── scripts_archive/            ← Scripts batch / génération (historique)
 ```
+
+Total : **67 fichiers `.md`** consolidés (18/04/2026).
+
+### Détail des sous-dossiers
+
+| Sous-dossier | Nombre de fichiers | Sujet |
+|---|---|---|
+| `specs_proto/` | 24 | Architecture proto, moteur IA, routes, DB, etc. |
+| `v2_specs/` | 11 | Specs du plugin V2 (Graph API, Auth, Dialog, Companion, UI) |
+| `analyses_proto_v2/` | 16 | Comparatifs proto/V2, plans de portage, 22 manques |
+| `plans/` | 4 | Plan 1 (doc), Plan 2 (flux), Plan 3 (caches), Plan Action Global |
+| `installation/` | 4 | Onboarding, chatbot, admin deploy, guide install |
+| `sessions/` | 5 | Bilans datés (10/04, 11/04, 13/04, 18/04) |
+| `audits/` | 2 | Rapports d'audit dédiés (29/03) |
+| `tests/` | 5+ | Plans de tests, scénarios, tests comparatifs GPT |
+| `commercial/` | 6 | Présentations, pricing, concurrentiel |
+| `scripts_archive/` | 9 | Scripts batch et générateurs historiques |
 
 ---
 
-## installer/ — Distribution
+## Dossiers divers
 
-```
-installer/
-├── EasyMail_Setup_V6.zip            ← Dernier installeur
-└── phase2_setup.py                  ← Script d'installation Phase 2
-```
-
----
-
-## landing/ — Page web
-
-```
-landing/
-└── index.html                       ← Landing page BoosterMail
-```
+| Dossier | Rôle |
+|---|---|
+| `extension/` | Source extension Chrome (partagée avec `V2/extension/`) |
+| `installer/` | Paquets d'installation globaux |
+| `landing/` | Page web marketing |
+| `templates/` | Templates HTML du proto (`email_detail.html`) — **LECTURE SEULE** |
+| `tests/` | Tests unitaires Python |
+| `__pycache__/` | Cache Python (ignore) |
 
 ---
 
-## backup/ — Sauvegardes historiques (conservées)
+## Fichiers racine — logs et caches
 
-```
-backup/
-├── easymail_backup_20260316_122008/
-├── easymail_backup_20260316_182029/
-├── easymail_backup_20260316_204950/
-├── easymail_backup_20260316_204951/
-├── easymail_backup_IMPORTANT_20260318_211238/
-├── easymail_backup_POST_AUDIT_20260318_222216/
-├── easymail_backup_ALL_FIXES_FINAL_20260318_223950/
-├── easymail_backup_CLEAN_CODE_20260319_222040/
-└── easymail_backup_STREAMING_OPTIM_20260321_214731/
-```
+| Fichier | Rôle |
+|---|---|
+| `boostermail.log` | Logs du proto |
+| `addin_debug.log` | Logs du clic bouton Outlook (écrits par `V2/autorunshared.js`) |
+| `prefetch_cache.json` | Cache prefetch persistant proto (TTL 48 h) |
+| `prefetch_cache_v2.json` | Cache prefetch persistant V2 |
+| `drafts_v2.json` | Cache brouillons V2 |
+| `pyqt_dialog.log` | Logs popup PyQt |
+| `.boostermail.launch` | Marqueur de lancement (superviseur) |
+| `.boostermail.pid` | PID du processus actif |
 
 ---
 
-## corbeille/ — Fichiers obsolètes (conservés, ne pas lire)
+## Dossiers externes importants
 
-```
-corbeille/
-├── V1_plugin/               ← Ancien dossier V1 (remplacé par V1_outlook)
-├── db_orphelins/            ← Fichiers .db-shm/.db-wal orphelins
-├── docs_anciens/            ← Presentation V1, pricing V1, Git.docx, install.bat...
-├── scripts_generation/      ← Scripts one-shot (generate_*.py, pricing_gen.js)
-├── setup_zip_anciens/       ← Setup V1→V5 + dossier V3 décompressé
-└── v1_outlook_anciens/      ← dialog_phase2, manifest_phase3, taskpane_legacy...
-```
+| Dossier | Rôle |
+|---|---|
+| `C:\EasyMail_backups\` | Backups datés (6 jalons nommés + releases) |
+| `C:\Users\yvanb\.claude\projects\C--EasyMail\memory\` | Mémoire persistante Claude Code (`MEMORY.md`) |
+
+---
+
+## Règles absolues sur la structure
+
+1. **Proto = LECTURE SEULE** — `app.py`, `claude_ai.py`, `outlook_com.py` ne se modifient pas sauf urgence auditée
+2. **V2 autonome** — les libs V2 sont dans `V2/*.py` et `V2/core/`, jamais dans la racine
+3. **Doc dans `docs/`** — tout nouveau `.md` va dans `docs/<sous-dossier>/`, jamais à la racine (sauf `CLAUDE.md` / `NOUVELLE_SESSION_V2.md`)
+4. **Point d'entrée doc** — `docs/SOMMAIRE_DETAILLE.md` référence TOUS les docs ; le consulter avant toute recherche
+5. **Config jamais committée** — `config.json` contient la clé API, listé dans `.gitignore`
+
+---
+
+## Pour aller plus loin
+
+- **Règles de projet** : `CLAUDE.md`
+- **Démarrage session** : `NOUVELLE_SESSION_V2.md`
+- **Index doc** : `docs/SOMMAIRE_DETAILLE.md`
+- **Règles de maintenance doc** (M1-M4) : section dédiée de `CLAUDE.md`

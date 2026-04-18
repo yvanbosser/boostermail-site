@@ -5,7 +5,7 @@
 >
 > **Pour l'état courant (post 18/04)**, voir :
 > - `CLAUDE.md` — architecture + décisions récentes
-> - `docs/v1_outlook_specs/TODO_SESSION_SUIVANTE.md` — état des flux
+> - `docs/v2_specs/TODO_SESSION_SUIVANTE.md` — état des flux
 > - `docs/analyses_proto_v2/V2_vs_PROTO_GAPS.md` — 22 manques identifiés
 >
 > **Évolutions depuis le 17/04** (non reflétées dans ce document) :

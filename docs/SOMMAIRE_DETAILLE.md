@@ -29,8 +29,8 @@
 En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux docs ont la même date ou pas de date) :
 
 - `CLAUDE.md` (source de vérité actuelle)
-- `NOUVELLE_SESSION.md` → section « DÉCISIONS STRATÉGIQUES »
-- `docs/v1_outlook_specs/TODO_SESSION_SUIVANTE.md` (état courant)
+- `NOUVELLE_SESSION_V2.md` → section « DÉCISIONS STRATÉGIQUES »
+- `docs/v2_specs/TODO_SESSION_SUIVANTE.md` (état courant)
 - `docs/sessions/` les plus récents (bilans datés)
 - `docs/specs_proto/HISTORIQUE_DECISIONS.md` (timeline décisions)
 - Les specs thématiques (seulement si cohérentes avec ce qui précède)
@@ -52,23 +52,23 @@ Ces docs portent un bandeau **⚠️ DOCUMENT PÉRIMÉ/HISTORIQUE** en en-tête 
 
 | Doc | Type | Raison |
 |---|---|---|
-| `docs/v1_outlook_specs/PLAN_ACTION_PHASE_2.md` | Historique figé | Bilan Phase 2 terminée 07/04 |
+| `docs/v2_specs/PLAN_ACTION_PHASE_2.md` | Historique figé | Bilan Phase 2 terminée 07/04 |
 | `docs/specs_proto/SPEC_PHASE2_RESUME.md` | Historique figé | Résumé Phase 2 terminée 07/04 |
-| `docs/v1_outlook_specs/SPEC_PHASE2_DECISIONS.md` | Périmé partiel | taskpane pinable, Mode Standard, V1_outlook |
-| `docs/v1_outlook_specs/SPEC_PHASE2_DIALOG.md` | Périmé partiel | taskpane pinable, Mode Standard |
-| `docs/v1_outlook_specs/SPEC_PHASE2_GRAPH.md` | Périmé léger | V1_outlook, Mode Standard (API Graph reste OK) |
+| `docs/v2_specs/SPEC_PHASE2_DECISIONS.md` | Périmé partiel | taskpane pinable, Mode Standard, V1_outlook |
+| `docs/v2_specs/SPEC_PHASE2_DIALOG.md` | Périmé partiel | taskpane pinable, Mode Standard |
+| `docs/v2_specs/SPEC_PHASE2_GRAPH.md` | Périmé léger | V1_outlook, Mode Standard (API Graph reste OK) |
 | `docs/STRUCTURE_PROJET.md` | Périmé | Chemins V1_outlook/ obsolètes |
 
 **En attente de décision utilisateur** sur 3 docs NIVEAU 1 qui mentionnent aussi du vocabulaire périmé (option : bandeau + retirer NIVEAU 1, ou updater le contenu) :
-- `docs/v1_outlook_specs/TODO_SESSION_SUIVANTE.md`
-- `docs/v1_outlook_specs/PLAN_FINALISATION_OUTLOOK.md`
-- `docs/v1_outlook_specs/PLAN_ACTION_PHASE_3.md`
+- `docs/v2_specs/TODO_SESSION_SUIVANTE.md`
+- `docs/v2_specs/PLAN_FINALISATION_OUTLOOK.md`
+- `docs/v2_specs/PLAN_ACTION_PHASE_3.md`
 
 ---
 
 ## Organisation physique
 
-Toute la documentation est désormais regroupée dans `docs/` (hors `CLAUDE.md` et `NOUVELLE_SESSION.md` qui restent à la racine).
+Toute la documentation est désormais regroupée dans `docs/` (hors `CLAUDE.md` et `NOUVELLE_SESSION_V2.md` qui restent à la racine).
 
 ```
 docs/
@@ -77,7 +77,7 @@ docs/
 │
 ├── specs_proto/               ← 24 specs moteur IA + proto (ex-specs/)
 ├── algorithme/                ← Scoring rédactionnel (ex-algorithme/)
-├── v1_outlook_specs/          ← 11 specs Phase 2 V1/V2 (ex-V1_outlook/*.md)
+├── v2_specs/          ← 11 specs Phase 2 V1/V2 (ex-V1_outlook/*.md)
 ├── analyses_proto_v2/         ← 16 analyses comparatives proto vs V2
 ├── plans/                     ← Plans d'action
 ├── installation/              ← Onboarding + chatbot + admin deploy
@@ -98,9 +98,9 @@ docs/
 |---|---|
 | **Architecture globale, où est quoi** | `docs/STRUCTURE_PROJET.md` |
 | **Règles de projet, contraintes** | `CLAUDE.md` (racine) |
-| **Ce qu'il faut faire cette session** | `docs/v1_outlook_specs/TODO_SESSION_SUIVANTE.md` |
+| **Ce qu'il faut faire cette session** | `docs/v2_specs/TODO_SESSION_SUIVANTE.md` |
 | **Pourquoi tel choix a été fait** | `docs/specs_proto/HISTORIQUE_DECISIONS.md` |
-| **État d'un flux / avancement** | `docs/v1_outlook_specs/PLAN_FINALISATION_OUTLOOK.md` |
+| **État d'un flux / avancement** | `docs/v2_specs/PLAN_FINALISATION_OUTLOOK.md` |
 | **Le moteur IA, système prompt** | `docs/specs_proto/SPEC_SYSTEM_PROMPT.md` |
 | **Fonctionnalité du proto (27 modules)** | `docs/specs_proto/SPEC_FONCTIONNALITES_PROTO.md` |
 | **Routes API du backend** | `docs/specs_proto/SPEC_ROUTES_API.md` |
@@ -120,7 +120,7 @@ docs/
 | Fichier | Rôle | À ouvrir quand |
 |---|---|---|
 | `CLAUDE.md` | Règles absolues, architecture, conventions, historique résumé | **Début de chaque session** |
-| `NOUVELLE_SESSION.md` | Guide de démarrage Claude (niveaux 1-4, méthode de travail) | **Début de chaque session** |
+| `NOUVELLE_SESSION_V2.md` | Guide de démarrage Claude (niveaux 1-4, méthode de travail) | **Début de chaque session** |
 
 ---
 
@@ -175,7 +175,7 @@ docs/
 
 ---
 
-### E. Specs V1/V2 Outlook (`docs/v1_outlook_specs/` — 11 fichiers)
+### E. Specs V1/V2 Outlook (`docs/v2_specs/` — 11 fichiers)
 
 **Architecture du plugin Outlook — Phase 2 complète.**
 
@@ -305,13 +305,13 @@ docs/
 │ Démarrage de session                 │
 └──────────────┬───────────────────────┘
                ▼
-   Lire : CLAUDE.md + NOUVELLE_SESSION.md
+   Lire : CLAUDE.md + NOUVELLE_SESSION_V2.md
                │
                ▼
    Lire : docs/SOMMAIRE_DETAILLE.md  ← CE FICHIER
                │
                ▼
-   Lire : docs/v1_outlook_specs/TODO_SESSION_SUIVANTE.md
+   Lire : docs/v2_specs/TODO_SESSION_SUIVANTE.md
                │
                ▼
 ┌──────────────────────────────────────┐
@@ -324,7 +324,7 @@ docs/
 │  → docs/analyses_proto_v2/V2_vs_PROTO│
 │                                      │
 │ Auth / Graph / Companion             │
-│  → docs/v1_outlook_specs/SPEC_PHASE2 │
+│  → docs/v2_specs/SPEC_PHASE2 │
 │                                      │
 │ Scoring / niveaux                    │
 │  → docs/algorithme/SPEC_SCORING…     │
@@ -341,7 +341,7 @@ docs/
 1. **Mettre à jour ce sommaire** à chaque ajout/déplacement de doc.
 2. **Ne pas dupliquer le contenu** — le sommaire pointe, il ne résume pas tout.
 3. **Un doc = un emplacement** — si ambigu, mettre dans la catégorie la plus forte et créer un renvoi.
-4. **Garder CLAUDE.md et NOUVELLE_SESSION.md à la racine** — ce sont les points d'entrée obligatoires.
+4. **Garder CLAUDE.md et NOUVELLE_SESSION_V2.md à la racine** — ce sont les points d'entrée obligatoires.
 
 ---
 
