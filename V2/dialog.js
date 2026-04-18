@@ -867,6 +867,9 @@ function _fetchGenerateReply(body) {
         var reader = response.body.getReader();
         var decoder = new TextDecoder();
         var _lineBuffer = ''; // Buffer anti-fragmentation : une ligne SSE peut être coupée par TCP
+        // Tracker le texte brut streamé (les \n sont perdus dans editor.textContent
+        // une fois insérés via insertAdjacentText dans un contenteditable).
+        window._streamedText = '';
 
         function read() {
             reader.read().then(function(result) {
@@ -875,7 +878,10 @@ function _fetchGenerateReply(body) {
                     if (_lineBuffer.startsWith('data: ')) {
                         try {
                             var last = JSON.parse(_lineBuffer.substring(6));
-                            if (last.chunk) editor.insertAdjacentText('beforeend', last.chunk);
+                            if (last.chunk) {
+                                editor.insertAdjacentText('beforeend', last.chunk);
+                                window._streamedText += last.chunk;
+                            }
                         } catch(e) {}
                     }
                     _onGenerationDone();
@@ -893,6 +899,7 @@ function _fetchGenerateReply(body) {
                                 spinner.classList.remove('active');
                                 document.getElementById('headerStatus').textContent = 'Generation en cours...';
                                 editor.insertAdjacentText('beforeend', data.chunk); /* #20 : pas de re-parse HTML */
+                                window._streamedText += data.chunk;
                             }
                             if (data.done) {
                                 _onGenerationDone();
@@ -930,12 +937,12 @@ function _onGenerationDone() {
     var elapsed = _sendStartTime ? ((Date.now() - _sendStartTime) / 1000).toFixed(1) : '?';
     document.getElementById('headerStatus').textContent = 'Reponse prete \u2022 ' + elapsed + 's';
 
-    // Convertir le texte brut en paragraphes pour une mise en page propre.
-    // IMPORTANT : textContent en priorité (préserve les \n bruts) — innerText
-    // normalise les whitespaces en respectant le rendu CSS, ce qui peut perdre
-    // les \n malgré white-space: pre-wrap.
+    // Convertir le texte brut streamé en paragraphes pour une mise en page propre.
+    // IMPORTANT : on utilise window._streamedText (accumulé pendant le streaming)
+    // plutôt que editor.textContent/innerText, car le contenteditable Chromium
+    // perd les \n malgré white-space: pre-wrap.
     var editor = document.getElementById('editor');
-    var raw = editor.textContent || editor.innerText || '';
+    var raw = window._streamedText || '';
     if (raw && !editor.querySelector('p')) {
         // Le contenu est du texte brut (pas de <p>) — le structurer
         var paragraphs = raw.split(/\n\n+/).map(function(p) {
