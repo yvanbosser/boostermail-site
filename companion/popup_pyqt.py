@@ -517,16 +517,12 @@ def main():
     app.setOrganizationName('BoosterMail')
     app.setStyle('Fusion')
 
-    # Purger le cache WebEngine PyQt à chaque lancement pour garantir
-    # que le dernier dialog.html/js/css est chargé (évite les décalages après
-    # modification du code plugin). Backend V2 sert déjà Cache-Control: no-cache
-    # mais le profil par défaut persiste quand même certains assets entre sessions.
-    _profile = QWebEngineProfile.defaultProfile()
+    # Purger uniquement le cache HTTP au démarrage (ressources JS/CSS/HTML obsolètes).
+    # NE PAS utiliser NoCache : ça casse la session SSL du certificat auto-signé
+    # localhost (observé : handshake failed, dialog blanc).
     try:
-        _profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.NoCache)
-        _profile.clearHttpCache()
-        _profile.clearAllVisitedLinks()
-        logger.info("WebEngine cache purge (NoCache + clearHttpCache)")
+        QWebEngineProfile.defaultProfile().clearHttpCache()
+        logger.info("WebEngine HTTP cache purged")
     except Exception as _e:
         logger.debug(f"WebEngine cache purge failed: {_e}")
 
