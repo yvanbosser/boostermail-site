@@ -504,6 +504,22 @@ def api_warmup_progress():
         return jsonify(dict(_warmup_progress))
 
 
+@app.route('/api/warmup_status', methods=['GET'])
+def api_warmup_status():
+    """
+    Alias compact du proto — retourne {done, step, current, total}.
+    Utilise par la popup marketing warmup (inbox.html / popup.html)
+    pour bloquer l'UI tant que le warmup n'est pas termine.
+    """
+    with _warmup_lock:
+        return jsonify({
+            "done": _warmup_done,
+            "step": _warmup_progress.get('current_subject', ''),
+            "current": _warmup_progress.get('loaded', 0),
+            "total": _warmup_progress.get('total', 0),
+        })
+
+
 # =============================================================================
 # ROUTES API — EVENT-BASED (alimentation popup PyQt / extension)
 # Phase 3 — 65 points résolus, 15 audits
@@ -519,6 +535,97 @@ _current_compose_data = {}
 # Prefetch cache (contexte A+B+C + speculative)
 _prefetch_cache = {}
 _prefetch_lock = threading.Lock()
+
+# Cache prefetch persistant (fichier JSON) — portage proto
+# Sauvegarde à la fermeture, rechargement au démarrage. TTL 48h.
+_PREFETCH_CACHE_PATH = os.path.join(EASYMAIL_DIR, 'prefetch_cache_v2.json')
+_PREFETCH_CACHE_TTL = 48 * 3600  # 48h en secondes
+
+def _save_prefetch_cache(inbox_ids=None):
+    """Sauvegarde le _prefetch_cache V2 sur disque (JSON).
+    Appelé atexit et après warmup. Si inbox_ids fourni, ne sauve que les mails présents."""
+    try:
+        with _prefetch_lock:
+            to_save = {}
+            for key, val in _prefetch_cache.items():
+                if not isinstance(val, dict) or val.get('status') != 'done':
+                    continue
+                # Filtrage inbox (si fourni)
+                if inbox_ids is not None and key not in inbox_ids:
+                    continue
+                # Ne garder que les champs essentiels + TTL
+                clean = {'status': 'done', 'timestamp': val.get('timestamp', time.time())}
+                for ctx_key in ('context_a', 'context_b', 'context_c', 'contact_profile', 'conversation_id'):
+                    if val.get(ctx_key):
+                        clean[ctx_key] = val[ctx_key]
+                if clean.get('context_a') or clean.get('context_b') or clean.get('context_c'):
+                    to_save[key] = clean
+        if to_save:
+            def _clean_for_json(obj):
+                if isinstance(obj, dict):
+                    return {k: _clean_for_json(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [_clean_for_json(i) for i in obj if isinstance(i, (dict, str, int, float, bool, type(None)))]
+                elif isinstance(obj, (str, int, float, bool, type(None))):
+                    return obj
+                else:
+                    return str(obj)
+            with open(_PREFETCH_CACHE_PATH, 'w', encoding='utf-8') as f:
+                json.dump(_clean_for_json(to_save), f, ensure_ascii=False)
+            logger.info(f"[cache] Prefetch V2 sauvegardé : {len(to_save)} entrées "
+                        f"({os.path.getsize(_PREFETCH_CACHE_PATH)//1024}KB)")
+    except Exception as e:
+        logger.warning(f"[cache] Erreur sauvegarde prefetch V2 : {e}")
+
+def _load_prefetch_cache():
+    """Charge le _prefetch_cache depuis disque. Appelé au démarrage.
+    Ignore les entrées dont le timestamp est > TTL (48h)."""
+    try:
+        if not os.path.exists(_PREFETCH_CACHE_PATH):
+            return 0
+        with open(_PREFETCH_CACHE_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        now = time.time()
+        loaded = 0
+        skipped = 0
+        with _prefetch_lock:
+            for key, val in data.items():
+                if not isinstance(val, dict):
+                    skipped += 1
+                    continue
+                # TTL : ignorer les entrées trop anciennes
+                if now - val.get('timestamp', 0) > _PREFETCH_CACHE_TTL:
+                    skipped += 1
+                    continue
+                if key in _prefetch_cache:
+                    skipped += 1
+                    continue
+                cleaned = {'status': val.get('status', 'done'),
+                           'timestamp': val.get('timestamp', now)}
+                for ctx_key in ('context_a', 'context_b', 'context_c', 'contact_profile', 'conversation_id'):
+                    items = val.get(ctx_key)
+                    if ctx_key in ('context_a', 'context_b', 'context_c'):
+                        cleaned[ctx_key] = [m for m in (items or []) if isinstance(m, dict)]
+                    elif items:
+                        cleaned[ctx_key] = items
+                if cleaned.get('context_a') or cleaned.get('context_b') or cleaned.get('context_c'):
+                    _prefetch_cache[key] = cleaned
+                    loaded += 1
+                else:
+                    skipped += 1
+        logger.info(f"[cache] Prefetch V2 chargé depuis disque : {loaded} entrées ({skipped} ignorées)")
+        return loaded
+    except Exception as e:
+        logger.warning(f"[cache] Erreur chargement prefetch V2 : {e}")
+        try:
+            os.remove(_PREFETCH_CACHE_PATH)
+        except Exception:
+            pass
+        return 0
+
+import atexit
+atexit.register(_save_prefetch_cache)
+
 # Cache des réponses préemptives (contacts connus, top 5 récents)
 _preemptive_cache = {}                 # {message_id: {chunks, text, timestamp}}
 _preemptive_lock = threading.Lock()
@@ -4760,6 +4867,7 @@ if __name__ == '__main__':
     print(f"  Proto (beta-testeurs) sur http://localhost:5050 — NON AFFECTE")
     print(f"{'='*60}\n")
 
+    _load_prefetch_cache()  # Phase 1.4 : recharge cache prefetch persistant (48h TTL)
     _auto_trigger_warmup()  # Fix #5 : warmup automatique 3s après démarrage
     threading.Thread(target=_check_git_updates, daemon=True).start()  # MAJ auto Git
 
