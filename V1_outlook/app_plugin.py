@@ -440,14 +440,16 @@ def _execute_warmup(graph):
 
 # Phase 1.5 : Event pour interrompre le préchargement BG quand l'utilisateur
 # interagit activement (clique un mail). Reset après 30s d'inactivité.
-_preload_pause = threading.Event()  # set = préchargement pausé
-_preload_last_activity = [0.0]      # timestamp dernière activité utilisateur
+_preload_pause = threading.Event()        # set = préchargement pausé
+_preload_last_activity = [0.0]            # timestamp dernière activité utilisateur
+_preload_activity_lock = threading.Lock() # Audit : protège _preload_last_activity[0]
 
 
 def _signal_user_activity():
     """Signale qu'une activité utilisateur interactive vient d'avoir lieu
     (ex: /generate_reply appelé). Met en pause le préchargement BG 30s."""
-    _preload_last_activity[0] = time.time()
+    with _preload_activity_lock:
+        _preload_last_activity[0] = time.time()
     _preload_pause.set()
 
 
@@ -520,8 +522,11 @@ def _background_preload_loop():
         for msg in mails:
             # Interruption : attendre si l'utilisateur est actif
             while _preload_pause.is_set():
+                # Lire le timestamp sous lock
+                with _preload_activity_lock:
+                    _elapsed = time.time() - _preload_last_activity[0]
                 # Reset automatique après 30s d'inactivité
-                if time.time() - _preload_last_activity[0] > 30:
+                if _elapsed > 30:
                     _preload_pause.clear()
                     break
                 time.sleep(2)
@@ -1271,6 +1276,9 @@ def _normalize_context_item(m, correspondent_email='', my_email=''):
         'from_email': m.get('from_email', ''),
         'date': m.get('date', ''),
         'direction': direction,
+        # Préserver id Graph + internet_message_id pour dédup fiable (Audit fix)
+        'id': m.get('id', ''),
+        'internet_message_id': m.get('internet_message_id', ''),
     }
 
 
@@ -1282,12 +1290,33 @@ def _normalize_context_a(items, correspondent_email='', my_email=''):
 
 def _item_key(m):
     """Phase 2.6 — Clé quasi-unique pour dédup d'items contexte.
-    (subject + from_email + premiers 40 chars date) — suffit à identifier les doublons Graph."""
+
+    Priorité : id Graph (unique garanti) > internet_message_id > fallback tuple.
+    Le fallback utilise la date COMPLÈTE (pas tronquée) pour éviter les collisions
+    entre mails reçus à la même seconde.
+    """
+    if m.get('id'):
+        return ('id', m['id'])
+    if m.get('internet_message_id'):
+        return ('mid', m['internet_message_id'])
     return (
+        'fb',
         (m.get('subject') or '').strip().lower()[:80],
         (m.get('from_email') or '').strip().lower(),
-        (m.get('date') or '')[:19],  # "2026-04-18T10:30:00"
+        (m.get('date') or ''),  # Date complète, pas tronquée
     )
+
+
+def _dedup_list(items):
+    """Helper lisible pour dédup préservant l'ordre d'apparition (équivalent à dict.fromkeys)."""
+    seen = set()
+    out = []
+    for m in items:
+        k = _item_key(m)
+        if k not in seen:
+            seen.add(k)
+            out.append(m)
+    return out
 
 
 def _dedup_and_truncate_contexts(context_a, context_b, context_c):
@@ -1295,45 +1324,49 @@ def _dedup_and_truncate_contexts(context_a, context_b, context_c):
     Phase 2.6 + 2.8 — Dédup A/B/C et troncature 6 mois.
 
     Priorité de conservation : A > B > C (si un mail est dans A, on le retire de B et C).
-    Troncature : mails > 180 jours → body_snippet tronqué à 200 chars (gardent du contexte
-    sans saturer la fenêtre prompt).
+    Troncature : mails > 180 jours → body_snippet tronqué à 200 chars.
 
-    Retourne (context_a, context_b, context_c) nettoyés.
+    ⚠️ Les items en entrée peuvent venir du _prefetch_cache (par référence).
+    Pour éviter de CORROMPRE le cache via mutations en place, on fait une copie
+    défensive de chaque item avant toute modification.
     """
     def _truncate_old(items, threshold_days=180, max_chars=200):
-        try:
-            now = datetime.now()
-            for m in items:
-                d = m.get('date', '')
-                if not d:
-                    continue
+        """Retourne une nouvelle liste avec des copies d'items (pas de mutation in-place)."""
+        result = []
+        now = datetime.now()
+        for m in items:
+            # Copie défensive — protège le cache d'origine
+            m_copy = dict(m)
+            d = m_copy.get('date', '')
+            if d:
                 try:
-                    # Supporter formats ISO avec ou sans microsecondes/timezone
-                    d_clean = d[:19]  # "2026-04-18T10:30:00"
+                    # Supporter formats ISO avec Z, microsecondes, etc. :
+                    # "2026-04-18T10:30:00.1234567Z" → "2026-04-18T10:30:00"
+                    d_clean = d.split('.')[0].replace('Z', '')[:19]
+                    if 'T' not in d_clean and len(d_clean) >= 10:
+                        d_clean = d_clean[:10] + 'T00:00:00'
                     dt = datetime.strptime(d_clean, '%Y-%m-%dT%H:%M:%S')
                     age_days = (now - dt).days
                     if age_days > threshold_days:
-                        if m.get('body_snippet') and len(m['body_snippet']) > max_chars:
-                            m['body_snippet'] = m['body_snippet'][:max_chars] + '...'
-                        if m.get('body') and len(m['body']) > max_chars:
-                            m['body'] = m['body'][:max_chars] + '...'
+                        bs = m_copy.get('body_snippet', '') or ''
+                        if len(bs) > max_chars:
+                            m_copy['body_snippet'] = bs[:max_chars] + '...'
+                        bd = m_copy.get('body', '') or ''
+                        if len(bd) > max_chars:
+                            m_copy['body'] = bd[:max_chars] + '...'
                 except Exception:
                     pass
-        except Exception:
-            pass
-        return items
+            result.append(m_copy)
+        return result
 
     a = list(context_a or [])
     b = list(context_b or [])
     c = list(context_c or [])
 
     # Étape 1 : dédup interne par liste (au cas où)
-    seen_a = set()
-    a = [m for m in a if not (_item_key(m) in seen_a or seen_a.add(_item_key(m)))]
-    seen_b = set()
-    b = [m for m in b if not (_item_key(m) in seen_b or seen_b.add(_item_key(m)))]
-    seen_c = set()
-    c = [m for m in c if not (_item_key(m) in seen_c or seen_c.add(_item_key(m)))]
+    a = _dedup_list(a)
+    b = _dedup_list(b)
+    c = _dedup_list(c)
 
     # Étape 2 : priorité A > B > C
     a_keys = set(_item_key(m) for m in a)
@@ -1342,7 +1375,7 @@ def _dedup_and_truncate_contexts(context_a, context_b, context_c):
     ab_keys = a_keys | b_keys
     c = [m for m in c if _item_key(m) not in ab_keys]
 
-    # Étape 3 : troncature 6 mois
+    # Étape 3 : troncature 6 mois (avec copies défensives — ne corrompt pas le cache)
     a = _truncate_old(a)
     b = _truncate_old(b)
     c = _truncate_old(c)
@@ -1356,25 +1389,38 @@ def _normalize_context_b(items, correspondent_email='', my_email=''):
     return [_normalize_context_item(m, correspondent_email, my_email) for m in (items or [])]
 
 
-def _normalize_context_c(items, source='unknown'):
+def _normalize_context_c(items, source='unknown', correspondent_email='', my_email=''):
     """
     Normalise les items contexte C au format attendu par _build_prompt() :
     {body_snippet, from_name, date, subject, direction}
 
-    _build_prompt() utilise m['direction'] sans .get() → KeyError si absent.
-    body_snippet est lu directement → champ vide si absent.
-    Les mails du contexte C sont toujours reçus (inbox).
+    Contexte C = recherche par sujet → peut contenir des mails envoyés ET reçus.
+    La direction est déduite via my_email et correspondent_email si dispo.
+    Fallback 'received' si indéterminable.
     """
     normalized = []
+    my_lower = (my_email or '').lower()
+    corr_lower = (correspondent_email or '').lower()
     for m in items:
+        body_snippet = m.get('body_snippet') or m.get('body_preview') or m.get('body', '')
+        from_email = (m.get('from_email') or '').strip().lower()
+        # Déterminer direction
+        if my_lower and from_email == my_lower:
+            direction = 'sent'
+        elif corr_lower and from_email == corr_lower:
+            direction = 'received'
+        else:
+            direction = 'received'  # fallback
         normalized.append({
             'subject':      m.get('subject', ''),
-            'body_snippet': m.get('body_snippet') or m.get('body_preview') or m.get('body', ''),
-            'body':         m.get('body_snippet') or m.get('body_preview') or m.get('body', ''),
+            'body_snippet': body_snippet,
+            'body':         body_snippet,
             'from_name':    m.get('from_name') or m.get('from_email', '').split('@')[0],
             'from_email':   m.get('from_email', ''),
             'date':         m.get('date', ''),
-            'direction':    'received',   # contexte C = inbox = toujours reçu
+            'direction':    direction,
+            # Préserver id Graph pour dédup (Audit fix)
+            'id':           m.get('id', ''),
         })
     return normalized
 
@@ -2373,8 +2419,15 @@ def api_extract_attachments(entry_id):
     indices = data.get('indices', None)
     print(f"[extract] Demande extraction indices={indices}", flush=True)
 
-    # Cache pre-extraction (background)
-    _cached_pj = _pj_text_cache.get(entry_id)
+    # Cache pre-extraction (background) — protégé par lock (Audit)
+    with _pj_text_cache_lock:
+        _cached_pj = _pj_text_cache.get(entry_id)
+        # Copie défensive immédiate pour éviter mutation concurrente pendant l'usage
+        if _cached_pj:
+            _cached_pj = {
+                'status': _cached_pj.get('status'),
+                'results': list(_cached_pj.get('results', [])),
+            }
     if _cached_pj and _cached_pj.get('status') == 'done' and _cached_pj.get('results'):
         if indices is not None and len(indices) == 1:
             idx = indices[0]
@@ -3083,6 +3136,7 @@ def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids
 
 # --- PJ extraction & upload ---------------------------------------------------
 _pj_text_cache = {}        # email_id → {'status': 'running'|'done', 'results': [...], 'ts': float}
+_pj_text_cache_lock = threading.Lock()   # Audit : protège _pj_text_cache (race condition BG vs main)
 _PDF_EXTS = {'.pdf'}
 _MAX_PRE_OCR_PDFS = 3      # Max 3 PDF pré-extraits par mail (limite coût + temps)
 _MAX_PJ_TEXT_CACHE = 30    # Limite taille cache
@@ -3099,15 +3153,22 @@ def _start_pj_pre_extract_v2(message_id, attachments=None):
     """
     if not message_id:
         return
-    # Skip si déjà en cache
-    existing = _pj_text_cache.get(message_id)
-    if existing and existing.get('status') in ('running', 'done'):
-        return
+    # Skip + réservation de slot 'running' ATOMIQUE (protège du double-lancement)
+    with _pj_text_cache_lock:
+        existing = _pj_text_cache.get(message_id)
+        if existing and existing.get('status') in ('running', 'done'):
+            return
+        # Réserver le slot running immédiatement sous lock (anti TOCTOU)
+        _trim_dict_cache(_pj_text_cache, _MAX_PJ_TEXT_CACHE)
+        entry = {'status': 'running', 'results': [], 'ts': time.time()}
+        _pj_text_cache[message_id] = entry
 
     def _bg_extract():
         try:
             graph = get_graph()
             if not graph:
+                with _pj_text_cache_lock:
+                    entry['status'] = 'done'  # Pas d'erreur : juste pas de token
                 return
             # Récupérer les PJ si pas fournies
             atts = attachments
@@ -3115,8 +3176,12 @@ def _start_pj_pre_extract_v2(message_id, attachments=None):
                 try:
                     atts = graph.get_attachments(message_id)
                 except Exception:
+                    with _pj_text_cache_lock:
+                        entry['status'] = 'error'
                     return
             if not atts:
+                with _pj_text_cache_lock:
+                    entry['status'] = 'done'
                 return
             # Filtrer PDF non-inline
             pdf_atts = []
@@ -3129,12 +3194,9 @@ def _start_pj_pre_extract_v2(message_id, attachments=None):
                 if len(pdf_atts) >= _MAX_PRE_OCR_PDFS:
                     break
             if not pdf_atts:
+                with _pj_text_cache_lock:
+                    entry['status'] = 'done'
                 return
-
-            # Trim cache + marquer running
-            _trim_dict_cache(_pj_text_cache, _MAX_PJ_TEXT_CACHE)
-            entry = {'status': 'running', 'results': [], 'ts': time.time()}
-            _pj_text_cache[message_id] = entry
 
             # Extraire chaque PDF via Graph + PyPDF2
             for idx, att in pdf_atts:
@@ -3146,9 +3208,11 @@ def _start_pj_pre_extract_v2(message_id, attachments=None):
                     content_bytes = graph.get_attachment_content(message_id, att_id)
                     if not content_bytes:
                         continue
-                    # Écrire en temp pour PyPDF2
+                    # Sanitize le message_id pour un chemin de fichier valide Windows
+                    # (caractères réservés : < > : " / \ | ? *)
+                    _safe_id = re.sub(r'[<>:"/\\|?*]', '_', message_id[:20])
                     tmp_path = os.path.join(tempfile.gettempdir(),
-                                            f'bm_pj_{message_id[:20].replace("<","").replace(">","")}_{idx}.pdf')
+                                            f'bm_pj_{_safe_id}_{idx}.pdf')
                     try:
                         with open(tmp_path, 'wb') as f:
                             f.write(content_bytes)
@@ -3164,9 +3228,9 @@ def _start_pj_pre_extract_v2(message_id, attachments=None):
                         # Fallback OCR Claude si < 50 chars (PDF scanné)
                         if len(text.strip()) < 50:
                             logger.info(f"[pj_pre_v2] PDF scanné {name}, fallback OCR désactivé en V2 (TODO)")
-                            # Note : OCR via Claude Vision à implémenter si besoin commercial
                         if text.strip():
-                            entry['results'].append({'index': idx, 'name': name, 'text': text.strip()})
+                            with _pj_text_cache_lock:
+                                entry['results'].append({'index': idx, 'name': name, 'text': text.strip()})
                     finally:
                         try:
                             os.remove(tmp_path)
@@ -3174,11 +3238,14 @@ def _start_pj_pre_extract_v2(message_id, attachments=None):
                             pass
                 except Exception as e:
                     logger.debug(f"[pj_pre_v2] Extraction {name} échouée : {e}")
-            entry['status'] = 'done'
-            logger.info(f"[pj_pre_v2] Terminé : {len(entry['results'])} PDF extraits pour {message_id[:20]}")
+            with _pj_text_cache_lock:
+                entry['status'] = 'done'
+                _results_count = len(entry['results'])
+            logger.info(f"[pj_pre_v2] Terminé : {_results_count} PDF extraits pour {message_id[:20]}")
         except Exception as e:
             logger.warning(f"[pj_pre_v2] Erreur : {e}")
-            _pj_text_cache[message_id] = {'status': 'error', 'results': [], 'ts': time.time()}
+            with _pj_text_cache_lock:
+                entry['status'] = 'error'
 
     threading.Thread(target=_bg_extract, daemon=True).start()
 
@@ -3585,14 +3652,25 @@ def generate_reply():
                 db_threads = _db.get_threads_for_correspondent(correspondent, limit=15)
                 if db_threads:
                     _db_items = []
+                    _corr_name = correspondent.split('@')[0].replace('.', ' ').replace('-', ' ').title()
+                    _my_name = _my_email_v.split('@')[0].replace('.', ' ').replace('-', ' ').title() if _my_email_v else ''
                     for t in db_threads:
                         _direction = t.get('direction', 'received')
+                        # Validation : force valeur valide
+                        if _direction not in ('received', 'sent'):
+                            _direction = 'received'
+                        if _direction == 'received':
+                            _from_email = correspondent
+                            _from_name = _corr_name
+                        else:
+                            _from_email = _my_email_v
+                            _from_name = _my_name
                         _db_items.append({
                             'subject': t.get('subject', ''),
                             'body': t.get('body', ''),
-                            'body_snippet': t.get('body', '')[:500],
-                            'from_email': correspondent if _direction == 'received' else _my_email_v,
-                            'from_name': '',
+                            'body_snippet': (t.get('body') or '')[:500],
+                            'from_email': _from_email,
+                            'from_name': _from_name,
                             'date': t.get('created_at', ''),
                         })
                     sender_history = _normalize_context_b(_db_items, correspondent, _my_email_v)
@@ -3621,7 +3699,8 @@ def generate_reply():
                 clean_subject = re.sub(r'^(Re|Fw|Fwd|Tr)\s*:\s*', '', subject, flags=re.IGNORECASE).strip()
                 if clean_subject and len(clean_subject) > 3:
                     c_results = graph.search_by_subject(clean_subject, max_results=10)
-                    keyword_context = _normalize_context_c(c_results, 'subject_search')
+                    keyword_context = _normalize_context_c(c_results, 'subject_search',
+                                                           correspondent, _my_email_v)
             except Exception as e:
                 logger.warning(f"Erreur contexte C: {e}")
 
