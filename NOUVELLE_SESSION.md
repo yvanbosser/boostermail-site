@@ -289,3 +289,64 @@ Le lancement de la popup PyQt est MANUEL pour le moment (`py -3 popup_pyqt.py`).
 ## Mémoire persistante
 
 Le dossier `C:\Users\yvanb\.claude\projects\C--Users-yvanb-OneDrive-Desktop\memory\` contient la mémoire inter-sessions (profil utilisateur, feedbacks, préférences). MEMORY.md est chargé automatiquement par Claude Code.
+
+---
+
+## 🔧 Diagnostic add-in Outlook — Fichier de logs permanent
+
+**Ajouté le 18/04/2026** (commit `d1bea20`).
+
+Quand l'utilisateur dit "ça marche pas dans Outlook", **lire directement le fichier de logs** au lieu de demander des DevTools.
+
+### Le fichier de logs
+
+```
+C:\EasyMail\addin_debug.log
+```
+
+Chaque clic sur le bouton BoosterMail dans Outlook y écrit automatiquement plusieurs lignes avec timestamp. Format :
+
+```
+2026-04-18T10:32:14 | button_clicked | {"hostName": "newOutlookWindows", "hostVersion": "16.0.18..."}
+2026-04-18T10:32:14 | mode_detected | {"isCompose": false}
+2026-04-18T10:32:14 | newOutlook_click | {"platform": "newOutlook", "payload": {...}}
+2026-04-18T10:32:14 | newOutlook_fetch_result | {"status": 200, "ok": true}
+```
+
+### Événements tracés
+
+| Événement | Quand | Info clé |
+|-----------|-------|----------|
+| `button_clicked` | Dès le clic | `hostName` révèle la plateforme : `newOutlookWindows`, `Outlook` (Classic), `OutlookWebApp` |
+| `mode_detected` | Juste après | `isCompose` (mode compose ou lecture) |
+| `newOutlook_click` | Si hostName = newOutlook | Le payload envoyé au Companion |
+| `newOutlook_fetch_result` | Si fetch OK | Code HTTP de la réponse |
+| `newOutlook_fetch_error` | Si fetch échoue | Message d'erreur exact |
+
+### Procédure de diagnostic
+
+1. Demander à l'utilisateur : « Clique le bouton **une seule fois** et dis-moi "c'est fait" »
+2. Lire les dernières lignes du fichier :
+   ```bash
+   tail -30 C:/EasyMail/addin_debug.log
+   ```
+3. Interpréter :
+   - **Aucune ligne écrite** → l'add-in a chargé une ancienne version cachée du JS. Fix : vider `%LOCALAPPDATA%\Microsoft\Olk\EBWebView` puis redémarrer Outlook.
+   - **`button_clicked` présent mais pas `newOutlook_click`** → détection plateforme échouée, regarder la valeur de `hostName` pour voir où on a atterri.
+   - **`newOutlook_fetch_error`** → Companion inaccessible. Si "Failed to fetch" = mixed-content. Si "NetworkError" = Companion pas lancé.
+   - **`newOutlook_fetch_result: status 4xx/5xx`** → backend/Companion répond mais refuse (CORS, whitelist).
+
+### Code source
+
+- **Émission** : `V1_outlook/autorunshared.js` → fonction `_debugLog(event, details)` en haut du fichier
+- **Réception** : `V1_outlook/app_plugin.py` → route `POST /api/debug_addin_log`
+- **Whitelist proxy Companion** : `_COMPANION_ALLOWED` inclut `open_dialog_native` (permet le fetch HTTPS → proxy → Companion)
+
+### Ajouter un nouvel événement
+
+Dans `autorunshared.js`, à n'importe quel endroit :
+```javascript
+_debugLog('mon_evenement', { info1: 'x', info2: 42 });
+```
+
+Ça écrit immédiatement dans `addin_debug.log`. Aucune config, aucun redémarrage.
