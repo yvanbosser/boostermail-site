@@ -36,7 +36,11 @@ PROCESSES = [
     {'name': 'Backend V2', 'script': os.path.join(EASYMAIL_DIR, 'V2', 'app_plugin.py'),        'port': 3443, 'delay': 1},
 ]
 
-# Proto + Tray : lances UNIQUEMENT si Classic Outlook est installe
+# Proto + Tray : DESACTIVES (decision 18/04/2026)
+# Depuis que V2 est autonome, le proto n'a plus besoin de tourner en parallele.
+# Eviter les interferences : deux serveurs Flask + deux DB + risque de conflit.
+# Pour reactiver le lancement auto du proto, mettre ENABLE_PROTO_AUTO_LAUNCH = True.
+ENABLE_PROTO_AUTO_LAUNCH = False
 PROTO_SCRIPT = os.path.join(EASYMAIL_DIR, 'app.py')
 TRAY_SCRIPT = os.path.join(EASYMAIL_DIR, 'boostermail_tray.py')
 
@@ -474,44 +478,49 @@ def run_supervisor(first_launch=True):
     logger.info(f"Ports prets: {ready}")
 
     # =========================================================
-    # PHASE 2b : Si Classic Outlook installe → lancer le Proto + icone tray
+    # PHASE 2b : Proto + Tray — DESACTIVES par defaut (decision 18/04/2026)
     # =========================================================
+    # V2 etant autonome, le proto n'a plus besoin de tourner en parallele.
+    # Pour reactiver (si besoin beta-testeurs), mettre ENABLE_PROTO_AUTO_LAUNCH = True en haut.
     proto_proc = None
     tray_proc = None
-    _classic = _has_classic_outlook()
 
-    if _classic:
-        logger.info("Classic Outlook detecte → lancement Proto + icone tray")
-
-        # Lancer le proto (port 5050) — le proto ouvre Chrome (= inbox BM)
-        if os.path.exists(PROTO_SCRIPT):
-            try:
-                # Nettoyer le port 5050 si occupe
-                if is_port_listening(5050):
-                    kill_port(5050)
-                    time.sleep(0.5)
-                proto_proc = subprocess.Popen(
-                    [pythonw, PROTO_SCRIPT], cwd=EASYMAIL_DIR,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    creationflags=_NW,
-                )
-                logger.info(f"Proto lance (PID {proto_proc.pid}, port 5050)")
-            except Exception as e:
-                logger.warning(f"Proto erreur: {e}")
-
-        # Lancer l'icone tray
-        if os.path.exists(TRAY_SCRIPT):
-            try:
-                tray_proc = subprocess.Popen(
-                    [pythonw, TRAY_SCRIPT], cwd=EASYMAIL_DIR,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    creationflags=_NW,
-                )
-                logger.info(f"Icone tray lancee (PID {tray_proc.pid})")
-            except Exception as e:
-                logger.warning(f"Tray erreur: {e}")
+    if not ENABLE_PROTO_AUTO_LAUNCH:
+        logger.info("Proto + tray DESACTIVES (ENABLE_PROTO_AUTO_LAUNCH=False) - V2 seul actif")
     else:
-        logger.info("Classic Outlook NON detecte → Proto et tray desactives")
+        _classic = _has_classic_outlook()
+        if _classic:
+            logger.info("Classic Outlook detecte → lancement Proto + icone tray")
+
+            # Lancer le proto (port 5050) — le proto ouvre Chrome (= inbox BM)
+            if os.path.exists(PROTO_SCRIPT):
+                try:
+                    # Nettoyer le port 5050 si occupe
+                    if is_port_listening(5050):
+                        kill_port(5050)
+                        time.sleep(0.5)
+                    proto_proc = subprocess.Popen(
+                        [pythonw, PROTO_SCRIPT], cwd=EASYMAIL_DIR,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        creationflags=_NW,
+                    )
+                    logger.info(f"Proto lance (PID {proto_proc.pid}, port 5050)")
+                except Exception as e:
+                    logger.warning(f"Proto erreur: {e}")
+
+            # Lancer l'icone tray
+            if os.path.exists(TRAY_SCRIPT):
+                try:
+                    tray_proc = subprocess.Popen(
+                        [pythonw, TRAY_SCRIPT], cwd=EASYMAIL_DIR,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        creationflags=_NW,
+                    )
+                    logger.info(f"Icone tray lancee (PID {tray_proc.pid})")
+                except Exception as e:
+                    logger.warning(f"Tray erreur: {e}")
+        else:
+            logger.info("Classic Outlook NON detecte → Proto et tray desactives")
 
     # =========================================================
     # PHASE 3 : Surveillance
