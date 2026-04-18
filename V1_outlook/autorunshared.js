@@ -341,23 +341,22 @@ function _openDialogPlatformRouted(dialogUrl, data, getMailBody, fromName, fromE
             hasAttachments: data.hasAttachments ? '1' : '0'
         };
         _debugLog('newOutlook_click', { platform: platform, payload: payload });
+        // IMPORTANT : keepalive: true garantit que le fetch continue même si
+        // event.completed() est appelé immédiatement après (sinon le runtime
+        // ExecuteFunction se libère et annule le fetch en cours → "Failed to fetch").
         try {
             fetch(_backendUrl + '/api/companion/open_dialog_native', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                keepalive: true
             }).then(function(r) {
                 _debugLog('newOutlook_fetch_result', { status: r.status, ok: r.ok });
-                if (!r.ok) {
-                    console.error('BoosterMail: Companion a refusé le dialog (HTTP ' + r.status + ')');
-                }
             }).catch(function(err) {
                 _debugLog('newOutlook_fetch_error', { error: String(err) });
-                console.error('BoosterMail: Companion inaccessible. ' + err);
             });
         } catch(e) {
             _debugLog('newOutlook_fetch_exception', { error: String(e) });
-            console.error('BoosterMail: fetch Companion impossible', e);
         }
         // Libérer le runtime immédiatement (le Companion gère la fenêtre)
         event.completed();
