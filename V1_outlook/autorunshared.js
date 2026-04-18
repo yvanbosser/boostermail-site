@@ -341,25 +341,26 @@ function _openDialogPlatformRouted(dialogUrl, data, getMailBody, fromName, fromE
             hasAttachments: data.hasAttachments ? '1' : '0'
         };
         _debugLog('newOutlook_click', { platform: platform, payload: payload });
-        // IMPORTANT : keepalive: true garantit que le fetch continue même si
-        // event.completed() est appelé immédiatement après (sinon le runtime
-        // ExecuteFunction se libère et annule le fetch en cours → "Failed to fetch").
+        // IMPORTANT : appeler event.completed() APRÈS la réponse du fetch,
+        // pas avant (sinon le runtime ExecuteFunction se libère et annule
+        // le fetch → "TypeError: Failed to fetch"). Le fetch localhost est
+        // rapide (<100ms), bien en dessous du timeout de popup Outlook.
         try {
             fetch(_backendUrl + '/api/companion/open_dialog_native', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-                keepalive: true
+                body: JSON.stringify(payload)
             }).then(function(r) {
                 _debugLog('newOutlook_fetch_result', { status: r.status, ok: r.ok });
+                event.completed();
             }).catch(function(err) {
                 _debugLog('newOutlook_fetch_error', { error: String(err) });
+                event.completed();
             });
         } catch(e) {
             _debugLog('newOutlook_fetch_exception', { error: String(e) });
+            event.completed();
         }
-        // Libérer le runtime immédiatement (le Companion gère la fenêtre)
-        event.completed();
         return true;
     }
 
