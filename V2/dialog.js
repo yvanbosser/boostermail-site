@@ -930,9 +930,12 @@ function _onGenerationDone() {
     var elapsed = _sendStartTime ? ((Date.now() - _sendStartTime) / 1000).toFixed(1) : '?';
     document.getElementById('headerStatus').textContent = 'Reponse prete \u2022 ' + elapsed + 's';
 
-    // Convertir le texte brut en paragraphes pour une mise en page propre
+    // Convertir le texte brut en paragraphes pour une mise en page propre.
+    // IMPORTANT : textContent en priorité (préserve les \n bruts) — innerText
+    // normalise les whitespaces en respectant le rendu CSS, ce qui peut perdre
+    // les \n malgré white-space: pre-wrap.
     var editor = document.getElementById('editor');
-    var raw = editor.innerText || editor.textContent || '';
+    var raw = editor.textContent || editor.innerText || '';
     if (raw && !editor.querySelector('p')) {
         // Le contenu est du texte brut (pas de <p>) — le structurer
         var paragraphs = raw.split(/\n\n+/).map(function(p) {
