@@ -74,16 +74,16 @@ Le cœur de la qualité de réponse Claude. Les 3 premiers items règlent les bu
 
 ## Phase 3 — Ingrédients qualité de sortie
 
-**Effort estimé : 2h30** · **Statut : ⏳ Bloquée (dépend de Phase 2)**
+**Effort estimé : 2h30** · **Statut : ✅ Terminée**
 
 Ce qui rend la réponse polie et fidèle au style utilisateur.
 
 | # | Item | Source proto | Cible V2 | Effort | Statut |
 |---|------|---|---|---|---|
-| 3.1 | 5 variations de style (`_variation_styles[]` + rotation selon compteur d'envois) | `_variation_styles = [...]` + `_select_variation()` ~ligne 2154 | V2 dans `generate_reply()` | 45 min | ⏳ |
-| 3.2 | Gardes post-génération complètes (registre tu/vous, greeting présent, closing présent, markers IA absents, longueur min 30 chars) | `_post_gen_guards()` dans `generate_sse()` ~ligne 3060 | V2 dans SSE de `generate_reply()` | 1h | ⏳ |
-| 3.3 | Markdown cleanup (strip `**bold**`, `#titre`, `- bullet`, etc. du corps de mail) | regex dans `generate_sse()` ~ligne 3100 | V2 | 20 min | ⏳ |
-| 3.4 | MAX_TOKENS adaptatif (R=600, S=1000, H=1500) au lieu du fix 1200 actuel | `MAX_TOKENS = {"R": 600, ...}` ~ligne 2900 | V2 `generate_reply()` ligne ~2905 | 20 min | ⏳ |
+| 3.1 | 5 variations de style (`_variation_styles[]` + rotation selon compteur d'envois) | `_variation_styles = [...]` proto ligne 2154 | ajouté dans `/generate_reply` V2 : dict 5 variations + injection dans `brief` via `[VARIATION #N]` | 45 min | ✅ ajouté |
+| 3.2 | Gardes post-génération complètes (registre tu/vous, greeting self_name, greeting mismatch, closing mismatch, markers IA, longueur min 30 chars) | `_post_gen_guards()` proto | déjà présent V2 ligne 3736+ : 6 gardes complètes | 1h | ✅ déjà là |
+| 3.3 | Markdown cleanup (strip `**bold**`, `#titre`, `- bullet`) | regex proto ligne 2517 | déjà présent V2 ligne 3719+ | 20 min | ✅ déjà là |
+| 3.4 | MAX_TOKENS adaptatif (R=600, S=1000, H=1500) | `MAX_TOKENS = {...}` proto | déjà présent V2 ligne 3369 : `{'R': 600, 'S': 1000, 'H': 1500}` | 20 min | ✅ déjà là |
 
 **Livrable Phase 3** : les sorties Claude sont propres, sans markdown parasite, avec la bonne longueur selon l'importance, et passent les 5 gardes.
 
@@ -121,8 +121,8 @@ Seulement après que les 4 phases ci-dessus soient terminées. 10 scénarios typ
 | Phase | Statut | Début | Fin | Commit |
 |-------|--------|-------|-----|--------|
 | 1 — Squelette transversal | ✅ Terminée | 18/04/2026 | 18/04/2026 | 158255f + adc80ff |
-| 2 — Ingrédients critiques génération | ✅ Terminée | 18/04/2026 | 18/04/2026 | (this commit) |
-| 3 — Ingrédients qualité sortie | ⏳ Bloquée | — | — | — |
+| 2 — Ingrédients critiques génération | ✅ Terminée | 18/04/2026 | 18/04/2026 | 4189ae2 |
+| 3 — Ingrédients qualité sortie | ✅ Terminée | 18/04/2026 | 18/04/2026 | (this commit) |
 | 4 — PJ & finitions | ⏳ Bloquée | — | — | — |
 
 **Légende** : ⏳ à lancer · 🔄 en cours · ✅ terminée · ⚠️ terminée avec réserves

@@ -3233,6 +3233,20 @@ def generate_reply():
     message_id = data.get('message_id', '')
     brief = data.get('brief', '')[:2000]
 
+    # Phase 3.1 — 5 variations de style (rotation sur compteur 1-5+)
+    # Envoyé par le frontend quand l'utilisateur clique "Essayer une autre réponse".
+    variation = int(data.get('variation', 0) or 0)
+    if variation:
+        _variation_styles = [
+            "Change l'ouverture, les tournures de phrases et la structure. Même fond, forme différente.",
+            "Adopte un angle complètement différent. Reformule chaque phrase autrement. Varie la longueur.",
+            "Commence différemment, utilise d'autres mots, change l'ordre des idées. Sois plus direct.",
+            "Prends un ton légèrement différent. Restructure le mail. Trouve de nouvelles formulations.",
+            "Réécris tout depuis zéro avec un style frais. Aucune phrase ne doit ressembler aux versions précédentes.",
+        ]
+        style_idx = (variation - 1) % len(_variation_styles)
+        brief = (brief + "\n" if brief else "") + f"[VARIATION #{variation}] {_variation_styles[style_idx]}"
+
     # DEBUG : tracer la longueur du body reçu pour diagnostic add-in
     try:
         _dbg_body = data.get('body', '') or ''
