@@ -23,11 +23,16 @@ from flask import Flask, send_from_directory, jsonify, request
 # --- Paths -------------------------------------------------------------------
 
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
-EASYMAIL_DIR = os.path.dirname(PLUGIN_DIR)  # Dossier parent = racine EasyMail
+EASYMAIL_DIR = os.path.dirname(PLUGIN_DIR)  # Dossier parent (C:\EasyMail) — pour config.json + style_profile.txt partagés
 PORT = 3443
 
-# Ajouter le dossier parent au path pour importer database.py, templates_mail.py, core/
-sys.path.insert(0, EASYMAIL_DIR)
+# V2 AUTONOME — Option B : indépendance du code (libs copiées dans V1_outlook/)
+# + DB SÉPARÉE (V1_outlook/boostermail.db) + caches V2 SÉPARÉS (prefetch_cache, addin_debug.log).
+# config.json (clé API) et style_profile.txt (style appris) restent PARTAGÉS au niveau parent
+# car ce sont des données "utilisateur" uniques, pas des données d'app.
+# Les libs Python (database, claude_ai, templates_mail, core) sont chargées depuis V1_outlook/.
+# On force PLUGIN_DIR en tête de sys.path pour garantir les imports locaux prioritaires.
+sys.path.insert(0, PLUGIN_DIR)
 
 # Certificat HTTPS (généré par generate_cert.py)
 CERT_FILE = os.path.join(PLUGIN_DIR, 'localhost.crt')
@@ -108,8 +113,10 @@ from core.auth_base import (
 )
 from auth_microsoft import MicrosoftAuthProvider
 
-# DB partagée — init() cree les tables si elles n'existent pas (#1 audit)
-_db = Database(os.path.join(EASYMAIL_DIR, 'boostermail.db'))
+# DB V2 autonome (Option B) — fichier séparé de celui du proto
+# Le proto utilise C:\EasyMail\boostermail.db
+# V2 utilise C:\EasyMail\V1_outlook\boostermail.db
+_db = Database(os.path.join(PLUGIN_DIR, 'boostermail.db'))
 _db.init()
 
 # Initialisation auth (lazy, pour ne pas crasher si config.json incomplet)
