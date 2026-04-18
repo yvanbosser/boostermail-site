@@ -1628,6 +1628,30 @@ function _listenParentMessages() {
                                 _fromEmail = data.from_email;
                             }
                             console.log('[dialog] Body recu du parent (' + _mailBodyForGeneration.length + ' chars)');
+
+                        } else if (data.action === 'compose_data') {
+                            // Données compose reçues du parent (mode compose ouvert rapidement)
+                            if (data.subject) _subject = data.subject;
+                            if (data.mode && data.mode !== _mode) {
+                                _mode = data.mode;
+                                _updateHeader();
+                                // Mettre à jour le champ sujet
+                                var fSubj = document.getElementById('fieldSubject');
+                                if (fSubj && data.subject) fSubj.value = data.subject;
+                                // Adapter le placeholder brief
+                                var briefField = document.getElementById('fieldBrief');
+                                if (briefField) {
+                                    briefField.placeholder = (_mode === 'new')
+                                        ? 'Decrivez votre mail en quelques mots (obligatoire)'
+                                        : 'Instructions (optionnel)';
+                                }
+                            }
+                            // Pré-remplir To/Cc si pas encore remplis
+                            var fTo = document.getElementById('fieldTo');
+                            if (fTo && data.to && !fTo.value) fTo.value = data.to;
+                            var fCc = document.getElementById('fieldCc');
+                            if (fCc && data.cc && !fCc.value) fCc.value = data.cc;
+                            console.log('[dialog] compose_data recu: mode=' + data.mode + ' subject=' + data.subject);
                         }
                     } catch(e) {
                         console.log('[dialog] Erreur parsing message parent:', e.message);

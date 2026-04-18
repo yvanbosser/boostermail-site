@@ -150,21 +150,25 @@ function _openDialogFromRead(item, event) {
         cc: cc
     });
 
-    // #3 audit : body.getAsync est ASYNC — ouvrir le dialog DANS le callback
-    // pour garantir que mailBody est disponible quand messageChild l'envoie
+    // IMPORTANT : displayDialogAsync DOIT être appelé dans le contexte user-gesture (le clic).
+    // Tout appel async AVANT (body.getAsync, fetch...) fait perdre ce contexte → popup blocker.
+    // Solution : lancer getAsync en parallèle, stocker le résultat dans _mailBody,
+    // puis le lire depuis le closure APRÈS que le dialog est ouvert (setTimeout 1000ms dans
+    // _buildAndOpenDialog laisse largement le temps à getAsync de finir, ~50-200ms en pratique).
+    var _mailBody = '';
     item.body.getAsync(Office.CoercionType.Text, function(bodyResult) {
-        var mailBody = '';
         if (bodyResult.status === Office.AsyncResultStatus.Succeeded) {
-            mailBody = bodyResult.value || '';
+            _mailBody = bodyResult.value || '';
         }
-
-        // Construire l'URL du dialog et ouvrir (maintenant que le body est pret)
-        _buildAndOpenDialog(item, event, {
-            subject: subject, from: from, fromName: fromName,
-            messageId: internetMessageId, hasAttachments: hasAttachments,
-            to: to, cc: cc, mode: 'reply'
-        }, function() { return mailBody; }, fromName, from);
+        // (Mode Perf. Réduite uniquement — en Mode Standard, le body vient de Graph /api/email_body)
     });
+
+    // Ouvrir le dialog IMMÉDIATEMENT pendant qu'on est encore dans le contexte du clic
+    _buildAndOpenDialog(item, event, {
+        subject: subject, from: from, fromName: fromName,
+        messageId: internetMessageId, hasAttachments: hasAttachments,
+        to: to, cc: cc, mode: 'reply'
+    }, function() { return _mailBody; }, fromName, from);
 }
 
 /**
@@ -173,47 +177,76 @@ function _openDialogFromRead(item, event) {
  * (P2) NE PAS utiliser body.getAsync ici — il retourne le body du compose, pas le mail reçu.
  */
 function _openDialogFromCompose(item, event) {
-    // Lire les propriétés async en parallèle
-    var subject = '', to = '', cc = '';
-    var pending = 3;
+    // IMPORTANT : même principe que _openDialogFromRead — ouvrir le dialog AVANT
+    // les getAsync pour rester dans le contexte user-gesture (éviter popup blocker).
+    // On ouvre avec mode=new et champs vides, puis on envoie les vraies valeurs
+    // via messageChild quand TOUT est prêt (données + dialog ouvert).
 
-    function _onDone() {
-        pending--;
-        if (pending > 0) return;
+    var _cd = { subject: '', to: '', cc: '', mode: 'new' };
+    var _dialogRef = null;
+    var _dataReady = false;
+
+    function _trySendComposeData() {
+        // N'envoie que si les deux conditions sont réunies
+        if (!_dataReady || !_dialogRef) return;
+        setTimeout(function() {
+            try {
+                _dialogRef.messageChild(JSON.stringify({
+                    action: 'compose_data',
+                    subject: _cd.subject,
+                    to: _cd.to,
+                    cc: _cd.cc,
+                    mode: _cd.mode
+                }));
+            } catch(e) {
+                console.log('EasyMail: messageChild compose_data failed', e);
+            }
+        }, 500);  // Laisser le temps au dialog de charger
+    }
+
+    var _pending = 3;
+    function _onAsync() {
+        _pending--;
+        if (_pending > 0) return;
 
         // Déterminer le mode depuis le sujet
-        var mode = 'new';
-        var subjectLower = subject.toLowerCase();
-        if (subjectLower.indexOf('re:') === 0 || subjectLower.indexOf('re :') === 0) {
-            mode = 'reply';
-        } else if (subjectLower.indexOf('fw:') === 0 || subjectLower.indexOf('fwd:') === 0 ||
-                   subjectLower.indexOf('tr:') === 0 || subjectLower.indexOf('tr :') === 0) {
-            mode = 'forward';
+        var sl = _cd.subject.toLowerCase();
+        if (sl.indexOf('re:') === 0 || sl.indexOf('re :') === 0) {
+            _cd.mode = 'reply';
+        } else if (sl.indexOf('fw:') === 0 || sl.indexOf('fwd:') === 0 ||
+                   sl.indexOf('tr:') === 0 || sl.indexOf('tr :') === 0) {
+            _cd.mode = 'forward';
         }
 
-        // Construire l'URL du dialog et ouvrir
-        _buildAndOpenDialog(item, event, {
-            subject: subject, from: '', fromName: '',
-            messageId: '', hasAttachments: false,
-            to: to, cc: cc, mode: mode
-        }, function() { return ''; }, '', '');
+        _dataReady = true;
+        _trySendComposeData();
     }
 
     item.subject.getAsync(function(r) {
-        if (r.status === Office.AsyncResultStatus.Succeeded) subject = r.value || '';
-        _onDone();
+        if (r.status === Office.AsyncResultStatus.Succeeded) _cd.subject = r.value || '';
+        _onAsync();
     });
     item.to.getAsync(function(r) {
         if (r.status === Office.AsyncResultStatus.Succeeded && r.value) {
-            to = r.value.map(function(rec) { return rec.emailAddress; }).join(',');
+            _cd.to = r.value.map(function(rec) { return rec.emailAddress; }).join(',');
         }
-        _onDone();
+        _onAsync();
     });
     item.cc.getAsync(function(r) {
         if (r.status === Office.AsyncResultStatus.Succeeded && r.value) {
-            cc = r.value.map(function(rec) { return rec.emailAddress; }).join(',');
+            _cd.cc = r.value.map(function(rec) { return rec.emailAddress; }).join(',');
         }
-        _onDone();
+        _onAsync();
+    });
+
+    // Ouvrir le dialog IMMÉDIATEMENT (contexte user-gesture) avec mode=new par défaut
+    _buildAndOpenDialog(item, event, {
+        subject: '', from: '', fromName: '',
+        messageId: '', hasAttachments: false,
+        to: '', cc: '', mode: 'new'
+    }, function() { return ''; }, '', '', function(handle) {
+        _dialogRef = handle;
+        _trySendComposeData();
     });
 }
 
@@ -221,7 +254,7 @@ function _openDialogFromCompose(item, event) {
  * Construit l'URL du dialog et l'ouvre via displayDialogAsync.
  * Partagé entre _openDialogFromRead et _openDialogFromCompose.
  */
-function _buildAndOpenDialog(item, event, data, getMailBody, fromName, fromEmail) {
+function _buildAndOpenDialog(item, event, data, getMailBody, fromName, fromEmail, onDialogOpen) {
     var params = [
         'subject=' + encodeURIComponent(data.subject),
         'from=' + encodeURIComponent(data.from),
@@ -247,10 +280,16 @@ function _buildAndOpenDialog(item, event, data, getMailBody, fromName, fromEmail
 
             var dialog = asyncResult.value;
 
+            // Callback optionnel (ex: _openDialogFromCompose pour envoyer compose_data)
+            if (typeof onDialogOpen === 'function') {
+                onDialogOpen(dialog);
+            }
+
             // Envoyer le body du mail au dialog (Mode Perf. Réduite, lecture uniquement)
-            var mailBody = getMailBody();
-            if (mailBody) {
-                setTimeout(function() {
+            // Délai 1000ms : laisse le temps au dialog de charger + à getAsync de finir
+            setTimeout(function() {
+                var mailBody = getMailBody();
+                if (mailBody) {
                     try {
                         dialog.messageChild(JSON.stringify({
                             action: 'mail_body',
@@ -261,8 +300,8 @@ function _buildAndOpenDialog(item, event, data, getMailBody, fromName, fromEmail
                     } catch(e) {
                         console.log('EasyMail: messageChild non supporté ou dialog pas prêt');
                     }
-                }, 1000);
-            }
+                }
+            }, 1000);
 
             // Écouter les messages du dialog
             dialog.addEventHandler(Office.EventType.DialogMessageReceived, function (arg) {
