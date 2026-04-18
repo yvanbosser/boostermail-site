@@ -977,6 +977,10 @@ def api_event_message_read():
         threading.Thread(target=_preload_neighbors,
                          args=(new_data['message_id'],), daemon=True).start()
 
+    # Phase 4.1 : pré-extraction BG des PJ PDF (si mail avec PJ)
+    if new_data.get('has_attachments') and new_data.get('message_id'):
+        _start_pj_pre_extract_v2(new_data['message_id'])
+
     return jsonify({"status": "ok"})
 
 
@@ -3079,6 +3083,104 @@ def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids
 
 # --- PJ extraction & upload ---------------------------------------------------
 _pj_text_cache = {}        # email_id → {'status': 'running'|'done', 'results': [...], 'ts': float}
+_PDF_EXTS = {'.pdf'}
+_MAX_PRE_OCR_PDFS = 3      # Max 3 PDF pré-extraits par mail (limite coût + temps)
+_MAX_PJ_TEXT_CACHE = 30    # Limite taille cache
+
+
+def _start_pj_pre_extract_v2(message_id, attachments=None):
+    """
+    Phase 4.1 — Pré-extraction BG des PJ PDF d'un mail (V2, via Graph API).
+    Lancé depuis /api/event/message_read dès que l'utilisateur ouvre un mail avec PJ.
+    Stocke le texte extrait dans _pj_text_cache pour qu'il soit disponible
+    quand l'utilisateur clique Générer (zéro attente supplémentaire).
+
+    Max 3 PDF par mail. Skip si déjà en cache.
+    """
+    if not message_id:
+        return
+    # Skip si déjà en cache
+    existing = _pj_text_cache.get(message_id)
+    if existing and existing.get('status') in ('running', 'done'):
+        return
+
+    def _bg_extract():
+        try:
+            graph = get_graph()
+            if not graph:
+                return
+            # Récupérer les PJ si pas fournies
+            atts = attachments
+            if atts is None:
+                try:
+                    atts = graph.get_attachments(message_id)
+                except Exception:
+                    return
+            if not atts:
+                return
+            # Filtrer PDF non-inline
+            pdf_atts = []
+            for i, att in enumerate(atts):
+                if att.get('is_inline'):
+                    continue
+                name = (att.get('name') or '').lower()
+                if any(name.endswith(ext) for ext in _PDF_EXTS):
+                    pdf_atts.append((i, att))
+                if len(pdf_atts) >= _MAX_PRE_OCR_PDFS:
+                    break
+            if not pdf_atts:
+                return
+
+            # Trim cache + marquer running
+            _trim_dict_cache(_pj_text_cache, _MAX_PJ_TEXT_CACHE)
+            entry = {'status': 'running', 'results': [], 'ts': time.time()}
+            _pj_text_cache[message_id] = entry
+
+            # Extraire chaque PDF via Graph + PyPDF2
+            for idx, att in pdf_atts:
+                att_id = att.get('id', '')
+                name = att.get('name', '')
+                if not att_id:
+                    continue
+                try:
+                    content_bytes = graph.get_attachment_content(message_id, att_id)
+                    if not content_bytes:
+                        continue
+                    # Écrire en temp pour PyPDF2
+                    tmp_path = os.path.join(tempfile.gettempdir(),
+                                            f'bm_pj_{message_id[:20].replace("<","").replace(">","")}_{idx}.pdf')
+                    try:
+                        with open(tmp_path, 'wb') as f:
+                            f.write(content_bytes)
+                        text = ''
+                        try:
+                            import PyPDF2
+                            with open(tmp_path, 'rb') as f:
+                                reader = PyPDF2.PdfReader(f)
+                                pages = [p.extract_text() or '' for p in reader.pages[:10]]
+                                text = '\n'.join(pages)[:10000]
+                        except Exception:
+                            pass
+                        # Fallback OCR Claude si < 50 chars (PDF scanné)
+                        if len(text.strip()) < 50:
+                            logger.info(f"[pj_pre_v2] PDF scanné {name}, fallback OCR désactivé en V2 (TODO)")
+                            # Note : OCR via Claude Vision à implémenter si besoin commercial
+                        if text.strip():
+                            entry['results'].append({'index': idx, 'name': name, 'text': text.strip()})
+                    finally:
+                        try:
+                            os.remove(tmp_path)
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.debug(f"[pj_pre_v2] Extraction {name} échouée : {e}")
+            entry['status'] = 'done'
+            logger.info(f"[pj_pre_v2] Terminé : {len(entry['results'])} PDF extraits pour {message_id[:20]}")
+        except Exception as e:
+            logger.warning(f"[pj_pre_v2] Erreur : {e}")
+            _pj_text_cache[message_id] = {'status': 'error', 'results': [], 'ts': time.time()}
+
+    threading.Thread(target=_bg_extract, daemon=True).start()
 
 _attachment_cache = {}     # email_id → [{'id', 'name', 'size', 'content_type', 'is_inline'}]
 _MAX_ATTACHMENT_CACHE = 30
