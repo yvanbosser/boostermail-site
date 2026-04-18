@@ -229,7 +229,7 @@ function _openDialog(mode) {
 
     Office.context.ui.displayDialogAsync(
         dialogUrl,
-        { width: 80, height: 74 },
+        { width: 80, height: 74, promptBeforeOpen: false },
         function (asyncResult) {
             if (asyncResult.status === Office.AsyncResultStatus.Failed) {
                 console.error('EasyMail dialog erreur :', asyncResult.error.message);

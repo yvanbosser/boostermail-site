@@ -381,7 +381,7 @@ function _openDialogOfficeJs(mode) {
         + '&to=' + encodeURIComponent(to)
         + '&cc=' + encodeURIComponent(cc);
 
-    Office.context.ui.displayDialogAsync(dialogUrl, { width: 80, height: 74 }, function (asyncResult) {
+    Office.context.ui.displayDialogAsync(dialogUrl, { width: 80, height: 74, promptBeforeOpen: false }, function (asyncResult) {
         if (asyncResult.status === Office.AsyncResultStatus.Failed) return;
 
         var dialog = asyncResult.value;
