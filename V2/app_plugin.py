@@ -6550,9 +6550,13 @@ def api_activation_status():
     # Audit 20/04 Q3 : popup affichée seulement si pas encore vue aujourd'hui
     # (anti-spam). Si user_activated=False → TOUJOURS afficher (CTA marketing).
     # Si user_activated=True → 1× par jour seulement.
+    # Exception dev : `.dev_mode` présent → popup TOUJOURS (override anti-spam)
     today = datetime.now().strftime('%Y-%m-%d')
     popup_shown_date = _db.get_setting('popup_shown_date', '') or ''
-    if not user_activated:
+    dev_mode = os.path.exists(os.path.join(EASYMAIL_DIR, '.dev_mode'))
+    if dev_mode:
+        should_show_popup = True  # mode dev : toujours afficher
+    elif not user_activated:
         should_show_popup = True   # CTA marketing bloquant toujours
     else:
         should_show_popup = (popup_shown_date != today)
@@ -6564,6 +6568,7 @@ def api_activation_status():
         "should_show_popup": should_show_popup,
         "popup_shown_date": popup_shown_date,
         "today": today,
+        "dev_mode": dev_mode,
         "conditions": {
             "onboarding_done": onboarding_done,
             "style_profile_exists": style_profile_exists,
