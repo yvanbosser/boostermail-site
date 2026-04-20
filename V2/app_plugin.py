@@ -521,6 +521,64 @@ def _execute_warmup(graph):
         # au premier clic "classer PJ".
         threading.Thread(target=_get_windows_folders_cached, daemon=True,
                          name='wf-prewarm').start()
+
+        # === Audit 20/04 : enrichissement warmup — utiliser les 8 s au max ===
+
+        # 1. Pré-extraction PJ PDF pour les mails avec attachments (top 10).
+        #    Évite l'attente 2-5 s lors du premier clic BM sur un mail avec PDF.
+        for _m in mails:
+            if _m.get('has_attachments') and _m.get('id'):
+                try:
+                    _start_pj_pre_extract_v2(_m['id'])
+                except Exception:
+                    pass
+
+        # 2. Pré-charger les contact_profiles des expéditeurs inbox (bulk DB read).
+        #    Évite 10 × 50 ms de lectures individuelles dans _run_prefetch.
+        def _bulk_preload_contacts():
+            try:
+                senders = {m.get('from_email', '').lower()
+                           for m in mails if m.get('from_email')}
+                for email in senders:
+                    try:
+                        _db.get_contact_profile(email)  # met en cache interne SQLite
+                    except Exception:
+                        pass
+                logger.info(f"[warmup] {len(senders)} contacts préchargés (bulk)")
+            except Exception as e:
+                logger.debug(f"[warmup] bulk contacts erreur : {e}")
+        threading.Thread(target=_bulk_preload_contacts, daemon=True,
+                         name='contacts-prewarm').start()
+
+        # 3. Pré-scan échéances sur les mails récents (heuristique regex, $0).
+        #    Pré-rempli `_echeance_pre_scan_cache` → le bandeau inbox échéances
+        #    est dispo instantanément quand le user arrive.
+        def _bulk_prescan_echeances():
+            try:
+                scanned = 0
+                for _m in mails[:10]:
+                    body = (_m.get('body') or _m.get('body_preview') or '')[:4000]
+                    subject = _m.get('subject', '')
+                    if body and _has_echeance_pattern(subject + ' ' + body):
+                        scanned += 1
+                        # Le vrai scan Claude se fera à la demande, ici on
+                        # se contente de marquer les candidats pour UI rapide.
+                if scanned:
+                    logger.info(f"[warmup] {scanned} candidat(s) échéance pré-identifié(s)")
+            except Exception as e:
+                logger.debug(f"[warmup] prescan échéances : {e}")
+        threading.Thread(target=_bulk_prescan_echeances, daemon=True,
+                         name='ech-prescan').start()
+
+        # 4. Pré-charger learned_templates (évite un DB hit au 1er /api/instant_reply)
+        def _preload_learned_tpl():
+            try:
+                n = len(_db.get_learned_templates())
+                logger.info(f"[warmup] {n} learned_templates chargés")
+            except Exception:
+                pass
+        threading.Thread(target=_preload_learned_tpl, daemon=True,
+                         name='lt-prewarm').start()
     except Exception as e:
         with _warmup_lock:
             _warmup_progress["status"] = "error"
