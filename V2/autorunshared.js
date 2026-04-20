@@ -43,28 +43,31 @@ _debugLog('js_loaded', { version: _ADDIN_VERSION });
 // ============================================================================
 
 Office.onReady(function (info) {
+    _debugLog('office_ready', { host: (info && info.host) || '?' });
     if (info.host === Office.HostType.Outlook) {
         // Enregistrer ItemChanged pour alimenter la popup PyQt en continu
         // Le shared runtime persiste — pas besoin de taskpane
         try {
             Office.context.mailbox.addHandlerAsync(
                 Office.EventType.ItemChanged,
-                _onItemChanged
+                _onItemChanged,
+                function(result) {
+                    _debugLog('item_changed_register', {
+                        status: (result && result.status) || '?',
+                        error: (result && result.error && result.error.message) || ''
+                    });
+                }
             );
-            console.log('[autorun] ItemChanged handler enregistré');
         } catch (e) {
-            console.log('[autorun] ItemChanged non supporté:', e);
+            _debugLog('item_changed_register_error', { error: String(e) });
         }
 
         // Rendre le demarrage automatique permanent (jour 2+)
         try {
             if (Office.addin && Office.addin.setStartupBehavior) {
                 Office.addin.setStartupBehavior(Office.StartupBehavior.load);
-                console.log('[autorun] setStartupBehavior(load) — demarrage auto active');
             }
-        } catch (e) {
-            console.log('[autorun] setStartupBehavior non supporte:', e);
-        }
+        } catch (e) {}
 
         // Alimenter immédiatement avec le mail courant
         _onItemChanged();
@@ -73,14 +76,25 @@ Office.onReady(function (info) {
 
 function _onItemChanged() {
     var item = Office.context.mailbox.item;
-    if (!item) return;
+    if (!item) {
+        _debugLog('item_changed_fired_no_item', {});
+        return;
+    }
 
     // Lecture seule (pas compose)
-    if (item.subject && typeof item.subject.getAsync === 'function') return;
+    if (item.subject && typeof item.subject.getAsync === 'function') {
+        _debugLog('item_changed_skip_compose', {});
+        return;
+    }
 
     var from = item.from ? item.from.emailAddress || '' : '';
     var fromName = item.from ? item.from.displayName || '' : '';
     var subject = item.subject || '';
+
+    _debugLog('item_changed_fired', {
+        subject: String(subject).substring(0, 60),
+        from_email: from
+    });
     var hasAttachments = item.attachments ? item.attachments.length > 0 : false;
     var to = (item.to && item.to.length > 0) ? item.to.map(function(r) { return r.emailAddress; }).join(',') : '';
     var cc = (item.cc && item.cc.length > 0) ? item.cc.map(function(r) { return r.emailAddress; }).join(',') : '';

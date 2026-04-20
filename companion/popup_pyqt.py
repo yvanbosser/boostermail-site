@@ -810,6 +810,24 @@ class EasyMailPopup(QMainWindow):
             self._open_dialog(mode)
         elif path == 'close-dialog':
             self._close_dialog()
+        elif path == 'minimize':
+            self._toggle_overlay_fold()
+        elif path == 'close-overlay':
+            self.hide()
+
+    def _toggle_overlay_fold(self):
+        """Replie/déplie l'overlay : plié = juste le header visible (42px),
+        déplié = taille overlay normale. Pas de barre des tâches, reste en place."""
+        current_h = self.size().height()
+        HEADER_H = 42
+        if current_h > HEADER_H + 10:
+            # Plier
+            self._overlay_unfolded_h = current_h
+            self.resize(self.size().width(), HEADER_H)
+        else:
+            # Déplier (restaurer)
+            target_h = getattr(self, '_overlay_unfolded_h', self._overlay_h)
+            self.resize(self.size().width(), target_h)
 
     def _open_dialog(self, mode='reply'):
         logger.info(f"Ouverture dialog mode={mode}")
