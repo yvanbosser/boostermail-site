@@ -641,7 +641,7 @@ def _continuous_speculation_loop():
                 else:
                     tier2.append(m)
 
-            # Candidats : mails sans entrée _preemptive_cache done/running
+            # Candidats : mails sans entrée _reply_cache done/running
             candidates = []
             for m in tier1 + tier2:
                 mid = m.get('message_id') or m.get('id', '')
@@ -652,8 +652,8 @@ def _continuous_speculation_loop():
                         continue  # Purge événementielle (6.5)
                 except Exception:
                     pass
-                with _preemptive_lock:
-                    entry = _preemptive_cache.get(mid, {})
+                with _reply_lock:
+                    entry = _reply_cache.get(mid, {})
                 if entry.get('status') in ('running', 'done'):
                     continue
                 candidates.append(m)
@@ -691,8 +691,16 @@ def _continuous_speculation_loop():
 
 def _background_preload_loop():
     """
-    Phase 1.5 — Préchargement continu en background des contextes A/B/C
-    pour les mails non traités.
+    Phase 1.5 — Préchargement ONE-SHOT après warmup, élargit au-delà des
+    10 premiers mails : fetch 50 mails Graph + prefetch A/B/C.
+
+    Rôle distinct de `_continuous_speculation_loop` (Phase 6) :
+    - `_background_preload_loop` : UNE FOIS, 50 mails Graph ⇒ couvre la liste
+      réelle inbox au démarrage (au-delà de warmup_cache top 10).
+    - `_continuous_speculation_loop` : EN CONTINU (45s), scan `_warmup_cache` top 20
+      ⇒ re-spécule après purges événementielles (mails traités, user active).
+
+    Les deux sont complémentaires, pas redondants.
 
     Se lance après le warmup. Interruptible : si _preload_pause est set
     (activité utilisateur), pause 30s avant de reprendre.
@@ -957,7 +965,7 @@ import atexit
 atexit.register(_save_prefetch_cache)
 
 # Cache UNIFIÉ des réponses (Plan 3 §9.1 — fusion spéculation + ex-brouillon).
-# _preemptive_cache[message_id] = {
+# _reply_cache[message_id] = {
 #     'status':    'running' | 'done' | 'cancelled',
 #     'source':    'bg_speculation' | 'user_edit',   # qui a écrit cette entrée
 #     'text':      str,
@@ -968,10 +976,51 @@ atexit.register(_save_prefetch_cache)
 # }
 # Purge purement événementielle (classify/send/delete/archive/consume/cohesion)
 # + safety net 4 semaines (Plan 3 §9.1). Plus de TTL 30 min en lecture.
-_preemptive_cache = {}
-_preemptive_lock = threading.Lock()
+_reply_cache = {}
+_reply_lock = threading.Lock()
 _REPLY_CACHE_SAFETY_NET = 28 * 24 * 3600  # 4 semaines — safety net anti-fuite
 _DRAFTS_CACHE_PATH = os.path.join(EASYMAIL_DIR, 'drafts_v2.json')
+
+# Plan 2 Phase 2.A.9 — Métriques cache (hit rate + purges)
+_reply_cache_metrics = {
+    'hits': 0,           # read a found entry (done/text)
+    'misses': 0,         # read missed
+    'writes_bg': 0,      # écriture bg_speculation
+    'writes_user': 0,    # écriture user_edit (save_draft)
+    'purges_event': 0,   # purge événementielle (classify/send/delete/archive/reply-ext/consume)
+    'purges_safety': 0,  # purge safety net 4 semaines
+    'purges_cohesion': 0,  # purge cohesion refresh
+}
+_reply_cache_metrics_lock = threading.Lock()
+
+
+def _reply_metric_inc(key, n=1):
+    with _reply_cache_metrics_lock:
+        _reply_cache_metrics[key] = _reply_cache_metrics.get(key, 0) + n
+
+
+def _reply_cache_metrics_report_loop():
+    """Log périodique (15 min) du hit rate + compteurs. Aide le debug prod."""
+    time.sleep(300)  # premier rapport après 5 min
+    while True:
+        try:
+            with _reply_cache_metrics_lock:
+                snap = dict(_reply_cache_metrics)
+            total_reads = snap['hits'] + snap['misses']
+            hit_rate = (100.0 * snap['hits'] / total_reads) if total_reads else 0.0
+            total_purges = snap['purges_event'] + snap['purges_safety'] + snap['purges_cohesion']
+            logger.info(
+                f"[reply_cache metrics] reads={total_reads} "
+                f"hits={snap['hits']} misses={snap['misses']} "
+                f"hit_rate={hit_rate:.1f}% | "
+                f"writes={snap['writes_bg']}bg+{snap['writes_user']}user | "
+                f"purges={total_purges} "
+                f"(event={snap['purges_event']}, safety={snap['purges_safety']}, "
+                f"cohesion={snap['purges_cohesion']})"
+            )
+        except Exception as e:
+            logger.warning(f"[reply_cache metrics] log error : {e}")
+        time.sleep(15 * 60)  # 15 min
 
 # --- Plan 2 Phase 2.C — Post-send caches (portés depuis proto app.py:415-467) ---
 # Évitent un re-appel Claude si le user revient sur la popup post-envoi dans les
@@ -1008,7 +1057,7 @@ def _get_post_send_entry(cache_dict, key, ttl=None):
 def _reply_cache_cohesion_refresh():
     """
     Plan 2 Phase 2.D — Cohesion refresh (Plan 3 §9.1).
-    Compare les clés de _preemptive_cache vs les mails présents dans l'inbox
+    Compare les clés de _reply_cache vs les mails présents dans l'inbox
     (via _warmup_cache + email_cache DB). Purge les entrées orphelines :
     - mails supprimés côté Outlook (delete)
     - mails déplacés hors inbox (archive / classify)
@@ -1037,17 +1086,18 @@ def _reply_cache_cohesion_refresh():
 
         # Purger les orphelins (sauf brouillons user)
         purged = 0
-        with _preemptive_lock:
-            for mid in list(_preemptive_cache.keys()):
+        with _reply_lock:
+            for mid in list(_reply_cache.keys()):
                 if mid in inbox_ids:
                     continue
-                entry = _preemptive_cache[mid]
+                entry = _reply_cache[mid]
                 if entry.get('source') == 'user_edit':
                     continue  # brouillons user : safety net 4 semaines seulement
-                _preemptive_cache.pop(mid, None)
+                _reply_cache.pop(mid, None)
                 purged += 1
         if purged:
             logger.info(f"[reply_cache cohesion] {purged} entrée(s) orpheline(s) purgée(s)")
+            _reply_metric_inc('purges_cohesion', purged)
     except Exception as e:
         logger.warning(f"[reply_cache cohesion] erreur : {e}")
 
@@ -1060,16 +1110,16 @@ def api_reply_cache_purge():
     existants : delete, archive, mail déplacé vers un autre dossier, etc.
 
     Body JSON : { message_id, reason? }
-    Purge le _preemptive_cache ET le _prefetch_cache pour cohérence.
+    Purge le _reply_cache ET le _prefetch_cache pour cohérence.
     """
     data = request.get_json() or {}
     mid = data.get('message_id', '')
     reason = data.get('reason', 'explicit')
     if not mid:
         return jsonify({"error": "message_id requis"}), 400
-    with _preemptive_lock:
-        was_user = _preemptive_cache.get(mid, {}).get('source') == 'user_edit'
-        _preemptive_cache.pop(mid, None)
+    with _reply_lock:
+        was_user = _reply_cache.get(mid, {}).get('source') == 'user_edit'
+        _reply_cache.pop(mid, None)
     with _prefetch_lock:
         _prefetch_cache.pop(mid, None)
     # Si c'était un brouillon user, re-persister le disque (suppression effective)
@@ -1102,8 +1152,8 @@ def _persist_reply_cache():
     Appelé à l'exit + après chaque save_draft explicite. Les entrées
     `bg_speculation` ne sont PAS persistées (re-générables à la volée)."""
     try:
-        with _preemptive_lock:
-            drafts = {k: v for k, v in _preemptive_cache.items()
+        with _reply_lock:
+            drafts = {k: v for k, v in _reply_cache.items()
                       if v.get('source') == 'user_edit'}
         payload = {
             'saved_at': datetime.now().isoformat(timespec='seconds'),
@@ -1128,7 +1178,7 @@ def _load_reply_cache():
         entries = payload.get('entries', {})
         now = time.time()
         loaded = 0
-        with _preemptive_lock:
+        with _reply_lock:
             for mid, entry in entries.items():
                 ts = entry.get('timestamp', 0)
                 # Safety net : ignorer les brouillons > 4 semaines
@@ -1137,7 +1187,7 @@ def _load_reply_cache():
                 # Forcer source et status cohérents (fichier peut être corrompu)
                 entry['source'] = 'user_edit'
                 entry['status'] = 'done'
-                _preemptive_cache[mid] = entry
+                _reply_cache[mid] = entry
                 loaded += 1
         logger.info(f"[draft] {loaded} brouillon(s) restauré(s) depuis disque")
     except Exception as e:
@@ -1150,14 +1200,15 @@ def _reply_cache_safety_net_loop():
         try:
             now = time.time()
             purged = 0
-            with _preemptive_lock:
-                stale = [k for k, v in _preemptive_cache.items()
+            with _reply_lock:
+                stale = [k for k, v in _reply_cache.items()
                          if now - v.get('timestamp', 0) > _REPLY_CACHE_SAFETY_NET]
                 for k in stale:
-                    _preemptive_cache.pop(k, None)
+                    _reply_cache.pop(k, None)
                     purged += 1
             if purged:
                 logger.info(f"[reply_cache safety net] {purged} entrée(s) > 4 semaines purgée(s)")
+                _reply_metric_inc('purges_safety', purged)
                 _persist_reply_cache()
         except Exception as e:
             logger.warning(f"[reply_cache safety net] erreur : {e}")
@@ -1168,6 +1219,7 @@ def _reply_cache_safety_net_loop():
 _load_reply_cache()
 atexit.register(_persist_reply_cache)
 threading.Thread(target=_reply_cache_safety_net_loop, daemon=True, name='reply-cache-sn').start()
+threading.Thread(target=_reply_cache_metrics_report_loop, daemon=True, name='reply-cache-metrics').start()
 
 # SSE clients connectés
 _sse_clients = []
@@ -2084,7 +2136,7 @@ def _start_speculative(mail_data):
     Génère une réponse en arrière-plan pour un contact connu (spéculation hybride).
 
     Attend (polling) que le prefetch de CE mail soit terminé, puis génère avec stream=False
-    et stocke le résultat dans _preemptive_cache[message_id].
+    et stocke le résultat dans _reply_cache[message_id].
 
     Appelé uniquement si _is_contact_known() → True (TIER 1/2).
     Le cache est nettoyé automatiquement après envoi / suppression / classement.
@@ -2094,14 +2146,14 @@ def _start_speculative(mail_data):
         return
 
     # Éviter les doublons (déjà en cache ou en cours)
-    with _preemptive_lock:
-        entry = _preemptive_cache.get(message_id, {})
+    with _reply_lock:
+        entry = _reply_cache.get(message_id, {})
         # Ne pas écraser un brouillon user ('source': 'user_edit') — priorité éditeur
         if entry.get('source') == 'user_edit':
             return
         if entry.get('status') in ('running', 'done'):
             return
-        _preemptive_cache[message_id] = {
+        _reply_cache[message_id] = {
             'status': 'running', 'source': 'bg_speculation',
             'timestamp': time.time(),
         }
@@ -2116,8 +2168,8 @@ def _start_speculative(mail_data):
         deadline = time.time() + 25
         while time.time() < deadline:
             # Vérifier annulation (template détecté en direct)
-            with _preemptive_lock:
-                if _preemptive_cache.get(message_id, {}).get('status') == 'cancelled':
+            with _reply_lock:
+                if _reply_cache.get(message_id, {}).get('status') == 'cancelled':
                     return
             with _prefetch_lock:
                 prefetch_status = _prefetch_cache.get(cache_key, {}).get('status', 'none')
@@ -2137,8 +2189,8 @@ def _start_speculative(mail_data):
         ai = get_ai()
         builder = _get_prompt_builder()
         if not ai or not builder:
-            with _preemptive_lock:
-                _preemptive_cache.pop(message_id, None)
+            with _reply_lock:
+                _reply_cache.pop(message_id, None)
             return
 
         from_name = mail_data.get('from_name', '')
@@ -2163,8 +2215,8 @@ def _start_speculative(mail_data):
                 text = assemble_template(template, contact_profile, user_name)
                 words = text.split(' ')
                 chunks = [' '.join(words[i:i+3]) + ' ' for i in range(0, len(words), 3)]
-                with _preemptive_lock:
-                    _preemptive_cache[message_id] = {
+                with _reply_lock:
+                    _reply_cache[message_id] = {
                         'status': 'done',
                         'text': text,
                         'chunks': chunks,
@@ -2222,8 +2274,8 @@ def _start_speculative(mail_data):
             )
         except Exception as e:
             logger.error(f"Speculative prompt error: {e}")
-            with _preemptive_lock:
-                _preemptive_cache.pop(message_id, None)
+            with _reply_lock:
+                _reply_cache.pop(message_id, None)
             return
 
         # Générer en mode non-streaming (stockage dans cache)
@@ -2244,24 +2296,24 @@ def _start_speculative(mail_data):
             chunks.append(' '.join(batch))
 
         # Nettoyage du cache si trop plein (max 10 entrées)
-        with _preemptive_lock:
+        with _reply_lock:
             # ANOMALIE #9 fix : ne pas écraser un flag 'cancelled' posé par generate_reply()
-            if _preemptive_cache.get(message_id, {}).get('status') == 'cancelled':
+            if _reply_cache.get(message_id, {}).get('status') == 'cancelled':
                 logger.info(f"Spéculation annulée (template) pour {message_id[:20]}")
                 return
 
-            if len(_preemptive_cache) > 10:
+            if len(_reply_cache) > 10:
                 # Trim : évict les 'done' sauf les brouillons user (source='user_edit')
-                evictable = [(k, v) for k, v in _preemptive_cache.items()
+                evictable = [(k, v) for k, v in _reply_cache.items()
                              if v.get('source') != 'user_edit'  # jamais toucher aux drafts
                              and (v.get('status') == 'done'
                                   or (v.get('status') == 'running'
                                       and time.time() - v.get('timestamp', 0) > 30))]
                 evictable.sort(key=lambda x: x[1].get('timestamp', 0))
                 for k, _ in evictable[:5]:
-                    del _preemptive_cache[k]
+                    del _reply_cache[k]
 
-            _preemptive_cache[message_id] = {
+            _reply_cache[message_id] = {
                 'status': 'done',
                 'source': 'bg_speculation',
                 'text': full_text,
@@ -2276,8 +2328,8 @@ def _start_speculative(mail_data):
 
     except Exception as e:
         logger.warning(f"Spéculation échouée pour {message_id[:20]}: {e}")
-        with _preemptive_lock:
-            _preemptive_cache.pop(message_id, None)
+        with _reply_lock:
+            _reply_cache.pop(message_id, None)
 
 
 def _run_preemptive_bg(inbox_mails):
@@ -2300,8 +2352,8 @@ def _run_preemptive_bg(inbox_mails):
         if not msg_id or not from_email:
             continue
         # Déjà en cache → passer
-        with _preemptive_lock:
-            if msg_id in _preemptive_cache:
+        with _reply_lock:
+            if msg_id in _reply_cache:
                 continue
         if _is_contact_known(from_email):
             candidates.append(mail)
@@ -2352,8 +2404,8 @@ def api_prefetch_status():
         entry = _prefetch_cache.get(cache_key, {})
 
     # Vérifier si une réponse spéculative est prête pour ce mail
-    with _preemptive_lock:
-        spec = _preemptive_cache.get(cache_key, {})
+    with _reply_lock:
+        spec = _reply_cache.get(cache_key, {})
         speculative_ready = spec.get('status') == 'done'
 
     return jsonify({
@@ -2771,6 +2823,109 @@ def api_suggest_folder(message_id):
         return jsonify({"error": _safe_err(e)}), 500
 
 
+# Plan 2 Phase 2.A.4 — 3 hooks événementiels ajoutés (post-audit)
+# Purgent le cache unifié + prefetch + DB cohérents à chaque événement
+# qui "termine" un mail côté user.
+
+def _event_purge_mail(message_id, action, reason):
+    """Helper commun pour les hooks delete/archive/reply-external : purge complète."""
+    if not message_id:
+        return
+    try:
+        _db.mark_treated(message_id, action=action)
+    except Exception:
+        pass
+    with _reply_lock:
+        was_user = _reply_cache.get(message_id, {}).get('source') == 'user_edit'
+        _reply_cache.pop(message_id, None)
+    with _prefetch_lock:
+        _prefetch_cache.pop(message_id, None)
+    try:
+        _db.purge_email_cache_for(message_id)
+    except Exception:
+        pass
+    if was_user:
+        threading.Thread(target=_persist_reply_cache, daemon=True).start()
+    _reply_metric_inc('purges_event')
+    logger.info(f"[event-purge] {action} {message_id[:20]} ({reason})")
+
+
+@app.route('/api/delete_email', methods=['POST'])
+def api_delete_email():
+    """
+    Plan 2 Phase 2.A.4 — hook 'delete' : supprime un mail côté Graph + purge caches.
+    Body JSON : { message_id }
+    """
+    data = request.get_json() or {}
+    message_id = data.get('message_id', '')
+    if not message_id:
+        return jsonify({"error": "message_id requis"}), 400
+    graph = get_graph()
+    if not graph:
+        # Pas de Graph → on peut au moins purger le cache V2 local
+        _event_purge_mail(message_id, 'deleted', 'no_graph')
+        return jsonify({"ok": True, "graph_delete": False, "cache_purged": True})
+    try:
+        graph.delete_message(message_id)
+        _event_purge_mail(message_id, 'deleted', 'graph_ok')
+        return jsonify({"ok": True, "graph_delete": True, "cache_purged": True})
+    except Exception as e:
+        logger.error(f"api_delete_email erreur : {e}")
+        # Purge cache V2 quand même — l'user a voulu supprimer
+        _event_purge_mail(message_id, 'deleted', f'graph_fail_{type(e).__name__}')
+        return jsonify({"ok": False, "error": _safe_err(e),
+                        "cache_purged": True}), 500
+
+
+@app.route('/api/archive_email', methods=['POST'])
+def api_archive_email():
+    """
+    Plan 2 Phase 2.A.4 — hook 'archive' : déplace un mail dans Archive + purge caches.
+    Body JSON : { message_id, archive_folder_id? (sinon default "archive") }
+    """
+    data = request.get_json() or {}
+    message_id = data.get('message_id', '')
+    archive_folder_id = data.get('archive_folder_id', 'archive')  # WellKnown name
+    if not message_id:
+        return jsonify({"error": "message_id requis"}), 400
+    graph = get_graph()
+    if not graph:
+        _event_purge_mail(message_id, 'archived', 'no_graph')
+        return jsonify({"ok": True, "graph_move": False, "cache_purged": True})
+    try:
+        # Move via Graph (move_message existe dans outlook_graph.py, sinon fallback)
+        try:
+            graph.move_message(message_id, archive_folder_id)
+        except AttributeError:
+            # Fallback : appel direct endpoint Graph
+            graph._request('POST', f'/me/messages/{message_id}/move',
+                          json={'destinationId': archive_folder_id})
+        _event_purge_mail(message_id, 'archived', 'graph_ok')
+        return jsonify({"ok": True, "graph_move": True, "cache_purged": True})
+    except Exception as e:
+        logger.error(f"api_archive_email erreur : {e}")
+        _event_purge_mail(message_id, 'archived', f'graph_fail_{type(e).__name__}')
+        return jsonify({"ok": False, "error": _safe_err(e),
+                        "cache_purged": True}), 500
+
+
+@app.route('/api/reply_external_detected', methods=['POST'])
+def api_reply_external_detected():
+    """
+    Plan 2 Phase 2.A.4 — hook 'reply-externe' : le user a répondu depuis Outlook
+    directement (pas via BoosterMail). Appelé par le companion polling qui détecte
+    un nouveau message envoyé dans la conversation.
+
+    Body JSON : { message_id } (le mail reçu auquel l'user a répondu dehors)
+    """
+    data = request.get_json() or {}
+    message_id = data.get('message_id', '')
+    if not message_id:
+        return jsonify({"error": "message_id requis"}), 400
+    _event_purge_mail(message_id, 'replied_external', 'poll_detect')
+    return jsonify({"ok": True, "cache_purged": True})
+
+
 @app.route('/api/classify_email', methods=['POST'])
 def api_classify_email():
     """
@@ -2820,8 +2975,8 @@ def api_classify_email():
             _classify_momentum = {'folder_id': folder_id, 'folder_name': folder_name, 'ts': time.time()}
 
         # Nettoyer les caches (mail classé = traité, plus besoin du prefetch ni de la réponse pré-générée)
-        with _preemptive_lock:
-            _preemptive_cache.pop(message_id, None)
+        with _reply_lock:
+            _reply_cache.pop(message_id, None)
         with _prefetch_lock:
             _prefetch_cache.pop(message_id, None)
         # Purger le cache DB email_cache pour ce mail
@@ -3974,12 +4129,12 @@ def api_save_draft():
     if not message_id:
         return jsonify({"error": "message_id requis"}), 400
 
-    with _preemptive_lock:
+    with _reply_lock:
         # Annuler toute spéculation BG en cours : le brouillon user prime
-        existing = _preemptive_cache.get(message_id, {})
+        existing = _reply_cache.get(message_id, {})
         if existing.get('status') == 'running':
-            _preemptive_cache[message_id] = {'status': 'cancelled'}
-        _preemptive_cache[message_id] = {
+            _reply_cache[message_id] = {'status': 'cancelled'}
+        _reply_cache[message_id] = {
             'status': 'done',
             'source': 'user_edit',
             'text': text,
@@ -4004,8 +4159,8 @@ def api_get_draft():
     if not message_id:
         return jsonify({"found": False, "error": "message_id requis"}), 400
 
-    with _preemptive_lock:
-        entry = _preemptive_cache.get(message_id, {})
+    with _reply_lock:
+        entry = _reply_cache.get(message_id, {})
 
     # Seuls les brouillons user_edit sont "officiels" ici
     if entry.get('source') == 'user_edit' and entry.get('status') == 'done':
@@ -4058,9 +4213,10 @@ def api_instant_reply():
 
     # 1) BROUILLON USER (priorité absolue)
     if message_id:
-        with _preemptive_lock:
-            entry = _preemptive_cache.get(message_id, {})
+        with _reply_lock:
+            entry = _reply_cache.get(message_id, {})
         if entry.get('source') == 'user_edit' and entry.get('status') == 'done':
+            _reply_metric_inc('hits')
             return jsonify({
                 "source": "draft",
                 "text": entry.get('text', ''),
@@ -4070,11 +4226,12 @@ def api_instant_reply():
 
     # 2) CACHE PRÉEMPTIF (BG spéculation déjà terminée)
     if message_id:
-        with _preemptive_lock:
-            entry = _preemptive_cache.get(message_id, {})
+        with _reply_lock:
+            entry = _reply_cache.get(message_id, {})
         if (entry.get('source') == 'bg_speculation'
                 and entry.get('status') == 'done'
                 and entry.get('text')):
+            _reply_metric_inc('hits')
             # Reconstituer avec greeting/closing via contact_profile
             contact_profile = None
             try:
@@ -4137,6 +4294,8 @@ def api_instant_reply():
         })
 
     # 4) Rien
+    if message_id:
+        _reply_metric_inc('misses')
     return jsonify({"source": "none"})
 
 
@@ -4311,12 +4470,12 @@ def generate_reply():
     # Cache unifié (Plan 3 §9.1) : pas de TTL — purge purement événementielle.
     # Safety net 4 semaines géré par le thread `_reply_cache_safety_net_loop`.
     if message_id and not brief:
-        with _preemptive_lock:
-            cached = _preemptive_cache.get(message_id, {})
+        with _reply_lock:
+            cached = _reply_cache.get(message_id, {})
             if cached.get('status') == 'done' and cached.get('chunks'):
                 cached_chunks = list(cached['chunks'])      # copie locale (thread-safe)
                 cached_text = cached.get('text', '')        # copie locale
-                _preemptive_cache.pop(message_id, None)     # consommé → pop immédiat
+                _reply_cache.pop(message_id, None)     # consommé → pop immédiat
             else:
                 cached_chunks = None
                 cached_text = ''
@@ -4735,10 +4894,10 @@ INSTRUCTIONS ECHEANCES :
             # ANOMALIE #9 fix : flag 'cancelled' au lieu de pop (le thread vérifie ce flag
             # et s'arrête proprement, sans remettre une entrée en cache après le pop)
             if message_id:
-                with _preemptive_lock:
-                    entry = _preemptive_cache.get(message_id, {})
+                with _reply_lock:
+                    entry = _reply_cache.get(message_id, {})
                     if entry.get('status') == 'running':
-                        _preemptive_cache[message_id] = {'status': 'cancelled'}
+                        _reply_cache[message_id] = {'status': 'cancelled'}
 
             def stream_template():
                 words = tpl_text.split(' ')
@@ -4966,6 +5125,128 @@ def refine_reply():
 # ROUTES API — ENVOI (squelettes connectés — 12h les remplira)
 # =============================================================================
 
+# =============================================================================
+# Plan 2 Phase 1.B.2 — Extraction learned_templates post-envoi
+# =============================================================================
+
+_LEARNED_TPL_EXCLUDE_RE = re.compile(
+    r'(?:https?://|www\.|\d{3,}|\d{1,2}[/\-]\d{1,2}|\d+\s*€|@\w)',
+    re.IGNORECASE,
+)
+
+
+def _strip_greeting_closing(text):
+    """Retire greeting/closing/signature pour isoler le 'corps' du mail.
+    Heuristique simple : enlève les 2 premières et 2 dernières lignes non vides."""
+    lines = [l.strip() for l in text.split('\n')]
+    nonempty = [i for i, l in enumerate(lines) if l]
+    if len(nonempty) <= 2:
+        return text.strip()
+    # Retirer greeting (1ère ligne non-vide), closing (avant-dernière), signature (dernière)
+    # seulement si elles sont courtes (< 60 chars typiquement pour ces patterns).
+    start = nonempty[0]
+    end = nonempty[-1]
+    # Drop 1ère ligne si elle commence par Bonjour/Salut/Hello/Bonsoir...
+    first = lines[start].lower()
+    if any(first.startswith(g) for g in ('bonjour', 'salut', 'hello', 'bonsoir', 'cher ', 'chère ')):
+        start = nonempty[1] if len(nonempty) > 1 else start
+    # Drop 2 dernières si courtes (closing + signature typique)
+    if end - start >= 2 and len(lines[end]) < 60:
+        end = nonempty[-2] if len(nonempty) >= 2 else end
+    if end - start >= 2 and len(lines[end]) < 60:
+        low = lines[end].lower()
+        if any(c in low for c in ('cordialement', 'cdlt', 'amicalement', 'bien à', 'merci')):
+            end = nonempty[-3] if len(nonempty) >= 3 else end
+    return '\n'.join(lines[start:end + 1]).strip()
+
+
+def _extract_pattern_keywords(received_body, received_subject):
+    """Retourne 3-5 mots-clés représentatifs du mail reçu (normalisés, séparés par ,)."""
+    import unicodedata
+    src = (received_subject or '') + ' ' + re.sub(r'<[^>]+>', ' ', received_body or '')
+    src = unicodedata.normalize('NFKD', src).encode('ascii', 'ignore').decode('ascii')
+    words = re.findall(r"[a-zA-Z]{3,}", src.lower())
+    # Stopwords FR/EN basiques
+    stop = {
+        'bonjour', 'merci', 'cordialement', 'avec', 'pour', 'dans', 'sur', 'par',
+        'les', 'des', 'une', 'est', 'pas', 'que', 'qui', 'mais', 'ces', 'ces',
+        'the', 'and', 'for', 'with', 'hello', 'thanks', 'regards',
+    }
+    kept = [w for w in words if w not in stop]
+    # Dédupliquer en gardant l'ordre d'apparition
+    seen, out = set(), []
+    for w in kept:
+        if w not in seen:
+            seen.add(w)
+            out.append(w)
+        if len(out) >= 5:
+            break
+    return ','.join(out) if out else ''
+
+
+def _extract_learned_template_post_send(message_id, sent_raw_body, mode):
+    """
+    Plan 2 Phase 1.B.2 — Post-envoi, si la réponse est courte ET générique,
+    créer un template candidat à partir de (pattern_keywords, template_text).
+
+    Règles :
+    - Mode doit être 'reply' ou 'reply_all' (pas forward/new)
+    - Template core (sans greeting/closing) < 500 chars
+    - Pas de données spécifiques (chiffres longs, URL, dates, €, emails)
+    - Pattern keywords non vide
+    """
+    if mode not in ('reply', 'reply_all'):
+        return
+    if not message_id or not sent_raw_body:
+        return
+    try:
+        # Core = sent_raw_body sans HTML, sans greeting/closing
+        core = re.sub(r'<[^>]+>', ' ', sent_raw_body).strip()
+        core = _strip_greeting_closing(core)
+        if not core or len(core) > 500 or len(core) < 10:
+            return
+        if _LEARNED_TPL_EXCLUDE_RE.search(core):
+            return  # contient des données spécifiques → pas générique
+
+        # Récupérer le mail reçu (pattern_keywords)
+        received_body = ''
+        received_subject = ''
+        with _warmup_lock:
+            mail = _warmup_cache.get(message_id)
+        if mail:
+            received_body = mail.get('body') or mail.get('body_preview', '')
+            received_subject = mail.get('subject', '')
+        pattern = _extract_pattern_keywords(received_body, received_subject)
+        if not pattern or len(pattern.split(',')) < 2:
+            return  # pas assez de signal
+
+        # Deviner le registre (tu/vous) selon le contenu envoyé
+        low = core.lower()
+        register = 'tutoiement' if re.search(r'\b(tu|toi|ton|tes|ta)\b', low) else 'vouvoiement'
+
+        # Éviter les doublons : chercher un learned_template avec les mêmes keywords
+        try:
+            existing = _db.get_learned_templates()
+            for lt in existing:
+                if lt.get('pattern_keywords') == pattern:
+                    # Même pattern → probablement la même situation : incrémenter usage
+                    _db.increment_learned_template(lt['id'], field='usage_count')
+                    logger.info(f"[learned-tpl] Pattern existant '{pattern[:40]}' → usage++")
+                    return
+        except Exception:
+            pass
+
+        # Créer le candidat
+        try:
+            tpl_id = _db.add_learned_template(pattern, core, register=register)
+            logger.info(f"[learned-tpl] Candidat #{tpl_id} créé : pattern='{pattern[:40]}' "
+                        f"({len(core)}ch, {register})")
+        except Exception as e:
+            logger.warning(f"[learned-tpl] add erreur : {e}")
+    except Exception as e:
+        logger.warning(f"[learned-tpl] extraction erreur : {e}")
+
+
 @app.route('/send_reply', methods=['POST'])
 def send_reply():
     """
@@ -5026,12 +5307,18 @@ def send_reply():
                 _db.mark_treated(message_id, action=mode)
             except Exception:
                 pass  # Non bloquant
+        # Plan 2 Phase 1.B.2 — Extraction learned_template (post-envoi)
+        try:
+            _extract_learned_template_post_send(message_id, raw_body, mode)
+        except Exception as _e:
+            logger.debug(f"[learned-tpl] hook error : {_e}")
         # Nettoyer les deux caches (mail envoyé = traité)
         if message_id:
-            with _preemptive_lock:
-                _preemptive_cache.pop(message_id, None)
+            with _reply_lock:
+                _reply_cache.pop(message_id, None)
             with _prefetch_lock:
                 _prefetch_cache.pop(message_id, None)
+            _reply_metric_inc('purges_event')
         return jsonify(result)
     except GraphAuthError:
         return jsonify({"error": "Token expiré", "auth_required": True}), 401

@@ -105,7 +105,7 @@ Préalable UX : popup **toujours affichée** au démarrage Outlook (Q1 validée 
 |---|---|---|
 | 2A.1 | Renommer et unifier | `_preemptive_cache` → `_reply_cache`, ajouter champs `status` (generated/edited/sent) et `source` (bg_speculation/user_edit) |
 | 2A.2 | Supprimer TTL 30 min lecture | [V2/app_plugin.py:3470](../../V2/app_plugin.py#L3470) — la vérification `cache_age < 1800` disparaît |
-| 2A.3 | Table `processed_emails` | Source de vérité : id, processed_at, action (read/replied/classified/deleted/archived) |
+| 2A.3 | Table `treated_emails` (existante, alias de la `processed_emails` prévue) | Colonnes réelles : `entry_id, action, created_at`. Rôle : source de vérité sur les mails traités (read/replied/classified/deleted/archived/replied_external). Utilisée par `_db.is_treated(mid)` dans les filtres Smart Speculative (F2) et par tous les hooks événementiels. **Décision 20/04** : garder le nom `treated_emails` (héritage proto, même rôle sémantique) plutôt que dupliquer. |
 | 2A.4 | Hooks événementiels (4 manquants) | `api_delete_email` (à créer), archive / déplacement inbox, reply-externe (via poll Graph), cohesion refresh inbox |
 | 2A.5 | Hooks événementiels (déjà présents — à conserver) | classify_email ([L2286](../../V2/app_plugin.py#L2286)), send_reply ([L4186](../../V2/app_plugin.py#L4186)), consommation ([L3473](../../V2/app_plugin.py#L3473)) |
 | 2A.6 | Persistance disque | `drafts_v2.json` existant à réutiliser. Code source à récupérer depuis `git show 25d4629:V2/app_plugin.py` OU ré-implémenter proprement |
@@ -150,7 +150,7 @@ Pipeline de cache complet, événementiel, sans gaspillage.
 
 | # | Action | Détail |
 |---|---|---|
-| 3.1 | Parallélisation des étapes | Graph `$batch` + DB loads + style_profile chargés en parallèle |
+| 3.1 | Parallélisation (sans Graph `$batch`) | `concurrent.futures.ThreadPoolExecutor(max_workers=3)` pour prefetch A/B/C simultané. **Décision 20/04** : Graph `$batch` initialement prévu mais **non adopté** — Microsoft Graph `$search` n'est pas compatible avec `$batch` (documenté dans `_run_prefetch` commentaire). `concurrent.futures` atteint le même gain réseau via HTTP/2. DB loads + style_profile sont chargés à l'import Python (avant startup Flask), donc effectivement en parallèle du warmup Graph. |
 | 3.2 | Progression UI | Barre 0→100% dans la popup avec étape courante |
 | 3.3 | Skip warmup si cache chaud | `prefetch_cache_v2.json` < 48h → skip direct |
 | 3.4 | Pré-warm templates | Charger les 45 templates en mémoire dès le démarrage (pas à la demande) |
@@ -190,7 +190,7 @@ Pipeline de cache complet, événementiel, sans gaspillage.
 
 | # | Action | Détail |
 |---|---|---|
-| 6.1 | `_background_preload_loop` amélioré | Génère en continu pour les mails récents non-traités |
+| 6.1 | Deux loops complémentaires (clarification 20/04) | **`_background_preload_loop`** (one-shot 50 mails Graph post-warmup) + **`_continuous_speculation_loop`** (continu, scan warmup_cache top 20 toutes les 45 s). Rôles distincts, pas redondants. Plan 2 initial parlait d'« améliorer » le loop existant ; décision de garder le one-shot et ajouter un second loop plus léger pour le continu. |
 | 6.2 | Respect des 6 filtres Smart Speculative | Ne génère pas dans le vide |
 | 6.3 | Interruption propre | Stop immédiat si user ouvre un autre mail |
 | 6.4 | Priorité intelligente | Contacts fréquents d'abord, puis chronologique |
