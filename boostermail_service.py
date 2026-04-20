@@ -73,7 +73,7 @@ def _has_classic_outlook():
 
 MAX_RESTART = 5
 HEALTH_CHECK_INTERVAL = 30
-OUTLOOK_POLL_INTERVAL = 2  # secondes entre chaque check Outlook (audit 20/04 : 3s → 2s, détection plus rapide)
+OUTLOOK_POLL_INTERVAL = 1  # secondes entre chaque check Outlook (audit 20/04 : 2s → 1s, gain détection)
 
 # --- Logging ---
 logging.basicConfig(
@@ -239,11 +239,29 @@ def _popup_is_alive():
 
 
 def show_pyqt_popup():
-    """Lance la popup PyQt (popup_pyqt.py) en processus séparé.
-    La popup interroge /api/activation_status pour choisir son mode (Plan 3 §9.3)."""
+    """Affiche la popup PyQt.
+    Audit 20/04 — 2 voies :
+    1) Si popup process déjà vivant → POST http://127.0.0.1:5052/show_popup
+       → réaffichage instantané (~100 ms), pas de respawn Python+Qt.
+    2) Sinon → subprocess.Popen popup_pyqt.py (premier lancement, ~5 s).
+    Gain attendu : ouverture Outlook → popup visible en ~2 s au lieu de 7 s."""
     if _popup_is_alive():
-        logger.info("Popup déjà vivante — skip (anti-doublon)")
-        return
+        # Voie 1 : IPC show_popup (rapide)
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                'http://127.0.0.1:5052/show_popup',
+                data=b'{}', headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            urllib.request.urlopen(req, timeout=1.0)
+            logger.info("Popup réaffichée via IPC (hot)")
+            return
+        except Exception as e:
+            logger.info(f"IPC show_popup échoué ({e}) → fallback subprocess")
+            # fallthrough → subprocess
+
+    # Voie 2 : subprocess fresh spawn
     try:
         pythonw = find_pythonw()
         proc = subprocess.Popen(
@@ -498,7 +516,7 @@ def run_supervisor(first_launch=True):
     _closed_since = None   # epoch du moment où Outlook a fermé (None = pas fermé)
     BACKENDS_IDLE_TIMEOUT = 30 * 60  # 30 min après fermeture Outlook → stop backends
     while True:
-        time.sleep(5)
+        time.sleep(1)  # Audit 20/04 : 5s → 1s, détection re-ouverture Outlook rapide
 
         if os.path.exists(STOP_FILE):
             logger.info("Stop demandé (STOP_FILE)")
@@ -541,9 +559,9 @@ def run_supervisor(first_launch=True):
 
         _was_running = running
 
-        # Health check backends (toutes les 30 s = 6 × 5 s) — seulement si actifs
+        # Health check backends (toutes les 30 s = 30 × 1 s) — seulement si actifs
         _health_counter += 1
-        if _health_counter >= 6:
+        if _health_counter >= 30:
             _health_counter = 0
             for mgr in managers:
                 if not mgr.is_alive():

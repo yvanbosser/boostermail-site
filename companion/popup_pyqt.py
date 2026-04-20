@@ -850,6 +850,24 @@ class EasyMailPopup(QMainWindow):
             self.move(self._screen.width() - self._overlay_w, 48)
         self._stack.setCurrentIndex(1)
 
+    def reshow_launch_popup(self):
+        """Audit 20/04 : re-affiche la popup de lancement (centrée) quand
+        Outlook ré-ouvre. Évite de respawner Python+Qt → gain ~5 s."""
+        logger.info('[popup] Réaffichage popup de lancement (IPC show_popup)')
+        # Remettre la bonne vue (loading screen centré) + geometry
+        try:
+            self._stack.setCurrentIndex(0)
+            self.resize(self._marketing_w, self._marketing_h)
+            self.move(
+                (self._screen.width() - self._marketing_w) // 2,
+                (self._screen.height() - self._marketing_h) // 2,
+            )
+            self.show()
+            self.raise_()
+            self.activateWindow()
+        except Exception as e:
+            logger.warning(f"reshow_launch_popup erreur: {e}")
+
     def closeEvent(self, event):
         # P9 : stopper TOUS les timers pour eviter segfault
         if hasattr(self, '_outlook_check_timer'):
@@ -1015,6 +1033,7 @@ IPC_HOST = '127.0.0.1'
 class _IPCBridge(QObject):
     """Bridge thread-safe HTTP→Qt. Émet un signal qui sera reçu sur le Qt thread."""
     open_dialog_requested = pyqtSignal(dict)
+    show_popup_requested = pyqtSignal()   # Réaffiche la popup de lancement
 
 
 _ipc_bridge = None  # Instance globale (setée au démarrage Qt)
@@ -1042,6 +1061,14 @@ class _IPCHandler(BaseHTTPRequestHandler):
             self._json_response({"error": "not found"}, 404)
 
     def do_POST(self):
+        if self.path == '/show_popup':
+            # Signale au Qt thread de réafficher la popup de lancement
+            if _ipc_bridge:
+                _ipc_bridge.show_popup_requested.emit()
+                self._json_response({"ok": True})
+            else:
+                self._json_response({"error": "bridge not ready"}, 503)
+            return
         if self.path != '/open_dialog':
             self._json_response({"error": "not found"}, 404)
             return
@@ -1162,13 +1189,19 @@ def main():
         logger.info(f"PyQt direct dialog visible — mode={args.mode}")
     else:
         global _ipc_bridge
+        # Audit 20/04 — ne pas quitter Qt quand toutes les fenêtres sont
+        # fermées. Le process reste vivant pour servir l'IPC hot instance
+        # (dialog au clic bouton BM) et pour réafficher la popup au prochain
+        # démarrage Outlook sans respawner tout Python + PyQt.
+        app.setQuitOnLastWindowClosed(False)
+
         # Mode overlay classique — vérifier anti-spam (audit 20/04 Q3)
         status = _fetch_activation_full()
         show_popup = status.get('should_show_popup', True)
         popup = EasyMailPopup()
         if show_popup:
             popup.show()
-            _mark_popup_shown()  # marquer pour ne pas réafficher aujourd'hui
+            _mark_popup_shown()
             logger.info(f"Overlay PyQt visible — backend: {BACKEND_URL}")
         else:
             logger.info(f"Popup déjà affichée aujourd'hui "
@@ -1177,10 +1210,11 @@ def main():
 
         # Plan 2 Phase 4 — Hot instance : serveur IPC pour éviter de relancer
         # Python + PyQt + QWebEngineView à chaque clic bouton dans Outlook.
-        # Actif dans les deux cas (popup visible ou cachée) pour que le bouton
-        # BM dans Outlook reste instantané.
         _ipc_bridge = _IPCBridge()
         _ipc_bridge.open_dialog_requested.connect(popup.open_dialog_via_ipc)
+        # Nouveau (audit 20/04) : endpoint POST /show_popup pour que le
+        # superviseur réaffiche la popup quand Outlook rouvre sans respawn.
+        _ipc_bridge.show_popup_requested.connect(popup.reshow_launch_popup)
         threading.Thread(target=_start_ipc_server, daemon=True, name='ipc-server').start()
 
     sys.exit(app.exec())
