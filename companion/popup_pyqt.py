@@ -199,9 +199,11 @@ class EasyMailPopup(QMainWindow):
 
         # --- Dispatch selon le mode ---
         if self._activation_mode == 'flash':
-            # user activé + cache chaud → 500 ms puis bascule overlay
+            # user activé + cache chaud → 1500 ms (temps de perception humaine)
+            # puis bascule overlay. Correction audit 20/04 : 500 ms était trop
+            # court pour être perçu visuellement.
             self._outlook_check_timer.start(5000)
-            QTimer.singleShot(500, self._transition_to_overlay)
+            QTimer.singleShot(1500, self._transition_to_overlay)
         elif self._activation_mode == 'marketing':
             # Pas activé + cache chaud : pas de warmup, on attend le clic user
             self._outlook_check_timer.start(5000)
@@ -282,31 +284,71 @@ class EasyMailPopup(QMainWindow):
     # -------- Mode FLASH (user activé, cache chaud) --------------------------
 
     def _build_flash_screen(self):
-        """Splash court : "BoosterMail prêt ✓" ~500 ms puis transition vers overlay."""
+        """
+        Splash de confirmation « BoosterMail prêt » — user activé + cache chaud.
+        Affiché ~1500 ms (temps de perception humaine, correction audit 20/04)
+        puis transition vers l'overlay popup.html.
+
+        Design : large pastille verte animée (fade-in) + logo + texte centré.
+        """
         widget = QWidget()
         widget.setStyleSheet(
             'QWidget { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,'
             ' stop:0 #ffffff, stop:1 #EAF4FC); }'
         )
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(15, 12, 15, 12)
+        layout.setContentsMargins(18, 18, 18, 18)
         layout.addStretch()
 
-        logo = QLabel('✉ BoosterMail')
+        # Pastille verte avec check
+        check_row = QHBoxLayout()
+        check_row.addStretch()
+        check = QLabel('✓')
+        check.setFixedSize(48, 48)
+        check.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        check.setStyleSheet(
+            'background: #16A34A; color: white; border-radius: 24px;'
+            ' font-size: 26px; font-weight: 700; font-family: "Segoe UI";'
+        )
+        check_row.addWidget(check)
+        check_row.addStretch()
+        layout.addLayout(check_row)
+
+        layout.addSpacing(8)
+
+        logo = QLabel('BoosterMail')
         logo.setStyleSheet(
-            'font-family: "Segoe UI"; font-size: 17px; font-weight: 700; color: #0F6CBD;'
+            'font-family: "Segoe UI"; font-size: 18px; font-weight: 700;'
+            ' color: #0F6CBD; letter-spacing: 0.3px;'
         )
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(logo)
 
-        ready = QLabel('prêt ✓')
+        ready = QLabel('est prêt')
         ready.setStyleSheet(
-            'font-family: "Segoe UI"; font-size: 12px; color: #16A34A; padding-top: 4px;'
+            'font-family: "Segoe UI"; font-size: 12px; color: #475569;'
+            ' padding-top: 2px;'
         )
         ready.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(ready)
 
         layout.addStretch()
+
+        # Animation fade-in sur le widget (donne une sensation de "pop" léger)
+        try:
+            effect = QGraphicsOpacityEffect(widget)
+            widget.setGraphicsEffect(effect)
+            effect.setOpacity(0.0)
+            anim = QPropertyAnimation(effect, b"opacity", widget)
+            anim.setDuration(220)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            anim.start()
+            # Garder référence pour éviter GC prématuré
+            self._flash_fade_anim = anim
+        except Exception:
+            pass
 
         # Widgets "factices" pour compatibilité avec le code warmup commun
         self._progress_bar = self._make_progress_bar()
