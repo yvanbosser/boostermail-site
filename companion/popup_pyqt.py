@@ -23,13 +23,14 @@ import time
 import urllib.request
 from urllib.parse import unquote
 
-from PyQt6.QtCore import Qt, QUrl, QTimer, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, QUrl, QTimer, QPropertyAnimation, QEasingCurve, pyqtSignal, QObject
 from PyQt6.QtGui import QDesktopServices, QFont, QLinearGradient, QPalette, QColor, QBrush
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
                               QWidget, QStackedWidget, QLabel, QProgressBar,
                               QPushButton, QGraphicsOpacityEffect, QSizePolicy)
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [popup-pyqt] %(levelname)s — %(message)s')
 logger = logging.getLogger('popup-pyqt')
@@ -698,6 +699,54 @@ class EasyMailPopup(QMainWindow):
         if getattr(self, '_direct_mode', False):
             QApplication.quit()
 
+    # Plan 2 Phase 4 — handler de hot instance (reçoit params via IPC)
+    def open_dialog_via_ipc(self, params):
+        """
+        Appelé par le bridge IPC quand l'add-in Outlook clique sur le bouton.
+        Charge dialog.html avec les nouveaux params et bascule l'affichage,
+        sans relancer un nouveau process Python/PyQt (instance chaude).
+        """
+        try:
+            from urllib.parse import urlencode
+            logger.info(f"[hot] open_dialog_via_ipc mode={params.get('mode', 'reply')} "
+                        f"subject={params.get('subject', '')[:50]}")
+            # Construire l'URL avec les params (même format que mode direct)
+            query = {'standalone': '1', **{k: v for k, v in params.items() if v}}
+            dialog_url = f'{BACKEND_URL}/plugin/dialog.html?' + urlencode(query)
+
+            # Si on est en mode direct (fenêtre dédiée dialog), juste recharger
+            if getattr(self, '_direct_mode', False):
+                self._dialog_view.load(QUrl(dialog_url))
+            else:
+                # Mode overlay : charger puis basculer sur la vue dialog
+                self._dialog_view.load(QUrl(dialog_url))
+                # Sauvegarder la géométrie overlay avant redimensionnement
+                self._overlay_geometry_backup = (
+                    self.size().width(), self.size().height(),
+                    self.pos().x(), self.pos().y(),
+                )
+                w = min(1200, self._screen.width() - 40)
+                h = min(800, self._screen.height() - 40)
+                self.resize(w, h)
+                self.move((self._screen.width() - w) // 2,
+                          (self._screen.height() - h) // 2)
+                self._stack.setCurrentIndex(2)  # vue dialog
+
+            # Ramener la fenêtre au premier plan
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            if sys.platform == 'win32':
+                try:
+                    import ctypes
+                    hwnd = int(self.winId())
+                    ctypes.windll.user32.AllowSetForegroundWindow(-1)
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"[hot] open_dialog_via_ipc erreur : {e}")
+
 
 # =============================================================================
 # DETECTION OUTLOOK
@@ -765,6 +814,75 @@ def _is_outlook_running():
     finally:
         kernel32.CloseHandle(snapshot)
     return False
+
+
+# =============================================================================
+# Plan 2 Phase 4 — IPC hot instance : écoute localhost:5052
+# =============================================================================
+
+IPC_PORT = 5052
+IPC_HOST = '127.0.0.1'
+
+
+class _IPCBridge(QObject):
+    """Bridge thread-safe HTTP→Qt. Émet un signal qui sera reçu sur le Qt thread."""
+    open_dialog_requested = pyqtSignal(dict)
+
+
+_ipc_bridge = None  # Instance globale (setée au démarrage Qt)
+
+
+class _IPCHandler(BaseHTTPRequestHandler):
+    """Handler HTTP minimal : GET /ping, POST /open_dialog."""
+
+    def log_message(self, format, *args):
+        # Silence les logs http.server par défaut (bruyant)
+        logger.debug(f"[ipc] {format % args}")
+
+    def _json_response(self, payload, status=200):
+        body = json.dumps(payload).encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path == '/ping':
+            self._json_response({"alive": True, "pid": os.getpid()})
+        else:
+            self._json_response({"error": "not found"}, 404)
+
+    def do_POST(self):
+        if self.path != '/open_dialog':
+            self._json_response({"error": "not found"}, 404)
+            return
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length) if length > 0 else b'{}'
+            params = json.loads(body.decode('utf-8') or '{}')
+        except Exception as e:
+            self._json_response({"error": f"bad json: {e}"}, 400)
+            return
+        if _ipc_bridge:
+            # Émettre sur le Qt thread via signal
+            _ipc_bridge.open_dialog_requested.emit(params)
+            self._json_response({"ok": True, "handled_by": "hot_instance"})
+        else:
+            self._json_response({"error": "bridge not initialized"}, 503)
+
+
+def _start_ipc_server():
+    """Démarre le serveur HTTP IPC dans un thread daemon."""
+    try:
+        server = ThreadingHTTPServer((IPC_HOST, IPC_PORT), _IPCHandler)
+        logger.info(f"[ipc] Hot instance serveur démarré sur {IPC_HOST}:{IPC_PORT}")
+        server.serve_forever()
+    except OSError as e:
+        # Port déjà occupé → un autre popup tourne déjà
+        logger.info(f"[ipc] Port {IPC_PORT} occupé ({e}) → pas de hot instance")
+    except Exception as e:
+        logger.warning(f"[ipc] Erreur serveur IPC : {e}")
 
 
 # =============================================================================
@@ -859,6 +977,13 @@ def main():
         popup = EasyMailPopup()
         popup.show()
         logger.info(f"Overlay PyQt visible — backend: {BACKEND_URL}")
+
+        # Plan 2 Phase 4 — Hot instance : serveur IPC pour éviter de relancer
+        # Python + PyQt + QWebEngineView à chaque clic bouton dans Outlook.
+        global _ipc_bridge
+        _ipc_bridge = _IPCBridge()
+        _ipc_bridge.open_dialog_requested.connect(popup.open_dialog_via_ipc)
+        threading.Thread(target=_start_ipc_server, daemon=True, name='ipc-server').start()
 
     sys.exit(app.exec())
 

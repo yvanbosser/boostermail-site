@@ -908,12 +908,44 @@ import threading as _th
 _dialog_process_lock = _th.Lock()
 _current_dialog_process = None   # Singleton : une seule fenêtre dialog à la fois
 
+_IPC_HOT_URL = 'http://127.0.0.1:5052/open_dialog'
+_IPC_PING_URL = 'http://127.0.0.1:5052/ping'
+
+
+def _try_hot_instance(params):
+    """
+    Plan 2 Phase 4 — Essayer le popup_pyqt déjà en mémoire (hot instance) avant
+    de spawn un nouveau process Python + PyQt (coût ~1.5-2s).
+    Retourne True si succès, False si pas de hot instance (ou crashé).
+    """
+    import urllib.request, urllib.error
+    try:
+        data = json.dumps(params).encode('utf-8')
+        req = urllib.request.Request(
+            _IPC_HOT_URL, data=data,
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            if resp.status == 200:
+                body = json.loads(resp.read().decode('utf-8'))
+                return bool(body.get('ok'))
+    except Exception as e:
+        logger.debug(f"Hot instance indispo ({e}) → fallback subprocess")
+    return False
+
+
 @app.route('/open_dialog_native', methods=['POST'])
 def open_dialog_native():
     """
     Ouvre une fenêtre PyQt native affichant le dialog BoosterMail.
     Appelé par l'add-in Outlook sur New Outlook Windows (où displayDialogAsync
     déclenche une popup de confirmation non désirable).
+
+    Plan 2 Phase 4 — 2 voies :
+      1. Hot instance (localhost:5052) : popup_pyqt déjà en mémoire
+         → affichage en ~200 ms (signal Qt → reload URL dialog.html)
+      2. Fallback subprocess : spawn un nouveau process Python+PyQt (~1.5-2s)
 
     Body JSON attendu : { mode, messageId, subject, fromName, fromEmail, to, cc, hasAttachments }
     """
@@ -924,7 +956,14 @@ def open_dialog_native():
         mode = data.get('mode', 'reply')
         if mode not in ('reply', 'reply_all', 'forward', 'new'):
             mode = 'reply'
+        data['mode'] = mode
 
+        # Voie 1 — Hot instance (rapide)
+        if _try_hot_instance(data):
+            logger.info(f"Dialog via HOT instance (5052) — mode={mode}")
+            return jsonify({"status": "ok", "via": "hot_instance"})
+
+        # Voie 2 — Fallback subprocess (lent mais fiable)
         # Localiser popup_pyqt.py (même dossier que ce fichier)
         script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'popup_pyqt.py')
         if not os.path.exists(script_path):
@@ -962,8 +1001,8 @@ def open_dialog_native():
                 stderr=subprocess.STDOUT,
             )
 
-        logger.info(f"Dialog PyQt lancé : mode={mode} subject={data.get('subject', '')[:50]}")
-        return jsonify({"status": "ok", "pid": _current_dialog_process.pid})
+        logger.info(f"Dialog PyQt lancé via subprocess : mode={mode} subject={data.get('subject', '')[:50]}")
+        return jsonify({"status": "ok", "via": "subprocess", "pid": _current_dialog_process.pid})
 
     except Exception as e:
         logger.error(f"open_dialog_native error: {e}")
