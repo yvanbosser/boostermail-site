@@ -20,14 +20,19 @@ MAX_TOKENS = 1200
 _writing_level = None
 
 # Charger le profil de style s'il existe
+# V2 autonomie (18/04) : style_profile.txt est partagé au niveau parent
+# (C:/EasyMail/style_profile.txt), pas dans V2/. Bug fix audit 20/04 :
+# pointer vers le parent au lieu du dossier du module.
 _style_profile = ""
-_style_path = os.path.join(os.path.dirname(__file__), "style_profile.txt")
+_style_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "style_profile.txt")
 if os.path.exists(_style_path):
     with open(_style_path, "r", encoding="utf-8") as f:
         _style_profile = f.read().strip()
     print(f"[claude] Profil de style charge ({len(_style_profile)} chars)", flush=True)
 else:
-    print("[claude] Pas de style_profile.txt — style generique utilise", flush=True)
+    print(f"[claude] Pas de style_profile.txt à {_style_path} — style generique utilise",
+          flush=True)
 
 # System prompt avec profil de style
 _BASE_SYSTEM = """Tu es le ghost-writer de l'utilisateur. Ecris comme lui, mais en un peu mieux : son style, son ton, ses habitudes — avec un francais irreprochable et une qualite de contenu superieure.

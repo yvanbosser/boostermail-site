@@ -4111,6 +4111,51 @@ _contacts_recalib_step = ''
 _contacts_recalib_progress = {'done': 0, 'total': 0}
 _recalib_contacts_lock = threading.Lock()   # protège le démarrage (anti TOCTOU)
 
+@app.route('/api/cache_metrics')
+def api_cache_metrics():
+    """
+    Plan 2 Phase 2.A.9 — Snapshot live des métriques cache.
+    Complément au log périodique toutes les 15 min (thread reply-cache-metrics).
+    Utile pour debug en conditions réelles sans attendre 15 min.
+    """
+    with _reply_cache_metrics_lock:
+        snap = dict(_reply_cache_metrics)
+    total_reads = snap['hits'] + snap['misses']
+    hit_rate = (100.0 * snap['hits'] / total_reads) if total_reads else 0.0
+    with _reply_lock:
+        size = len(_reply_cache)
+        user_edits = sum(1 for v in _reply_cache.values()
+                         if v.get('source') == 'user_edit')
+        bg_speculations = sum(1 for v in _reply_cache.values()
+                              if v.get('source') == 'bg_speculation')
+    with _c_keyword_lock:
+        ckw_size = len(_c_keyword_cache)
+    return jsonify({
+        "reply_cache": {
+            "size": size,
+            "user_edits": user_edits,
+            "bg_speculations": bg_speculations,
+            "reads": total_reads,
+            "hits": snap['hits'],
+            "misses": snap['misses'],
+            "hit_rate_pct": round(hit_rate, 1),
+            "writes_bg": snap['writes_bg'],
+            "writes_user": snap['writes_user'],
+            "purges_event": snap['purges_event'],
+            "purges_safety": snap['purges_safety'],
+            "purges_cohesion": snap['purges_cohesion'],
+        },
+        "c_keyword_cache": {
+            "size": ckw_size,
+            "max": _C_KEYWORD_CACHE_MAX,
+            "ttl_seconds": _C_KEYWORD_CACHE_TTL,
+        },
+        "open_counter": {
+            "tracked_mails": len(_mail_open_counter),
+        },
+    })
+
+
 @app.route('/api/save_draft', methods=['POST'])
 def api_save_draft():
     """
