@@ -28,6 +28,8 @@ CONFIG_PATH = os.path.join(EASYMAIL_DIR, 'config.json')
 PID_FILE = os.path.join(EASYMAIL_DIR, '.boostermail.pid')
 STOP_FILE = os.path.join(EASYMAIL_DIR, '.boostermail.stop')
 LOG_FILE = os.path.join(EASYMAIL_DIR, 'boostermail.log')
+POPUP_PID_FILE = os.path.join(EASYMAIL_DIR, 'companion', '.popup_pid')
+POPUP_SCRIPT = os.path.join(EASYMAIL_DIR, 'companion', 'popup_pyqt.py')
 _NW = 0x08000000  # CREATE_NO_WINDOW
 _MUTEX_HANDLE = None  # Handle mutex Windows (eviter GC)
 
@@ -180,7 +182,7 @@ def write_pid_file(sup_pid, child_pids):
 
 
 def cleanup():
-    for f in [PID_FILE, STOP_FILE, LAUNCH_SIGNAL]:
+    for f in [PID_FILE, STOP_FILE, POPUP_PID_FILE]:
         try:
             if os.path.exists(f):
                 os.remove(f)
@@ -213,26 +215,47 @@ def validate_prerequisites():
     return len(errors) == 0
 
 
-POPUP_SCRIPT = os.path.join(EASYMAIL_DIR, 'boostermail_popup.py')
-LAUNCH_SIGNAL = os.path.join(EASYMAIL_DIR, '.boostermail.launch')
+def _popup_is_alive():
+    """True si le PID stocké correspond à un process vivant (anti-doublon)."""
+    try:
+        with open(POPUP_PID_FILE, 'r') as f:
+            pid = int(f.read().strip())
+    except Exception:
+        return False
+    try:
+        kernel32 = ctypes.windll.kernel32
+        PROCESS_QUERY_LIMITED = 0x1000
+        h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED, False, pid)
+        if not h:
+            return False
+        exit_code = wintypes.DWORD()
+        kernel32.GetExitCodeProcess(h, ctypes.byref(exit_code))
+        kernel32.CloseHandle(h)
+        return exit_code.value == 259  # STILL_ACTIVE
+    except Exception:
+        return False
 
 
-def show_marketing_popup():
-    """Lance la popup marketing comme processus separe (fiable a chaque cycle).
-    La popup ecrit .boostermail.launch quand l'utilisateur clique 'Lancer'."""
-    # Nettoyer le signal
-    if os.path.exists(LAUNCH_SIGNAL):
-        os.remove(LAUNCH_SIGNAL)
+def show_pyqt_popup():
+    """Lance la popup PyQt (popup_pyqt.py) en processus séparé.
+    La popup interroge /api/activation_status pour choisir son mode (Plan 3 §9.3)."""
+    if _popup_is_alive():
+        logger.info("Popup déjà vivante — skip (anti-doublon)")
+        return
     try:
         pythonw = find_pythonw()
-        subprocess.Popen([pythonw, POPUP_SCRIPT], cwd=EASYMAIL_DIR,
-                         creationflags=_NW)
-        logger.info("Popup marketing lancee (processus separe)")
+        proc = subprocess.Popen(
+            [pythonw, POPUP_SCRIPT], cwd=EASYMAIL_DIR,
+            creationflags=_NW,
+        )
+        try:
+            with open(POPUP_PID_FILE, 'w') as f:
+                f.write(str(proc.pid))
+        except Exception:
+            pass
+        logger.info(f"Popup PyQt lancee (PID {proc.pid})")
     except Exception as e:
-        logger.warning(f"Popup erreur: {e}")
-        # Creer le signal pour que les backends se lancent quand meme
-        with open(LAUNCH_SIGNAL, 'w') as f:
-            f.write('launch')
+        logger.warning(f"Popup PyQt erreur: {e}")
 
 
 # =============================================================================
@@ -424,38 +447,11 @@ def run_supervisor(first_launch=True):
         time.sleep(OUTLOOK_POLL_INTERVAL)
 
     # =========================================================
-    # PHASE 2 : Outlook detecte — popup + attente clic + backends
+    # PHASE 2 : Outlook detecte — backends puis popup PyQt
+    # Nouveau flow (Phase 0 Plan 2) : les backends se lancent en premier
+    # pour que la popup PyQt puisse interroger /api/activation_status.
     # =========================================================
     managers = []
-
-    # Nettoyer tout signal residuel avant de lancer la popup
-    for f in [LAUNCH_SIGNAL]:
-        try:
-            if os.path.exists(f):
-                os.remove(f)
-        except Exception:
-            pass
-
-    # Afficher la popup (processus separe, ecrit .boostermail.launch au clic)
-    show_marketing_popup()
-    time.sleep(1)  # Laisser la popup s'ouvrir avant de commencer a attendre
-
-    # Attendre le signal de la popup (clic "Lancer") ou timeout 60s
-    logger.info("Attente clic utilisateur sur la popup...")
-    for _ in range(200):  # 200 × 0.3s = 60s max
-        if os.path.exists(LAUNCH_SIGNAL):
-            logger.info("Signal 'Lancer' recu !")
-            try:
-                os.remove(LAUNCH_SIGNAL)
-            except Exception:
-                pass
-            break
-        if os.path.exists(STOP_FILE):
-            cleanup()
-            return False
-        time.sleep(0.3)
-    else:
-        logger.warning("Popup non cliquee apres 60s — lancement automatique")
 
     # Lancer les backends
     logger.info("Lancement des backends...")
@@ -467,8 +463,21 @@ def run_supervisor(first_launch=True):
         managers.append(mgr)
     write_pid_file(os.getpid(), [m.pid for m in managers if m.pid])
 
-    # Attendre que les ports repondent (max 60s)
-    logger.info("Attente des ports...")
+    # Attendre que V2 (port 3443) réponde, indispensable pour /api/activation_status
+    logger.info("Attente de V2 (port 3443) pour popup...")
+    for _ in range(30):  # 30 × 1s = 30s max
+        if is_port_listening(3443):
+            break
+        if os.path.exists(STOP_FILE):
+            cleanup()
+            return False
+        time.sleep(1)
+
+    # Lancer la popup PyQt (interroge /api/activation_status elle-même)
+    show_pyqt_popup()
+
+    # Attendre que tous les ports répondent (max 60s au total)
+    logger.info("Attente des autres ports...")
     for _ in range(60):
         if all(is_port_listening(p['port']) for p in PROCESSES):
             break

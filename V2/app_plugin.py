@@ -5223,6 +5223,73 @@ def api_setup_complete():
     return jsonify({"status": "ok", "step": step})
 
 
+@app.route('/api/activation_status')
+def api_activation_status():
+    """
+    Retourne l'état d'activation du user + état du cache.
+    Permet à la popup PyQt de choisir entre ses 4 modes (cf. Plan 3 §9.3) :
+      - pas activé + cache froid → marketing CTA + barre warmup
+      - pas activé + cache chaud → marketing CTA seul
+      - activé + cache froid     → temporisateur + barre warmup ~8s
+      - activé + cache chaud     → flash <500ms
+
+    Définition "activé" (Plan 3 §9.3) : 3 conditions cumulées.
+    """
+    # 1. onboarding_done (flag DB settings)
+    onboarding_done = _db.get_setting('onboarding_done', 'false') == 'true'
+
+    # 2. OAuth Microsoft token valide
+    oauth_token_valid = False
+    try:
+        auth = get_auth_provider()
+        if auth:
+            token = auth.get_access_token()
+            oauth_token_valid = bool(token)
+    except Exception:
+        oauth_token_valid = False
+
+    # 3. style_profile.txt existe et non vide
+    style_profile_exists = False
+    try:
+        style_path = os.path.join(EASYMAIL_DIR, "style_profile.txt")
+        if os.path.exists(style_path) and os.path.getsize(style_path) > 0:
+            style_profile_exists = True
+    except Exception:
+        pass
+
+    user_activated = onboarding_done and oauth_token_valid and style_profile_exists
+
+    # Cache chaud : prefetch_cache_v2.json existe et < 48h
+    cache_warm = False
+    try:
+        if os.path.exists(_PREFETCH_CACHE_PATH):
+            age = time.time() - os.path.getmtime(_PREFETCH_CACHE_PATH)
+            cache_warm = age < _PREFETCH_CACHE_TTL
+    except Exception:
+        cache_warm = False
+
+    # Mode déduit (le popup peut aussi le recalculer, ce champ est un raccourci)
+    if user_activated and cache_warm:
+        mode = 'flash'
+    elif user_activated and not cache_warm:
+        mode = 'warmup'
+    elif not user_activated and cache_warm:
+        mode = 'marketing'
+    else:
+        mode = 'marketing_warmup'
+
+    return jsonify({
+        "user_activated": user_activated,
+        "cache_warm": cache_warm,
+        "mode": mode,
+        "conditions": {
+            "onboarding_done": onboarding_done,
+            "oauth_token_valid": oauth_token_valid,
+            "style_profile_exists": style_profile_exists,
+        },
+    })
+
+
 @app.route('/api/setup/onboarding', methods=['POST'])
 def api_setup_onboarding():
     """

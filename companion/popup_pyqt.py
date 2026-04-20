@@ -23,10 +23,11 @@ import time
 import urllib.request
 from urllib.parse import unquote
 
-from PyQt6.QtCore import Qt, QUrl, QTimer
-from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout,
-                              QWidget, QStackedWidget, QLabel, QProgressBar)
+from PyQt6.QtCore import Qt, QUrl, QTimer, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QDesktopServices, QFont, QLinearGradient, QPalette, QColor, QBrush
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
+                              QWidget, QStackedWidget, QLabel, QProgressBar,
+                              QPushButton, QGraphicsOpacityEffect, QSizePolicy)
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 
@@ -107,6 +108,9 @@ class EasyMailPopup(QMainWindow):
         self._screen = QApplication.primaryScreen().availableGeometry()
         self._overlay_w = min(max(int(self._screen.width() * 0.22), 280), 380)
         self._overlay_h = int(self._screen.height() * 0.31)
+        # Dimensions élargies pour le CTA marketing (user pas activé)
+        self._marketing_w = min(max(int(self._screen.width() * 0.30), 420), 520)
+        self._marketing_h = min(max(int(self._screen.height() * 0.55), 420), 560)
 
         # --- Layout principal ---
         central = QWidget()
@@ -149,8 +153,13 @@ class EasyMailPopup(QMainWindow):
 
         # --- MODE OVERLAY (Classic/fallback) : 3 vues stackées ---
 
-        # --- Vue 0 : Ecran chargement (barre de progression) ---
-        self._loading = self._build_loading_screen()
+        # --- Détection du mode d'activation (Plan 3 §9.3) ---
+        # 4 modes : flash / warmup / marketing / marketing_warmup
+        self._activation_mode = _fetch_activation_mode()
+        logger.info(f"Mode popup détecté : {self._activation_mode}")
+
+        # --- Vue 0 : Ecran chargement (adapté au mode) ---
+        self._loading = self._build_loading_screen(self._activation_mode)
         self._stack.addWidget(self._loading)
 
         # --- Vue 1 : popup.html (Etat 1 — overlay) ---
@@ -167,65 +176,301 @@ class EasyMailPopup(QMainWindow):
         self._dialog_page.easymail_action = self._on_easymail_action
         self._stack.addWidget(self._dialog_view)
 
-        # --- TOUJOURS positionner en haut a droite (pas de restore geometry) ---
+        # --- Positionnement : centre pour marketing, haut-droite sinon ---
         self._stack.setCurrentIndex(0)
-        self.resize(self._overlay_w, self._overlay_h)
-        self.move(self._screen.width() - self._overlay_w, 48)
+        if self._activation_mode in ('marketing', 'marketing_warmup'):
+            # CTA marketing centré pour maximiser l'impact
+            self.resize(self._marketing_w, self._marketing_h)
+            self.move(
+                (self._screen.width() - self._marketing_w) // 2,
+                (self._screen.height() - self._marketing_h) // 2,
+            )
+        else:
+            self.resize(self._overlay_w, self._overlay_h)
+            self.move(self._screen.width() - self._overlay_w, 48)
 
         # --- Timer detection fermeture Outlook ---
         self._outlook_check_timer = QTimer()
         self._outlook_check_timer.timeout.connect(self._check_outlook_alive)
         self._outlook_fail_count = 0
 
-        logger.info("Overlay PyQt demarre — phase chargement")
+        logger.info(f"Overlay PyQt demarre — mode={self._activation_mode}")
 
-        # Lancer le warmup automatiquement
-        self._start_warmup()
+        # --- Dispatch selon le mode ---
+        if self._activation_mode == 'flash':
+            # user activé + cache chaud → 500 ms puis bascule overlay
+            self._outlook_check_timer.start(5000)
+            QTimer.singleShot(500, self._transition_to_overlay)
+        elif self._activation_mode == 'marketing':
+            # Pas activé + cache chaud : pas de warmup, on attend le clic user
+            self._outlook_check_timer.start(5000)
+        else:
+            # 'warmup' ou 'marketing_warmup' → warmup normal en arrière-plan
+            self._start_warmup()
 
     # =========================================================================
-    # ECRAN DE CHARGEMENT
+    # ECRAN DE CHARGEMENT (dispatcher 4 modes — Plan 3 §9.3)
     # =========================================================================
 
-    def _build_loading_screen(self):
-        """Ecran de chargement : barre de progression + noms des mails."""
+    def _build_loading_screen(self, mode='warmup'):
+        """
+        4 modes :
+          - 'flash'           : user activé + cache chaud → splash 500 ms
+          - 'warmup'          : user activé + cache froid → barre progression ~8 s
+          - 'marketing'       : user pas activé + cache chaud → CTA bloquant
+          - 'marketing_warmup': user pas activé + cache froid → CTA + barre en bas
+        Crée les widgets `_progress_bar`, `_progress_label`, `_mail_label` dans
+        tous les modes (le code de warmup suppose leur existence).
+        """
+        if mode == 'flash':
+            return self._build_flash_screen()
+        if mode == 'marketing':
+            return self._build_marketing_screen(with_warmup=False)
+        if mode == 'marketing_warmup':
+            return self._build_marketing_screen(with_warmup=True)
+        return self._build_warmup_screen()
+
+    # -------- Mode WARMUP (user activé, cache froid) -------------------------
+
+    def _build_warmup_screen(self):
+        """Overlay compact : logo + barre de progression + sujet du mail courant."""
         widget = QWidget()
-        widget.setStyleSheet('background: #fff;')
+        widget.setStyleSheet(
+            'QWidget { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,'
+            ' stop:0 #ffffff, stop:1 #F5F7FB); }'
+        )
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(15, 12, 15, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(10)
 
-        # Logo compact
-        logo = QLabel('\u2709 BoosterMail')
-        logo.setStyleSheet('font-size: 14px; font-weight: 700; color: #0F6CBD; padding: 0;')
+        logo = QLabel('✉ BoosterMail')
+        logo.setStyleSheet(
+            'font-family: "Segoe UI"; font-size: 15px; font-weight: 700;'
+            ' color: #0F6CBD; letter-spacing: 0.2px;'
+        )
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(logo)
 
-        # Barre de progression
-        self._progress_bar = QProgressBar()
-        self._progress_bar.setRange(0, 100)
-        self._progress_bar.setValue(0)
-        self._progress_bar.setTextVisible(False)
-        self._progress_bar.setFixedHeight(6)
-        self._progress_bar.setStyleSheet(
-            'QProgressBar { background: #E8E8E8; border: none; border-radius: 3px; }'
-            'QProgressBar::chunk { background: #0F6CBD; border-radius: 3px; }'
-        )
+        sub = QLabel('Préparation de vos mails…')
+        sub.setStyleSheet('font-family: "Segoe UI"; font-size: 11px; color: #4A5568;')
+        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(sub)
+
+        self._progress_bar = self._make_progress_bar()
         layout.addWidget(self._progress_bar)
 
-        self._progress_label = QLabel('Chargement des mails...')
-        self._progress_label.setStyleSheet('font-size: 10px; color: #0F6CBD; padding: 0;')
+        self._progress_label = QLabel('Connexion au serveur…')
+        self._progress_label.setStyleSheet(
+            'font-family: "Segoe UI"; font-size: 10px; color: #0F6CBD;'
+        )
         self._progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._progress_label.setWordWrap(True)
         layout.addWidget(self._progress_label)
 
         self._mail_label = QLabel('')
-        self._mail_label.setStyleSheet('font-size: 9px; color: #999; padding: 0; font-style: italic;')
+        self._mail_label.setStyleSheet(
+            'font-family: "Segoe UI"; font-size: 9px; color: #94A3B8; font-style: italic;'
+        )
         self._mail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._mail_label.setWordWrap(True)
         layout.addWidget(self._mail_label)
 
         layout.addStretch()
         return widget
+
+    # -------- Mode FLASH (user activé, cache chaud) --------------------------
+
+    def _build_flash_screen(self):
+        """Splash court : "BoosterMail prêt ✓" ~500 ms puis transition vers overlay."""
+        widget = QWidget()
+        widget.setStyleSheet(
+            'QWidget { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,'
+            ' stop:0 #ffffff, stop:1 #EAF4FC); }'
+        )
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(15, 12, 15, 12)
+        layout.addStretch()
+
+        logo = QLabel('✉ BoosterMail')
+        logo.setStyleSheet(
+            'font-family: "Segoe UI"; font-size: 17px; font-weight: 700; color: #0F6CBD;'
+        )
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(logo)
+
+        ready = QLabel('prêt ✓')
+        ready.setStyleSheet(
+            'font-family: "Segoe UI"; font-size: 12px; color: #16A34A; padding-top: 4px;'
+        )
+        ready.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(ready)
+
+        layout.addStretch()
+
+        # Widgets "factices" pour compatibilité avec le code warmup commun
+        self._progress_bar = self._make_progress_bar()
+        self._progress_bar.setValue(100)
+        self._progress_bar.hide()
+        self._progress_label = QLabel('')
+        self._progress_label.hide()
+        self._mail_label = QLabel('')
+        self._mail_label.hide()
+        return widget
+
+    # -------- Mode MARKETING (user pas activé) -------------------------------
+
+    def _build_marketing_screen(self, with_warmup=False):
+        """CTA bloquant : "Répondez 5× plus vite, activez en 2 min" + bouton."""
+        widget = QWidget()
+        widget.setStyleSheet(
+            'QWidget { background: qlineargradient(x1:0, y1:0, x2:1, y2:1,'
+            ' stop:0 #5B4FBF, stop:1 #0F6CBD); }'
+        )
+        outer = QVBoxLayout(widget)
+        outer.setContentsMargins(28, 28, 28, 28)
+
+        # Carte centrée blanche (effet "material")
+        card = QWidget()
+        card.setObjectName('mkCard')
+        card.setStyleSheet(
+            '#mkCard { background: white; border-radius: 14px; }'
+        )
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(28, 32, 28, 24)
+        card_layout.setSpacing(14)
+
+        # Icône enveloppe sur pastille bleue
+        icon_row = QHBoxLayout()
+        icon_row.addStretch()
+        icon = QLabel('✉')
+        icon.setFixedSize(64, 64)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setStyleSheet(
+            'background: #0F6CBD; color: white; border-radius: 32px;'
+            ' font-size: 28px; font-family: "Segoe UI";'
+        )
+        icon_row.addWidget(icon)
+        icon_row.addStretch()
+        card_layout.addLayout(icon_row)
+
+        title = QLabel('BoosterMail')
+        title.setStyleSheet(
+            'font-family: "Segoe UI"; font-size: 24px; font-weight: 700;'
+            ' color: #1a1a2e; padding-top: 6px;'
+        )
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.addWidget(title)
+
+        baseline = QLabel('Répondez à vos mails 5× plus vite')
+        baseline.setStyleSheet(
+            'font-family: "Segoe UI"; font-size: 13px; color: #4A5568;'
+        )
+        baseline.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        baseline.setWordWrap(True)
+        card_layout.addWidget(baseline)
+
+        pitch = QLabel(
+            'L\'IA rédige vos réponses dans votre style, '
+            'adaptées à chaque correspondant.'
+        )
+        pitch.setStyleSheet(
+            'font-family: "Segoe UI"; font-size: 11px; color: #718096; padding-top: 4px;'
+        )
+        pitch.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pitch.setWordWrap(True)
+        card_layout.addWidget(pitch)
+
+        card_layout.addSpacing(6)
+
+        # Bouton d'activation (gros, arrondi, bleu)
+        btn = QPushButton('Activer en 2 minutes')
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFixedHeight(46)
+        btn.setStyleSheet(
+            'QPushButton {'
+            '  background: #0F6CBD; color: white; border: none;'
+            '  border-radius: 23px; font-family: "Segoe UI";'
+            '  font-size: 13px; font-weight: 600; padding: 0 22px;'
+            '}'
+            'QPushButton:hover { background: #0d5ca3; }'
+            'QPushButton:pressed { background: #094a86; }'
+        )
+        btn.clicked.connect(self._on_activate_click)
+        card_layout.addWidget(btn)
+
+        # Lien "Plus tard" (discret, toujours visible pour fermer)
+        later = QPushButton('Plus tard')
+        later.setCursor(Qt.CursorShape.PointingHandCursor)
+        later.setFlat(True)
+        later.setStyleSheet(
+            'QPushButton { background: transparent; color: #94A3B8;'
+            ' font-family: "Segoe UI"; font-size: 10px; border: none; }'
+            'QPushButton:hover { color: #64748B; text-decoration: underline; }'
+        )
+        later.clicked.connect(self.close)
+        card_layout.addWidget(later, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Warmup en bas si cache froid (pendant que le user décide)
+        if with_warmup:
+            self._progress_bar = self._make_progress_bar()
+            card_layout.addWidget(self._progress_bar)
+
+            self._progress_label = QLabel('Préparation en arrière-plan…')
+            self._progress_label.setStyleSheet(
+                'font-family: "Segoe UI"; font-size: 9px; color: #94A3B8;'
+            )
+            self._progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            card_layout.addWidget(self._progress_label)
+
+            self._mail_label = QLabel('')
+            self._mail_label.setStyleSheet(
+                'font-family: "Segoe UI"; font-size: 8px; color: #94A3B8; font-style: italic;'
+            )
+            self._mail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._mail_label.setWordWrap(True)
+            card_layout.addWidget(self._mail_label)
+        else:
+            # Factices pour compat
+            self._progress_bar = self._make_progress_bar()
+            self._progress_bar.hide()
+            self._progress_label = QLabel('')
+            self._progress_label.hide()
+            self._mail_label = QLabel('')
+            self._mail_label.hide()
+
+        outer.addWidget(card)
+        return widget
+
+    # -------- Helper : barre de progression stylée --------------------------
+
+    def _make_progress_bar(self):
+        bar = QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(0)
+        bar.setTextVisible(False)
+        bar.setFixedHeight(6)
+        bar.setStyleSheet(
+            'QProgressBar { background: #E8EEF6; border: none; border-radius: 3px; }'
+            'QProgressBar::chunk {'
+            '  background: qlineargradient(x1:0, y1:0, x2:1, y2:0,'
+            '    stop:0 #0F6CBD, stop:1 #5B4FBF);'
+            '  border-radius: 3px;'
+            '}'
+        )
+        return bar
+
+    # -------- Handler : clic "Activer en 2 minutes" -------------------------
+
+    def _on_activate_click(self):
+        """
+        Le user clique sur le CTA : on ouvre le flow d'onboarding dans le dialog.
+        Le reste (OAuth, etc.) se fait côté web — la popup laisse la main.
+        """
+        logger.info('CTA marketing cliqué → bascule onboarding')
+        # TODO Phase 5 : déclencher le flow d'onboarding complet.
+        # Pour l'instant, on bascule vers popup.html (Etat 1 overlay) qui
+        # contient déjà le bouton d'activation Microsoft.
+        self._transition_to_overlay()
 
     # =========================================================================
     # WARMUP (chargement des mails au demarrage)
@@ -331,13 +576,13 @@ class EasyMailPopup(QMainWindow):
         if self._wp['subject']:
             self._mail_label.setText(self._wp['subject'])
 
-        # Warmup termine → transition
+        # Warmup termine
         if self._wp['done']:
             self._warmup_timer.stop()
-            QTimer.singleShot(400, self._transition_to_overlay)
+            self._on_warmup_finished()
             return
 
-        # 10s max → transition forcee avec animation finale (P12)
+        # 10s max → fin forcee (P12)
         if self._warmup_elapsed >= 10000:
             self._wp['done'] = True
             self._wp['pct'] = 100
@@ -345,7 +590,24 @@ class EasyMailPopup(QMainWindow):
             self._progress_bar.setValue(100)
             self._progress_label.setText('Pret !')
             self._warmup_timer.stop()
-            QTimer.singleShot(400, self._transition_to_overlay)
+            self._on_warmup_finished()
+
+    def _on_warmup_finished(self):
+        """Appelé quand le warmup est fini. Comportement selon le mode :
+        - warmup (activé, cache froid) → transition auto vers l'overlay
+        - marketing_warmup (pas activé, cache froid) → cacher barre, attendre user
+        """
+        if getattr(self, '_activation_mode', 'warmup') == 'marketing_warmup':
+            # Cacher discrètement la barre, garder le CTA en avant
+            if self._progress_bar and self._progress_bar.isVisible():
+                self._progress_bar.hide()
+            if self._progress_label and self._progress_label.isVisible():
+                self._progress_label.setText('Prêt dès activation ✓')
+            if self._mail_label and self._mail_label.isVisible():
+                self._mail_label.hide()
+            return
+        # Modes 'warmup' et 'flash' (déjà géré) → transition
+        QTimer.singleShot(400, self._transition_to_overlay)
 
     def _transition_to_overlay(self):
         """Bascule vers popup.html (overlay). Pas de repositionnement — deja en haut a droite."""
@@ -440,6 +702,26 @@ class EasyMailPopup(QMainWindow):
 # =============================================================================
 # DETECTION OUTLOOK
 # =============================================================================
+
+def _fetch_activation_mode():
+    """
+    Interroge le backend V2 pour connaître l'état d'activation du user + cache.
+    Retourne un des 4 modes : 'flash' / 'warmup' / 'marketing' / 'marketing_warmup'.
+    Défaut (backend pas prêt) : 'warmup' — bon compromis (affiche juste la barre).
+    """
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        resp = urllib.request.urlopen(
+            f'{BACKEND_URL}/api/activation_status', context=ctx, timeout=1.5
+        )
+        data = json.loads(resp.read().decode('utf-8'))
+        return data.get('mode', 'warmup')
+    except Exception as e:
+        logger.info(f"activation_status indisponible ({e}) → fallback warmup")
+        return 'warmup'
+
 
 def _is_outlook_running():
     """Detecte si Outlook (New ou Classic) tourne — methode rapide via ctypes."""
