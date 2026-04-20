@@ -1,5 +1,7 @@
 # Rapport d'audit — Phases 1 à 4 (Squelette + Ingrédients 100%)
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 **Date** : 18/04/2026
 **Fichier audité** : `C:\EasyMail\V2\app_plugin.py`
 **Commits audités** : `158255f`, `adc80ff`, `4189ae2`, `686c77b`, `e0e25c0`

@@ -1,5 +1,7 @@
 # PROTO vs V2 — PLAN PAR PLATEFORME
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 **Comment V2 s'adapte (ou ne s'adapte pas) aux spécificités de chaque plateforme Outlook**
 
 Date: 2026-04-17

@@ -1,5 +1,7 @@
 # PLAN 1 — Application de la documentation
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 > **Objectif** : finaliser la consolidation doc (18/04/2026) et mettre en place les garde-fous pour qu'elle reste propre dans le temps.
 >
 > **Contexte** : consolidation initiale terminée (63 fichiers .md déplacés dans `docs/`, SOMMAIRE_DETAILLE.md créé, NOUVELLE_SESSION_V2.md mis à jour). Il reste à dater, valider les périmés, rafraîchir les specs maîtres et installer des règles de maintenance.

@@ -1,5 +1,7 @@
 # Phase 2 — Plugin Outlook + Graph API (Résumé)
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 > Extrait de CLAUDE.md — architecture V1, routes, companion, DRY, optimisations
 
 ## Phase 2 — Plugin Outlook + Graph API (TERMINÉE le 07/04/2026)

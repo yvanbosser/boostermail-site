@@ -1,5 +1,7 @@
 # Choses à faire plus tard
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 *Document vivant — on y note les idées, fonctionnalités et chantiers dont l'implémentation est reportée à plus tard. Révisé ponctuellement.*
 
 ---

@@ -1,5 +1,7 @@
 # V2 FIX PLAN — Quick Path to PROTO Performance
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 **Fix the 7 gaps to match proto timing**
 
 Date: 2026-04-17

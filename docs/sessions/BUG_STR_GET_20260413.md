@@ -1,5 +1,7 @@
 # Bug : 'str' object has no attribute 'get'
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 *Detecte le 13/04/2026*
 
 ## Symptome

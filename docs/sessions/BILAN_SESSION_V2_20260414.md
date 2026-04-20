@@ -1,5 +1,7 @@
 # Bilan Session V2 — 14-15 avril 2026
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 ## Resume
 
 Premiere session de developpement de la V2 BoosterMail (integration Outlook).

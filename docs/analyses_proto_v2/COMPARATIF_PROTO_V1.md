@@ -1,5 +1,7 @@
 # Comparatif exhaustif Proto vs V1 — Processus par processus
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 *Produit le 11/04/2026 — 109 processus du proto analyses*
 *Mis a jour le 11/04/2026 soir — 4 analyses profondes + 3 verifications croisees*
 

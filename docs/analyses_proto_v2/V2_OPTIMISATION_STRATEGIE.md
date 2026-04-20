@@ -1,5 +1,7 @@
 # V2 OPTIMISATION — BASE COMMUNE + SPÉCIFICITÉS PAR PLATEFORME
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 **Stratégie d'optimisation V2 : qu'est-ce qui est partagé vs qu'est-ce qui est spécifique**
 
 Date: 2026-04-17

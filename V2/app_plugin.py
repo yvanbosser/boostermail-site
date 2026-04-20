@@ -4129,6 +4129,14 @@ def api_save_draft():
     if not message_id:
         return jsonify({"error": "message_id requis"}), 400
 
+    # Audit 20/04 — D5 : cap à 50 KB pour éviter qu'un client hostile ne
+    # poste un body énorme (un mail légitime dépasse rarement 20 KB en HTML).
+    _SAVE_DRAFT_MAX = 50_000
+    if len(text) > _SAVE_DRAFT_MAX:
+        logger.warning(f"[save_draft] text > {_SAVE_DRAFT_MAX} chars ({len(text)}), "
+                       f"tronqué pour {message_id[:20]}")
+        text = text[:_SAVE_DRAFT_MAX]
+
     with _reply_lock:
         # Annuler toute spéculation BG en cours : le brouillon user prime
         existing = _reply_cache.get(message_id, {})
@@ -5231,7 +5239,11 @@ def _extract_learned_template_post_send(message_id, sent_raw_body, mode):
                 if lt.get('pattern_keywords') == pattern:
                     # Même pattern → probablement la même situation : incrémenter usage
                     _db.increment_learned_template(lt['id'], field='usage_count')
-                    logger.info(f"[learned-tpl] Pattern existant '{pattern[:40]}' → usage++")
+                    # Audit 20/04 — D7 : ne pas logger le pattern complet
+                    # (peut contenir du contenu email). Hash court pour le debug.
+                    import hashlib as _hl
+                    _psig = _hl.sha1(pattern.encode('utf-8')).hexdigest()[:8]
+                    logger.info(f"[learned-tpl] Pattern existant #{_psig} → usage++")
                     return
         except Exception:
             pass
@@ -5239,8 +5251,12 @@ def _extract_learned_template_post_send(message_id, sent_raw_body, mode):
         # Créer le candidat
         try:
             tpl_id = _db.add_learned_template(pattern, core, register=register)
-            logger.info(f"[learned-tpl] Candidat #{tpl_id} créé : pattern='{pattern[:40]}' "
-                        f"({len(core)}ch, {register})")
+            # Audit 20/04 — D7 : hash du pattern (données sensibles) + kw_count non-intrusif
+            import hashlib as _hl
+            _psig = _hl.sha1(pattern.encode('utf-8')).hexdigest()[:8]
+            _kw_count = len(pattern.split(',')) if pattern else 0
+            logger.info(f"[learned-tpl] Candidat #{tpl_id} créé : sig={_psig} "
+                        f"({_kw_count}kw, {len(core)}ch, {register})")
         except Exception as e:
             logger.warning(f"[learned-tpl] add erreur : {e}")
     except Exception as e:

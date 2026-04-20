@@ -1,5 +1,7 @@
 # V2 PLAN COMPLET D'IMPLÉMENTATION
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 **Plan détaillé: tests, validation, rollout, fallback, dépendances, checklist granulaire**
 
 Date: 2026-04-17

@@ -1,5 +1,7 @@
 # Bilan Session — 16 avril 2026
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 ## Resume
 
 Journee marathon. Architecture V2 completee (phases 2-7 du plan), lancement automatique

@@ -1,5 +1,7 @@
 # BUGS PROTO À CORRIGER PLUS TARD
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 *Document de suivi — bugs détectés dans le proto (app.py) à corriger après V2 stabilisé*
 
 Date: 2026-04-17

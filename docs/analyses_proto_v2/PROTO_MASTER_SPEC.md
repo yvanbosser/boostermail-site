@@ -1,5 +1,7 @@
 # PROTO — MASTER SPECIFICATION
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 **The Machine de Guerre** — Complete architectural blueprint for V2 alignment
 
 Date: 2026-04-17

@@ -1,5 +1,7 @@
 # ANALYSE — Pourquoi le Proto fonctionne mieux que V2
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 *Analyse comparative des flux proto vs V2 — mode NO CODE*
 
 Date: 2026-04-17

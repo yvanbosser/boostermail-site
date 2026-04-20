@@ -1,5 +1,7 @@
 # PLAN DE PORTAGE PROTO → V2
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 **How to turn V2 into a 1:1 copy of PROTO**
 
 Date: 2026-04-17

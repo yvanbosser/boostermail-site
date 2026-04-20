@@ -1,5 +1,7 @@
 # BoosterMail — Spec Installation Commerciale
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 *Cree le 16/04/2026*
 
 ---

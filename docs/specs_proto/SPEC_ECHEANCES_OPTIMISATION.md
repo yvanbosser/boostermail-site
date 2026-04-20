@@ -1,5 +1,7 @@
 # Spécifications — Échéances : pré-filtre heuristique + suivi de correspondance
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 ## A. Pré-filtre heuristique (réduire les appels IA)
 
 ### Aujourd'hui

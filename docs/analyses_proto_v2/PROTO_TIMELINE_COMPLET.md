@@ -1,5 +1,7 @@
 # TIMELINE COMPLET DU PROTO — Ordre d'exécution optimisé
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 *Analyse exhaustive et systématique du flux proto (app.py)*
 
 Mode: **NO CODE** — Documentation pure de l'orchestration

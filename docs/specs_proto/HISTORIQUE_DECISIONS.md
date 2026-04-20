@@ -1,5 +1,7 @@
 # Historique des décisions validées
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 Extrait de CLAUDE.md — tableau chronologique complet (15/03 → 06/04/2026)
 
 | Date | Décision | Détail |

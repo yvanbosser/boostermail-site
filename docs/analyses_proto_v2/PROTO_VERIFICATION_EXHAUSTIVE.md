@@ -1,5 +1,7 @@
 # PROTO — Vérification exhaustive (CHECKLIST)
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 *Document pour s'assurer qu'aucun flux n'est manqué*
 
 Mode: **AUDIT SYSTÉMATIQUE**

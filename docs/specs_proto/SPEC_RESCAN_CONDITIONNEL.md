@@ -1,5 +1,7 @@
 # Spécifications — Re-scan échéances conditionnel après refinement
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 ## Aujourd'hui
 
 Après chaque refinement (modification du mail par l'utilisateur), le scan échéances est relancé systématiquement. La plupart des refinements ("plus court", "plus formel", "tutoiement"...) ne changent aucune date ni engagement → re-scan inutile.

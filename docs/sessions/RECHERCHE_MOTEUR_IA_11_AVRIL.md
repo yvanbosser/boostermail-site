@@ -1,5 +1,7 @@
 # Recherche exhaustive — Portage moteur IA (Phase 2 ter)
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 *Produit le 11/04/2026 — Session de recherche (nocode)*
 
 ---

@@ -1,5 +1,7 @@
 # V2 vs PROTO — GAP ANALYSIS
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 **What's missing from V2 to match proto's performance**
 
 Date: 2026-04-17

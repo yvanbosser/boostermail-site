@@ -1,5 +1,7 @@
 # BoosterMail — Guide d'installation complet
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 *Document de reference pour l'installation chez les clients*
 *Cree le 10/04/2026 — Mis a jour le 10/04/2026*
 

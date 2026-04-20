@@ -1,5 +1,7 @@
 # Plan de finalisation — Intégration BoosterMail dans Outlook
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 **Créé le 09/04/2026 soir**
 **Objectif : un produit fini sur New Outlook, Classic Outlook et Outlook Web**
 

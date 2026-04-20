@@ -1,5 +1,7 @@
 # Fonctionnalités implémentées — Proto EasyMail
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 > Extrait de CLAUDE.md — sections 1 à 27
 
 ### 1. Boîte de réception (inbox.html)

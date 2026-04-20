@@ -1,5 +1,7 @@
 # V2 OUTLOOK — COMPLETE SPECIFICATION
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 > ⚠️ **SNAPSHOT D'AUDIT — figé au 17/04/2026**
 > Ce document décrit l'état V2 au moment de l'audit exhaustif (16 threads, 51 routes, 20+ globals, 14 locks, 5 caches).
 >

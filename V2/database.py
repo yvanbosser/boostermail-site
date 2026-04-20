@@ -796,14 +796,31 @@ class Database:
     def increment_learned_template(self, template_id, field='success_count'):
         """Incrémente usage/success/reject + met à jour last_used. Gère la promotion/démotion."""
         import time as _t
-        if field not in ('usage_count', 'success_count', 'reject_count'):
-            return
+        # Audit 20/04 : branching explicite plutôt que f-string SQL.
+        # Techniquement safe via le whitelist ci-dessous, mais le pattern f-string
+        # avec nom de colonne est fragile et à proscrire.
+        now = int(_t.time())
         conn = self._conn()
-        conn.execute(
-            f"UPDATE learned_templates SET {field} = {field} + 1, last_used = ?"
-            " WHERE id = ?",
-            (int(_t.time()), template_id),
-        )
+        if field == 'usage_count':
+            conn.execute(
+                "UPDATE learned_templates SET usage_count = usage_count + 1,"
+                " last_used = ? WHERE id = ?",
+                (now, template_id),
+            )
+        elif field == 'success_count':
+            conn.execute(
+                "UPDATE learned_templates SET success_count = success_count + 1,"
+                " last_used = ? WHERE id = ?",
+                (now, template_id),
+            )
+        elif field == 'reject_count':
+            conn.execute(
+                "UPDATE learned_templates SET reject_count = reject_count + 1,"
+                " last_used = ? WHERE id = ?",
+                (now, template_id),
+            )
+        else:
+            return  # field invalide — silent no-op (historique)
         # Promotion / démotion automatique
         c = conn.execute(
             "SELECT success_count, reject_count, status FROM learned_templates WHERE id = ?",

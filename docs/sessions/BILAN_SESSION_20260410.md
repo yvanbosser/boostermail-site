@@ -1,5 +1,7 @@
 # Bilan session du 10/04/2026
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 ---
 
 ## Ce qui a été fait

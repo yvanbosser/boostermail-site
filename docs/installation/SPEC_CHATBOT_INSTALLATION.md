@@ -1,5 +1,7 @@
 # BoosterMail — Chatbot d'installation guide
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 *Specification du chatbot qui accompagne l'admin IT ou l'utilisateur pendant l'installation*
 *Cree le 10/04/2026*
 

@@ -1,5 +1,7 @@
 # EasyMail — Spec UI Complète (État 1 Lecture + État 2 Réponse)
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 *Créé le 07/04/2026 — Document de référence EXHAUSTIF*
 *Ce document recense TOUTES les solutions UI envisagées pour EasyMail : état lecture (closed), état réponse (overlay), mécanismes d'alimentation, et solutions impossibles.*
 

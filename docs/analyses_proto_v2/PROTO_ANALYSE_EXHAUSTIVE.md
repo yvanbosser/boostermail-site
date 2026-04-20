@@ -1,5 +1,7 @@
 # ANALYSE EXHAUSTIVE DU PROTO — Vue systématique complète
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 *Documentation ligne par ligne, thread par thread, timing par timing*
 
 Mode: **NO CODE TOTAL**

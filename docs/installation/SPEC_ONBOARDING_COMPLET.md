@@ -1,5 +1,7 @@
 # BoosterMail — Parcours d'onboarding complet
 
+> **Dernière mise à jour** : 18/04/2026 (git)
+
 *Specification du parcours utilisateur de la premiere ouverture a l'activation*
 *Cree le 10/04/2026*
 
