@@ -177,18 +177,17 @@ class EasyMailPopup(QMainWindow):
         self._dialog_page.easymail_action = self._on_easymail_action
         self._stack.addWidget(self._dialog_view)
 
-        # --- Positionnement : centre pour marketing, haut-droite sinon ---
+        # --- Positionnement : popup de lancement toujours centrée ---
+        # Audit 20/04 : la popup de lancement (tous modes) est centrée et
+        # grande pour être visible avec les boutons Annuler/Lancer.
+        # Après clic "Lancer" → _transition_to_overlay redimensionne en
+        # overlay discret haut-droite.
         self._stack.setCurrentIndex(0)
-        if self._activation_mode in ('marketing', 'marketing_warmup'):
-            # CTA marketing centré pour maximiser l'impact
-            self.resize(self._marketing_w, self._marketing_h)
-            self.move(
-                (self._screen.width() - self._marketing_w) // 2,
-                (self._screen.height() - self._marketing_h) // 2,
-            )
-        else:
-            self.resize(self._overlay_w, self._overlay_h)
-            self.move(self._screen.width() - self._overlay_w, 48)
+        self.resize(self._marketing_w, self._marketing_h)
+        self.move(
+            (self._screen.width() - self._marketing_w) // 2,
+            (self._screen.height() - self._marketing_h) // 2,
+        )
 
         # --- Timer detection fermeture Outlook ---
         self._outlook_check_timer = QTimer()
@@ -249,7 +248,8 @@ class EasyMailPopup(QMainWindow):
         widget = QWidget()
         widget.setStyleSheet(
             'QWidget#root { background: qlineargradient(x1:0, y1:0, x2:1, y2:1,'
-            ' stop:0 #f8fafc, stop:1 #eef2ff); }'
+            ' stop:0 #f8fafc, stop:1 #eef2ff);'
+            ' border: 1px solid #cbd5e1; border-radius: 12px; }'
         )
         widget.setObjectName('root')
         outer = QVBoxLayout(widget)
@@ -364,20 +364,13 @@ class EasyMailPopup(QMainWindow):
         return widget
 
     def _on_launch_click(self):
-        """Clic 'Lancer' : transition immédiate vers l'overlay (warmup déjà fini
-        ou en cours en BG). Le travail ne s'est jamais arrêté."""
-        logger.info('[popup] Lancer cliqué → transition vers overlay')
-        # Si l'utilisateur clique Lancer AVANT que le warmup ne termine,
-        # on transitionne quand même ; les threads BG continuent sans être
-        # interrompus, le dialog se comportera normalement au clic bouton Outlook.
+        """Clic 'Lancer' : transition vers l'overlay (popup.html) haut-droite."""
+        logger.info('[popup] Lancer cliqué → overlay popup.html')
         if hasattr(self, '_flash_timer') and self._flash_timer.isActive():
             self._flash_timer.stop()
         if hasattr(self, '_warmup_timer') and self._warmup_timer.isActive():
             self._warmup_timer.stop()
         self._transition_to_overlay()
-
-        layout.addStretch()
-        return widget
 
     # -------- Mode FLASH (user activé, cache chaud) --------------------------
 
@@ -640,10 +633,10 @@ class EasyMailPopup(QMainWindow):
         self._flash_progress += 2  # +2% toutes les 50 ms → 100% en 2,5 s
         self._progress_bar.setValue(min(100, self._flash_progress))
         if self._flash_progress >= 95:
-            self._progress_label.setText('Prêt ✓')
+            self._progress_label.setText('Prêt — cliquez sur Lancer')
         if self._flash_progress >= 100:
             self._flash_timer.stop()
-            QTimer.singleShot(300, self._transition_to_overlay)
+            # Audit 20/04 : pas d'auto-transition — attendre clic "Lancer"
 
     # =========================================================================
     # WARMUP (chargement des mails au demarrage)
@@ -766,27 +759,27 @@ class EasyMailPopup(QMainWindow):
             self._on_warmup_finished()
 
     def _on_warmup_finished(self):
-        """Appelé quand le warmup est fini. Comportement selon le mode :
-        - warmup (activé, cache froid) → transition auto vers l'overlay
-        - marketing_warmup (pas activé, cache froid) → cacher barre, attendre user
+        """Appelé quand le warmup est fini. Audit 20/04 : plus d'auto-transition.
+        La popup reste affichée jusqu'au clic user sur "Lancer" ou "Annuler".
         """
-        if getattr(self, '_activation_mode', 'warmup') == 'marketing_warmup':
-            # Cacher discrètement la barre, garder le CTA en avant
-            if self._progress_bar and self._progress_bar.isVisible():
-                self._progress_bar.hide()
-            if self._progress_label and self._progress_label.isVisible():
-                self._progress_label.setText('Prêt dès activation ✓')
-            if self._mail_label and self._mail_label.isVisible():
-                self._mail_label.hide()
-            return
-        # Modes 'warmup' et 'flash' (déjà géré) → transition
-        QTimer.singleShot(400, self._transition_to_overlay)
+        # Juste mettre à jour le label pour indiquer que c'est prêt
+        if self._progress_label:
+            self._progress_label.setText('Prêt — cliquez sur Lancer')
+        if self._mail_label and self._mail_label.isVisible():
+            self._mail_label.hide()
 
     def _transition_to_overlay(self):
-        """Bascule vers popup.html (overlay). Pas de repositionnement — deja en haut a droite."""
+        """
+        Bascule vers popup.html (overlay discret haut-droite).
+        Audit 20/04 : la popup de lancement était centrée et grande.
+        Ici, on réduit et on la déplace en haut-droite pour ne plus gêner.
+        """
         logger.info("Transition vers overlay")
         self._popup_view.load(QUrl(POPUP_URL))
         self._stack.setCurrentIndex(1)
+        # Redimensionner en overlay discret haut-droite
+        self.resize(self._overlay_w, self._overlay_h)
+        self.move(self._screen.width() - self._overlay_w, 48)
 
         # Pre-charger le dialog (O7)
         self._dialog_view.load(QUrl(DIALOG_URL + '&mode=reply'))
