@@ -461,123 +461,129 @@ class EasyMailPopup(QMainWindow):
     # -------- Mode MARKETING (user pas activé) -------------------------------
 
     def _build_marketing_screen(self, with_warmup=False):
-        """CTA bloquant : "Répondez 5× plus vite, activez en 2 min" + bouton."""
+        """
+        Popup d'activation — design cohérent avec warmup (audit 20/04).
+        Fond gradient doux (pas agressif), carte blanche, icone gradient,
+        2 boutons Annuler/Activer en 2 min.
+        """
         widget = QWidget()
+        widget.setObjectName('root')
         widget.setStyleSheet(
-            'QWidget { background: qlineargradient(x1:0, y1:0, x2:1, y2:1,'
-            ' stop:0 #5B4FBF, stop:1 #0F6CBD); }'
+            'QWidget#root { background: qlineargradient(x1:0, y1:0, x2:1, y2:1,'
+            ' stop:0 #f8fafc, stop:1 #eef2ff); }'
         )
         outer = QVBoxLayout(widget)
-        outer.setContentsMargins(28, 28, 28, 28)
+        outer.setContentsMargins(18, 18, 18, 18)
 
-        # Carte centrée blanche (effet "material")
         card = QWidget()
         card.setObjectName('mkCard')
         card.setStyleSheet(
-            '#mkCard { background: white; border-radius: 14px; }'
+            '#mkCard { background: white; border-radius: 14px;'
+            ' border: 1px solid #e2e8f0; }'
         )
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(28, 32, 28, 24)
-        card_layout.setSpacing(14)
+        card_layout.setContentsMargins(26, 24, 26, 20)
+        card_layout.setSpacing(10)
 
-        # Icône enveloppe sur pastille bleue
+        # Icône pastille gradient (comme warmup)
         icon_row = QHBoxLayout()
         icon_row.addStretch()
         icon = QLabel('✉')
-        icon.setFixedSize(64, 64)
+        icon.setFixedSize(56, 56)
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon.setStyleSheet(
-            'background: #0F6CBD; color: white; border-radius: 32px;'
-            ' font-size: 28px; font-family: "Segoe UI";'
+            'QLabel { color: white; font-size: 24px; font-family: "Segoe UI";'
+            ' border-radius: 28px;'
+            ' background: qlineargradient(x1:0, y1:0, x2:1, y2:1,'
+            ' stop:0 #0F6CBD, stop:1 #5B4FBF); }'
         )
         icon_row.addWidget(icon)
         icon_row.addStretch()
         card_layout.addLayout(icon_row)
 
-        title = QLabel('BoosterMail')
+        title = QLabel('Bienvenue sur BoosterMail')
         title.setStyleSheet(
-            'font-family: "Segoe UI"; font-size: 24px; font-weight: 700;'
-            ' color: #1a1a2e; padding-top: 6px;'
+            'font-family: "Segoe UI"; font-size: 20px; font-weight: 700;'
+            ' color: #1a1a2e; padding-top: 4px; letter-spacing: 0.2px;'
         )
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(title)
 
         baseline = QLabel('Répondez à vos mails 5× plus vite')
         baseline.setStyleSheet(
-            'font-family: "Segoe UI"; font-size: 13px; color: #4A5568;'
+            'font-family: "Segoe UI"; font-size: 12px; color: #64748B;'
         )
         baseline.setAlignment(Qt.AlignmentFlag.AlignCenter)
         baseline.setWordWrap(True)
         card_layout.addWidget(baseline)
 
-        pitch = QLabel(
-            'L\'IA rédige vos réponses dans votre style, '
-            'adaptées à chaque correspondant.'
-        )
-        pitch.setStyleSheet(
-            'font-family: "Segoe UI"; font-size: 11px; color: #718096; padding-top: 4px;'
-        )
-        pitch.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pitch.setWordWrap(True)
-        card_layout.addWidget(pitch)
+        card_layout.addSpacing(2)
 
-        card_layout.addSpacing(6)
-
-        # Bouton d'activation (gros, arrondi, bleu)
-        btn = QPushButton('Activer en 2 minutes')
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setFixedHeight(46)
-        btn.setStyleSheet(
-            'QPushButton {'
-            '  background: #0F6CBD; color: white; border: none;'
-            '  border-radius: 23px; font-family: "Segoe UI";'
-            '  font-size: 13px; font-weight: 600; padding: 0 22px;'
-            '}'
-            'QPushButton:hover { background: #0d5ca3; }'
-            'QPushButton:pressed { background: #094a86; }'
-        )
-        btn.clicked.connect(self._on_activate_click)
-        card_layout.addWidget(btn)
-
-        # Lien "Plus tard" (discret, toujours visible pour fermer)
-        later = QPushButton('Plus tard')
-        later.setCursor(Qt.CursorShape.PointingHandCursor)
-        later.setFlat(True)
-        later.setStyleSheet(
-            'QPushButton { background: transparent; color: #94A3B8;'
-            ' font-family: "Segoe UI"; font-size: 10px; border: none; }'
-            'QPushButton:hover { color: #64748B; text-decoration: underline; }'
-        )
-        later.clicked.connect(self.close)
-        card_layout.addWidget(later, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        # Warmup en bas si cache froid (pendant que le user décide)
+        # Barre de progression discrète si cache froid
         if with_warmup:
             self._progress_bar = self._make_progress_bar()
             card_layout.addWidget(self._progress_bar)
 
             self._progress_label = QLabel('Préparation en arrière-plan…')
             self._progress_label.setStyleSheet(
-                'font-family: "Segoe UI"; font-size: 9px; color: #94A3B8;'
+                'font-family: "Segoe UI"; font-size: 10px; color: #0F6CBD;'
             )
             self._progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             card_layout.addWidget(self._progress_label)
 
             self._mail_label = QLabel('')
             self._mail_label.setStyleSheet(
-                'font-family: "Segoe UI"; font-size: 8px; color: #94A3B8; font-style: italic;'
+                'font-family: "Segoe UI"; font-size: 9px; color: #94A3B8;'
+                ' font-style: italic;'
             )
             self._mail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._mail_label.setWordWrap(True)
             card_layout.addWidget(self._mail_label)
         else:
-            # Factices pour compat
+            # Factices pour compat avec _update_warmup_ui
             self._progress_bar = self._make_progress_bar()
             self._progress_bar.hide()
             self._progress_label = QLabel('')
             self._progress_label.hide()
             self._mail_label = QLabel('')
             self._mail_label.hide()
+
+        card_layout.addSpacing(4)
+
+        # Boutons Annuler / Activer (mêmes styles que warmup)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        btn_cancel = QPushButton('Plus tard')
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancel.setFixedHeight(36)
+        btn_cancel.setStyleSheet(
+            'QPushButton { background: transparent; color: #64748B;'
+            ' border: 1px solid #cbd5e1; border-radius: 18px;'
+            ' font-family: "Segoe UI"; font-size: 12px; padding: 0 18px; }'
+            'QPushButton:hover { background: #f1f5f9; color: #334155; }'
+        )
+        btn_cancel.clicked.connect(self.close)
+        btn_row.addWidget(btn_cancel)
+
+        btn_activate = QPushButton('Activer en 2 minutes')
+        btn_activate.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_activate.setFixedHeight(36)
+        btn_activate.setStyleSheet(
+            'QPushButton {'
+            '  background: qlineargradient(x1:0, y1:0, x2:1, y2:0,'
+            '    stop:0 #0F6CBD, stop:1 #5B4FBF);'
+            '  color: white; border: none; border-radius: 18px;'
+            '  font-family: "Segoe UI"; font-size: 12px; font-weight: 600;'
+            '  padding: 0 20px;'
+            '}'
+            'QPushButton:hover { background: #0d5ca3; }'
+            'QPushButton:pressed { background: #094a86; }'
+        )
+        btn_activate.clicked.connect(self._on_activate_click)
+        btn_row.addWidget(btn_activate)
+
+        card_layout.addLayout(btn_row)
 
         outer.addWidget(card)
         return widget

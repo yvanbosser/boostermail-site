@@ -6440,10 +6440,24 @@ def api_activation_status():
 
     Définition "activé" (Plan 3 §9.3) : 3 conditions cumulées.
     """
-    # 1. onboarding_done (flag DB settings)
+    # Audit 20/04 — user_activated basé UNIQUEMENT sur des signaux stables :
+    # 1. onboarding_done (flag DB)
+    # 2. style_profile.txt existe et non vide (preuve d'onboarding complet)
+    # On NE check PAS le token Microsoft live ici : il peut être absent au boot
+    # (réseau pas prêt, refresh pas encore fait) sans que l'user soit "désactivé".
+    # Le token est vérifié à chaque appel Graph, avec gestion d'erreur propre.
+
     onboarding_done = _db.get_setting('onboarding_done', 'false') == 'true'
 
-    # 2. OAuth Microsoft token valide
+    style_profile_exists = False
+    try:
+        style_path = os.path.join(EASYMAIL_DIR, "style_profile.txt")
+        if os.path.exists(style_path) and os.path.getsize(style_path) > 0:
+            style_profile_exists = True
+    except Exception:
+        pass
+
+    # Diagnostic token live (pour debug uniquement, n'influence PAS user_activated)
     oauth_token_valid = False
     try:
         auth = get_auth_provider()
@@ -6453,16 +6467,8 @@ def api_activation_status():
     except Exception:
         oauth_token_valid = False
 
-    # 3. style_profile.txt existe et non vide
-    style_profile_exists = False
-    try:
-        style_path = os.path.join(EASYMAIL_DIR, "style_profile.txt")
-        if os.path.exists(style_path) and os.path.getsize(style_path) > 0:
-            style_profile_exists = True
-    except Exception:
-        pass
-
-    user_activated = onboarding_done and oauth_token_valid and style_profile_exists
+    # user_activated : signaux stables uniquement
+    user_activated = onboarding_done and style_profile_exists
 
     # Cache chaud : prefetch_cache_v2.json existe et < 48h
     cache_warm = False
@@ -6502,8 +6508,8 @@ def api_activation_status():
         "today": today,
         "conditions": {
             "onboarding_done": onboarding_done,
-            "oauth_token_valid": oauth_token_valid,
             "style_profile_exists": style_profile_exists,
+            "oauth_token_valid": oauth_token_valid,  # diagnostic uniquement
         },
     })
 
