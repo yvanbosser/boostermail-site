@@ -926,6 +926,12 @@ def _fetch_activation_mode():
     Retourne un des 4 modes : 'flash' / 'warmup' / 'marketing' / 'marketing_warmup'.
     Défaut (backend pas prêt) : 'warmup' — bon compromis (affiche juste la barre).
     """
+    data = _fetch_activation_full()
+    return data.get('mode', 'warmup')
+
+
+def _fetch_activation_full():
+    """Version complète : retourne le dict JSON complet de /api/activation_status."""
     try:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
@@ -933,11 +939,26 @@ def _fetch_activation_mode():
         resp = urllib.request.urlopen(
             f'{BACKEND_URL}/api/activation_status', context=ctx, timeout=1.5
         )
-        data = json.loads(resp.read().decode('utf-8'))
-        return data.get('mode', 'warmup')
+        return json.loads(resp.read().decode('utf-8'))
     except Exception as e:
         logger.info(f"activation_status indisponible ({e}) → fallback warmup")
-        return 'warmup'
+        return {'mode': 'warmup', 'should_show_popup': True}
+
+
+def _mark_popup_shown():
+    """Signale au backend que la popup a été affichée aujourd'hui (anti-spam)."""
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(
+            f'{BACKEND_URL}/api/mark_popup_shown',
+            data=b'{}', headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        urllib.request.urlopen(req, context=ctx, timeout=1.5)
+    except Exception as e:
+        logger.debug(f"mark_popup_shown indispo ({e})")
 
 
 def _is_outlook_running():
@@ -1141,14 +1162,24 @@ def main():
         QTimer.singleShot(50, _bring_to_front)
         logger.info(f"PyQt direct dialog visible — mode={args.mode}")
     else:
-        # Mode overlay classique
+        global _ipc_bridge
+        # Mode overlay classique — vérifier anti-spam (audit 20/04 Q3)
+        status = _fetch_activation_full()
+        show_popup = status.get('should_show_popup', True)
         popup = EasyMailPopup()
-        popup.show()
-        logger.info(f"Overlay PyQt visible — backend: {BACKEND_URL}")
+        if show_popup:
+            popup.show()
+            _mark_popup_shown()  # marquer pour ne pas réafficher aujourd'hui
+            logger.info(f"Overlay PyQt visible — backend: {BACKEND_URL}")
+        else:
+            logger.info(f"Popup déjà affichée aujourd'hui "
+                        f"(popup_shown_date={status.get('popup_shown_date')}) → cachée, "
+                        f"service hot instance prêt pour le dialog")
 
         # Plan 2 Phase 4 — Hot instance : serveur IPC pour éviter de relancer
         # Python + PyQt + QWebEngineView à chaque clic bouton dans Outlook.
-        global _ipc_bridge
+        # Actif dans les deux cas (popup visible ou cachée) pour que le bouton
+        # BM dans Outlook reste instantané.
         _ipc_bridge = _IPCBridge()
         _ipc_bridge.open_dialog_requested.connect(popup.open_dialog_via_ipc)
         threading.Thread(target=_start_ipc_server, daemon=True, name='ipc-server').start()

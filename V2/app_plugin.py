@@ -6483,16 +6483,42 @@ def api_activation_status():
     else:
         mode = 'marketing_warmup'
 
+    # Audit 20/04 Q3 : popup affichée seulement si pas encore vue aujourd'hui
+    # (anti-spam). Si user_activated=False → TOUJOURS afficher (CTA marketing).
+    # Si user_activated=True → 1× par jour seulement.
+    today = datetime.now().strftime('%Y-%m-%d')
+    popup_shown_date = _db.get_setting('popup_shown_date', '') or ''
+    if not user_activated:
+        should_show_popup = True   # CTA marketing bloquant toujours
+    else:
+        should_show_popup = (popup_shown_date != today)
+
     return jsonify({
         "user_activated": user_activated,
         "cache_warm": cache_warm,
         "mode": mode,
+        "should_show_popup": should_show_popup,
+        "popup_shown_date": popup_shown_date,
+        "today": today,
         "conditions": {
             "onboarding_done": onboarding_done,
             "oauth_token_valid": oauth_token_valid,
             "style_profile_exists": style_profile_exists,
         },
     })
+
+
+@app.route('/api/mark_popup_shown', methods=['POST'])
+def api_mark_popup_shown():
+    """
+    Marque la popup comme affichée aujourd'hui. Appelé par popup_pyqt.py après
+    affichage réussi. Évite la réouverture multiple pendant la journée (anti-spam).
+    Flag reset au changement de jour (via comparaison `popup_shown_date != today`
+    dans api_activation_status).
+    """
+    today = datetime.now().strftime('%Y-%m-%d')
+    _db.save_setting('popup_shown_date', today)
+    return jsonify({"ok": True, "date": today})
 
 
 @app.route('/api/setup/onboarding', methods=['POST'])

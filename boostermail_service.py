@@ -405,60 +405,18 @@ def run_supervisor(first_launch=True):
 
     pythonw = find_pythonw()
     logger.info(f"pythonw: {pythonw}")
-    logger.info("En attente d'Outlook...")
 
     # Ecrire le PID du superviseur (sans enfants pour l'instant)
     write_pid_file(os.getpid(), [])
 
     # =========================================================
-    # PHASE 1 : Attendre qu'Outlook soit lance PAR L'UTILISATEUR
-    # =========================================================
-    # Au premier lancement, si Outlook est deja ouvert (processus residuel),
-    # attendre qu'il se ferme pour eviter les faux positifs.
-    # Aux cycles suivants (Outlook vient de fermer), on attend juste 10s
-    # que les fenetres residuelles disparaissent.
-    if not first_launch:
-        logger.info("Attente 10s que les fenetres Outlook disparaissent...")
-        time.sleep(10)
-    elif is_outlook_running():
-        logger.info("Outlook deja ouvert — attente qu'il se ferme d'abord (max 5 min)...")
-        _wait_start = time.time()
-        while is_outlook_running():
-            if os.path.exists(STOP_FILE):
-                cleanup()
-                return False
-            if time.time() - _wait_start > 300:  # 5 min timeout
-                logger.info("Outlook ouvert depuis 5 min — lancement direct")
-                break
-            time.sleep(OUTLOOK_POLL_INTERVAL)
-        else:
-            logger.info("Outlook ferme. En attente d'une NOUVELLE ouverture...")
-            time.sleep(3)
-
-    while True:
-        if os.path.exists(STOP_FILE):
-            logger.info("Stop demande pendant l'attente")
-            cleanup()
-            return
-
-        platform = is_outlook_running()
-        if platform:
-            logger.info(f"Outlook detecte ({platform}) !")
-            # Audit 20/04 : sleep(2) supprimé. V2 + Companion ne dépendent pas
-            # du fait qu'Outlook soit "complètement lancé". Le Companion gère
-            # gracieusement les échecs COM temporaires (retry). Gain : 2 s.
-            break
-        time.sleep(OUTLOOK_POLL_INTERVAL)
-
-    # =========================================================
-    # PHASE 2 : Outlook detecte — backends puis popup PyQt
-    # Nouveau flow (Phase 0 Plan 2) : les backends se lancent en premier
-    # pour que la popup PyQt puisse interroger /api/activation_status.
+    # PHASE 1 : Lancer backends IMMEDIATEMENT au logon (audit 20/04)
+    # Nouvelle architecture : V2 + Companion tournent en permanence dès le
+    # logon Windows. La popup s'affiche quand Outlook s'ouvre. Les backends
+    # s'arrêtent 30 min après la fermeture d'Outlook (économie RAM).
     # =========================================================
     managers = []
-
-    # Lancer les backends
-    logger.info("Lancement des backends...")
+    logger.info("Lancement backends au logon (pas d'attente Outlook)...")
     for proc in PROCESSES:
         if proc['delay'] > 0:
             time.sleep(proc['delay'])
@@ -467,28 +425,21 @@ def run_supervisor(first_launch=True):
         managers.append(mgr)
     write_pid_file(os.getpid(), [m.pid for m in managers if m.pid])
 
-    # Attendre que V2 (port 3443) réponde, indispensable pour /api/activation_status
-    logger.info("Attente de V2 (port 3443) pour popup...")
-    for _ in range(30):  # 30 × 1s = 30s max
+    # Attendre que V2 soit prêt (port 3443)
+    logger.info("Attente de V2 (port 3443)...")
+    for _ in range(30):
         if is_port_listening(3443):
             break
         if os.path.exists(STOP_FILE):
             cleanup()
             return False
         time.sleep(1)
+    logger.info("Backends prêts — en veille jusqu'à ouverture Outlook")
 
-    # Lancer la popup PyQt (interroge /api/activation_status elle-même)
-    show_pyqt_popup()
-
-    # Attendre que tous les ports répondent (max 60s au total)
-    logger.info("Attente des autres ports...")
-    for _ in range(60):
-        if all(is_port_listening(p['port']) for p in PROCESSES):
-            break
-        time.sleep(1)
-
-    ready = [p['port'] for p in PROCESSES if is_port_listening(p['port'])]
-    logger.info(f"Ports prets: {ready}")
+    # Si Outlook est déjà ouvert (ex: logon pendant Outlook actif),
+    # afficher la popup immédiatement
+    if is_outlook_running():
+        show_pyqt_popup()
 
     # =========================================================
     # PHASE 2b : Proto + Tray — DESACTIVES par defaut (decision 18/04/2026)
@@ -536,32 +487,72 @@ def run_supervisor(first_launch=True):
             logger.info("Classic Outlook NON detecte → Proto et tray desactives")
 
     # =========================================================
-    # PHASE 3 : Surveillance
+    # PHASE 3 : Surveillance (audit 20/04)
+    # Backends tournent en permanence. On surveille Outlook :
+    #   - Outlook ouvre (après être fermé) → show_pyqt_popup (si pas montrée aujourd'hui)
+    #   - Outlook fermé 30 min → stop backends (économie RAM)
+    #   - Outlook réouvre alors que backends stopped → respawn
     # =========================================================
     _health_counter = 0
+    _was_running = is_outlook_running()
+    _closed_since = None   # epoch du moment où Outlook a fermé (None = pas fermé)
+    BACKENDS_IDLE_TIMEOUT = 30 * 60  # 30 min après fermeture Outlook → stop backends
     while True:
-        time.sleep(5)  # Check Outlook toutes les 5s (pas 30s)
+        time.sleep(5)
 
         if os.path.exists(STOP_FILE):
-            logger.info("Stop demande")
+            logger.info("Stop demandé (STOP_FILE)")
             break
 
-        # Verifier si Outlook est encore ouvert (toutes les 5s)
-        if not is_outlook_running():
-            logger.info("Outlook ferme — arret des backends")
-            break
+        running = is_outlook_running()
 
-        # Health check backends (toutes les 30s = 6 × 5s)
+        # Transition : ouvert → fermé
+        if _was_running and not running:
+            logger.info("Outlook fermé — décompte 30 min avant arrêt backends")
+            _closed_since = time.time()
+
+        # Transition : fermé → ouvert (y compris si backends stopped)
+        if running and not _was_running:
+            logger.info("Outlook ré-ouvert — popup si applicable")
+            _closed_since = None
+            # Si backends stoppés pendant idle → respawn
+            if not managers or not managers[0].is_alive():
+                logger.info("Respawn backends après idle...")
+                managers = []
+                for proc in PROCESSES:
+                    mgr = ProcessManager(proc['name'], proc['script'], proc['port'], pythonw)
+                    mgr.start()
+                    managers.append(mgr)
+                for _ in range(30):
+                    if is_port_listening(3443):
+                        break
+                    time.sleep(1)
+            show_pyqt_popup()
+
+        # Outlook fermé depuis trop longtemps → stop backends
+        if _closed_since and (time.time() - _closed_since > BACKENDS_IDLE_TIMEOUT):
+            if managers and any(m.is_alive() for m in managers):
+                logger.info(f"Outlook fermé > {BACKENDS_IDLE_TIMEOUT//60} min → arrêt backends (économie RAM)")
+                for mgr in managers:
+                    mgr.stop()
+                managers = []
+                write_pid_file(os.getpid(), [])
+            # On ne break pas : le superviseur continue de surveiller
+
+        _was_running = running
+
+        # Health check backends (toutes les 30 s = 6 × 5 s) — seulement si actifs
         _health_counter += 1
         if _health_counter >= 6:
             _health_counter = 0
             for mgr in managers:
                 if not mgr.is_alive():
-                    logger.warning(f"{mgr.name}: mort detecte")
+                    logger.warning(f"{mgr.name}: mort détecté")
                     mgr.restart()
-            write_pid_file(os.getpid(), [m.pid for m in managers if m.pid])
+            if managers:
+                write_pid_file(os.getpid(), [m.pid for m in managers if m.pid])
 
-    # Arret propre des backends + proto + tray
+    # Arret propre des backends + proto + tray (sur STOP_FILE)
     logger.info("Arret des backends...")
     for mgr in managers:
         mgr.stop()
@@ -600,12 +591,9 @@ if __name__ == '__main__':
         stop_existing()
         print("BoosterMail arrete.")
     else:
-        # Boucle : surveille Outlook → lance BM → Outlook ferme → attend → recommence
-        first = True
-        while True:
-            should_continue = run_supervisor(first_launch=first)
-            first = False
-            if not should_continue:
-                break  # --stop demande
-            cleanup()
-            logger.info("Retour en mode attente Outlook...")
+        # Audit 20/04 : le superviseur tourne en continu depuis le logon Windows.
+        # Les backends sont spawn au démarrage (pas à l'ouverture d'Outlook) et
+        # restent actifs tant qu'Outlook est ouvert OU pendant 30 min après sa
+        # fermeture. Pas de boucle de relance supplémentaire ici.
+        run_supervisor(first_launch=True)
+        logger.info("Superviseur arrêté.")
