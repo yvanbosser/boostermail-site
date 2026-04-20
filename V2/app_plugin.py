@@ -602,6 +602,93 @@ def _preload_neighbors(message_id):
         logger.debug(f"[preload-neighbor] Erreur : {e}")
 
 
+def _continuous_speculation_loop():
+    """
+    Plan 2 Phase 6 — Spéculation BG continue.
+
+    Toutes les 45 s (configurable), scanne l'inbox courante (_warmup_cache)
+    et relance `_run_prefetch` pour les TIER 1 non couverts. Le filtre
+    Smart Speculative `_should_speculate` (Phase 2.B) s'applique en aval :
+    il bloque la génération Claude mais garde le prefetch A/B/C. La purge
+    événementielle (Phase 2.A) retire les entrées des mails traités.
+
+    Interruptible : respecte _preload_pause (activité user).
+    Priorité : TIER 1 (contacts connus) en premier, puis chronologique.
+    """
+    time.sleep(20)  # Laisser le warmup initial + preemptive_bg finir
+    CYCLE_INTERVAL = 45  # secondes entre deux scans complets
+    while True:
+        try:
+            # Pause si user actif
+            if _preload_pause.is_set():
+                time.sleep(5)
+                continue
+
+            with _warmup_lock:
+                mails = list(_warmup_cache.values())[:20]
+            if not mails:
+                time.sleep(CYCLE_INTERVAL)
+                continue
+
+            # Priorité 1 (6.4) : TIER 1 contacts connus, puis TIER 2 (autres)
+            tier1, tier2 = [], []
+            for m in mails:
+                fe = m.get('from_email', '')
+                if not fe:
+                    continue
+                if _is_contact_known(fe):
+                    tier1.append(m)
+                else:
+                    tier2.append(m)
+
+            # Candidats : mails sans entrée _preemptive_cache done/running
+            candidates = []
+            for m in tier1 + tier2:
+                mid = m.get('message_id') or m.get('id', '')
+                if not mid:
+                    continue
+                try:
+                    if _db.is_treated(mid):
+                        continue  # Purge événementielle (6.5)
+                except Exception:
+                    pass
+                with _preemptive_lock:
+                    entry = _preemptive_cache.get(mid, {})
+                if entry.get('status') in ('running', 'done'):
+                    continue
+                candidates.append(m)
+                if len(candidates) >= 5:  # max 5 par cycle
+                    break
+
+            for m in candidates:
+                # Re-vérifier la pause entre chaque candidat (interruption 6.3)
+                if _preload_pause.is_set():
+                    break
+                mail_data = {
+                    'from_email': m.get('from_email', ''),
+                    'from_name': m.get('from_name', ''),
+                    'subject': m.get('subject', ''),
+                    'body': m.get('body') or m.get('body_preview', ''),
+                    'message_id': m.get('message_id') or m.get('id', ''),
+                    'conversation_id': m.get('conversation_id', ''),
+                    'to': m.get('to', ''),
+                    'cc': m.get('cc', ''),
+                    'date': m.get('date', ''),
+                }
+                # Lance prefetch → les filtres Smart Speculative (6.2) s'appliquent
+                # automatiquement dans _run_prefetch avant le _start_speculative.
+                threading.Thread(target=_run_prefetch, args=(mail_data,),
+                                 daemon=True).start()
+                time.sleep(2)  # Throttle entre les lancements
+
+            if candidates:
+                logger.info(f"[cont-spec] cycle : {len(candidates)} nouveau(x) candidat(s) "
+                            f"(tier1={len(tier1)}, tier2={len(tier2)})")
+        except Exception as e:
+            logger.warning(f"[cont-spec] erreur cycle : {e}")
+        time.sleep(CYCLE_INTERVAL)
+
+
 def _background_preload_loop():
     """
     Phase 1.5 — Préchargement continu en background des contextes A/B/C
@@ -1004,6 +1091,9 @@ def _cohesion_refresh_loop():
 
 
 threading.Thread(target=_cohesion_refresh_loop, daemon=True, name='cache-cohesion').start()
+
+# Plan 2 Phase 6 — Spéculation BG continue
+threading.Thread(target=_continuous_speculation_loop, daemon=True, name='cont-spec').start()
 
 
 
