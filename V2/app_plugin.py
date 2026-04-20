@@ -3890,6 +3890,128 @@ def api_get_draft():
     return jsonify({"found": False})
 
 
+@app.route('/api/instant_reply', methods=['POST'])
+def api_instant_reply():
+    """
+    Plan 2 Phase 5 — Pipeline de réponse instantanée unifié.
+    Ordre de priorité :
+      1. Brouillon user (source='draft')        → 100% match, rien au-dessus
+      2. Cache préemptif (source='preemptive')  → réponse BG déjà calculée
+      3. Template fixe ou appris (source='template') → confidence >= 0.75
+      4. Aucun hit (source='none')              → le dialog doit lancer Claude
+
+    Body JSON : {
+        message_id, email_body, subject, brief, reply_mode, importance,
+        current_draft, from_email
+    }
+
+    Réponse :
+    {
+        "source": "draft"|"preemptive"|"template"|"none",
+        "text": str | None,
+        "badge": str | None,
+        "confidence"?, "template_name"?, "timestamp"?
+    }
+    """
+    data = request.get_json() or {}
+    message_id = data.get('message_id', '') or ''
+    email_body = data.get('email_body', '') or ''
+    subject = data.get('subject', '') or ''
+    brief = data.get('brief', '') or ''
+    reply_mode = data.get('reply_mode', 'reply') or 'reply'
+    importance = data.get('importance', 0)
+    current_draft = data.get('current_draft', '') or ''
+    from_email = (data.get('from_email', '') or '').lower()
+
+    try:
+        importance_int = int(importance) if importance else 0
+    except (ValueError, TypeError):
+        importance_int = 0
+
+    # 1) BROUILLON USER (priorité absolue)
+    if message_id:
+        with _preemptive_lock:
+            entry = _preemptive_cache.get(message_id, {})
+        if entry.get('source') == 'user_edit' and entry.get('status') == 'done':
+            return jsonify({
+                "source": "draft",
+                "text": entry.get('text', ''),
+                "badge": "Brouillon sauvegardé",
+                "timestamp": entry.get('timestamp', 0),
+            })
+
+    # 2) CACHE PRÉEMPTIF (BG spéculation déjà terminée)
+    if message_id:
+        with _preemptive_lock:
+            entry = _preemptive_cache.get(message_id, {})
+        if (entry.get('source') == 'bg_speculation'
+                and entry.get('status') == 'done'
+                and entry.get('text')):
+            # Reconstituer avec greeting/closing via contact_profile
+            contact_profile = None
+            try:
+                if from_email:
+                    contact_profile = _db.get_contact_profile(from_email)
+            except Exception:
+                pass
+            greeting = ((contact_profile or {}).get('greeting', '') or 'Bonjour,')
+            closing = ((contact_profile or {}).get('closing', '') or 'Cordialement,')
+            user_name = _db.get_setting('user_name', '') or ''
+            body = entry.get('text', '')
+            parts = [greeting, '', body, '', closing]
+            if user_name:
+                parts.append(user_name)
+            return jsonify({
+                "source": "preemptive",
+                "text": '\n'.join(parts),
+                "badge": "Pré-générée",
+                "timestamp": entry.get('timestamp', 0),
+            })
+
+    # 3) TEMPLATE (fixe ou appris, confidence >= 0.75)
+    try:
+        learned = [lt for lt in _db.get_learned_templates()
+                   if lt.get('status') != 'demoted']
+    except Exception:
+        learned = []
+    try:
+        m = match_template_with_confidence(
+            email_body=email_body, subject=subject, brief=brief,
+            is_first_mail=(reply_mode == 'new'), reply_mode=reply_mode,
+            importance_override=importance_int, current_draft=current_draft,
+            learned_templates=learned,
+        )
+    except Exception as e:
+        logger.warning(f"[instant_reply] match_template erreur : {e}")
+        m = None
+
+    if m and m.get('confidence', 0) >= 0.75:
+        contact_profile = None
+        try:
+            if from_email:
+                contact_profile = _db.get_contact_profile(from_email)
+        except Exception:
+            pass
+        user_name = _db.get_setting('user_name', '') or ''
+        if m['source'] == 'fixed':
+            text = assemble_template(m['template_dict'], contact_profile, user_name)
+        else:
+            text = assemble_learned_template(m['learned'], contact_profile, user_name)
+        return jsonify({
+            "source": "template",
+            "text": text,
+            "badge": "Réponse apprise" if m['source'] == 'learned' else "Réponse rapide",
+            "confidence": m['confidence'],
+            "template_name": m['template_name'],
+            "template_id": m['template_id'] if m['source'] == 'fixed'
+                           else f"learned_{m['template_id']}",
+            "template_source": m['source'],
+        })
+
+    # 4) Rien
+    return jsonify({"source": "none"})
+
+
 @app.route('/api/match_template', methods=['POST'])
 def api_match_template():
     """

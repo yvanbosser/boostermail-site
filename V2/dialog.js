@@ -104,15 +104,13 @@ try {
         _listenParentMessages();
     }
 
-    // (O13) Vérifier le speculative cache — seulement en mode non-standalone
-    // (en mode standalone, _checkSpeculativeCache est appelé dans _loadMailBodyStandalone
-    //  après la récupération du message_id correct depuis /api/current_mail)
+    // Plan 2 Phase 5 — Pipeline unifié "réponse instantanée" à l'ouverture du dialog
+    // Priorité : brouillon user > préemptif BG > template > rien
+    // Remplace les appels séparés _checkSpeculativeCache / _restoreDraft / _tryTemplateMatch.
     if (!_isStandaloneMode) {
-        _checkSpeculativeCache();
+        // Délai court pour laisser _loadMailBody peupler _mailBodyForGeneration
+        setTimeout(_tryInstantReply, 250);
     }
-
-    // Plan 2 Phase 2.A — Restaurer brouillon user si présent
-    _restoreDraft();
 
     // Plan 2 Phase 2.A — Auto-save brouillon en édition (debounced)
     _setupDraftAutoSave();
@@ -933,6 +931,74 @@ function _showTemplateBadge(result) {
 }
 
 var _lastTemplateMatch = null;
+
+
+// =============================================================================
+// Plan 2 Phase 5 — Pipeline unifié "réponse instantanée" à l'ouverture
+// =============================================================================
+
+function _tryInstantReply() {
+    if (!_messageId) return;
+    var editor = document.getElementById('editor');
+    // Ne pas écraser si l'user a déjà commencé à taper
+    if (editor.innerText && editor.innerText.trim()) return;
+
+    var payload = JSON.stringify({
+        message_id: _messageId,
+        email_body: _mailBodyForGeneration || '',
+        subject: document.getElementById('fieldSubject').value || '',
+        brief: document.getElementById('fieldBrief').value || '',
+        reply_mode: _mode,
+        importance: _importance,
+        current_draft: (editor.innerText || '').trim(),
+        from_email: _fromEmail || '',
+    });
+
+    fetch(_backendUrl + '/api/instant_reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+        if (!res || res.source === 'none') {
+            console.log('[dialog] instant_reply: aucun hit, génération standard requise');
+            return;
+        }
+        console.log('[dialog] instant_reply HIT', res.source, res.badge || '');
+        editor.innerHTML = (res.text || '').replace(/\n/g, '<br>');
+        _showInstantReplyBadge(res);
+        if (res.source === 'template') {
+            _lastTemplateMatch = {
+                id: res.template_id, name: res.template_name,
+                source: res.template_source, confidence: res.confidence,
+            };
+        }
+    })
+    .catch(function(e) { console.warn('[dialog] instant_reply erreur', e); });
+}
+
+function _showInstantReplyBadge(res) {
+    var existing = document.getElementById('tplBadge') || document.getElementById('draftBadge');
+    if (existing) existing.remove();
+    var badge = document.createElement('div');
+    badge.id = 'tplBadge';
+    badge.className = 'tpl-badge';
+    var extra = '';
+    if (res.source === 'template' && typeof res.confidence === 'number') {
+        extra = ' <span class="tpl-badge-conf">' +
+                Math.round(res.confidence * 100) + '%</span>';
+    } else if ((res.source === 'draft' || res.source === 'preemptive') && res.timestamp) {
+        var delta = Math.round((Date.now() / 1000 - res.timestamp) / 60);
+        if (delta < 60) extra = ' il y a ' + delta + ' min';
+        else if (delta < 1440) extra = ' il y a ' + Math.round(delta / 60) + ' h';
+        else extra = ' il y a ' + Math.round(delta / 1440) + ' j';
+    }
+    badge.innerHTML = '<span class="tpl-badge-dot">●</span> ' +
+                      (res.badge || 'Réponse instantanée') + extra;
+    var editor = document.getElementById('editor');
+    editor.parentNode.insertBefore(badge, editor);
+}
 
 
 // =============================================================================
