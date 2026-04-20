@@ -34,8 +34,10 @@ _NW = 0x08000000  # CREATE_NO_WINDOW
 _MUTEX_HANDLE = None  # Handle mutex Windows (eviter GC)
 
 PROCESSES = [
+    # Audit 20/04 : delay=0 sur les deux — pas de dépendance entre Companion
+    # et V2 (ports/DB différents). Démarrage réellement parallèle, gain ~1 s.
     {'name': 'Companion',  'script': os.path.join(EASYMAIL_DIR, 'companion', 'companion.py'),  'port': 5051, 'delay': 0},
-    {'name': 'Backend V2', 'script': os.path.join(EASYMAIL_DIR, 'V2', 'app_plugin.py'),        'port': 3443, 'delay': 1},
+    {'name': 'Backend V2', 'script': os.path.join(EASYMAIL_DIR, 'V2', 'app_plugin.py'),        'port': 3443, 'delay': 0},
 ]
 
 # Proto + Tray : DESACTIVES (decision 18/04/2026)
@@ -71,7 +73,7 @@ def _has_classic_outlook():
 
 MAX_RESTART = 5
 HEALTH_CHECK_INTERVAL = 30
-OUTLOOK_POLL_INTERVAL = 3  # secondes entre chaque check Outlook
+OUTLOOK_POLL_INTERVAL = 2  # secondes entre chaque check Outlook (audit 20/04 : 3s → 2s, détection plus rapide)
 
 # --- Logging ---
 logging.basicConfig(
@@ -442,7 +444,9 @@ def run_supervisor(first_launch=True):
         platform = is_outlook_running()
         if platform:
             logger.info(f"Outlook detecte ({platform}) !")
-            time.sleep(2)  # Laisser Outlook finir de s'ouvrir avant la popup
+            # Audit 20/04 : sleep(2) supprimé. V2 + Companion ne dépendent pas
+            # du fait qu'Outlook soit "complètement lancé". Le Companion gère
+            # gracieusement les échecs COM temporaires (retry). Gain : 2 s.
             break
         time.sleep(OUTLOOK_POLL_INTERVAL)
 
