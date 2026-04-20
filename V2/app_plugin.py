@@ -798,6 +798,126 @@ _preemptive_lock = threading.Lock()
 _REPLY_CACHE_SAFETY_NET = 28 * 24 * 3600  # 4 semaines — safety net anti-fuite
 _DRAFTS_CACHE_PATH = os.path.join(EASYMAIL_DIR, 'drafts_v2.json')
 
+# --- Plan 2 Phase 2.C — Post-send caches (portés depuis proto app.py:415-467) ---
+# Évitent un re-appel Claude si le user revient sur la popup post-envoi dans les
+# premières minutes (change d'avis sur la classification, échéance, etc.).
+_echeance_post_send_cache = {}      # email_id -> {'echeances': [...], 'ts': float}
+_classification_post_send_cache = {}  # email_id -> {'suggestion': {...}, 'ts': float}
+_pj_classification_post_send_cache = {}  # email_id -> {'suggestion': {...}, 'ts': float}
+_MAX_POST_SEND_CACHE = 30
+_MAX_PJ_POST_SEND_CACHE = 30
+_POST_SEND_CACHE_TTL = 5 * 60  # 5 min (suggestion classement)
+
+
+def _trim_dict_cache(cache_dict, max_entries):
+    """Trim un cache dict en gardant les entrées les plus récentes par 'ts'."""
+    if len(cache_dict) <= max_entries:
+        return
+    items = sorted(cache_dict.items(), key=lambda kv: kv[1].get('ts', 0), reverse=True)
+    # Garder les max_entries plus récents
+    to_keep = dict(items[:max_entries])
+    cache_dict.clear()
+    cache_dict.update(to_keep)
+
+
+def _get_post_send_entry(cache_dict, key, ttl=None):
+    """Retourne l'entrée si fraîche (< ttl), None sinon. ttl=None → pas d'expiration."""
+    entry = cache_dict.get(key)
+    if not entry:
+        return None
+    if ttl is not None and time.time() - entry.get('ts', 0) > ttl:
+        return None
+    return entry
+
+
+def _reply_cache_cohesion_refresh():
+    """
+    Plan 2 Phase 2.D — Cohesion refresh (Plan 3 §9.1).
+    Compare les clés de _preemptive_cache vs les mails présents dans l'inbox
+    (via _warmup_cache + email_cache DB). Purge les entrées orphelines :
+    - mails supprimés côté Outlook (delete)
+    - mails déplacés hors inbox (archive / classify)
+    - mails traités via Outlook directement (reply-externe)
+
+    Protège toujours les entrées user_edit (safety net 4 semaines uniquement).
+    """
+    try:
+        # Collecter l'ensemble des message_id actuellement dans l'inbox
+        inbox_ids = set()
+        with _warmup_lock:
+            for m in _warmup_cache:
+                mid = m.get('message_id') or m.get('id', '')
+                if mid:
+                    inbox_ids.add(mid)
+        try:
+            for row in _db.get_recent_email_cache(limit=200):
+                eid = row.get('entry_id') or row.get('message_id', '')
+                if eid:
+                    inbox_ids.add(eid)
+        except Exception:
+            pass
+
+        if not inbox_ids:
+            return  # inbox vide ou pas chargée → skip
+
+        # Purger les orphelins (sauf brouillons user)
+        purged = 0
+        with _preemptive_lock:
+            for mid in list(_preemptive_cache.keys()):
+                if mid in inbox_ids:
+                    continue
+                entry = _preemptive_cache[mid]
+                if entry.get('source') == 'user_edit':
+                    continue  # brouillons user : safety net 4 semaines seulement
+                _preemptive_cache.pop(mid, None)
+                purged += 1
+        if purged:
+            logger.info(f"[reply_cache cohesion] {purged} entrée(s) orpheline(s) purgée(s)")
+    except Exception as e:
+        logger.warning(f"[reply_cache cohesion] erreur : {e}")
+
+
+@app.route('/api/reply_cache/purge', methods=['POST'])
+def api_reply_cache_purge():
+    """
+    Purge explicite d'une entrée du cache (Plan 2 Phase 2.D).
+    Appelé par le frontend sur les événements non couverts par les hooks
+    existants : delete, archive, mail déplacé vers un autre dossier, etc.
+
+    Body JSON : { message_id, reason? }
+    Purge le _preemptive_cache ET le _prefetch_cache pour cohérence.
+    """
+    data = request.get_json() or {}
+    mid = data.get('message_id', '')
+    reason = data.get('reason', 'explicit')
+    if not mid:
+        return jsonify({"error": "message_id requis"}), 400
+    with _preemptive_lock:
+        was_user = _preemptive_cache.get(mid, {}).get('source') == 'user_edit'
+        _preemptive_cache.pop(mid, None)
+    with _prefetch_lock:
+        _prefetch_cache.pop(mid, None)
+    # Si c'était un brouillon user, re-persister le disque (suppression effective)
+    if was_user:
+        threading.Thread(target=_persist_reply_cache, daemon=True).start()
+    logger.info(f"[reply_cache purge] {mid[:20]} ({reason})")
+    return jsonify({"ok": True, "user_draft_deleted": was_user})
+
+
+def _cohesion_refresh_loop():
+    """Thread BG qui appelle _reply_cache_cohesion_refresh toutes les 10 min."""
+    time.sleep(30)  # Laisser le warmup s'initialiser
+    while True:
+        try:
+            _reply_cache_cohesion_refresh()
+        except Exception as e:
+            logger.warning(f"[cohesion loop] erreur : {e}")
+        time.sleep(600)  # 10 min
+
+
+threading.Thread(target=_cohesion_refresh_loop, daemon=True, name='cache-cohesion').start()
+
+
 
 def _persist_reply_cache():
     """Sauvegarde les entrées `user_edit` du cache sur disque (drafts_v2.json).
