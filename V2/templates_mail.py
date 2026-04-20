@@ -295,6 +295,93 @@ def detect_template(email_body, subject, brief, is_first_mail, reply_mode,
     return None, None
 
 
+def _score_keyword_matches(body_norm, keywords):
+    """Compte combien de keywords matchent dans le body. Retourne int."""
+    return sum(1 for kw in keywords if _normalize(kw) in body_norm)
+
+
+def match_template_with_confidence(email_body, subject, brief, is_first_mail,
+                                    reply_mode, importance_override=None,
+                                    current_draft=None, learned_templates=None):
+    """
+    Wrapper autour de detect_template qui :
+      - Calcule un score de confiance (0.0 à 1.0)
+      - Consulte aussi les templates appris (`learned_templates` de la DB)
+      - Retourne un dict structuré ou None
+
+    Règle confiance (Plan 2 Phase 1.A.3 — seuil 0.75) :
+      - Fixe 1 keyword match = 0.80
+      - Fixe 2+ keyword matches = 0.90
+      - Fixe brief match = 0.85 (brief court = signal fort)
+      - Learned, tous keywords matchent = 0.85 (promoted) / 0.78 (candidate)
+      - Learned demoted = ignoré
+    """
+    # 1. Essai sur les templates FIXES via detect_template standard
+    tpl, tpl_name = detect_template(
+        email_body=email_body, subject=subject, brief=brief,
+        is_first_mail=is_first_mail, reply_mode=reply_mode,
+        importance_override=importance_override, current_draft=current_draft,
+    )
+    if tpl:
+        # Recalculer le score selon le nombre de keywords matchés
+        if tpl.get('type') == 'brief':
+            confidence = 0.85
+        else:
+            body_norm = _normalize(_strip_html(email_body or ''))
+            n = _score_keyword_matches(body_norm, tpl.get('keywords', []))
+            confidence = 0.90 if n >= 2 else 0.80
+        return {
+            'match': True,
+            'template_id': tpl.get('id'),
+            'template_name': tpl_name,
+            'source': 'fixed',
+            'confidence': confidence,
+            'template_dict': tpl,
+        }
+
+    # 2. Essai sur les templates APPRIS (s'ils sont fournis)
+    if learned_templates and email_body and reply_mode != 'forward' and not (brief and brief.strip()):
+        body_clean = _strip_html(email_body or '')
+        if _word_count(body_clean) < 30 and '?' not in body_clean:
+            body_norm = _normalize(body_clean)
+            best = None
+            for lt in learned_templates:
+                if lt.get('status') == 'demoted':
+                    continue
+                keywords = [k.strip() for k in (lt.get('pattern_keywords') or '').split(',') if k.strip()]
+                if not keywords:
+                    continue
+                matches = _score_keyword_matches(body_norm, keywords)
+                if matches == len(keywords):  # TOUS les keywords matchent
+                    confidence = 0.85 if lt.get('status') == 'promoted' else 0.78
+                    if not best or confidence > best['confidence']:
+                        best = {
+                            'match': True,
+                            'template_id': lt['id'],
+                            'template_name': f"learned_{lt['id']}",
+                            'source': 'learned',
+                            'confidence': confidence,
+                            'learned': lt,
+                        }
+            if best:
+                return best
+
+    return None
+
+
+def assemble_learned_template(learned_template, contact_profile, user_name):
+    """Assemble un mail à partir d'un template appris (plus simple : texte déjà complet)."""
+    register = (contact_profile or {}).get('register', 'vouvoiement')
+    greeting = (contact_profile or {}).get('greeting', '') or 'Bonjour,'
+    closing = (contact_profile or {}).get('closing', '') or 'Cordialement,'
+    body = learned_template.get('template_text', '')
+    signature = user_name or ''
+    parts = [greeting, '', body, '', closing]
+    if signature:
+        parts.append(signature)
+    return '\n'.join(parts)
+
+
 def assemble_template(template_dict, contact_profile, user_name):
     """
     Assemble le mail final : greeting + corps template (tu/vous) + closing + signature.

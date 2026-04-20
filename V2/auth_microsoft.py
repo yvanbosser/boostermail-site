@@ -21,9 +21,9 @@ import msal
 import requests
 from flask import request as flask_request
 
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# V2 autonome : core/ est local (V2/core/). Pas besoin de polluer sys.path avec
+# EASYMAIL_DIR comme avant la décision d'autonomie (18/04), ça masquait les libs
+# V2 comme templates_mail.py au profit des versions proto.
 from core.auth_base import AuthProvider, TokenStore
 
 logger = logging.getLogger('easymail.auth.microsoft')

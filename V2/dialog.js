@@ -821,7 +821,16 @@ function generateReply() {
             pj_context: _extractedPjContext || '',
             fwd_pj_indices: _fwdSelectedIndexes.length > 0 ? _fwdSelectedIndexes : undefined,
         });
-        _fetchGenerateReply(body);
+        // Plan 2 Phase 1 — tenter un template ($0, <100 ms) avant Claude
+        // Sauf si l'user vient de cliquer "Autre réponse" → skip template
+        if (_skipTemplateMatch) {
+            _skipTemplateMatch = false;
+            _fetchGenerateReply(body);
+            return;
+        }
+        _tryTemplateMatch(brief, function(matched) {
+            if (!matched) _fetchGenerateReply(body);
+        });
     };
 
     if (!_mailBodyForGeneration && _messageId && _mode !== 'new') {
@@ -842,6 +851,83 @@ function generateReply() {
 
     _proceedWithGeneration();
 }
+
+/**
+ * Plan 2 Phase 1 — Tente un template (fixe ou appris) AVANT d'appeler Claude.
+ * Si match avec confiance >= 0.75 : affiche le template directement, badge "Réponse rapide",
+ * callback(true). Sinon : callback(false) pour que le caller lance la génération IA.
+ *
+ * Coût $0, temps <100 ms (pas de streaming SSE, affichage instantané).
+ */
+function _tryTemplateMatch(brief, callback) {
+    var editor = document.getElementById('editor');
+    var spinner = document.getElementById('genSpinner');
+    var btnGen = document.getElementById('btnGenerate');
+
+    var payload = JSON.stringify({
+        email_body: _mailBodyForGeneration || '',
+        subject: document.getElementById('fieldSubject').value || '',
+        brief: brief || '',
+        reply_mode: _mode,
+        importance: _importance,
+        current_draft: (editor.innerText || '').trim(),
+        from_email: _fromEmail || '',
+    });
+
+    document.getElementById('headerStatus').textContent = 'Vérification template...';
+
+    fetch(_backendUrl + '/api/match_template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+        if (!result || !result.match || !result.threshold_passed) {
+            callback(false);
+            return;
+        }
+        // MATCH — afficher le template en remplaçant le contenu éditeur
+        console.log('[dialog] Template match', result.template_name,
+                    'conf=' + result.confidence, 'src=' + result.source);
+        var html = (result.template || '').replace(/\n/g, '<br>');
+        editor.innerHTML = html;
+        _isGenerating = false;
+        btnGen.disabled = false;
+        spinner.classList.remove('active');
+        _showTemplateBadge(result);
+        document.getElementById('headerStatus').textContent = 'Réponse rapide (template)';
+        // Mémoriser pour le learning loop côté serveur à l'envoi
+        _lastTemplateMatch = {
+            id: result.template_id, name: result.template_name,
+            source: result.source, confidence: result.confidence,
+        };
+        callback(true);
+    })
+    .catch(function(e) {
+        console.warn('[dialog] match_template erreur, fallback génération:', e);
+        callback(false);
+    });
+}
+
+/** Affiche un badge discret "Réponse rapide · template" près de l'éditeur. */
+function _showTemplateBadge(result) {
+    var existing = document.getElementById('tplBadge');
+    if (existing) existing.remove();
+    var badge = document.createElement('div');
+    badge.id = 'tplBadge';
+    badge.className = 'tpl-badge';
+    var label = result.source === 'learned' ? 'Réponse apprise' : 'Réponse rapide';
+    badge.innerHTML = '<span class="tpl-badge-dot">●</span> ' + label +
+                      ' · ' + (result.template_name || 'template') +
+                      ' <span class="tpl-badge-conf">' +
+                      Math.round((result.confidence || 0) * 100) + '%</span>';
+    var editor = document.getElementById('editor');
+    editor.parentNode.insertBefore(badge, editor);
+}
+
+var _lastTemplateMatch = null;
+
 
 function _fetchGenerateReply(body) {
     var editor = document.getElementById('editor');
@@ -1071,7 +1157,31 @@ function regenReply() {
     if (currentHtml && currentHtml.trim()) {
         _versionStack.push(currentHtml);
     }
+    // Plan 2 Phase 1 : si l'user clique "Autre réponse", il rejette le template
+    // (s'il y en avait un). On skippe le match template et on feedback au backend.
+    if (_lastTemplateMatch) {
+        _sendTemplateFeedback(_lastTemplateMatch, 'reject');
+        _lastTemplateMatch = null;
+    }
+    var badge = document.getElementById('tplBadge');
+    if (badge) badge.remove();
+    _skipTemplateMatch = true;
     generateReply();
+}
+
+var _skipTemplateMatch = false;
+
+/** Envoie un feedback success/reject au backend pour la learning loop. */
+function _sendTemplateFeedback(match, feedback) {
+    try {
+        fetch(_backendUrl + '/api/template_feedback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                template_id: match.id, source: match.source, feedback: feedback,
+            }),
+        }).catch(function() {});
+    } catch (e) {}
 }
 
 function restorePreviousVersion() {
@@ -1220,6 +1330,11 @@ function _sendViaGraph(body, to, cc, subject) {
     })
     .then(function(data) {
         if (data.success) {
+            // Plan 2 Phase 1 : le user a envoyé → si un template a été accepté, on feedback
+            if (_lastTemplateMatch) {
+                _sendTemplateFeedback(_lastTemplateMatch, 'success');
+                _lastTemplateMatch = null;
+            }
             // Succès → post-envoi
             document.getElementById('headerStatus').textContent = 'Mail envoye !';
             btnSend.innerHTML = '&#x2705; Envoye';

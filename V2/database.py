@@ -291,6 +291,23 @@ class Database:
             )
         """)
 
+        # Templates appris (Plan 2 Phase 1.B) — extraits auto des mails envoyés
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS learned_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pattern_keywords TEXT NOT NULL,
+                template_text TEXT NOT NULL,
+                register TEXT DEFAULT 'vouvoiement',
+                usage_count INTEGER DEFAULT 0,
+                success_count INTEGER DEFAULT 0,
+                reject_count INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'candidate',
+                last_used INTEGER DEFAULT 0,
+                created_at INTEGER NOT NULL
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_lt_status ON learned_templates(status)")
+
         # Migration : ajouter quality_impact aux corrections (Phase 3)
         try:
             c.execute("ALTER TABLE style_corrections ADD COLUMN quality_impact TEXT DEFAULT 'STYLE'")
@@ -740,6 +757,71 @@ class Database:
     def save_setting(self, key, value):
         conn = self._conn()
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
+        conn.commit()
+
+    # --- TEMPLATES APPRIS (Plan 2 Phase 1.B) ------------------------------
+
+    def get_learned_templates(self, status=None):
+        """Retourne la liste des templates appris (tous ou filtrés par status)."""
+        c = self._conn().cursor()
+        if status:
+            c.execute(
+                "SELECT id, pattern_keywords, template_text, register, usage_count,"
+                " success_count, reject_count, status, last_used FROM learned_templates"
+                " WHERE status = ? ORDER BY success_count DESC",
+                (status,),
+            )
+        else:
+            c.execute(
+                "SELECT id, pattern_keywords, template_text, register, usage_count,"
+                " success_count, reject_count, status, last_used FROM learned_templates"
+                " ORDER BY success_count DESC"
+            )
+        cols = ['id', 'pattern_keywords', 'template_text', 'register',
+                'usage_count', 'success_count', 'reject_count', 'status', 'last_used']
+        return [dict(zip(cols, row)) for row in c.fetchall()]
+
+    def add_learned_template(self, pattern_keywords, template_text, register='vouvoiement'):
+        """Crée un nouveau template candidat (status='candidate')."""
+        import time as _t
+        conn = self._conn()
+        c = conn.execute(
+            "INSERT INTO learned_templates (pattern_keywords, template_text, register,"
+            " created_at) VALUES (?, ?, ?, ?)",
+            (pattern_keywords, template_text, register, int(_t.time())),
+        )
+        conn.commit()
+        return c.lastrowid
+
+    def increment_learned_template(self, template_id, field='success_count'):
+        """Incrémente usage/success/reject + met à jour last_used. Gère la promotion/démotion."""
+        import time as _t
+        if field not in ('usage_count', 'success_count', 'reject_count'):
+            return
+        conn = self._conn()
+        conn.execute(
+            f"UPDATE learned_templates SET {field} = {field} + 1, last_used = ?"
+            " WHERE id = ?",
+            (int(_t.time()), template_id),
+        )
+        # Promotion / démotion automatique
+        c = conn.execute(
+            "SELECT success_count, reject_count, status FROM learned_templates WHERE id = ?",
+            (template_id,),
+        )
+        row = c.fetchone()
+        if row:
+            success, reject, status = row
+            new_status = status
+            if status == 'candidate' and success >= 3:
+                new_status = 'promoted'
+            elif status != 'demoted' and reject >= 3:
+                new_status = 'demoted'
+            if new_status != status:
+                conn.execute(
+                    "UPDATE learned_templates SET status = ? WHERE id = ?",
+                    (new_status, template_id),
+                )
         conn.commit()
 
     def save_to_thread(self, project, direction, subject, body, correspondent):

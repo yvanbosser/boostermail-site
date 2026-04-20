@@ -170,7 +170,8 @@ from core.ai_provider import get_ai_provider, AIProvider
 # SANS faire d'appels API via cette instance (les appels passent par ai_provider)
 from claude_ai import ClaudeAssistant
 from claude_ai import _build_system_prompt, _style_profile, _clean_email_body
-from templates_mail import detect_template, assemble_template
+from templates_mail import (detect_template, assemble_template,
+                             match_template_with_confidence, assemble_learned_template)
 
 _prompt_builder = None  # Instance ClaudeAssistant pour construction des prompts UNIQUEMENT
 
@@ -3417,6 +3418,133 @@ _contacts_recalibrating = False
 _contacts_recalib_step = ''
 _contacts_recalib_progress = {'done': 0, 'total': 0}
 _recalib_contacts_lock = threading.Lock()   # protège le démarrage (anti TOCTOU)
+
+@app.route('/api/match_template', methods=['POST'])
+def api_match_template():
+    """
+    Teste si un template (fixe ou appris) match le mail ouvert.
+    Permet au dialog.js d'afficher une réponse instantanée ($0, <100 ms)
+    AVANT de lancer la génération Claude.
+
+    Plan 2 Phase 1.A.3 — seuil confiance 0.75.
+
+    Body JSON : {
+        email_body, subject, brief, reply_mode, importance, current_draft,
+        from_email (pour contact_profile → register tu/vous)
+    }
+
+    Retour :
+    {
+        "match": true/false,
+        "template": "Bonjour,\\n\\n...\\n\\nCordialement,\\nYvan",
+        "template_id": 1 | "learned_42",
+        "template_name": "document_recu",
+        "source": "fixed" | "learned",
+        "confidence": 0.85,
+        "threshold_passed": true   // confidence >= 0.75
+    }
+    """
+    data = request.get_json() or {}
+    email_body = data.get('email_body', '') or ''
+    subject = data.get('subject', '') or ''
+    brief = data.get('brief', '') or ''
+    reply_mode = data.get('reply_mode', 'reply') or 'reply'
+    importance = data.get('importance', 0)
+    current_draft = data.get('current_draft', '') or ''
+    from_email = (data.get('from_email', '') or '').lower()
+
+    try:
+        importance_int = int(importance) if importance else 0
+    except (ValueError, TypeError):
+        importance_int = 0
+
+    # Charger les templates appris promus + candidats (pas les démotés)
+    try:
+        learned = [lt for lt in _db.get_learned_templates()
+                   if lt.get('status') != 'demoted']
+    except Exception as e:
+        logger.warning(f"Erreur get_learned_templates: {e}")
+        learned = []
+
+    try:
+        result = match_template_with_confidence(
+            email_body=email_body, subject=subject, brief=brief,
+            is_first_mail=(reply_mode == 'new'), reply_mode=reply_mode,
+            importance_override=importance_int, current_draft=current_draft,
+            learned_templates=learned,
+        )
+    except Exception as e:
+        logger.warning(f"Erreur match_template: {e}")
+        return jsonify({"match": False, "error": str(e)})
+
+    if not result:
+        return jsonify({"match": False})
+
+    # Assembler le texte complet (greeting + corps + closing + signature)
+    contact_profile = None
+    try:
+        if from_email:
+            contact_profile = _db.get_contact_profile(from_email)
+    except Exception:
+        pass
+
+    user_name = _db.get_setting('user_name', '') or ''
+
+    if result['source'] == 'fixed':
+        text = assemble_template(result['template_dict'], contact_profile, user_name)
+    else:
+        text = assemble_learned_template(result['learned'], contact_profile, user_name)
+
+    confidence = result['confidence']
+    return jsonify({
+        "match": True,
+        "template": text,
+        "template_id": result['template_id'] if result['source'] == 'fixed'
+                       else f"learned_{result['template_id']}",
+        "template_name": result['template_name'],
+        "source": result['source'],
+        "confidence": confidence,
+        "threshold_passed": confidence >= 0.75,
+    })
+
+
+@app.route('/api/template_feedback', methods=['POST'])
+def api_template_feedback():
+    """
+    Feedback de l'user sur un template proposé (Plan 2 Phase 1.E).
+    - source='learned' : incrémente success_count (accepté) ou reject_count (refusé).
+    - source='fixed' : juste loggé (pas de stats stockées pour les templates hardcodés).
+
+    Body JSON : { template_id, source, feedback: 'success' | 'reject' }
+    """
+    data = request.get_json() or {}
+    template_id = data.get('template_id')
+    source = data.get('source', '')
+    feedback = data.get('feedback', '')
+
+    if feedback not in ('success', 'reject'):
+        return jsonify({"error": "feedback doit être 'success' ou 'reject'"}), 400
+
+    if source == 'learned':
+        # template_id peut être "learned_42" (du front) ou 42 (int)
+        try:
+            if isinstance(template_id, str) and template_id.startswith('learned_'):
+                tid = int(template_id.split('_', 1)[1])
+            else:
+                tid = int(template_id)
+            field = 'success_count' if feedback == 'success' else 'reject_count'
+            _db.increment_learned_template(tid, field=field)
+            # Usage compteur à part
+            _db.increment_learned_template(tid, field='usage_count')
+            logger.info(f"Template appris {tid} : {feedback}")
+        except Exception as e:
+            logger.warning(f"Erreur template_feedback learned : {e}")
+            return jsonify({"error": str(e)}), 500
+    else:
+        logger.info(f"Template fixe {template_id} : {feedback} (non stocké)")
+
+    return jsonify({"ok": True})
+
 
 @app.route('/generate_reply', methods=['POST'])
 def generate_reply():
