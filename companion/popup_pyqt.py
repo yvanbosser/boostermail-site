@@ -97,11 +97,12 @@ class EasyMailPopup(QMainWindow):
         self._direct_mode = direct_dialog_params is not None
 
         # Mode direct : fenêtre centrale sans StaysOnTop (fenêtre normale redimensionnable)
-        # Mode overlay : petite fenêtre haut-droite toujours au-dessus
+        # Mode overlay : frameless (pas de titre bar Windows — un seul header dans popup.html)
         if self._direct_mode:
             self.setWindowFlags(Qt.WindowType.Window)
         else:
             self.setWindowFlags(
+                Qt.WindowType.FramelessWindowHint |
                 Qt.WindowType.WindowStaysOnTopHint |
                 Qt.WindowType.Tool
             )
@@ -816,18 +817,25 @@ class EasyMailPopup(QMainWindow):
             self.hide()
 
     def _toggle_overlay_fold(self):
-        """Replie/déplie l'overlay : plié = juste le header visible (42px),
-        déplié = taille overlay normale. Pas de barre des tâches, reste en place."""
+        """Replie/déplie l'overlay.
+        Plié   = header + nav fixe (Échéances / Contacts / Profil) visibles
+                 → ~95 px (header ~38 + nav ~40 + marges)
+        Déplié = taille overlay normale (header + nav fixe + 3 lignes scroll)"""
+        logger.info(f"[popup] fold toggle appelé, h={self.size().height()}")
         current_h = self.size().height()
-        HEADER_H = 42
-        if current_h > HEADER_H + 10:
-            # Plier
+        FOLDED_H = 80   # header (~38 px) + barre nav fixe (~40 px)
+        if current_h > FOLDED_H + 20:
             self._overlay_unfolded_h = current_h
-            self.resize(self.size().width(), HEADER_H)
+            self.setMinimumHeight(FOLDED_H)
+            self.setMaximumHeight(FOLDED_H)
+            self.resize(self.size().width(), FOLDED_H)
+            logger.info(f"[popup] folded to {FOLDED_H}")
         else:
-            # Déplier (restaurer)
             target_h = getattr(self, '_overlay_unfolded_h', self._overlay_h)
+            self.setMinimumHeight(0)
+            self.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
             self.resize(self.size().width(), target_h)
+            logger.info(f"[popup] unfolded to {target_h}")
 
     def _open_dialog(self, mode='reply'):
         logger.info(f"Ouverture dialog mode={mode}")

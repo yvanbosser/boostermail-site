@@ -49,9 +49,20 @@ var _companionAvailable = false;
     _btn('navContacts', function () { alert('Page Contacts — a implementer'); });
     _btn('navProfil', function () { _showProfilSection(); });
 
-    // Boutons header overlay (PyQt) : réduire + fermer
-    _btn('btnMinimize', function () { window.location.href = 'easymail://minimize/'; });
-    _btn('btnCloseOverlay', function () { window.location.href = 'easymail://close-overlay/'; });
+    // Navigation FIXE en haut (Audit 20/04) — même handlers
+    _btn('navEcheancesFixed', function () { alert('Page Echeances — a implementer'); });
+    _btn('navContactsFixed', function () { alert('Page Contacts — a implementer'); });
+    _btn('navProfilFixed', function () { _showProfilSection(); });
+
+    // Afficher la nav fixe + section scrollable dès que overlay
+    if (_container === 'pyqt' || _container === 'extension') {
+        var fn = document.getElementById('fixedNav');
+        if (fn) fn.style.display = 'flex';
+        var sc = document.getElementById('scrollSection');
+        if (sc) sc.style.display = 'flex';
+        var es = document.getElementById('emptyState');
+        if (es) es.style.display = 'none';  // on cache — les 3 lignes sont toujours là
+    }
 
     // Test connexion backend
     _checkBackendStatus();
