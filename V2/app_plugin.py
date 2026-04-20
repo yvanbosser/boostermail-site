@@ -171,7 +171,13 @@ from core.ai_provider import get_ai_provider, AIProvider
 from claude_ai import ClaudeAssistant
 from claude_ai import _build_system_prompt, _style_profile, _clean_email_body
 from templates_mail import (detect_template, assemble_template,
-                             match_template_with_confidence, assemble_learned_template)
+                             match_template_with_confidence, assemble_learned_template,
+                             TEMPLATES as _FIXED_TEMPLATES)
+
+# Plan 2 Phase 3.4 — Pré-warm templates : force la lecture de la liste
+# (la liste est déjà en RAM depuis l'import, mais on log explicitement
+# pour validation dans les tests de démarrage).
+logger.info(f"[templates] {len(_FIXED_TEMPLATES)} templates fixes pré-chargés en RAM")
 
 _prompt_builder = None  # Instance ClaudeAssistant pour construction des prompts UNIQUEMENT
 
@@ -354,11 +360,40 @@ _warmup_done = False
 _warmup_progress = {"status": "idle", "loaded": 0, "total": 0, "current_subject": ""}
 _warmup_lock = threading.Lock()  # #8 : protege _warmup_done et _warmup_progress
 
+def _is_warmup_cache_warm():
+    """
+    Plan 2 Phase 3.3 — teste si le warmup peut être SKIPPED :
+    - prefetch_cache_v2.json existe et < 48h (fraicheur globale)
+    - au moins 5 entrées contexte A/B/C déjà en mémoire
+    Retourne True → skip Graph fetch, warmup express <500ms.
+    """
+    try:
+        if not os.path.exists(_PREFETCH_CACHE_PATH):
+            return False
+        age = time.time() - os.path.getmtime(_PREFETCH_CACHE_PATH)
+        if age > _PREFETCH_CACHE_TTL:
+            return False
+        with _prefetch_lock:
+            fresh_entries = sum(
+                1 for v in _prefetch_cache.values()
+                if v.get('status') == 'done'
+                and (v.get('context_a') or v.get('context_b') or v.get('context_c'))
+            )
+        return fresh_entries >= 5
+    except Exception:
+        return False
+
+
 def _execute_warmup(graph):
     """
     Logique de warmup extraite : charge les mails, prefetch A/B/C,
     puis lance la spéculation préemptive TIER 1 (contacts connus).
     Appelable directement (auto-trigger) ou via la route HTTP.
+
+    Plan 2 Phase 3 — orchestration optimisée :
+    - 3.3 Skip Graph fetch si cache chaud (<48h + 5 entrées prefetch)
+    - 3.2 Progression UI multi-étapes
+    - 3.4 Pré-warm templates confirmé (déjà import-time, log explicite)
     """
     global _warmup_done
     try:
@@ -373,6 +408,50 @@ def _execute_warmup(graph):
                 logger.info(f"Warmup: {len(cached_rows)} mails rechargés depuis DB")
         except Exception as e:
             logger.debug(f"Warmup pré-chargement DB ignoré: {e}")
+
+        # --- Plan 2 Phase 3.3 — FAST PATH si cache chaud ---
+        if _is_warmup_cache_warm() and len(_warmup_cache) >= 5:
+            with _warmup_lock:
+                _warmup_progress.update({
+                    "status": "done", "loaded": len(_warmup_cache),
+                    "total": len(_warmup_cache),
+                    "current_subject": "Cache chaud — prêt en un éclair",
+                })
+                _warmup_done = True
+            logger.info(f"Warmup FAST PATH : cache chaud ({len(_warmup_cache)} mails + "
+                        f"prefetch < 48h) → skip Graph fetch")
+            # Relancer la spéculation TIER 1 en arrière-plan (cache peut avoir des gaps)
+            threading.Thread(target=_background_preload_loop, daemon=True).start()
+            return
+
+        # Plan 2 Phase 3.1 — Parallélisation : lancer immédiatement le prefetch
+        # pour les mails DÉJÀ en cache DB, en parallèle du fetch Graph.
+        # Résultat : par le temps que Graph réponde, les 5 premiers prefetch
+        # sont déjà en cours.
+        cached_mails_for_prefetch = []
+        with _warmup_lock:
+            cached_mails_for_prefetch = list(_warmup_cache.values())[:5]
+        parallel_threads = []
+        for msg in cached_mails_for_prefetch:
+            if not msg.get('from_email'):
+                continue
+            mail_data = {
+                'from_email': msg.get('from_email', ''),
+                'from_name': msg.get('from_name', ''),
+                'subject': msg.get('subject', ''),
+                'body': msg.get('body') or msg.get('body_preview', ''),
+                'message_id': msg.get('message_id') or msg.get('id', ''),
+                'conversation_id': msg.get('conversation_id', ''),
+                'to': msg.get('to', ''),
+                'cc': msg.get('cc', ''),
+                'date': msg.get('date', ''),
+            }
+            t = threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True)
+            t.start()
+            parallel_threads.append(t)
+        if parallel_threads:
+            logger.info(f"[warmup 3.1] {len(parallel_threads)} prefetch(es) en //  "
+                        "du fetch Graph (mails en cache DB)")
 
         with _warmup_lock:
             _warmup_progress["current_subject"] = "Recuperation des mails..."
@@ -399,6 +478,10 @@ def _execute_warmup(graph):
 
         # ANOMALIE #8 fix : lancer les prefetch AVANT de mettre _warmup_done = True
         # (évite que l'utilisateur ouvre un mail pendant la fenêtre entre done=True et les threads lancés)
+        # Les prefetch déjà lancés en parallèle (Phase 3.1) ne seront pas doublonnés
+        # grâce au guard `cache_key in _prefetch_cache` dans _run_prefetch.
+        with _warmup_lock:
+            _warmup_progress["current_subject"] = "Préparation du contexte..."
         prefetch_threads = []
         for msg in mails[:5]:
             mail_data = {
@@ -408,6 +491,10 @@ def _execute_warmup(graph):
                 'body': msg.get('body') or msg.get('body_preview', ''),
                 'message_id': msg.get('id', ''),
                 'conversation_id': msg.get('conversation_id', ''),
+                # Plan 2 Phase 2.B — propager to/cc/date pour les filtres Smart Speculative
+                'to': msg.get('to', ''),
+                'cc': msg.get('cc', ''),
+                'date': msg.get('date', ''),
             }
             if mail_data['from_email']:
                 t = threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True)
@@ -419,6 +506,7 @@ def _execute_warmup(graph):
         with _warmup_lock:
             _warmup_done = True
             _warmup_progress["status"] = "done"
+            _warmup_progress["current_subject"] = "Prêt !"
         logger.info("Warmup terminé — spéculation TIER 1 en cours")
 
         # Lancer la spéculation préemptive TIER 1 (contacts connus dans les 20 premiers mails)
