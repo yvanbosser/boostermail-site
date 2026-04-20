@@ -515,6 +515,12 @@ def _execute_warmup(graph):
         # Phase 1.5 : Préchargement BG des contextes A/B/C pour tous les mails non traités
         # (au-delà des 5 premiers déjà prefetchés). Tourne en fond, throttle 2s.
         threading.Thread(target=_background_preload_loop, daemon=True).start()
+
+        # Pré-chargement Windows folders (classement auto PJ) — faible priorité,
+        # BG pour ne pas bloquer l'interaction user. Évite un scan synchrone
+        # au premier clic "classer PJ".
+        threading.Thread(target=_get_windows_folders_cached, daemon=True,
+                         name='wf-prewarm').start()
     except Exception as e:
         with _warmup_lock:
             _warmup_progress["status"] = "error"
@@ -1321,6 +1327,11 @@ def _poll_companion_loop():
                     # Lancer le prefetch
                     if from_email:
                         threading.Thread(target=_run_prefetch, args=(_current_mail_data,), daemon=True).start()
+                    # Précharger les mails voisins N+1 / N-1 (Phase 1.6 — le code
+                    # `_preload_neighbors` existait mais n'était jamais appelé)
+                    _mid = new_data.get('message_id', '')
+                    if _mid:
+                        threading.Thread(target=_preload_neighbors, args=(_mid,), daemon=True).start()
         except Exception:
             pass
         time.sleep(_poll_interval)  # #9 : backoff dynamique

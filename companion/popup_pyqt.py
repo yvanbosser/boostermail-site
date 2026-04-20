@@ -237,50 +237,144 @@ class EasyMailPopup(QMainWindow):
         # mode flash et warmup partagent le même design — différence = durée bar
         return self._build_warmup_screen()
 
-    # -------- Mode WARMUP (user activé, cache froid) -------------------------
+    # -------- Mode WARMUP (user activé) — design moderne --------------------
 
     def _build_warmup_screen(self):
-        """Overlay compact : logo + barre de progression + sujet du mail courant."""
+        """
+        Popup de lancement moderne (audit 20/04, suite retour utilisateur
+        "l'actuelle est horrible"). Carte blanche, gradient subtil, 2 boutons
+        Annuler/Lancer. Le warmup tourne en BG pendant que user décide.
+        Clic Lancer → transition dialog. Clic Annuler → close popup.
+        """
         widget = QWidget()
         widget.setStyleSheet(
-            'QWidget { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,'
-            ' stop:0 #ffffff, stop:1 #F5F7FB); }'
+            'QWidget#root { background: qlineargradient(x1:0, y1:0, x2:1, y2:1,'
+            ' stop:0 #f8fafc, stop:1 #eef2ff); }'
         )
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(18, 14, 18, 14)
-        layout.setSpacing(10)
+        widget.setObjectName('root')
+        outer = QVBoxLayout(widget)
+        outer.setContentsMargins(14, 14, 14, 14)
 
-        logo = QLabel('✉ BoosterMail')
-        logo.setStyleSheet(
-            'font-family: "Segoe UI"; font-size: 15px; font-weight: 700;'
-            ' color: #0F6CBD; letter-spacing: 0.2px;'
+        # Carte blanche avec ombre visuelle (border-radius 14px)
+        card = QWidget()
+        card.setObjectName('wCard')
+        card.setStyleSheet(
+            '#wCard { background: white; border-radius: 14px;'
+            ' border: 1px solid #e2e8f0; }'
         )
-        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(logo)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(22, 20, 22, 16)
+        card_layout.setSpacing(10)
 
-        sub = QLabel('Préparation de vos mails…')
-        sub.setStyleSheet('font-family: "Segoe UI"; font-size: 11px; color: #4A5568;')
+        # Pastille logo (gradient bleu → violet)
+        icon_row = QHBoxLayout()
+        icon_row.addStretch()
+        icon = QLabel('✉')
+        icon.setFixedSize(52, 52)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setStyleSheet(
+            'QLabel { color: white; font-size: 22px; font-family: "Segoe UI";'
+            ' border-radius: 26px;'
+            ' background: qlineargradient(x1:0, y1:0, x2:1, y2:1,'
+            ' stop:0 #0F6CBD, stop:1 #5B4FBF); }'
+        )
+        icon_row.addWidget(icon)
+        icon_row.addStretch()
+        card_layout.addLayout(icon_row)
+
+        # Titre
+        title = QLabel('BoosterMail')
+        title.setStyleSheet(
+            'font-family: "Segoe UI"; font-size: 20px; font-weight: 700;'
+            ' color: #1a1a2e; padding-top: 4px; letter-spacing: 0.2px;'
+        )
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.addWidget(title)
+
+        # Sous-titre rassurant
+        sub = QLabel('Votre assistant email intelligent')
+        sub.setStyleSheet(
+            'font-family: "Segoe UI"; font-size: 11px; color: #64748B;'
+        )
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(sub)
+        card_layout.addWidget(sub)
 
+        card_layout.addSpacing(4)
+
+        # Barre de progression (visible dès l'affichage — travail en BG)
         self._progress_bar = self._make_progress_bar()
-        layout.addWidget(self._progress_bar)
+        card_layout.addWidget(self._progress_bar)
 
-        self._progress_label = QLabel('Connexion au serveur…')
+        self._progress_label = QLabel('Préparation en arrière-plan…')
         self._progress_label.setStyleSheet(
             'font-family: "Segoe UI"; font-size: 10px; color: #0F6CBD;'
+            ' padding-top: 2px;'
         )
         self._progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._progress_label.setWordWrap(True)
-        layout.addWidget(self._progress_label)
+        card_layout.addWidget(self._progress_label)
 
         self._mail_label = QLabel('')
         self._mail_label.setStyleSheet(
-            'font-family: "Segoe UI"; font-size: 9px; color: #94A3B8; font-style: italic;'
+            'font-family: "Segoe UI"; font-size: 9px; color: #94A3B8;'
+            ' font-style: italic;'
         )
         self._mail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._mail_label.setWordWrap(True)
-        layout.addWidget(self._mail_label)
+        card_layout.addWidget(self._mail_label)
+
+        card_layout.addSpacing(6)
+
+        # Boutons Annuler / Lancer
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        btn_cancel = QPushButton('Annuler')
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancel.setFixedHeight(36)
+        btn_cancel.setStyleSheet(
+            'QPushButton { background: transparent; color: #64748B;'
+            ' border: 1px solid #cbd5e1; border-radius: 18px;'
+            ' font-family: "Segoe UI"; font-size: 12px; padding: 0 18px; }'
+            'QPushButton:hover { background: #f1f5f9; color: #334155; }'
+        )
+        btn_cancel.clicked.connect(self.close)
+        btn_row.addWidget(btn_cancel)
+
+        btn_launch = QPushButton('Lancer')
+        btn_launch.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_launch.setFixedHeight(36)
+        btn_launch.setStyleSheet(
+            'QPushButton {'
+            '  background: qlineargradient(x1:0, y1:0, x2:1, y2:0,'
+            '    stop:0 #0F6CBD, stop:1 #5B4FBF);'
+            '  color: white; border: none; border-radius: 18px;'
+            '  font-family: "Segoe UI"; font-size: 12px; font-weight: 600;'
+            '  padding: 0 22px;'
+            '}'
+            'QPushButton:hover { background: #0d5ca3; }'
+            'QPushButton:pressed { background: #094a86; }'
+        )
+        btn_launch.clicked.connect(self._on_launch_click)
+        btn_row.addWidget(btn_launch)
+
+        card_layout.addLayout(btn_row)
+
+        outer.addWidget(card)
+        return widget
+
+    def _on_launch_click(self):
+        """Clic 'Lancer' : transition immédiate vers l'overlay (warmup déjà fini
+        ou en cours en BG). Le travail ne s'est jamais arrêté."""
+        logger.info('[popup] Lancer cliqué → transition vers overlay')
+        # Si l'utilisateur clique Lancer AVANT que le warmup ne termine,
+        # on transitionne quand même ; les threads BG continuent sans être
+        # interrompus, le dialog se comportera normalement au clic bouton Outlook.
+        if hasattr(self, '_flash_timer') and self._flash_timer.isActive():
+            self._flash_timer.stop()
+        if hasattr(self, '_warmup_timer') and self._warmup_timer.isActive():
+            self._warmup_timer.stop()
+        self._transition_to_overlay()
 
         layout.addStretch()
         return widget
