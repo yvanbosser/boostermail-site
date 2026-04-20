@@ -49,6 +49,10 @@ var _companionAvailable = false;
     _btn('navContacts', function () { alert('Page Contacts — a implementer'); });
     _btn('navProfil', function () { _showProfilSection(); });
 
+    // Boutons header overlay (PyQt) : réduire + fermer
+    _btn('btnMinimize', function () { window.location.href = 'easymail://minimize/'; });
+    _btn('btnCloseOverlay', function () { window.location.href = 'easymail://close-overlay/'; });
+
     // Test connexion backend
     _checkBackendStatus();
 })();

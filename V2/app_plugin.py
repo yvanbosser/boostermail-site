@@ -1522,15 +1522,11 @@ def api_current_mail():
     """
     Retourne les données du mail courant (body + conversationId inclus).
     Consommé par : popup PyQt (SSE), extension, dialog standalone.
-    Stale après 5 minutes.
+    Audit 20/04 : plus de "stale" — on retourne le dernier mail connu
+    peu importe son âge, l'user veut voir sa sélection actuelle.
     """
     if not _current_mail_data:
         return jsonify({"status": "no_data"})
-
-    age = time.time() - _current_mail_data.get('timestamp', 0)
-    if age > 300:
-        return jsonify({"status": "stale"})
-
     return jsonify({"status": "ok", "mail": _current_mail_data})
 
 
