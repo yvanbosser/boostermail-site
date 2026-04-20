@@ -111,6 +111,12 @@ try {
         _checkSpeculativeCache();
     }
 
+    // Plan 2 Phase 2.A — Restaurer brouillon user si présent
+    _restoreDraft();
+
+    // Plan 2 Phase 2.A — Auto-save brouillon en édition (debounced)
+    _setupDraftAutoSave();
+
     // Bouton fermer
     document.getElementById('btnClose').addEventListener('click', function() {
         _closeDialog();
@@ -927,6 +933,77 @@ function _showTemplateBadge(result) {
 }
 
 var _lastTemplateMatch = null;
+
+
+// =============================================================================
+// Plan 2 Phase 2.A — Cache brouillon unifié (ex-drafts_v2 + _preemptive_cache)
+// =============================================================================
+
+var _draftSaveTimer = null;
+
+function _restoreDraft() {
+    if (!_messageId) return;
+    fetch(_backendUrl + '/api/get_draft?message_id=' + encodeURIComponent(_messageId))
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+            if (!res || !res.found) return;
+            var editor = document.getElementById('editor');
+            // Ne pas écraser si l'user a déjà commencé à taper
+            if (editor.innerText && editor.innerText.trim()) return;
+            editor.innerHTML = (res.text || '').replace(/\n/g, '<br>');
+            _showDraftBadge(res.timestamp);
+            console.log('[dialog] Brouillon restauré pour', _messageId.substring(0, 20));
+        })
+        .catch(function() {});
+}
+
+function _showDraftBadge(timestamp) {
+    var existing = document.getElementById('draftBadge');
+    if (existing) existing.remove();
+    var badge = document.createElement('div');
+    badge.id = 'draftBadge';
+    badge.className = 'tpl-badge';  // réutilise le même style que le template badge
+    var ageText = '';
+    if (timestamp) {
+        var delta = Math.round((Date.now() / 1000 - timestamp) / 60);
+        if (delta < 60) ageText = ' il y a ' + delta + ' min';
+        else if (delta < 1440) ageText = ' il y a ' + Math.round(delta / 60) + ' h';
+        else ageText = ' il y a ' + Math.round(delta / 1440) + ' j';
+    }
+    badge.innerHTML = '<span class="tpl-badge-dot">●</span> Brouillon sauvegardé' + ageText;
+    var editor = document.getElementById('editor');
+    editor.parentNode.insertBefore(badge, editor);
+}
+
+function _saveDraftNow() {
+    if (!_messageId) return;
+    var editor = document.getElementById('editor');
+    var text = (editor.innerText || '').trim();
+    if (!text) return;  // n'écrase pas avec un éditeur vide
+    fetch(_backendUrl + '/api/save_draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            message_id: _messageId,
+            text: text,
+            from_email: _fromEmail || '',
+            importance: _importance || '',
+        }),
+    }).catch(function() {});
+}
+
+function _setupDraftAutoSave() {
+    var editor = document.getElementById('editor');
+    if (!editor) return;
+    // Debounce 2 s après la dernière frappe
+    var schedule = function() {
+        if (_draftSaveTimer) clearTimeout(_draftSaveTimer);
+        _draftSaveTimer = setTimeout(_saveDraftNow, 2000);
+    };
+    editor.addEventListener('input', schedule);
+    // Sauvegarde explicite si l'user ferme / quitte l'onglet
+    window.addEventListener('beforeunload', _saveDraftNow);
+}
 
 
 function _fetchGenerateReply(body) {

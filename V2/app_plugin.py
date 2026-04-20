@@ -781,9 +781,96 @@ def _load_prefetch_cache():
 import atexit
 atexit.register(_save_prefetch_cache)
 
-# Cache des réponses préemptives (contacts connus, top 5 récents)
-_preemptive_cache = {}                 # {message_id: {chunks, text, timestamp}}
+# Cache UNIFIÉ des réponses (Plan 3 §9.1 — fusion spéculation + ex-brouillon).
+# _preemptive_cache[message_id] = {
+#     'status':    'running' | 'done' | 'cancelled',
+#     'source':    'bg_speculation' | 'user_edit',   # qui a écrit cette entrée
+#     'text':      str,
+#     'chunks':    list (optionnel, pour streaming depuis BG gen),
+#     'timestamp': epoch,
+#     'contact':   str,
+#     'importance': 'R'|'S'|'H',
+# }
+# Purge purement événementielle (classify/send/delete/archive/consume/cohesion)
+# + safety net 4 semaines (Plan 3 §9.1). Plus de TTL 30 min en lecture.
+_preemptive_cache = {}
 _preemptive_lock = threading.Lock()
+_REPLY_CACHE_SAFETY_NET = 28 * 24 * 3600  # 4 semaines — safety net anti-fuite
+_DRAFTS_CACHE_PATH = os.path.join(EASYMAIL_DIR, 'drafts_v2.json')
+
+
+def _persist_reply_cache():
+    """Sauvegarde les entrées `user_edit` du cache sur disque (drafts_v2.json).
+    Appelé à l'exit + après chaque save_draft explicite. Les entrées
+    `bg_speculation` ne sont PAS persistées (re-générables à la volée)."""
+    try:
+        with _preemptive_lock:
+            drafts = {k: v for k, v in _preemptive_cache.items()
+                      if v.get('source') == 'user_edit'}
+        payload = {
+            'saved_at': datetime.now().isoformat(timespec='seconds'),
+            'entries': drafts,
+        }
+        tmp = _DRAFTS_CACHE_PATH + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, _DRAFTS_CACHE_PATH)
+        logger.info(f"[draft] Persist {len(drafts)} brouillon(s) → drafts_v2.json")
+    except Exception as e:
+        logger.warning(f"[draft] Échec persist : {e}")
+
+
+def _load_reply_cache():
+    """Charge les brouillons user_edit depuis drafts_v2.json au démarrage."""
+    try:
+        if not os.path.exists(_DRAFTS_CACHE_PATH):
+            return
+        with open(_DRAFTS_CACHE_PATH, 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+        entries = payload.get('entries', {})
+        now = time.time()
+        loaded = 0
+        with _preemptive_lock:
+            for mid, entry in entries.items():
+                ts = entry.get('timestamp', 0)
+                # Safety net : ignorer les brouillons > 4 semaines
+                if now - ts > _REPLY_CACHE_SAFETY_NET:
+                    continue
+                # Forcer source et status cohérents (fichier peut être corrompu)
+                entry['source'] = 'user_edit'
+                entry['status'] = 'done'
+                _preemptive_cache[mid] = entry
+                loaded += 1
+        logger.info(f"[draft] {loaded} brouillon(s) restauré(s) depuis disque")
+    except Exception as e:
+        logger.warning(f"[draft] Échec chargement : {e}")
+
+
+def _reply_cache_safety_net_loop():
+    """Thread BG qui purge les entrées > 4 semaines. Scan 1× toutes les 6h."""
+    while True:
+        try:
+            now = time.time()
+            purged = 0
+            with _preemptive_lock:
+                stale = [k for k, v in _preemptive_cache.items()
+                         if now - v.get('timestamp', 0) > _REPLY_CACHE_SAFETY_NET]
+                for k in stale:
+                    _preemptive_cache.pop(k, None)
+                    purged += 1
+            if purged:
+                logger.info(f"[reply_cache safety net] {purged} entrée(s) > 4 semaines purgée(s)")
+                _persist_reply_cache()
+        except Exception as e:
+            logger.warning(f"[reply_cache safety net] erreur : {e}")
+        time.sleep(6 * 3600)  # 6h
+
+
+# Chargement au démarrage + persistance à l'exit
+_load_reply_cache()
+atexit.register(_persist_reply_cache)
+threading.Thread(target=_reply_cache_safety_net_loop, daemon=True, name='reply-cache-sn').start()
+
 # SSE clients connectés
 _sse_clients = []
 _sse_lock = threading.Lock()
@@ -879,6 +966,8 @@ def _poll_companion_loop():
                     _sse_data = {k: v for k, v in new_data.items() if k != 'body'}
                     _broadcast_sse('mail_changed', _sse_data)
                     logger.info(f"Mail changé → {from_email} / {subject[:40]}")
+                    # Filtre #5 Smart Speculative : incrémenter le compteur d'ouvertures
+                    _increment_open_counter(new_data.get('message_id', ''))
                     # Lancer le prefetch
                     if from_email:
                         threading.Thread(target=_run_prefetch, args=(_current_mail_data,), daemon=True).start()
@@ -987,6 +1076,9 @@ def api_event_message_read():
     # Broadcast SSE (sans le body)
     _sse_data = {k: v for k, v in new_data.items() if k != 'body'}
     _broadcast_sse('mail_changed', _sse_data)
+
+    # Filtre #5 Smart Speculative : incrémenter le compteur d'ouvertures
+    _increment_open_counter(new_data.get('message_id', ''))
 
     # (O8) Auto-prefetch
     if new_data.get('from_email'):
@@ -1209,12 +1301,17 @@ def _run_prefetch(mail_data):
         _broadcast_sse('prefetch_progress', {'status': 'done', 'a': len(context_a), 'b': len(context_b), 'c': len(context_c)})
 
         # Lancer la spéculation si contact connu (spéculation hybride)
+        # + 6 filtres Smart Speculative (Plan 2 Phase 2.B, Plan 3 §9.2)
         if message_id and from_email and _is_contact_known(from_email):
-            threading.Thread(
-                target=_start_speculative,
-                args=(mail_data,),
-                daemon=True
-            ).start()
+            ok_spec, skip_reason = _should_speculate(mail_data)
+            if ok_spec:
+                threading.Thread(
+                    target=_start_speculative,
+                    args=(mail_data,),
+                    daemon=True
+                ).start()
+            else:
+                logger.info(f"[speculative] Skip ({skip_reason}) pour {message_id[:20]}")
 
     except Exception as e:
         logger.error(f"Prefetch error: {e}")
@@ -1554,6 +1651,98 @@ def _is_contact_known(email):
         return False
 
 
+# =============================================================================
+# Plan 2 Phase 2.B — Smart Speculative : 6 filtres (Plan 3 §9.2)
+#   - 5 filtres portés depuis le proto (app.py:1126-1165)
+#   - 1 filtre créé en V2 (filtre #5 : open_count, absent du proto)
+# Règle : si UN filtre matche → pas de spéculation, mais le prefetch A/B/C reste.
+# =============================================================================
+
+_SPEC_NOREPLY_PATTERNS = (
+    'no-reply', 'noreply', 'newsletter', 'notification',
+    'mailer-daemon', 'postmaster',
+)
+
+# Filtre #5 : compteur d'ouvertures par mail (RAM). Incrémenté à chaque fois
+# que le mail devient `_current_mail_data` via le polling companion.
+_mail_open_counter = {}
+_mail_open_counter_lock = threading.Lock()
+
+
+def _increment_open_counter(message_id):
+    """Incrémente le compteur d'ouvertures (filtre #5 Smart Speculative)."""
+    if not message_id:
+        return
+    with _mail_open_counter_lock:
+        _mail_open_counter[message_id] = _mail_open_counter.get(message_id, 0) + 1
+        # Trim mémoire : si > 200 entrées, purger les plus anciennes en conservant 100
+        if len(_mail_open_counter) > 200:
+            # On n'a pas le timestamp : on jette 100 arbitrairement (non critique)
+            keys = list(_mail_open_counter.keys())[:100]
+            for k in keys:
+                _mail_open_counter.pop(k, None)
+
+
+def _should_speculate(mail_data):
+    """
+    Applique les 6 filtres Smart Speculative. Retourne (bool, reason).
+    (True, '')  → on peut spéculer.
+    (False, X)  → skip spéculation, X = raison (pour logs). Le prefetch A/B/C reste.
+    """
+    message_id = mail_data.get('message_id', '')
+    from_email = (mail_data.get('from_email', '') or '').lower()
+    body = mail_data.get('body', '') or ''
+    to_field = (mail_data.get('to', '') or '').lower()
+    cc_field = (mail_data.get('cc', '') or '').lower()
+
+    # Filtre 1 : mail > 7 jours
+    mail_date = mail_data.get('date', '')
+    if mail_date:
+        try:
+            if 'T' in mail_date:
+                dt = datetime.fromisoformat(mail_date.replace('Z', '+00:00'))
+                dt_naive = dt.replace(tzinfo=None)
+            else:
+                dt_naive = datetime.strptime(mail_date, '%Y-%m-%d %H:%M:%S')
+            if (datetime.now() - dt_naive).days > 7:
+                return False, 'mail > 7 jours'
+        except Exception:
+            pass
+
+    # Filtre 2 : mail déjà traité
+    try:
+        if message_id and _db.is_treated(message_id):
+            return False, 'mail déjà traité'
+    except Exception:
+        pass
+
+    # Filtre 3 : expéditeur automatique (no-reply / newsletter / postmaster / ...)
+    if any(p in from_email for p in _SPEC_NOREPLY_PATTERNS):
+        return False, 'expéditeur automatique'
+
+    # Filtre 4 : body < 10 chars sans "?"
+    body_stripped = re.sub(r'<[^>]+>', '', body).strip()
+    if len(body_stripped) < 10 and '?' not in body_stripped:
+        return False, 'body < 10 chars sans question'
+
+    # Filtre 5 : mail ouvert 2+ fois sans réponse (compteur mémoire V2)
+    with _mail_open_counter_lock:
+        opens = _mail_open_counter.get(message_id, 0)
+    if opens >= 2:
+        return False, f'mail ouvert {opens}× sans réponse'
+
+    # Filtre 6 : user en CC (pas en TO)
+    try:
+        my_email = (_get_my_email() or '').lower()
+        if my_email and to_field and my_email not in to_field:
+            if my_email in cc_field:
+                return False, 'utilisateur en CC'
+    except Exception:
+        pass
+
+    return True, ''
+
+
 def _start_speculative(mail_data):
     """
     Génère une réponse en arrière-plan pour un contact connu (spéculation hybride).
@@ -1571,9 +1760,15 @@ def _start_speculative(mail_data):
     # Éviter les doublons (déjà en cache ou en cours)
     with _preemptive_lock:
         entry = _preemptive_cache.get(message_id, {})
+        # Ne pas écraser un brouillon user ('source': 'user_edit') — priorité éditeur
+        if entry.get('source') == 'user_edit':
+            return
         if entry.get('status') in ('running', 'done'):
             return
-        _preemptive_cache[message_id] = {'status': 'running', 'timestamp': time.time()}
+        _preemptive_cache[message_id] = {
+            'status': 'running', 'source': 'bg_speculation',
+            'timestamp': time.time(),
+        }
 
     from_email = mail_data.get('from_email', '')
     subject = mail_data.get('subject', '')
@@ -1720,17 +1915,19 @@ def _start_speculative(mail_data):
                 return
 
             if len(_preemptive_cache) > 10:
-                # ANOMALIE #11 fix : inclure les entries 'running' vieilles de >30s dans le trim
+                # Trim : évict les 'done' sauf les brouillons user (source='user_edit')
                 evictable = [(k, v) for k, v in _preemptive_cache.items()
-                             if v.get('status') == 'done'
-                             or (v.get('status') == 'running'
-                                 and time.time() - v.get('timestamp', 0) > 30)]
+                             if v.get('source') != 'user_edit'  # jamais toucher aux drafts
+                             and (v.get('status') == 'done'
+                                  or (v.get('status') == 'running'
+                                      and time.time() - v.get('timestamp', 0) > 30))]
                 evictable.sort(key=lambda x: x[1].get('timestamp', 0))
                 for k, _ in evictable[:5]:
                     del _preemptive_cache[k]
 
             _preemptive_cache[message_id] = {
                 'status': 'done',
+                'source': 'bg_speculation',
                 'text': full_text,
                 'chunks': chunks,
                 'timestamp': time.time(),
@@ -1790,6 +1987,10 @@ def _run_preemptive_bg(inbox_mails):
             'body': mail.get('body') or mail.get('body_preview', ''),
             'message_id': mail.get('message_id') or mail.get('id', ''),
             'conversation_id': mail.get('conversation_id', ''),
+            # Plan 2 Phase 2.B : propager to/cc/date pour les filtres Smart Speculative
+            'to': mail.get('to', ''),
+            'cc': mail.get('cc', ''),
+            'date': mail.get('date', ''),
         }
         threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True).start()
 
@@ -3419,6 +3620,68 @@ _contacts_recalib_step = ''
 _contacts_recalib_progress = {'done': 0, 'total': 0}
 _recalib_contacts_lock = threading.Lock()   # protège le démarrage (anti TOCTOU)
 
+@app.route('/api/save_draft', methods=['POST'])
+def api_save_draft():
+    """
+    Sauvegarde un brouillon user dans le cache unifié (Plan 3 §9.1).
+    Appelé par dialog.js quand l'user quitte sans envoyer OU périodiquement
+    pendant l'édition. Écrit aussi sur disque (drafts_v2.json).
+
+    Body JSON : { message_id, text, from_email?, importance? }
+    """
+    data = request.get_json() or {}
+    message_id = data.get('message_id') or ''
+    text = data.get('text') or ''
+    from_email = data.get('from_email') or ''
+    importance = data.get('importance') or ''
+
+    if not message_id:
+        return jsonify({"error": "message_id requis"}), 400
+
+    with _preemptive_lock:
+        # Annuler toute spéculation BG en cours : le brouillon user prime
+        existing = _preemptive_cache.get(message_id, {})
+        if existing.get('status') == 'running':
+            _preemptive_cache[message_id] = {'status': 'cancelled'}
+        _preemptive_cache[message_id] = {
+            'status': 'done',
+            'source': 'user_edit',
+            'text': text,
+            'timestamp': time.time(),
+            'contact': from_email,
+            'importance': importance,
+        }
+
+    # Écrire sur disque en arrière-plan (non bloquant pour la réponse HTTP)
+    threading.Thread(target=_persist_reply_cache, daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@app.route('/api/get_draft')
+def api_get_draft():
+    """
+    Récupère un brouillon user depuis le cache unifié.
+    Query : ?message_id=xxx
+    Retourne { found: bool, text?, timestamp?, source? }.
+    """
+    message_id = request.args.get('message_id', '')
+    if not message_id:
+        return jsonify({"found": False, "error": "message_id requis"}), 400
+
+    with _preemptive_lock:
+        entry = _preemptive_cache.get(message_id, {})
+
+    # Seuls les brouillons user_edit sont "officiels" ici
+    if entry.get('source') == 'user_edit' and entry.get('status') == 'done':
+        return jsonify({
+            "found": True,
+            "text": entry.get('text', ''),
+            "timestamp": entry.get('timestamp', 0),
+            "source": "user_edit",
+        })
+    return jsonify({"found": False})
+
+
 @app.route('/api/match_template', methods=['POST'])
 def api_match_template():
     """
@@ -3587,15 +3850,12 @@ def generate_reply():
     except Exception:
         pass
 
-    # Fix #16 : vérifier le cache préemptif AVANT le rate limiting
-    # (un cache hit ne coûte rien → pas de raison de le bloquer au double-clic)
+    # Cache unifié (Plan 3 §9.1) : pas de TTL — purge purement événementielle.
+    # Safety net 4 semaines géré par le thread `_reply_cache_safety_net_loop`.
     if message_id and not brief:
         with _preemptive_lock:
             cached = _preemptive_cache.get(message_id, {})
-            # ANOMALIE #4 fix : vérifier TTL 30min + copier les données + pop immédiat sous lock
-            cache_age = time.time() - cached.get('timestamp', 0)
-            if (cached.get('status') == 'done' and cached.get('chunks')
-                    and cache_age < 1800):
+            if cached.get('status') == 'done' and cached.get('chunks'):
                 cached_chunks = list(cached['chunks'])      # copie locale (thread-safe)
                 cached_text = cached.get('text', '')        # copie locale
                 _preemptive_cache.pop(message_id, None)     # consommé → pop immédiat

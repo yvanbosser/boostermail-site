@@ -52,8 +52,10 @@ addin_debug.log
 boostermail.log
 pyqt_dialog.log
 prefetch_cache_v2.json
+drafts_v2.json
 boostermail.db-shm
 boostermail.db-wal
+companion/.popup_pid
 
 # Autres worktrees Claude (embedded git repos)
 .claude/worktrees/distracted-visvesvaraya-*
