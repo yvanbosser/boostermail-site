@@ -199,11 +199,11 @@ class EasyMailPopup(QMainWindow):
 
         # --- Dispatch selon le mode ---
         if self._activation_mode == 'flash':
-            # user activé + cache chaud → 1500 ms (temps de perception humaine)
-            # puis bascule overlay. Correction audit 20/04 : 500 ms était trop
-            # court pour être perçu visuellement.
+            # Cache chaud — popup de lancement + barre rapide (~2,5 s).
+            # Pas de vrai warmup (pas besoin : prefetch_cache_v2.json < 48h).
+            # L'animation rapide donne un feedback visible sans faire attendre.
             self._outlook_check_timer.start(5000)
-            QTimer.singleShot(1500, self._transition_to_overlay)
+            self._start_flash_animation()
         elif self._activation_mode == 'marketing':
             # Pas activé + cache chaud : pas de warmup, on attend le clic user
             self._outlook_check_timer.start(5000)
@@ -218,19 +218,23 @@ class EasyMailPopup(QMainWindow):
     def _build_loading_screen(self, mode='warmup'):
         """
         4 modes :
-          - 'flash'           : user activé + cache chaud → splash 500 ms
-          - 'warmup'          : user activé + cache froid → barre progression ~8 s
+          - 'flash'           : user activé + cache chaud → popup warmup + barre rapide (~2 s)
+          - 'warmup'          : user activé + cache froid → popup warmup + barre ~8 s
           - 'marketing'       : user pas activé + cache chaud → CTA bloquant
           - 'marketing_warmup': user pas activé + cache froid → CTA + barre en bas
         Crée les widgets `_progress_bar`, `_progress_label`, `_mail_label` dans
         tous les modes (le code de warmup suppose leur existence).
+
+        Correction audit 20/04 : flash utilise maintenant le même design que
+        warmup (popup de lancement + barre de progression) pour donner un
+        feedback visible, juste avec un remplissage plus rapide quand cache
+        chaud (~2 s au lieu de ~8 s).
         """
-        if mode == 'flash':
-            return self._build_flash_screen()
         if mode == 'marketing':
             return self._build_marketing_screen(with_warmup=False)
         if mode == 'marketing_warmup':
             return self._build_marketing_screen(with_warmup=True)
+        # mode flash et warmup partagent le même design — différence = durée bar
         return self._build_warmup_screen()
 
     # -------- Mode WARMUP (user activé, cache froid) -------------------------
@@ -516,6 +520,32 @@ class EasyMailPopup(QMainWindow):
         self._transition_to_overlay()
 
     # =========================================================================
+    # FLASH ANIMATION (cache chaud — simule le warmup rapidement)
+    # =========================================================================
+
+    def _start_flash_animation(self):
+        """
+        Popup de lancement en mode flash : la barre de progression se remplit
+        en ~2,5 s pour donner un feedback visible sans faire attendre inutilement.
+        Pas d'appel backend (cache déjà chaud via prefetch_cache_v2.json < 48h).
+        """
+        self._progress_label.setText('BoosterMail — cache chaud, prêt en un instant…')
+        self._flash_progress = 0
+        self._flash_timer = QTimer()
+        self._flash_timer.setInterval(50)  # 50ms × 50 ticks = 2,5 s
+        self._flash_timer.timeout.connect(self._tick_flash)
+        self._flash_timer.start()
+
+    def _tick_flash(self):
+        self._flash_progress += 2  # +2% toutes les 50 ms → 100% en 2,5 s
+        self._progress_bar.setValue(min(100, self._flash_progress))
+        if self._flash_progress >= 95:
+            self._progress_label.setText('Prêt ✓')
+        if self._flash_progress >= 100:
+            self._flash_timer.stop()
+            QTimer.singleShot(300, self._transition_to_overlay)
+
+    # =========================================================================
     # WARMUP (chargement des mails au demarrage)
     # =========================================================================
 
@@ -733,6 +763,8 @@ class EasyMailPopup(QMainWindow):
             self._outlook_check_timer.stop()
         if hasattr(self, '_warmup_timer'):
             self._warmup_timer.stop()
+        if hasattr(self, '_flash_timer'):
+            self._flash_timer.stop()
         # P2 : signaler au thread worker de s'arreter
         if hasattr(self, '_wp'):
             self._wp['done'] = True
