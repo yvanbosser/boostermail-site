@@ -6444,10 +6444,16 @@ def api_setup_status():
     companion_installed = _db.get_setting('companion_installed', 'false')
     onboarding_done = _db.get_setting('onboarding_done', 'false')
 
+    # Audit 20/04 : button_activated retourné pour popup.js. Considéré true
+    # dès que l'onboarding est fait — l'user a forcément vu le bouton BM
+    # pour tester avant de valider l'onboarding. Évite l'affichage du
+    # message "Dans New Outlook, ouvrez un mail puis cliquez..." qui
+    # apparaissait aléatoirement.
     return jsonify({
         "step": setup_step,
         "companion_installed": companion_installed == 'true',
         "onboarding_done": onboarding_done == 'true',
+        "button_activated": onboarding_done == 'true',
         "user_name": _db.get_setting('user_name', ''),
     })
 
