@@ -1840,6 +1840,15 @@ def _normalize_context_c(items, source='unknown', correspondent_email='', my_ema
     return normalized
 
 
+# Plan 2 Phase 7 (post-audit) — Cache C keywords 24h (porté depuis proto app.py:391)
+# Évite les re-hits Graph/Companion pour des keywords déjà recherchés dans la journée.
+# Thread-safe via _c_keyword_lock. TTL 24h, cap 200 entries (trim le plus ancien).
+_c_keyword_cache = {}     # keyword_lower.strip() → {'items': [normalized], 'ts': float, 'src': str}
+_c_keyword_lock = threading.Lock()
+_C_KEYWORD_CACHE_TTL = 24 * 3600
+_C_KEYWORD_CACHE_MAX = 200
+
+
 def _prefetch_context_c_with_table(keywords, graph=None, correspondent_email='', my_email=''):
     """
     Contexte C : recherche par mots-clés via Companion GetTable (COM Outlook local).
@@ -1848,16 +1857,29 @@ def _prefetch_context_c_with_table(keywords, graph=None, correspondent_email='',
     correspondent_email + my_email : utilisés pour déduire la direction des items
     retournés (sent/received). Fallback 'received' si non fournis.
 
-    Priorité : Companion GetTable > Graph search_emails > []
-    Avantage GetTable : < 100ms, aucun quota Graph, fonctionne hors réseau.
+    Priorité : cache keyword 24h > Companion GetTable > Graph search_emails > []
+    Avantage cache : 0ms sur hit. Avantage GetTable : <100ms, aucun quota Graph.
 
     La sortie est normalisée (_normalize_context_c) pour compatibilité _build_prompt().
     """
     if not keywords:
         return []
 
+    kw_key = str(keywords).lower().strip()
+
+    # 0. Cache keyword 24h (priorité absolue)
+    if kw_key:
+        with _c_keyword_lock:
+            entry = _c_keyword_cache.get(kw_key)
+            if entry and (time.time() - entry.get('ts', 0)) < _C_KEYWORD_CACHE_TTL:
+                logger.info(f"Prefetch C via cache keyword HIT '{kw_key}' "
+                            f"({len(entry.get('items', []))} résultats)")
+                return list(entry['items'])
+
     # 1. Tenter Companion GetTable (préféré — COM local, rapide)
     import requests as _requests  # import global-level alias (cohérent avec Mode Dégradé)
+    normalized = None
+    src = None
     try:
         resp = _requests.get(
             'http://localhost:5051/api/get_table',
@@ -1868,22 +1890,38 @@ def _prefetch_context_c_with_table(keywords, graph=None, correspondent_email='',
             data = resp.json()
             if data.get('status') == 'ok' and data.get('results'):
                 logger.info(f"Prefetch C via Companion GetTable : {len(data['results'])} résultats")
-                return _normalize_context_c(data['results'], 'get_table',
-                                            correspondent_email, my_email)
+                normalized = _normalize_context_c(data['results'], 'get_table',
+                                                  correspondent_email, my_email)
+                src = 'get_table'
     except Exception as e:
         logger.debug(f"Companion GetTable indisponible : {e}")
 
     # 2. Fallback Graph API (retour brut Graph normalisé aussi)
-    if graph:
+    if normalized is None and graph:
         try:
             results = graph.search_emails(f'subject:{keywords}', 20)
             logger.info(f"Prefetch C via Graph fallback : {len(results)} résultats")
-            return _normalize_context_c(results, 'graph',
-                                        correspondent_email, my_email)
+            normalized = _normalize_context_c(results, 'graph',
+                                              correspondent_email, my_email)
+            src = 'graph'
         except Exception as e:
             logger.warning(f"Prefetch C Graph fallback error: {e}")
 
-    return []
+    if normalized is None:
+        return []
+
+    # Stocker dans le cache 24h (trim si > MAX entries)
+    if kw_key and normalized:
+        with _c_keyword_lock:
+            if len(_c_keyword_cache) >= _C_KEYWORD_CACHE_MAX:
+                # Retirer l'entrée la plus ancienne
+                oldest = min(_c_keyword_cache.items(), key=lambda kv: kv[1].get('ts', 0))
+                _c_keyword_cache.pop(oldest[0], None)
+            _c_keyword_cache[kw_key] = {
+                'items': list(normalized), 'ts': time.time(), 'src': src,
+            }
+
+    return normalized
 
 
 def _detect_importance(body, subject):

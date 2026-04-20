@@ -106,7 +106,7 @@ Position **bas-droite** du dialog (validé), **visible en permanence** (même qu
 | **Inbox 10 derniers mails** | ✅ `_warmup_cache` + `email_cache` DB | Graph `/messages` | Affichage + base spéculation |
 | **Prefetch contexte A** (thread) | ✅ `_prefetch_cache` (par message_id) | Graph `conversationId` | Bloc A prompt |
 | **Prefetch contexte B** (historique) | ✅ `_prefetch_cache` | Graph `search_by_sender` + fallback DB `threads` | Bloc B prompt |
-| **Prefetch contexte C** (keywords sujet) | ✅ **Corrigé 18/04** — `_c_keyword_cache` présent en V2 ([app_plugin.py:391](../../V2/app_plugin.py#L391), TTL 24 h / 86400 s) | Graph `search_by_subject` / Companion GetTable | Bloc C prompt |
+| **Prefetch contexte C** (keywords sujet) | ✅ **Re-corrigé 20/04** — `_c_keyword_cache` **porté depuis proto** vers V2 (cf. §9.5). Audit 18/04 avait faussement rapporté qu'il était présent à L391 ; audit 20/04 a détecté la régression et le portage a été effectué. TTL 24 h, cap 200 entries. | Cache → Companion GetTable → Graph search | Bloc C prompt |
 | **Arborescence dossiers Outlook** | ✅ DB `folder_cache` (396 dossiers persistants, rescan 60min BG) | Graph `get_all_folders` | Classement post-envoi |
 | **Arborescence dossiers Windows** | ❌ **Corrigé 18/04** — absent de V2 (existe seulement en proto). À porter pour la proposition de classement auto PJ | Scan disque `pj_root_folder` | Classement auto PJ Windows |
 | **Contacts profiles** | ✅ DB `contact_profiles` (103 contacts, persistant) | DB | Registre, greeting, closing, ton |
@@ -119,7 +119,7 @@ Position **bas-droite** du dialog (validé), **visible en permanence** (même qu
 | **Prefetch persistant 48h** | ✅ `prefetch_cache_v2.json` | Fichier disque | Saut du warmup si session récente |
 | **_my_email** | ✅ `_my_email_cache` (TTL 1h) | Graph `/me` | Direction sent/received dans contextes |
 | **Spéculation contacts connus** (réponses Claude pré-générées) | 🟡 **Existe** `_preemptive_cache` MAIS les 6 filtres `SPEC_SMART_SPECULATIF` ne sont pas encore portés | Claude stream | Affichage instantané cas A |
-| ~~**Cache C keywords 24h**~~ | ✅ **Corrigé 18/04 — déjà présent en V2** | — | — |
+| **Cache C keywords 24h** | ❌ Était absent en V2 (faux positif Plan 3 audit 18/04) → ✅ **porté depuis proto le 20/04** (voir §9.5) — TTL 24 h, cap 200 entries | Cache keyword 24 h | Réutilise les recherches C entre mails même sujet |
 | **Cache brouillon unifié (ex-24h)** | ❌ **Code perdu entre 17/04 et 18/04** (drafts_v2.json existe toujours sur disque, code disparu de V2). À restaurer OU ré-implémenter dans le **cache unifié `_reply_cache`** (cf. §9) | Memory + disque | User retrouve sa dernière édition (purge événementielle + safety net 4 semaines) |
 | **HTML rendu + inline images** | ❌ **Pas nécessaire en V2** (HTML via dialog.html) | — | Spécifique proto (`_html_cache`, `_inline_images_cache`) |
 | **Classification post-envoi** | ❌ **Manquant** (`_classification_post_send_cache` en proto) | Claude | Éviter de re-générer la suggestion classement après send |
@@ -150,7 +150,7 @@ Position **bas-droite** du dialog (validé), **visible en permanence** (même qu
 
 **Total révisé** : **~3 h 10 de dev**.
 
-> ⚠️ **Liste retirée** : ~~Cache C keywords 24 h~~ — **déjà présent en V2** (audit 18/04, faux négatif du Plan 3 initial).
+> ⚠️ **Correction 20/04** : l'audit du 18/04 avait faussement rapporté que `_c_keyword_cache` était présent en V2 (ligne 391). Audit 20/04 a confirmé son absence → **porté depuis proto le 20/04** dans `_prefetch_context_c_with_table` (TTL 24 h, cap 200 entries).
 > ⚠️ **Liste ajoutée** : `_windows_folders_cache` — absent de V2 (faux positif du Plan 3 initial).
 
 ---
@@ -248,7 +248,7 @@ Bas-droite du dialog, **visible en permanence** (même après édition user).
 | # | Cache | Avant | Après audit |
 |---|---|---|---|
 | 6 | `_windows_folders_cache` | ✅ présent V2 | ❌ absent V2 — à porter (classement auto PJ, dans Plan 2) |
-| 17 | `_c_keyword_cache` 24 h | ❌ manquant | ✅ présent V2 depuis 14/04 ([app_plugin.py:391](../../V2/app_plugin.py#L391)) |
+| 17 | `_c_keyword_cache` 24 h | ❌ manquant | ❌ **confirmé absent V2 (audit 20/04)** → porté depuis proto (app.py:391, 1248, 1334) vers V2 `_prefetch_context_c_with_table` le 20/04 |
 
 ### 9.6 Régression détectée
 
