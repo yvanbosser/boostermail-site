@@ -73,6 +73,9 @@ addin_debug.log
 pyqt_dialog.log
 boostermail.log
 
+# Perf logs (instrumentation dialog 80%) — local seulement
+logs/perf/*.json
+
 # Backups de certs / manifest (conserves localement pour rollback)
 *.bak
 V2/localhost.crt.bak
