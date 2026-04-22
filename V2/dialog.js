@@ -263,12 +263,11 @@ _perfMonitor.mark('T0_script_start');
     // Priorité : brouillon user > préemptif BG > template > rien
     // Remplace les appels séparés _checkSpeculativeCache / _restoreDraft / _tryTemplateMatch.
     //
-    // Phase C audit 22/04 : délai réduit 250 → 60 ms (body arrive maintenant via
-    // /api/dialog_init bundle, beaucoup plus vite qu'avant). Gain perceptif ~200 ms.
-    // _tryInstantReply tolère un body vide (cache draft/preemptive/template
-    // indépendants du body), on évite de bloquer le pipeline de réponse.
+    // Délai 250 ms laisse _loadMailBody peupler _mailBodyForGeneration AVANT
+    // l'appel /api/instant_reply. Valeur éprouvée en prod, ne pas réduire sans
+    // mesure formelle de la race body-vs-reply.
     if (!_isStandaloneMode) {
-        setTimeout(_tryInstantReply, 60);
+        setTimeout(_tryInstantReply, 250);
     }
 
     // Plan 2 Phase 2.A — Auto-save brouillon en édition (debounced)
@@ -387,12 +386,18 @@ function _updateHeader() {
 }
 
 function _loadContactTags() {
-    // Phase C audit 22/04 : le profil contact est chargé via /api/dialog_init
-    // (route bundle). Cette fonction est conservée comme NO-OP pour compat :
-    // _loadMailBody() l'appelle encore avant le bundle pour l'onglet résumé.
-    // Les tags sont peuplés par _applyContactProfile() depuis le bundle OU par
-    // _legacyFetchContactTags() en fallback.
-    // → économie : 1 fetch HTTPS (-20-40ms en sommet de cold path).
+    // Fix audit 22/04 bis : le dialog est ouvert en mode STANDALONE (PyQt
+    // WebEngineView) dans 99% des cas — `/api/dialog_init` n'est donc jamais
+    // consommé. Restauration du fetch direct pour peupler les tags registre
+    // + confiance en standalone. La petite dépense d'1 round-trip (~20-40ms)
+    // est le prix à payer pour que les tags s'affichent.
+    if (!_fromEmail) return;
+    fetch(_backendUrl + '/api/contact_profile/' + encodeURIComponent(_fromEmail))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data && data.profile) _applyContactProfile(data.profile);
+        })
+        .catch(function() {});
 }
 
 
@@ -781,29 +786,40 @@ function _loadMailBody() {
     }
 
     // (Phase 3) Mode standalone : charger les données depuis /api/current_mail
+    // (ou depuis le bundle /api/dialog_init si eager fetch a abouti — voir
+    // _loadMailBodyStandalone).
     if (_isStandaloneMode) {
         _loadMailBodyStandalone();
         return;
     }
 
-    // Phase C audit 22/04 — route bundle : 1 seul round-trip pour
-    // body + résumé + profil contact (élimine 3 TLS handshakes successifs).
-    // Fallback individuel si /api/dialog_init échoue.
-    _loadDialogBundle();
+    // Chemin Office.js natif (rare en pratique car overlay PyQt est le chemin
+    // principal) : utilise aussi le bundle /api/dialog_init si disponible,
+    // sinon retombe sur les fetches individuels.
+    _loadMailBodyOfficeJs();
 }
 
 /**
- * Phase C — charge body + résumé + profil contact en 1 seul fetch bundle.
- * Fallback gracieux : si la route bundle KO, on retombe sur les fetches
- * individuels existants (compat arrière garantie).
- *
- * Eager fetch : si `window.__bundlePromise` est déjà en cours (déclenché par
- * le <script> inline de dialog.html AVANT le parse dialog.js), on consomme
- * cette promesse → gain ~100-300 ms sur le cold start.
+ * Chemin Office.js natif : consomme le bundle /api/dialog_init si l'eager
+ * fetch a été déclenché par dialog.html, sinon lance les fetches individuels
+ * (email_body + mail_summary + contact_profile).
  */
-function _loadDialogBundle() {
-    var _bs = function() { var el = document.getElementById('bodySpinner'); if (el) el.classList.remove('active'); };
-    // Prioriser la promesse pré-déclenchée par dialog.html (eager fetch)
+function _loadMailBodyOfficeJs() {
+    _consumeBundleOrFallback(
+        /* onEmailMissing */  _fetchBodyDirect,
+        /* onSummaryMissing */ _fetchMailSummary,
+        /* onProfileMissing */ _loadContactTags
+    );
+}
+
+/**
+ * Consomme le bundle /api/dialog_init (eager fetch depuis dialog.html).
+ * Pour chaque bloc manquant du bundle, appelle le fallback correspondant.
+ *
+ * Règle : si le bundle échoue ou timeout > 3 s, on appelle TOUS les fallbacks.
+ */
+function _consumeBundleOrFallback(onEmailMissing, onSummaryMissing, onProfileMissing) {
+    // Promesse à consommer : eager si disponible, sinon on la lance ici.
     var bundlePromise;
     if (window.__bundlePromise) {
         bundlePromise = window.__bundlePromise;
@@ -811,55 +827,71 @@ function _loadDialogBundle() {
             var eagerMs = Math.round((performance.now() - window.__bundleTriggeredAt) * 10) / 10;
             console.info('[dialog] bundle consommé depuis eager fetch (age=' + eagerMs + 'ms)');
         }
-    } else {
+    } else if (_messageId) {
         var url = _backendUrl + '/api/dialog_init?message_id=' + encodeURIComponent(_messageId)
                   + (_fromEmail ? '&from_email=' + encodeURIComponent(_fromEmail) : '');
-        bundlePromise = fetch(url).then(function(r) { return r.ok ? r.json() : null; });
+        bundlePromise = fetch(url).then(function(r) { return r.ok ? r.json() : null; })
+                                  .catch(function() { return null; });
+    } else {
+        // Pas de messageId → pas de bundle possible. Fallback direct.
+        bundlePromise = Promise.resolve(null);
     }
-    bundlePromise
-        .then(function(bundle) {
-            if (!bundle) {
-                // Fallback : ancienne logique (3 fetches)
-                _legacyFetchBody();
-                _legacyFetchContactTags();
-                if (_messageId) _fetchMailSummary();
-                return;
+
+    // Sécurité : timeout 3 s côté client — si le bundle n'a pas répondu, on
+    // déclenche les fallbacks (le bundle terminera en silence et écrasera
+    // si besoin, mais le rendu initial ne reste pas bloqué).
+    var timeoutPromise = new Promise(function(resolve) {
+        setTimeout(function() { resolve({ __timeout: true }); }, 3000);
+    });
+
+    Promise.race([bundlePromise, timeoutPromise]).then(function(bundle) {
+        if (!bundle || bundle.__timeout) {
+            // Bundle absent ou trop lent → fallbacks complets
+            if (bundle && bundle.__timeout) {
+                console.warn('[dialog] bundle timeout 3 s → fallbacks déclenchés');
             }
-            // --- Email body ---
-            var email = bundle.email;
-            if (email && email.error === 'auth_required') {
-                document.getElementById('mailBody').innerHTML =
-                    '<p style="color:#999; font-size:11px;">Reconnexion Microsoft requise.</p>';
-                _bs();
-            } else if (email) {
-                _renderMailBody(email);
-                if (email.attachments && email.attachments.length > 0) {
-                    _renderAttachments(email.attachments);
-                }
-            } else {
-                // Mode Dégradé ou pas de email_body dispo — fallback
-                _legacyFetchBody();
+            if (onEmailMissing) onEmailMissing();
+            if (onSummaryMissing && _messageId) onSummaryMissing();
+            if (onProfileMissing) onProfileMissing();
+            return;
+        }
+
+        // --- Email body ---
+        var email = bundle.email;
+        if (email && email.error === 'auth_required') {
+            document.getElementById('mailBody').innerHTML =
+                '<p style="color:#999; font-size:11px;">Reconnexion Microsoft requise.</p>';
+            var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
+        } else if (email && (email.html_body || email.body)) {
+            _renderMailBody(email);
+            if (email.attachments && email.attachments.length > 0) {
+                _renderAttachments(email.attachments);
             }
-            // --- Résumé ---
-            var summary = bundle.summary;
-            if (summary && summary.status === 'done') {
-                _renderSummaryInstant(summary.points || [], summary.actions || []);
-            } else {
-                // MISS → fallback SSE stream
-                _fetchMailSummary();
-            }
-            // --- Profil contact ---
-            var profile = bundle.contact_profile;
-            if (profile) {
-                _applyContactProfile(profile);
-            }
-        })
-        .catch(function(e) {
-            console.warn('[dialog] dialog_init bundle échec, fallback:', e);
-            _legacyFetchBody();
-            _legacyFetchContactTags();
-            if (_messageId) _fetchMailSummary();
-        });
+        } else if (onEmailMissing) {
+            onEmailMissing();
+        }
+
+        // --- Résumé ---
+        var summary = bundle.summary;
+        if (summary && summary.status === 'done'
+            && ((summary.points && summary.points.length)
+                || (summary.actions && summary.actions.length))) {
+            _renderSummaryInstant(summary.points || [], summary.actions || []);
+        } else if (onSummaryMissing && _messageId) {
+            // Pas de résumé en cache OU résumé vide : on fire le fallback
+            // (long-poll + SSE stream) qui rendra soit des points, soit
+            // un état "vide" après timeout.
+            onSummaryMissing();
+        }
+
+        // --- Profil contact ---
+        var profile = bundle.contact_profile;
+        if (profile) {
+            _applyContactProfile(profile);
+        } else if (onProfileMissing) {
+            onProfileMissing();
+        }
+    });
 }
 
 /** Rendu body (extrait de _loadMailBody pour réutilisation dans bundle) */
@@ -974,8 +1006,9 @@ function _renderSummaryInstant(points, actions) {
     _perfMonitor.mark('T4_summary_source', 'cache');
 }
 
-/** Fallback body : ancien /api/email_body (si bundle KO) */
-function _legacyFetchBody() {
+/** Fetch direct du body via /api/email_body (fallback si bundle KO) */
+function _fetchBodyDirect() {
+    if (!_messageId) return;
     fetch(_backendUrl + '/api/email_body?messageId=' + encodeURIComponent(_messageId))
         .then(function(r) {
             if (r.status === 403) {
@@ -998,17 +1031,6 @@ function _legacyFetchBody() {
             document.getElementById('mailBody').innerHTML =
                 '<p style="color:#c00; font-size:11px;">Erreur chargement : ' + _escapeHtml(err.message) + '</p>';
         });
-}
-
-/** Fallback tags contact : ancien /api/contact_profile/<email> (si bundle KO) */
-function _legacyFetchContactTags() {
-    if (!_fromEmail) return;
-    fetch(_backendUrl + '/api/contact_profile/' + encodeURIComponent(_fromEmail))
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data && data.profile) _applyContactProfile(data.profile);
-        })
-        .catch(function() {});
 }
 
 
@@ -2690,6 +2712,7 @@ function _setMailBody(rawBody, isCached) {
     if (bs) bs.classList.remove('active');
     // Phase 2 progression : body chargé → passage à "Intégration du contexte"
     if (_progressPlaceholderActive) _showProgressPlaceholder('context');
+    _perfMonitor.mark('T3_body_rendered', isCached ? 'cache' : 'graph');
     return true;
 }
 
@@ -2763,11 +2786,20 @@ function _fetchTimeout(url, options, timeoutMs) {
 }
 
 /**
- * Charge le body du mail (mode standalone) — P2 audit 21/04 :
- *   - Si on a _messageId (params URL du dialog), on fetch DIRECT /api/email_body
- *     EN PARALLÈLE de /api/current_mail. Le premier qui a un body gagne.
- *   - Économise jusqu'à 500 ms vs chaîne séquentielle courante → email_body.
- *   - _applyMailMeta s'exécute immédiatement avec les données URL.
+ * Charge le body du mail (mode standalone — QWebEngineView PyQt).
+ *
+ * Pipeline 22/04 (Option A audit bis) :
+ *   1. **Priorité bundle /api/dialog_init** (eager fetch lancé par dialog.html
+ *      AVANT le parse dialog.js) : si le bundle contient email + summary +
+ *      contact_profile, on rend tout depuis ce JSON unique (1 round-trip).
+ *   2. **Fallback par bloc manquant** : si le bundle n'a pas `email`, on tente
+ *      /api/current_mail (le backend peut avoir le body en RAM). Si pas de
+ *      summary, on lance _fetchMailSummary (long-poll + SSE stream). Si pas
+ *      de contact_profile, on fire _loadContactTags.
+ *   3. **Fallback global** : bundle KO ou timeout 3 s → on déclenche tous
+ *      les fallbacks en parallèle.
+ *
+ * _applyMailMeta s'exécute immédiatement (infos déjà en URL params).
  */
 function _loadMailBodyStandalone() {
     _applyMailMeta();   // Immédiat : infos déjà en URL params
@@ -2775,76 +2807,63 @@ function _loadMailBodyStandalone() {
     // Phase 1 progression : feedback immédiat dans l'éditeur (mode reply/forward)
     if (_mode !== 'new') _showProgressPlaceholder('history');
 
-    var done = false;   // Garde course : premier résultat gagne
-    var fetches = [];
-
-    // Path 1 — /api/email_body (direct si on a le messageId). Timeout 5s.
-    if (_messageId) {
+    // Fallback body-miss spécifique au mode standalone :
+    //   le backend peut avoir stocké le body en RAM via /api/current_mail
+    //   (Companion → V2 push). On tente en race avec /api/email_body pour
+    //   le cas où le body n'est pas (encore) en cache DB.
+    var _standaloneBodyFallback = function() {
+        var done = false;
+        var fetches = [];
+        if (_messageId) {
+            fetches.push(
+                _fetchTimeout(_backendUrl + '/api/email_body?messageId=' + encodeURIComponent(_messageId), null, 5000)
+                    .then(function(r) { return r.json(); })
+                    .then(function(ebody) {
+                        if (done) return;
+                        var full = ebody && (ebody.html_body || ebody.body);
+                        if (full && _setMailBody(full, !!(ebody && ebody.cached))) done = true;
+                    })
+                    .catch(function(){})
+            );
+        }
         fetches.push(
-            _fetchTimeout(_backendUrl + '/api/email_body?messageId=' + encodeURIComponent(_messageId), null, 5000)
+            _fetchTimeout(_backendUrl + '/api/current_mail', null, 5000)
                 .then(function(r) { return r.json(); })
-                .then(function(ebody) {
-                    if (done) return;
-                    var full = ebody && (ebody.html_body || ebody.body);
-                    // Phase 3 : propager le flag cached (true = email_cache DB hit)
-                    if (full && _setMailBody(full, !!(ebody && ebody.cached))) done = true;
+                .then(function(data) {
+                    if (done || !data || data.status !== 'ok' || !data.mail) return;
+                    var mail = data.mail;
+                    if (mail.from_name) _fromName = mail.from_name;
+                    if (mail.from_email) _fromEmail = mail.from_email;
+                    if (mail.subject) _subject = mail.subject;
+                    if (mail.message_id) _messageId = mail.message_id;
+                    _applyMailMeta();
+                    if (mail.body && _setMailBody(mail.body)) done = true;
                 })
-                .catch(function(){ /* other path or timeout */ })
+                .catch(function(){})
         );
-    }
+        Promise.allSettled(fetches).then(function() {
+            if (done) return;
+            var mb = document.getElementById('mailBody');
+            if (mb) mb.innerHTML = _messageId
+                ? '<p style="color:#999;">Contenu du mail non disponible.</p>'
+                : '<p style="color:#999;">Body en attente (cliquez le bouton EasyMail dans Outlook).</p>';
+            var bs = document.getElementById('bodySpinner');
+            if (bs) bs.classList.remove('active');
+        });
+    };
 
-    // Path 2 — /api/current_mail (fallback : le backend a parfois le body). Timeout 5s.
-    fetches.push(
-        _fetchTimeout(_backendUrl + '/api/current_mail', null, 5000)
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (done || !data || data.status !== 'ok' || !data.mail) return;
-                var mail = data.mail;
-                // Backend fait autorité sur les métadonnées : rafraîchit si différent
-                if (mail.from_name) _fromName = mail.from_name;
-                if (mail.from_email) _fromEmail = mail.from_email;
-                if (mail.subject) _subject = mail.subject;
-                if (mail.message_id) _messageId = mail.message_id;
-                _applyMailMeta();
-                if (mail.body && _setMailBody(mail.body)) done = true;
-            })
-            .catch(function(){ /* other path or timeout */ })
+    // Consomme le bundle eager fetch, puis fallback pour les blocs manquants
+    _consumeBundleOrFallback(
+        /* onEmailMissing */  _standaloneBodyFallback,
+        /* onSummaryMissing */ _fetchMailSummary,
+        /* onProfileMissing */ _loadContactTags
     );
 
-    // Quand tous les fetches sont terminés, si aucun n'a fourni de body → message d'erreur
-    Promise.allSettled(fetches).then(function() {
-        if (done) return;
-        var mb = document.getElementById('mailBody');
-        if (mb) mb.innerHTML = _messageId
-            ? '<p style="color:#999;">Contenu du mail non disponible.</p>'
-            : '<p style="color:#999;">Body en attente (cliquez le bouton EasyMail dans Outlook).</p>';
-        var bs = document.getElementById('bodySpinner');
-        if (bs) bs.classList.remove('active');
-    });
-
-    // Fix 21/04 (user-reported "cache écrasé par nouvelle génération") :
-    //   _checkSpeculativeCache() était l'ANCIEN chemin : il POSTait
-    //   /api/prefetch_status, et si speculative_ready=true, appelait
-    //   generateReply() qui WIPE l'éditeur et lance une nouvelle Claude SSE
-    //   depuis zéro. C'est une RÉGÉNÉRATION, pas une lecture de cache.
-    //   Résultat : l'user voyait brièvement la cachée puis elle disparaissait
-    //   au profit d'une nouvelle.
-    //
-    //   _tryInstantReply() couvre déjà tout le pipeline (draft > préemptif >
-    //   template > fallback auto-generate) et affiche DIRECTEMENT le texte
-    //   caché via editor.innerHTML — pas d'appel Claude inutile.
-    //
-    //   On supprime donc _checkSpeculativeCache() et on garde _tryInstantReply
-    //   comme seul point d'entrée. Le 400ms d'attente laisse le body se
-    //   peupler pour que le payload /api/instant_reply soit complet.
+    // Fix 21/04 — _tryInstantReply à 400 ms laisse le body se peupler avant
+    // l'appel /api/instant_reply (match draft/préemptif/template côté backend).
+    // NB : le délai 400 ms est conservateur mais éprouvé en prod. Ne pas réduire
+    // tant que la race body-vs-reply n'est pas formellement mesurée.
     setTimeout(_tryInstantReply, 400);
-
-    // Résumé du mail (21/04) : fetch /api/mail_summary et peupler les
-    // sections "Points principaux" + "Actions attendues" du panneau gauche.
-    // Non-bloquant — se déroule en parallèle du chargement du body.
-    if (_messageId) {
-        _fetchMailSummary();
-    }
 }
 
 /**
