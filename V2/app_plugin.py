@@ -43,8 +43,20 @@ CONFIG_PATH = os.path.join(EASYMAIL_DIR, 'config.json')
 
 # --- Logging -----------------------------------------------------------------
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(levelname)s — %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(levelname)s - %(message)s')
 logger = logging.getLogger('easymail.v1')
+
+# Fix audit 22/04 (Pattern #5 cp1252 récidive) : forcer utf-8 sur stdout/stderr
+# pour que les caractères U+2014 (—) dans les messages existants ne crashent pas
+# si la console est en cp1252 (cmd.exe hors mode UTF-8). Idempotent (Python 3.7+).
+try:
+    import sys as _sys
+    if hasattr(_sys.stdout, 'reconfigure'):
+        _sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(_sys.stderr, 'reconfigure'):
+        _sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
 
 # --- App Flask ---------------------------------------------------------------
 
@@ -531,8 +543,8 @@ def _execute_warmup(graph):
                 _warmup_cache[mid] = msg
                 try:
                     _db.save_email_cache(mid, msg)
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.debug(f"[warmup] save_email_cache échec mid={mid[:20]} : {_e}")
         # Limite cache 50 entrées (cohérent avec la limite fetch)
         with _warmup_lock:
             while len(_warmup_cache) > 50:
@@ -3713,8 +3725,11 @@ def _event_purge_mail(message_id, action, reason):
         return
     try:
         _db.mark_treated(message_id, action=action)
-    except Exception:
-        pass
+    except Exception as e:
+        # Fix audit 22/04 : ne pas avaler silencieusement — mark_treated rate
+        # = le mail sera re-suggéré, user confusion. Log pour diagnostic.
+        logger.warning(f"[event-purge] mark_treated échec msg={message_id[:20]} "
+                       f"action={action} : {e}")
     with _reply_lock:
         was_user = _reply_cache.get(message_id, {}).get('source') == 'user_edit'
         _reply_cache.pop(message_id, None)
@@ -3722,8 +3737,8 @@ def _event_purge_mail(message_id, action, reason):
         _prefetch_cache.pop(message_id, None)
     try:
         _db.purge_email_cache_for(message_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[event-purge] purge_email_cache_for échec msg={message_id[:20]} : {e}")
     if was_user:
         threading.Thread(target=_persist_reply_cache, daemon=True).start()
     _reply_metric_inc('purges_event')

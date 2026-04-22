@@ -1,0 +1,38 @@
+{
+  "message_id": "test-perf-probe",
+  "mode": "reply",
+  "standalone": false,
+  "marks": {
+    "T0_script_start": {
+      "ms": 0
+    },
+    "T1_init_end": {
+      "ms": 25.4
+    },
+    "T2_header_rendered": {
+      "ms": 26.1
+    },
+    "T3_body_rendered": {
+      "ms": 480.2,
+      "meta": "cache"
+    },
+    "T4_summary_first_point": {
+      "ms": 512.5,
+      "meta": "cache"
+    },
+    "T4_summary_done": {
+      "ms": 513.7,
+      "meta": "cache"
+    },
+    "T5_reply_first_chunk": {
+      "ms": 520.1,
+      "meta": "draft"
+    },
+    "T5_reply_done": {
+      "ms": 520.3
+    }
+  },
+  "user_agent": "test-probe",
+  "ts": "2026-04-22T12:00:00Z",
+  "_server_received_at": "2026-04-22T12:16:52.102933"
+}
