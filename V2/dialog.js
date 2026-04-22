@@ -100,6 +100,112 @@ window.addEventListener('unhandledrejection', function(ev) {
 
 
 // =============================================================================
+// PERF MONITOR (22/04 Phase A — instrumentation "dialog 80% complétude")
+//
+// Mesure la latence perceptive de chaque bloc du dialog, de l'ouverture au
+// rendu complet. Le client envoie un snapshot au backend quand tous les marks
+// attendus sont arrivés OU après 10 s (timeout pour les cas où un bloc
+// échoue). Le backend écrit un JSON par run dans logs/perf_<iso>.json.
+//
+// Marks attendus (ordre logique) :
+//   T0_script_start       → script parsé, variables init
+//   T1_init_end           → IIFE init() terminé, 1er paint possible
+//   T2_header_rendered    → From/Subject/Date/To/Cc rendus
+//   T3_body_rendered      → body HTML affiché (cache ou Graph)
+//   T3_body_source        → "cache" | "graph" | "standalone" | "perfreduce"
+//   T4_summary_first_point → 1er point résumé visible (cache instant OU stream)
+//   T4_summary_done       → résumé complet (points + actions)
+//   T4_summary_source     → "cache" | "stream"
+//   T5_reply_first_chunk  → 1er texte réponse Claude visible (template/cache/stream)
+//   T5_reply_done         → réponse complète
+//   T5_reply_source       → "cache" | "template" | "stream" | "draft"
+//   T6_contact_profile    → tags confiance/registre rendus
+//   T7_pj_rendered        → liste PJ rendue (si applicable)
+//
+// Chaque mark stocke `performance.now()` ET un delta vs T0. Pas d'envoi
+// backend si T0 manque (dialog ouvert hors init normal → bruit).
+// =============================================================================
+
+var _perfMonitor = (function() {
+    var _marks = {};
+    var _sent = false;
+    var _expectedMarks = [
+        'T1_init_end', 'T2_header_rendered', 'T3_body_rendered',
+        'T4_summary_done', 'T5_reply_first_chunk',
+    ];
+    var _completenessTimer = null;
+
+    function mark(name, meta) {
+        if (_marks[name]) return;   // premier seulement (immutable)
+        _marks[name] = {
+            t: performance.now(),
+            meta: meta || null,
+        };
+        // Check complétude dès qu'un nouveau mark arrive
+        _scheduleSend();
+    }
+
+    function _scheduleSend() {
+        if (_sent || _completenessTimer) return;
+        // Attendre 500 ms sans nouveau mark avant d'envoyer (batch)
+        _completenessTimer = setTimeout(function() {
+            _completenessTimer = null;
+            var allPresent = _expectedMarks.every(function(n) {
+                return !!_marks[n];
+            });
+            // Si tous les marks attendus sont là OU 10 s écoulées, on send
+            var elapsed = _marks['T0_script_start'] ?
+                (performance.now() - _marks['T0_script_start'].t) : 0;
+            if (allPresent || elapsed >= 10000) {
+                _send();
+            } else {
+                _scheduleSend();   // retente dans 500 ms
+            }
+        }, 500);
+    }
+
+    function _send() {
+        if (_sent) return;
+        _sent = true;
+        try {
+            var t0 = _marks['T0_script_start'] ? _marks['T0_script_start'].t : 0;
+            var normalized = {};
+            Object.keys(_marks).forEach(function(k) {
+                normalized[k] = {
+                    ms: Math.round((_marks[k].t - t0) * 100) / 100,
+                    meta: _marks[k].meta,
+                };
+            });
+            var payload = {
+                message_id: _messageId || null,
+                mode: _mode,
+                standalone: _isStandaloneMode,
+                marks: normalized,
+                user_agent: navigator.userAgent.substring(0, 200),
+                ts: new Date().toISOString(),
+            };
+            fetch(_backendUrl + '/api/perf_log', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                keepalive: true,
+            }).catch(function(){});
+        } catch(e) { /* silent */ }
+    }
+
+    // Envoi forcé avant fermeture du dialog (capture même les runs incomplets)
+    window.addEventListener('beforeunload', function() {
+        if (!_sent) _send();
+    });
+
+    return { mark: mark };
+})();
+
+// Mark très précoce : script parsé
+_perfMonitor.mark('T0_script_start');
+
+
+// =============================================================================
 // INITIALISATION
 // =============================================================================
 
@@ -235,6 +341,9 @@ window.addEventListener('unhandledrejection', function(ev) {
     // Garde forward : bouton Générer grisé si champ À vide en mode forward
     _applyForwardGuard();
 
+    // Perf : fin de l'IIFE init → 1er paint possible
+    _perfMonitor.mark('T1_init_end');
+
 })();
 
 // Garde forward extraite en fonction pour pouvoir être ré-attachée sur rebind
@@ -270,6 +379,7 @@ function _updateHeader() {
     } else if (_mode === 'new') {
         label.innerHTML = 'Nouveau mail';
     }
+    _perfMonitor.mark('T2_header_rendered');
 }
 
 function _loadContactTags() {
@@ -292,6 +402,7 @@ function _loadContactTags() {
                     tagConf.textContent = 'confiance ' + p.confidence + '%';
                     tagConf.style.display = '';
                 }
+                _perfMonitor.mark('T6_contact_profile');
             }
         })
         .catch(function() {});
@@ -704,6 +815,13 @@ function _loadMailBody() {
             if (!data) return;
             var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
 
+            // Phase 3 audit 22/04 : `cached` true = HIT email_cache DB
+            // (body déjà en local) → affichage instantané. false = fetched via
+            // Graph en live → anim fade-in pour signaler le delta perceptif
+            // (l'utilisateur voit que c'est un tout nouveau mail).
+            var _bodyCached = !!(data && data.cached);
+            var _mailBodyEl = document.getElementById('mailBody');
+
             if (data.html_body) {
                 // Sanitize : supprimer les scripts du HTML reçu (protection XSS basique)
                 var sanitized = data.html_body
@@ -712,7 +830,16 @@ function _loadMailBody() {
                     .replace(/<object\b[^>]*>/gi, '<!-- blocked -->')
                     .replace(/<embed\b[^>]*>/gi, '<!-- blocked -->')
                     .replace(/on\w+\s*=/gi, 'data-blocked=');
-                document.getElementById('mailBody').innerHTML = sanitized;
+                if (!_bodyCached && _mailBodyEl) {
+                    _mailBodyEl.style.opacity = '0';
+                    _mailBodyEl.style.transition = 'opacity 0.25s ease-in';
+                }
+                _mailBodyEl.innerHTML = sanitized;
+                if (!_bodyCached) {
+                    requestAnimationFrame(function() {
+                        if (_mailBodyEl) _mailBodyEl.style.opacity = '1';
+                    });
+                }
                 // Stocker pour le post-envoi (save_to_thread direction=received)
                 _receivedBody = data.body || data.html_body || '';
                 _mailBodyForGeneration = data.body || data.html_body || '';
@@ -721,12 +848,23 @@ function _loadMailBody() {
                 var bodyHtml = data.body.split(/\n\n+/).map(function(p) {
                     return '<p>' + _escapeHtml(p).replace(/\n/g, '<br>') + '</p>';
                 }).join('');
-                document.getElementById('mailBody').innerHTML = bodyHtml;
+                if (!_bodyCached && _mailBodyEl) {
+                    _mailBodyEl.style.opacity = '0';
+                    _mailBodyEl.style.transition = 'opacity 0.25s ease-in';
+                }
+                _mailBodyEl.innerHTML = bodyHtml;
+                if (!_bodyCached) {
+                    requestAnimationFrame(function() {
+                        if (_mailBodyEl) _mailBodyEl.style.opacity = '1';
+                    });
+                }
                 _mailBodyForGeneration = data.body || '';
             } else {
-                document.getElementById('mailBody').innerHTML =
+                _mailBodyEl.innerHTML =
                     '<p style="color:#999;">Contenu non disponible.</p>';
             }
+            _perfMonitor.mark('T3_body_rendered',
+                _bodyCached ? 'cache' : 'graph');
 
             // Mettre à jour les métadonnées (À + Cc + date comme mockup v14)
             if (data.date || data.to) {
@@ -771,6 +909,7 @@ function _renderAttachments(attachments) {
     if (pjList.children.length === 0) {
         pjList.innerHTML = '<span style="color:#999; font-size:11px;">Aucune piece jointe</span>';
     }
+    _perfMonitor.mark('T7_pj_rendered', attachments.length);
 
     // Mettre à jour le badge PJ dans l'onglet
     var pjTab = document.querySelector('[data-tab="pj"]');
@@ -1045,6 +1184,9 @@ function _tryTemplateMatch(brief, callback) {
             id: result.template_id, name: result.template_name,
             source: result.source, confidence: result.confidence,
         };
+        _perfMonitor.mark('T5_reply_first_chunk', 'template');
+        _perfMonitor.mark('T5_reply_done', 'template');
+        _perfMonitor.mark('T5_reply_source', 'template');
         callback(true);
     })
     .catch(function(e) {
@@ -1118,6 +1260,10 @@ function _tryInstantReply() {
                 source: res.template_source, confidence: res.confidence,
             };
         }
+        // Perf : réponse affichée en instant via cache (draft / préemptif / template)
+        _perfMonitor.mark('T5_reply_first_chunk', res.source || 'cache');
+        _perfMonitor.mark('T5_reply_done', res.source || 'cache');
+        _perfMonitor.mark('T5_reply_source', res.source || 'cache');
     })
     .catch(function(e) { console.warn('[dialog] instant_reply erreur', e); });
 }
@@ -1328,6 +1474,10 @@ function _fetchGenerateReply(body) {
                                 document.getElementById('headerStatus').textContent = 'Generation en cours...';
                                 editor.insertAdjacentText('beforeend', data.chunk);
                                 streamedText += data.chunk;
+                                if (!streamedText || streamedText.length === data.chunk.length) {
+                                    _perfMonitor.mark('T5_reply_first_chunk', 'stream');
+                                    _perfMonitor.mark('T5_reply_source', 'stream');
+                                }
                             }
                             // data.done (événement applicatif) : on n'agit PAS ici.
                             // Le reformatage final se fait UNE fois dans result.done
@@ -1390,6 +1540,7 @@ function _onGenerationDone(streamedText) {
     document.getElementById('btnSend').disabled = false;
     var btnRestore = document.getElementById('btnRestore');
     if (btnRestore) btnRestore.style.display = _versionStack.length > 0 ? '' : 'none';
+    _perfMonitor.mark('T5_reply_done');
 }
 
 
@@ -2402,9 +2553,19 @@ function _applyMailMeta() {
     }
 }
 
-function _setMailBody(rawBody) {
+function _setMailBody(rawBody, isCached) {
     if (!rawBody) return false;
-    document.getElementById('mailBody').innerHTML = _sanitizeHtml(rawBody);
+    var mb = document.getElementById('mailBody');
+    // Phase 3 audit 22/04 : si !cached → fetch fresh → anim fade-in (feedback
+    // visuel). Si cached → instantané (pas d'anim, user voit le texte déjà là).
+    if (!isCached && mb) {
+        mb.style.opacity = '0';
+        mb.style.transition = 'opacity 0.25s ease-in';
+    }
+    mb.innerHTML = _sanitizeHtml(rawBody);
+    if (!isCached && mb) {
+        requestAnimationFrame(function() { mb.style.opacity = '1'; });
+    }
     _receivedBody = rawBody;
     _mailBodyForGeneration = rawBody;
     var bs = document.getElementById('bodySpinner');
@@ -2507,7 +2668,8 @@ function _loadMailBodyStandalone() {
                 .then(function(ebody) {
                     if (done) return;
                     var full = ebody && (ebody.html_body || ebody.body);
-                    if (full && _setMailBody(full)) done = true;
+                    // Phase 3 : propager le flag cached (true = email_cache DB hit)
+                    if (full && _setMailBody(full, !!(ebody && ebody.cached))) done = true;
                 })
                 .catch(function(){ /* other path or timeout */ })
         );
@@ -2569,24 +2731,87 @@ function _loadMailBodyStandalone() {
 
 /**
  * Charge le résumé IA du mail (points principaux + actions attendues).
- * Backend : /api/mail_summary. SELECT DB pur côté backend (~5 ms).
  *
- * Retry logic (fix A8 audit 21/04) : si le résumé n'est pas encore en DB
- * (status=none), le piggyback sur /api/email_body est en train de générer
- * — on retente 3 fois avec backoff (1.5 s, 3 s, 5 s) pour laisser Haiku
- * finir (~1-2 s en batch=1).
+ * Pipeline audit 22/04 (Phase 1+2) :
+ *   1. Fetch /api/mail_summary?wait=2 (long-poll DB 2s)
+ *      → HIT cache → rendu INSTANTANÉ en un bloc
+ *   2. MISS cache → fallback SSE /api/mail_summary_stream
+ *      → points affichés PROGRESSIVEMENT (un par un, Haiku streaming)
+ *
+ * Logique utilisateur (user 22/04) :
+ *   « si le body/résumé est prêt en cache, il apparait en instantané ;
+ *     par contre si le résumé est rédigé en streaming : alors affichage
+ *     progressif »
  */
 function _fetchMailSummary() {
     var pointsBox = document.getElementById('resumePoints');
     var actionsBox = document.getElementById('resumeActionsList');
     var spinner = document.getElementById('resumeSpinner');
-    var attempts = 0;
-    var maxAttempts = 4;           // 4 essais : 0, 1.5s, 3s, 5s
-    var delays = [0, 1500, 3000, 5000];
+    var _sseSource = null;
+    var _pointsUL = null;    // créé lazy à la première ligne
+    var _actionsUL = null;
 
-    function _render(points, actions) {
+    function _ensurePointsUL() {
+        if (_pointsUL || !pointsBox) return _pointsUL;
+        var title = pointsBox.querySelector('.resume-section-title');
+        pointsBox.innerHTML = '';
+        if (title) pointsBox.appendChild(title);
+        _pointsUL = document.createElement('ul');
+        _pointsUL.style.cssText = 'margin:0;padding-left:16px;font-size:11px;line-height:1.5;';
+        pointsBox.appendChild(_pointsUL);
+        return _pointsUL;
+    }
+    function _ensureActionsUL() {
+        if (_actionsUL || !actionsBox) return _actionsUL;
+        actionsBox.innerHTML = '';
+        _actionsUL = document.createElement('ul');
+        _actionsUL.style.cssText = 'margin:0;padding-left:16px;font-size:11px;line-height:1.5;';
+        actionsBox.appendChild(_actionsUL);
+        return _actionsUL;
+    }
+    function _appendPoint(text) {
+        var ul = _ensurePointsUL();
+        if (!ul) return;
+        var li = document.createElement('li');
+        li.textContent = text;
+        li.style.opacity = '0';
+        li.style.transition = 'opacity 0.2s ease-in';
+        ul.appendChild(li);
+        requestAnimationFrame(function() { li.style.opacity = '1'; });
+    }
+    function _appendAction(text) {
+        var ul = _ensureActionsUL();
+        if (!ul) return;
+        var li = document.createElement('li');
+        li.textContent = text;
+        li.style.opacity = '0';
+        li.style.transition = 'opacity 0.2s ease-in';
+        ul.appendChild(li);
+        requestAnimationFrame(function() { li.style.opacity = '1'; });
+    }
+    function _finalize(hadPoints, hadActions) {
         if (spinner) spinner.classList.remove('active');
+        if (!hadPoints && pointsBox && !pointsBox.querySelector('ul')) {
+            var title = pointsBox.querySelector('.resume-section-title');
+            pointsBox.innerHTML = '';
+            if (title) pointsBox.appendChild(title);
+            var empty = document.createElement('div');
+            empty.style.cssText = 'color:#999;font-size:10px;';
+            empty.textContent = 'Pas de points clés identifiés.';
+            pointsBox.appendChild(empty);
+        }
+        if (!hadActions && actionsBox && !actionsBox.querySelector('ul')) {
+            actionsBox.innerHTML = '';
+            var emptyA = document.createElement('span');
+            emptyA.style.cssText = 'color:#999;font-size:10px;';
+            emptyA.textContent = 'Aucune action explicite.';
+            actionsBox.appendChild(emptyA);
+        }
+    }
 
+    // Rendu INSTANTANÉ (cache hit) : on affiche tous les points/actions d'un coup
+    function _renderInstant(points, actions) {
+        _perfMonitor.mark('T4_summary_first_point', 'cache');
         if (pointsBox) {
             var title = pointsBox.querySelector('.resume-section-title');
             pointsBox.innerHTML = '';
@@ -2625,39 +2850,78 @@ function _fetchMailSummary() {
                 actionsBox.appendChild(ulA);
             }
         }
+        if (spinner) spinner.classList.remove('active');
+        _perfMonitor.mark('T4_summary_done', 'cache');
     }
 
-    function _tryFetch() {
-        fetch(_backendUrl + '/api/mail_summary?message_id=' + encodeURIComponent(_messageId))
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                var status = (data && data.status) || 'none';
-                var points = (data && data.points) || [];
-                var actions = (data && data.actions) || [];
-                // Status 'done' → on rend (même si points/actions vides,
-                // c'est une décision de Claude : "mail sans point saillant").
-                if (status === 'done') {
-                    _render(points, actions);
-                    return;
+    // Rendu PROGRESSIF via SSE (cache miss)
+    function _startSSE() {
+        _perfMonitor.mark('T4_summary_source', 'stream');
+        var url = _backendUrl + '/api/mail_summary_stream?message_id='
+                  + encodeURIComponent(_messageId);
+        try {
+            _sseSource = new EventSource(url);
+        } catch (e) {
+            console.warn('[dialog] EventSource indisponible :', e);
+            _finalize(false, false);
+            return;
+        }
+        var hadPoints = false;
+        var hadActions = false;
+        _sseSource.addEventListener('point', function(ev) {
+            try {
+                var d = JSON.parse(ev.data);
+                if (d && d.text) {
+                    _appendPoint(d.text);
+                    if (!hadPoints) _perfMonitor.mark('T4_summary_first_point', 'stream');
+                    hadPoints = true;
                 }
-                // Status 'none' : pas encore en DB, retry ou abandonne
-                attempts++;
-                if (attempts < maxAttempts) {
-                    setTimeout(_tryFetch, delays[attempts]);
-                } else {
-                    // Dernière tentative : afficher un état neutre
-                    console.info('[dialog] mail_summary : pas disponible après '
-                                 + maxAttempts + ' essais');
-                    _render([], []);
-                }
-            })
-            .catch(function(e) {
-                if (spinner) spinner.classList.remove('active');
-                console.warn('[dialog] mail_summary erreur :', e);
-            });
+            } catch (e) {}
+        });
+        _sseSource.addEventListener('action', function(ev) {
+            try {
+                var d = JSON.parse(ev.data);
+                if (d && d.text) { _appendAction(d.text); hadActions = true; }
+            } catch (e) {}
+        });
+        _sseSource.addEventListener('done', function(ev) {
+            try { _sseSource.close(); } catch (e) {}
+            _sseSource = null;
+            _finalize(hadPoints, hadActions);
+            _perfMonitor.mark('T4_summary_done', 'stream');
+        });
+        _sseSource.addEventListener('error', function(ev) {
+            // EventSource émet 'error' aussi en cas de fin ou coupure réseau —
+            // on ne ferme que si readyState = CLOSED (vraie erreur terminale)
+            if (_sseSource && _sseSource.readyState === 2) {
+                console.info('[dialog] mail_summary_stream : flux fermé');
+                _sseSource = null;
+                _finalize(hadPoints, hadActions);
+            }
+        });
     }
 
-    _tryFetch();
+    // 1re tentative : cache DB long-poll (2s max côté backend)
+    fetch(_backendUrl + '/api/mail_summary?message_id=' + encodeURIComponent(_messageId) + '&wait=2')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var status = (data && data.status) || 'none';
+            var points = (data && data.points) || [];
+            var actions = (data && data.actions) || [];
+            if (status === 'done') {
+                // HIT cache → instant
+                _renderInstant(points, actions);
+                return;
+            }
+            // MISS cache → bascule SSE (résumé progressif via Haiku stream)
+            console.info('[dialog] mail_summary MISS → SSE streaming');
+            _startSSE();
+        })
+        .catch(function(e) {
+            console.warn('[dialog] mail_summary erreur :', e);
+            // Tentative SSE quand même (réseau peut-être revenu)
+            _startSSE();
+        });
 }
 
 /**

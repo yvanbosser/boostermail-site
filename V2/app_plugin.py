@@ -59,7 +59,39 @@ def _add_cors_headers(response):
         response.headers['Access-Control-Allow-Origin'] = origin
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    # Perf : expose la durée serveur côté X-Request-Duration (lu par dialog.js
+    # pour matcher la latence réseau vs serveur — utile au diag Phase A)
+    try:
+        from flask import g as _g
+        if hasattr(_g, '_perf_start'):
+            elapsed_ms = (time.time() - _g._perf_start) * 1000.0
+            response.headers['X-Request-Duration'] = f'{elapsed_ms:.1f}'
+    except Exception:
+        pass
     return response
+
+
+# --- Perf : mesurer la durée serveur de chaque requête (Phase A audit 22/04) -
+_PERF_TRACKED_ROUTES = {
+    '/api/email_body', '/api/mail_summary', '/api/mail_summary_stream',
+    '/api/instant_reply', '/api/contact_profile', '/api/contact_profiles',
+    '/api/current_mail', '/api/status', '/api/prefetch_status',
+    '/api/match_template',
+}
+_PERF_TRACKED_ROUTE_PREFIXES = ('/api/contact_profile/',)
+
+@app.before_request
+def _perf_start_timer():
+    try:
+        path = request.path or ''
+        tracked = (path in _PERF_TRACKED_ROUTES
+                   or any(path.startswith(p) for p in _PERF_TRACKED_ROUTE_PREFIXES))
+        if tracked:
+            from flask import g as _g
+            _g._perf_start = time.time()
+            _g._perf_path = path
+    except Exception:
+        pass
 
 # --- Locks globaux (audit majeur thread safety) ----
 _mail_data_lock = threading.Lock()
@@ -431,6 +463,25 @@ def _execute_warmup(graph):
                         f"prefetch < 48h) → skip Graph fetch")
             # Relancer la spéculation TIER 1 en arrière-plan (cache peut avoir des gaps)
             threading.Thread(target=_background_preload_loop, daemon=True).start()
+
+            # Fix audit 22/04 (Phase 1.A.1) : bulk résumés MEME en fast path.
+            # Avant : le bulk summaries était APRÈS ce return → jamais exécuté
+            # aux boots suivants (cas courant) → DB mail_summaries toujours vide
+            # → dialog fetch /api/mail_summary = miss → retry JS 4x (9.5s cumulés).
+            # Maintenant : on lance le bulk sur les mails déjà en mémoire
+            # (_warmup_cache), idempotent via has_mail_summary.
+            def _fastpath_bulk_summaries():
+                try:
+                    with _warmup_lock:
+                        cached_mails = list(_warmup_cache.values())[:50]
+                    gen, skipped = summarize_mails_to_db(cached_mails, chunk_size=10)
+                    if gen or skipped:
+                        logger.info(f"[warmup FAST PATH] résumés IA : +{gen} généré(s), "
+                                    f"{skipped} déjà en DB")
+                except Exception as e:
+                    logger.warning(f"[warmup FAST PATH] résumés IA erreur : {e}")
+            threading.Thread(target=_fastpath_bulk_summaries, daemon=True,
+                             name='summaries-fastpath').start()
             return
 
         # Plan 2 Phase 3.1 — Parallélisation : lancer immédiatement le prefetch
@@ -792,6 +843,14 @@ def _continuous_speculation_loop():
             if candidates:
                 logger.info(f"[cont-spec] cycle : {len(candidates)} nouveau(x) candidat(s) "
                             f"(tier1={len(tier1)}, tier2={len(tier2)})")
+
+            # Fix audit 22/04 (Phase 1.A.2) : bulk résumés sur les mails du
+            # cycle qui ont un body. Rattrape les nouveaux mails arrivés depuis
+            # le dernier warmup. Idempotent via has_mail_summary.
+            try:
+                summarize_mails_to_db(mails, chunk_size=10)
+            except Exception as e:
+                logger.debug(f"[cont-spec] résumés : {e}")
         except Exception as e:
             logger.warning(f"[cont-spec] erreur cycle : {e}")
         time.sleep(CYCLE_INTERVAL)
@@ -1555,6 +1614,47 @@ def api_debug_addin_log():
     return ('', 204)
 
 
+# --- Perf log dialog 80% (Phase A audit 22/04) -------------------------------
+# Le dialog envoie un snapshot de ses `performance.mark()` à la fin du chargement
+# (voir dialog.js _perfMonitor). On persiste chaque run dans un JSON horodaté
+# sous `logs/perf/perf_<ISO>.json` pour analyse offline. Aucune agrégation
+# en ligne — on garde brut pour pouvoir re-traiter plus tard.
+
+_perf_log_dir = os.path.join(EASYMAIL_DIR, 'logs', 'perf')
+try:
+    os.makedirs(_perf_log_dir, exist_ok=True)
+except Exception:
+    pass
+_perf_log_lock = threading.Lock()
+
+@app.route('/api/perf_log', methods=['POST'])
+def api_perf_log():
+    """Reçoit un snapshot timing du dialog et le stocke dans logs/perf/.
+    Retourne 204 No Content (fire & forget côté client via keepalive)."""
+    try:
+        payload = request.get_json(force=True, silent=True) or {}
+        ts = datetime.now().strftime('%Y%m%dT%H%M%S_%f')
+        filename = f'perf_{ts}.json'
+        fpath = os.path.join(_perf_log_dir, filename)
+        # Enrichir avec les métadonnées serveur
+        payload['_server_received_at'] = datetime.now().isoformat()
+        with _perf_log_lock:
+            with open(fpath, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+        # Log concise pour suivi temps réel
+        marks = payload.get('marks', {})
+        mid = (payload.get('message_id') or '')[:30]
+        t_body = marks.get('T3_body_rendered', {}).get('ms', '?')
+        t_sum  = marks.get('T4_summary_done', {}).get('ms', '?')
+        t_rep  = marks.get('T5_reply_first_chunk', {}).get('ms', '?')
+        t_hdr  = marks.get('T2_header_rendered', {}).get('ms', '?')
+        logger.info(f"[perf] msg={mid} header={t_hdr}ms body={t_body}ms "
+                    f"summary={t_sum}ms reply1chunk={t_rep}ms → {filename}")
+    except Exception as e:
+        logger.warning(f"[perf_log] erreur : {e}")
+    return ('', 204)
+
+
 # --- Message read (turbo Office.js + auto-prefetch O8) -----------------------
 
 @app.route('/api/event/message_read', methods=['POST'])
@@ -1624,10 +1724,44 @@ def api_event_message_read():
     if new_data.get('has_attachments') and new_data.get('message_id'):
         _start_pj_pre_extract_v2(new_data['message_id'])
 
-    # Note (21/04 audit A12) : on ne lance PAS ici le scan résumé — Office.js
-    # n'envoie pas le body dans /api/event/message_read (metadata only). Le
-    # résumé est déclenché en piggyback dans /api/email_body (qui lui a le
-    # body Graph). Pas de duplication : has_mail_summary() skip si déjà en DB.
+    # Fix audit 22/04 (Phase 1.A.4) : pré-scan résumé dès le message_read.
+    # Office.js n'envoie pas le body (metadata only), donc on le fetch via
+    # Graph en BG, puis on lance le résumé Haiku. But : quand le dialog
+    # s'ouvre (~200-500ms après), le résumé est déjà en cours de génération
+    # voire terminé. Combiné avec /api/mail_summary?wait=1 côté client →
+    # résumé quasi instant même sur premier affichage.
+    _mid_new = new_data.get('message_id', '')
+    if _mid_new and not _skip_prefetch:
+        def _prescan_summary():
+            try:
+                # Skip si déjà en DB (idempotent)
+                if _db.has_mail_summary(_mid_new):
+                    return
+                graph = get_graph()
+                if not graph:
+                    return  # Mode Dégradé : pas de résumé possible
+                # Fetch body (accepte internet ID ou Graph ID)
+                if _mid_new.startswith('<'):
+                    email = graph.get_email_by_internet_id(_mid_new)
+                else:
+                    email = graph.get_email_by_id(_mid_new)
+                if not email:
+                    return
+                body = email.get('body') or email.get('html_body') or ''
+                if not body:
+                    return
+                # Lancer le scan résumé (idempotent)
+                summarize_mails_to_db([{
+                    'message_id': _mid_new,
+                    'subject': email.get('subject', '') or new_data.get('subject', ''),
+                    'body': body,
+                    'from_email': email.get('from_email', '') or new_data.get('from_email', ''),
+                    'from_name': email.get('from_name', '') or new_data.get('from_name', ''),
+                }], chunk_size=1)
+            except Exception as e:
+                logger.debug(f"[message_read prescan summary] erreur : {e}")
+        threading.Thread(target=_prescan_summary, daemon=True,
+                         name='summary-prescan').start()
 
     return jsonify({"status": "ok"})
 
@@ -1740,6 +1874,7 @@ def summarize_mails_to_db(mails, chunk_size=10):
     # l'internet_message_id pour matcher les requêtes du dialog.
     to_scan = []
     skipped = 0
+    skipped_short_body = 0
     for m in mails:
         msg_id = (m.get('internet_message_id')
                   or m.get('message_id')
@@ -1752,17 +1887,32 @@ def summarize_mails_to_db(mails, chunk_size=10):
                 continue
         except Exception:
             pass
+        # Fix audit 22/04 : skipper les mails sans body complet (body_preview
+        # seul = 255 chars, trop court pour un résumé utile. Claude retourne
+        # vide → bulk "0 généré" spam des logs). Le body complet arrivera :
+        #   - au piggyback /api/email_body (quand user ouvre le dialog)
+        #   - au pré-scan message_read (Phase 1.A.4, fetch Graph direct)
+        raw_body = m.get('body') or m.get('html_body') or ''
+        import re as _re_body
+        body_stripped = _re_body.sub(r'<[^>]+>', ' ', raw_body).strip()
+        if len(body_stripped) < 100:
+            skipped_short_body += 1
+            continue
         # Construire un dict normalisé pour Claude
         to_scan.append({
             'message_id': msg_id,
             'subject': m.get('subject', '') or '',
-            'body': m.get('body') or m.get('body_preview') or '',
+            'body': raw_body,
             'from_email': m.get('from_email', '') or '',
             'from_name': m.get('from_name', '') or '',
         })
 
     if not to_scan:
-        logger.info(f"[summaries] rien à résumer (skipped={skipped})")
+        if skipped_short_body:
+            logger.info(f"[summaries] rien à résumer (skipped={skipped} "
+                        f"already_db, short_body={skipped_short_body})")
+        else:
+            logger.info(f"[summaries] rien à résumer (skipped={skipped})")
         return (0, skipped)
 
     generated = 0
@@ -2793,12 +2943,19 @@ def api_mail_summary():
     """
     Retourne le résumé (points + actions) d'un mail depuis la DB.
 
-    Pipeline : les résumés sont générés en BATCH au warmup (claude_ai.py
-    summarize_mails_batch, modèle Haiku 3.5), puis en scan isolé via
-    /api/event/message_read pour les nouveaux mails. Cette route fait
-    seulement une lecture DB — pas d'appel Claude ici (~5 ms).
+    Pipeline : les résumés sont générés en BATCH au warmup (fast path et
+    standard), puis au continuous_speculation_loop, puis en scan isolé via
+    /api/email_body piggyback. Cette route fait une lecture DB — pas
+    d'appel Claude direct.
 
-    Query string : ?message_id=<id>
+    Query string :
+        ?message_id=<id>
+        ?wait=<seconds>  (optionnel, long-polling max 3s — fix Phase 1.A.3)
+
+    Si wait > 0 et miss DB au premier check : on attend jusqu'à wait secondes
+    (polling 200ms) que le piggyback/continuous_spec finisse et peuple la DB.
+    → Client reçoit le résumé en 1 seul fetch au lieu de retry×4 avec backoff.
+
     Retour JSON : {
         "status": "done"|"none",
         "points": [...], "actions": [...]
@@ -2808,26 +2965,192 @@ def api_mail_summary():
     if not message_id:
         return jsonify({"status": "none", "points": [], "actions": []})
 
+    # Long-polling : si wait > 0, on attend que la DB se peuple (piggyback
+    # en cours via /api/email_body ou continuous_spec). Plafond 3s.
     try:
-        entry = _db.get_mail_summary(message_id)
-    except Exception as e:
-        logger.warning(f"[mail_summary] DB erreur : {e}")
-        entry = None
+        wait_s = float(request.args.get('wait', '0'))
+    except (TypeError, ValueError):
+        wait_s = 0.0
+    wait_s = max(0.0, min(wait_s, 3.0))
+
+    def _read_entry():
+        try:
+            return _db.get_mail_summary(message_id)
+        except Exception as e:
+            logger.warning(f"[mail_summary] DB erreur : {e}")
+            return None
+
+    entry = _read_entry()
+    if entry is None and wait_s > 0:
+        # Long-poll : check toutes les 200ms jusqu'à wait_s
+        import time as _t
+        _deadline = _t.time() + wait_s
+        while _t.time() < _deadline:
+            _t.sleep(0.2)
+            entry = _read_entry()
+            if entry is not None:
+                break
 
     if entry:
-        # Fix A17 (log HIT/MISS pour diagnostic)
         logger.info(f"[mail_summary] HIT msg={message_id[:30]} "
                     f"points={len(entry.get('points', []))} "
-                    f"actions={len(entry.get('actions', []))}")
+                    f"actions={len(entry.get('actions', []))}"
+                    + (f" (wait={wait_s}s)" if wait_s else ""))
         return jsonify({
             "status": "done",
             "points": entry.get('points', []),
             "actions": entry.get('actions', []),
         })
 
-    # Absent en DB : le scan isolé est peut-être en cours. Le frontend retry.
-    logger.info(f"[mail_summary] MISS msg={message_id[:30]} (pas encore en DB)")
+    # Absent en DB même après long-poll : le scan n'a pas eu le temps.
+    logger.info(f"[mail_summary] MISS msg={message_id[:30]}"
+                + (f" (apres wait={wait_s}s)" if wait_s else ""))
     return jsonify({"status": "none", "points": [], "actions": []})
+
+
+@app.route('/api/mail_summary_stream')
+def api_mail_summary_stream():
+    """
+    Phase 2 audit 22/04 — streaming SSE du résumé mail.
+
+    Flux :
+      1. Si déjà en DB → émet un seul événement `done` avec les données (pas
+         de streaming nécessaire, le client peut afficher instant).
+      2. Sinon : récupère le body (cache warmup OU Graph), appelle
+         summarize_one_mail_stream (Haiku streaming) et push un event SSE
+         par ligne parsée :
+            event: point   data: {"text": "..."}
+            event: action  data: {"text": "..."}
+            event: done    data: {"points": [...], "actions": [...]}
+            event: error   data: {"error": "..."}
+      3. À la fin, sauve en DB (idempotent via INSERT OR REPLACE).
+
+    Query string : ?message_id=<id>
+    """
+    message_id = (request.args.get('message_id', '') or '').strip()
+    if not message_id:
+        def _gen_empty():
+            yield f"event: done\ndata: {json.dumps({'points': [], 'actions': []})}\n\n"
+        return Response(stream_with_context(_gen_empty()),
+                        mimetype='text/event-stream',
+                        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+    # Cas 1 : déjà en DB → tout sort d'un coup
+    try:
+        entry = _db.get_mail_summary(message_id)
+    except Exception:
+        entry = None
+    if entry:
+        points = entry.get('points', [])
+        actions = entry.get('actions', [])
+        def _gen_cached():
+            for p in points:
+                yield f"event: point\ndata: {json.dumps({'text': p})}\n\n"
+            for a in actions:
+                yield f"event: action\ndata: {json.dumps({'text': a})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'points': points, 'actions': actions, 'cached': True})}\n\n"
+        logger.info(f"[mail_summary_stream] HIT cache msg={message_id[:30]}")
+        return Response(stream_with_context(_gen_cached()),
+                        mimetype='text/event-stream',
+                        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+    # Cas 2 : miss — récupérer le body depuis cache warmup OU Graph
+    mail_payload = None
+    with _warmup_lock:
+        for _mid, _msg in _warmup_cache.items():
+            if (_msg.get('internet_message_id') == message_id
+                    or _msg.get('message_id') == message_id
+                    or _mid == message_id):
+                mail_payload = {
+                    'message_id': message_id,
+                    'subject': _msg.get('subject', ''),
+                    'body': _msg.get('body') or _msg.get('html_body', ''),
+                    'from_email': _msg.get('from_email', ''),
+                    'from_name': _msg.get('from_name', ''),
+                }
+                break
+
+    # Fetch Graph si cache insuffisant (pas de body ou absent)
+    if not mail_payload or not (mail_payload.get('body') or '').strip():
+        graph = get_graph()
+        if graph:
+            try:
+                if message_id.startswith('<'):
+                    email = graph.get_email_by_internet_id(message_id)
+                else:
+                    email = graph.get_email_by_id(message_id)
+                if email:
+                    mail_payload = {
+                        'message_id': message_id,
+                        'subject': email.get('subject', ''),
+                        'body': email.get('body') or email.get('html_body', ''),
+                        'from_email': email.get('from_email', ''),
+                        'from_name': email.get('from_name', ''),
+                    }
+            except Exception as e:
+                logger.warning(f"[mail_summary_stream] Graph fetch erreur : {e}")
+
+    if not mail_payload or not (mail_payload.get('body') or '').strip():
+        def _gen_no_body():
+            yield f"event: error\ndata: {json.dumps({'error': 'body indisponible'})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'points': [], 'actions': []})}\n\n"
+        return Response(stream_with_context(_gen_no_body()),
+                        mimetype='text/event-stream',
+                        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+    builder = _get_prompt_builder()
+    if not builder or not hasattr(builder, 'summarize_one_mail_stream'):
+        def _gen_no_ai():
+            yield f"event: error\ndata: {json.dumps({'error': 'AI provider indisponible'})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'points': [], 'actions': []})}\n\n"
+        return Response(stream_with_context(_gen_no_ai()),
+                        mimetype='text/event-stream',
+                        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+    def _gen_stream():
+        final_points = []
+        final_actions = []
+        try:
+            for kind, payload in builder.summarize_one_mail_stream(mail_payload):
+                if kind == 'point':
+                    final_points.append(payload)
+                    yield f"event: point\ndata: {json.dumps({'text': payload})}\n\n"
+                elif kind == 'action':
+                    final_actions.append(payload)
+                    yield f"event: action\ndata: {json.dumps({'text': payload})}\n\n"
+                elif kind == 'end':
+                    # payload = {'points': [...], 'actions': [...]}
+                    # On privilégie ce qu'on a accumulé via events (plus sûr)
+                    if not final_points and payload.get('points'):
+                        final_points = payload.get('points', [])
+                    if not final_actions and payload.get('actions'):
+                        final_actions = payload.get('actions', [])
+                    break
+                elif kind == 'error':
+                    yield f"event: error\ndata: {json.dumps({'error': payload})}\n\n"
+            # Sauvegarde DB (idempotent via INSERT OR REPLACE — cf database.save_mail_summary)
+            try:
+                _db.save_mail_summary({
+                    'message_id': message_id,
+                    'subject': mail_payload.get('subject', ''),
+                    'from_email': mail_payload.get('from_email', ''),
+                    'points': final_points,
+                    'actions': final_actions,
+                    'model': 'claude-3-5-haiku-20241022',
+                })
+                logger.info(f"[mail_summary_stream] SAVED msg={message_id[:30]} "
+                            f"points={len(final_points)} actions={len(final_actions)}")
+            except Exception as e:
+                logger.warning(f"[mail_summary_stream] DB save erreur : {e}")
+            yield f"event: done\ndata: {json.dumps({'points': final_points, 'actions': final_actions, 'cached': False})}\n\n"
+        except Exception as e:
+            logger.error(f"[mail_summary_stream] erreur : {e}")
+            yield f"event: error\ndata: {json.dumps({'error': str(e)[:200]})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'points': final_points, 'actions': final_actions})}\n\n"
+
+    return Response(stream_with_context(_gen_stream()),
+                    mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
 # --- Prefetch status (consommé par dialog) -----------------------------------
@@ -3042,13 +3365,65 @@ def api_save_setting():
 @app.route('/api/email_body')
 def api_email_body():
     """
-    Récupère le body HTML d'un email via Graph API.
+    Récupère le body HTML d'un email.
+
+    Phase 3 audit 22/04 — pipeline 2 niveaux :
+      1. Check email_cache DB → si HIT avec body complet, retour INSTANTANÉ
+         (flag cached=true pour que le dialog skip l'animation).
+      2. Sinon, fetch Graph API + SAVE en email_cache → retour avec
+         cached=false (le dialog peut afficher l'anim fade-in).
+
     Appelé par le dialog pour afficher le mail reçu (panneau gauche).
     Query param : messageId (Graph ID OU internetMessageId du type <xxx@yyy.com>)
     """
     message_id = request.args.get('messageId', '')
     if not message_id:
         return jsonify({"error": "messageId requis"}), 400
+
+    # ===== Phase 3 : check email_cache DB en priorité =====
+    # `email_cache` est peuplé au warmup + ici après chaque fetch Graph.
+    # Purgé automatiquement (`purge_email_cache_for`) quand un mail est
+    # supprimé ou classé → cohérence garantie.
+    try:
+        cached = _db.get_cached_email(message_id)
+    except Exception as e:
+        logger.debug(f"[email_body] cache DB erreur : {e}")
+        cached = None
+
+    if cached and (cached.get('body') or cached.get('html_body')):
+        logger.info(f"[email_body] HIT cache DB msg={message_id[:30]}")
+        # Piggyback résumé (idempotent) sur cache HIT aussi
+        _sum_body = cached.get('body') or cached.get('html_body') or ''
+        _sum_mid = (message_id if message_id.startswith('<')
+                    else (cached.get('internet_message_id')
+                          or cached.get('id') or message_id))
+        if _sum_mid and _sum_body:
+            try:
+                if not _db.has_mail_summary(_sum_mid):
+                    _sum_mail = {
+                        'message_id': _sum_mid,
+                        'subject': cached.get('subject', '') or '',
+                        'body': _sum_body,
+                        'from_email': cached.get('from_email', '') or '',
+                        'from_name': cached.get('from_name', '') or '',
+                    }
+                    threading.Thread(
+                        target=summarize_mails_to_db, args=([_sum_mail], 1),
+                        daemon=True, name='summary-piggyback-cache').start()
+            except Exception:
+                pass
+        return jsonify({
+            "html_body": cached.get('html_body', ''),
+            "body": cached.get('body', ''),
+            "subject": cached.get('subject', ''),
+            "from_name": cached.get('from_name', ''),
+            "from_email": cached.get('from_email', ''),
+            "date": cached.get('date', ''),
+            "attachments": cached.get('attachments', []),
+            "to": cached.get('to', cached.get('to_email', '')),
+            "cc": cached.get('cc', ''),
+            "cached": True,
+        })
 
     graph = get_graph()
     if not graph:
@@ -3092,6 +3467,27 @@ def api_email_body():
             except Exception as e:
                 logger.debug(f"[summary-piggyback] erreur : {e}")
 
+        # Phase 3 : sauvegarde en email_cache pour les prochains accès.
+        # email_data stocké en JSON → récupéré tel quel au prochain fetch.
+        # Clé : message_id tel que reçu (internet_id si client Office.js,
+        # Graph ID sinon). Purge automatique si mail supprimé/classé.
+        try:
+            _db.save_email_cache(message_id, {
+                'html_body': email.get('html_body', ''),
+                'body': email.get('body', ''),
+                'subject': email.get('subject', ''),
+                'from_name': email.get('from_name', ''),
+                'from_email': email.get('from_email', ''),
+                'date': email.get('date', ''),
+                'attachments': email.get('attachments', []),
+                'to': email.get('to', email.get('to_email', '')),
+                'cc': email.get('cc', ''),
+                'internet_message_id': email.get('internet_message_id', ''),
+                'id': email.get('id', ''),
+            })
+        except Exception as e:
+            logger.debug(f"[email_body] save_email_cache erreur : {e}")
+
         return jsonify({
             "html_body": email.get('html_body', ''),
             "body": email.get('body', ''),
@@ -3102,6 +3498,7 @@ def api_email_body():
             "attachments": email.get('attachments', []),
             "to": email.get('to', email.get('to_email', '')),
             "cc": email.get('cc', ''),
+            "cached": False,
         })
     except GraphAuthError:
         return jsonify({"error": "Token expiré", "auth_required": True}), 401
