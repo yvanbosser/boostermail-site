@@ -23,8 +23,8 @@ import time
 import urllib.request
 from urllib.parse import unquote
 
-from PyQt6.QtCore import Qt, QUrl, QTimer, QPropertyAnimation, QEasingCurve, pyqtSignal, QObject
-from PyQt6.QtGui import QDesktopServices, QFont, QLinearGradient, QPalette, QColor, QBrush
+from PyQt6.QtCore import Qt, QUrl, QTimer, QPropertyAnimation, QEasingCurve, pyqtSignal, QObject, QEvent
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
                               QWidget, QStackedWidget, QLabel, QProgressBar,
                               QPushButton, QGraphicsOpacityEffect, QSizePolicy)
@@ -32,8 +32,22 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import os
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [popup-pyqt] %(levelname)s — %(message)s')
 logger = logging.getLogger('popup-pyqt')
+
+# Log fichier (ajout 20/04) : diagnostic nécessaire car popup_pyqt tourne
+# en pythonw.exe (pas de stdout accessible).
+try:
+    _log_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'popup_pyqt.log')
+    _fh = logging.FileHandler(_log_path, mode='a', encoding='utf-8')
+    _fh.setFormatter(logging.Formatter('%(asctime)s [popup-pyqt] %(levelname)s — %(message)s'))
+    logger.addHandler(_fh)
+    logger.info(f"=== popup_pyqt démarre, log → {_log_path} ===")
+except Exception as _e:
+    pass
 
 BACKEND_URL = 'https://localhost:3443'
 POPUP_URL = f'{BACKEND_URL}/plugin/popup.html?container=pyqt'
@@ -43,6 +57,18 @@ DIALOG_URL = f'{BACKEND_URL}/plugin/dialog.html?standalone=1'
 # =============================================================================
 # PAGE PERSONNALISEE — accepte le certificat auto-signe localhost (P10)
 # =============================================================================
+
+class _BlackholePage(QWebEnginePage):
+    """Page QWebEngine qui refuse TOUTE navigation.
+
+    Fix 21/04 — bug popup blanche résiduelle Edge : utilisée comme retour
+    de `createWindow()`. Chromium croit qu'il a créé une nouvelle fenêtre,
+    mais notre page rejette systématiquement toute URL → aucun rendu,
+    aucune fenêtre visible, aucune fuite vers le navigateur système.
+    """
+    def acceptNavigationRequest(self, url, nav_type, is_main_frame):
+        return False
+
 
 class LocalhostPage(QWebEnginePage):
     easymail_action = None
@@ -54,20 +80,23 @@ class LocalhostPage(QWebEnginePage):
             return
         error.rejectCertificate()
 
-    def createWindow(self, window_type):
-        """Intercepte window.open() — ouvre dans le navigateur systeme (BUG 1)."""
-        page = QWebEnginePage(self.profile(), self)
-        def _open_and_cleanup(url):
-            self._open_in_browser(url)
-            page.deleteLater()  # P8 : eviter fuite memoire
-        page.urlChanged.connect(_open_and_cleanup)
-        return page
 
-    def _open_in_browser(self, url):
-        """Ouvre l'URL dans le navigateur par defaut."""
-        if url.scheme() in ('http', 'https'):
-            logger.info(f"window.open intercepte → navigateur systeme : {url.toString()}")
-            QDesktopServices.openUrl(url)
+    def createWindow(self, window_type):
+        """Intercepte window.open() — BLOCAGE COMPLET (renforcé 21/04).
+
+        Avant : on retournait une QWebEnginePage vide qui faisait
+        `deleteLater()` sur urlChanged → mais Chromium pouvait créer un
+        shell de fenêtre flash (visible ~100 ms ou résiduelle). Les boutons
+        nav du header (profil/contacts/échéances) faisaient `window.open`
+        et Edge pouvait s'ouvrir avec admin.cloud.microsoft et autres
+        pages résiduelles qui s'accumulaient.
+
+        Maintenant : on retourne un _BlackholePage qui REFUSE toute
+        navigation (acceptNavigationRequest → False) → aucune URL n'est
+        jamais chargée, aucune fenêtre n'est jamais créée visible.
+        """
+        logger.info(f"window.open bloqué (type={window_type})")
+        return _BlackholePage(self.profile(), self)
 
     def acceptNavigationRequest(self, url, nav_type, is_main_frame):
         if url.scheme() == 'easymail':
@@ -129,6 +158,10 @@ class EasyMailPopup(QMainWindow):
             self._dialog_page = LocalhostPage(QWebEngineProfile.defaultProfile(), self._dialog_view)
             self._dialog_view.setPage(self._dialog_page)
             self._dialog_page.easymail_action = self._on_easymail_action
+            # Fix 20/04 (Fix 1) — fond bleu BoosterMail pendant le parse Chromium
+            # (évite le flash blanc agressif avant que dialog.html soit rendu).
+            self._dialog_page.setBackgroundColor(QColor('#0F6CBD'))
+            self._dialog_view.setStyleSheet("background: #0F6CBD;")
             self._stack.addWidget(self._dialog_view)
 
             # Construire l'URL du dialog avec les params
@@ -176,6 +209,10 @@ class EasyMailPopup(QMainWindow):
         self._dialog_page = LocalhostPage(QWebEngineProfile.defaultProfile(), self._dialog_view)
         self._dialog_view.setPage(self._dialog_page)
         self._dialog_page.easymail_action = self._on_easymail_action
+        # Fix 20/04 (Fix 1) — fond bleu BoosterMail pendant le parse Chromium
+        # (évite le flash blanc avant que dialog.html soit rendu).
+        self._dialog_page.setBackgroundColor(QColor('#0F6CBD'))
+        self._dialog_view.setStyleSheet("background: #0F6CBD;")
         self._stack.addWidget(self._dialog_view)
 
         # --- Positionnement : popup de lancement toujours centrée ---
@@ -778,13 +815,16 @@ class EasyMailPopup(QMainWindow):
         logger.info("Transition vers overlay")
         self._popup_view.load(QUrl(POPUP_URL))
         self._stack.setCurrentIndex(1)
-        # Redimensionner en overlay discret haut-droite
-        self.resize(self._overlay_w, self._overlay_h)
+        # Fix définitif 21/04 v3 : verrou Qt dur (setFixedSize). La fenêtre
+        # ne peut PHYSIQUEMENT plus être redimensionnée tant qu'on est en overlay.
+        # Demande utilisateur 21/04 : par défaut l'overlay s'affiche REPLIÉ
+        # (juste header + barre nav, ~80 px) — moins intrusif à l'écran.
+        # L'user peut déplier en cliquant sur la flèche du header.
+        self._lock_overlay_size(folded=True)
         self.move(self._screen.width() - self._overlay_w, 48)
 
-        # Pre-charger le dialog (O7)
-        self._dialog_view.load(QUrl(DIALOG_URL + '&mode=reply'))
-        logger.info("Dialog pre-charge (O7)")
+        # Le dialog sera chargé au premier clic du bouton BM
+        # via open_dialog_via_ipc (pas de pré-chargement — rollback 20/04).
 
     # =========================================================================
     # DETECTION FERMETURE OUTLOOK (BUG 2)
@@ -806,7 +846,9 @@ class EasyMailPopup(QMainWindow):
 
     def _on_easymail_action(self, path, mode):
         mode = unquote(mode) if mode else 'reply'
-        logger.info(f"Action easymail://{path}/{mode}")
+        # Drag ne loggue pas (60 Hz, pollution des logs)
+        if path not in ('drag-move', 'drag-start', 'drag-end'):
+            logger.info(f"Action easymail://{path}/{mode}")
         if path in ('compose', 'open-dialog'):
             self._open_dialog(mode)
         elif path == 'close-dialog':
@@ -815,36 +857,86 @@ class EasyMailPopup(QMainWindow):
             self._toggle_overlay_fold()
         elif path == 'close-overlay':
             self.hide()
+        elif path == 'dialog-minimize':
+            # Ajout 20/04 : minimise la fenêtre Qt dans la barre des tâches
+            self.showMinimized()
+        elif path == 'drag-start':
+            # mode = "screenX,screenY" — calcule l'offset clic→coin fenêtre
+            try:
+                sx, sy = [int(v) for v in mode.split(',')]
+                wpos = self.pos()
+                self._drag_offset = (sx - wpos.x(), sy - wpos.y())
+            except Exception:
+                self._drag_offset = None
+        elif path == 'drag-move':
+            # mode = "screenX,screenY" — recalcule la position via offset
+            if getattr(self, '_drag_offset', None) is None:
+                return
+            try:
+                sx, sy = [int(v) for v in mode.split(',')]
+                off_x, off_y = self._drag_offset
+                self.move(sx - off_x, sy - off_y)
+            except Exception:
+                pass
+        elif path == 'drag-end':
+            self._drag_offset = None
+
+    # =========================================================================
+    # GESTION DE LA TAILLE — FIX DÉFINITIF OVERLAY (21/04 v3)
+    # =========================================================================
+    # Principe : l'overlay est une fenêtre à taille FIXE (setFixedSize). Qt
+    # empêche alors TOUT redimensionnement : drag user, Aero Snap, restore
+    # depuis maximized, ou resize() avec une valeur erronée. Le bug récurrent
+    # "overlay gigantesque" venait d'une variable héritée (_overlay_unfolded_h)
+    # qui stockait une taille corrompue réinjectée au unfold. On la supprime.
+    # =========================================================================
+
+    # Fix audit 22/04 : 80 px sur-dimensionne de ~8 px → affichait un bout
+    # blanc (debut de .tp-content) sous la barre nav. Mesure CSS reelle :
+    # .tp-header (height 36) + .tp-fixed-nav (padding 6+6 + content ~22 +
+    # border-bottom 1) = 71-72 px. On fixe a 72 pour matcher pile le header
+    # + nav sans debordement visible du contenu scroll.
+    _FOLDED_H = 72
+
+    def _lock_overlay_size(self, folded=False):
+        """Verrouille la fenêtre à la taille overlay canonique (fixe).
+        setFixedSize crée une contrainte Qt dure : width + height immuables
+        jusqu'au prochain _unlock_size(). Aucune action user ni code ne peut
+        forcer une taille différente."""
+        h = self._FOLDED_H if folded else self._overlay_h
+        self.setFixedSize(self._overlay_w, h)
+
+    def _unlock_size(self):
+        """Libère la contrainte fixe (pour passer en dialog 80% ou marketing
+        où une taille différente est nécessaire)."""
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16777215, 16777215)  # QWIDGETSIZE_MAX
 
     def _toggle_overlay_fold(self):
         """Replie/déplie l'overlay.
-        Plié   = header + nav fixe (Échéances / Contacts / Profil) visibles
-                 → ~95 px (header ~38 + nav ~40 + marges)
-        Déplié = taille overlay normale (header + nav fixe + 3 lignes scroll)"""
-        logger.info(f"[popup] fold toggle appelé, h={self.size().height()}")
+        Plié   = header + nav fixe visibles → 80 px (self._FOLDED_H)
+        Déplié = taille overlay canonique   → self._overlay_h
+
+        Plus de variable `_overlay_unfolded_h` — le unfold revient TOUJOURS à
+        la taille canonique, impossible de hériter d'une valeur corrompue."""
         current_h = self.size().height()
-        FOLDED_H = 80   # header (~38 px) + barre nav fixe (~40 px)
-        if current_h > FOLDED_H + 20:
-            self._overlay_unfolded_h = current_h
-            self.setMinimumHeight(FOLDED_H)
-            self.setMaximumHeight(FOLDED_H)
-            self.resize(self.size().width(), FOLDED_H)
-            logger.info(f"[popup] folded to {FOLDED_H}")
+        logger.info(f"[popup] fold toggle appelé, h={current_h}")
+        if current_h > self._FOLDED_H + 20:
+            self._lock_overlay_size(folded=True)
+            logger.info(f"[popup] folded to {self._FOLDED_H}")
         else:
-            target_h = getattr(self, '_overlay_unfolded_h', self._overlay_h)
-            self.setMinimumHeight(0)
-            self.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
-            self.resize(self.size().width(), target_h)
-            logger.info(f"[popup] unfolded to {target_h}")
+            self._lock_overlay_size(folded=False)
+            logger.info(f"[popup] unfolded to {self._overlay_h} (canonical)")
 
     def _open_dialog(self, mode='reply'):
         logger.info(f"Ouverture dialog mode={mode}")
         dialog_url = f'{DIALOG_URL}&mode={mode}'
         self._dialog_view.load(QUrl(dialog_url))
 
-        # Sauvegarder la geometrie overlay AVANT de redimensionner
-        self._overlay_geometry_backup = (self.size().width(), self.size().height(),
-                                         self.pos().x(), self.pos().y())
+        # Fix définitif 21/04 v3 : libérer le verrou Qt fixe de l'overlay
+        # AVANT de redimensionner en dialog 80%. Sans ça, setFixedSize bloque
+        # resize(1200, 800) → dialog rétréci à la taille overlay.
+        self._unlock_size()
 
         w = min(1200, self._screen.width() - 40)
         h = min(800, self._screen.height() - 40)
@@ -864,16 +956,25 @@ class EasyMailPopup(QMainWindow):
         if url.toString() == 'about:blank':
             self._close_dialog()
 
+    def _force_overlay_geometry(self):
+        """Force la fenêtre à retourner à une géométrie d'overlay propre.
+
+        Fix définitif 21/04 v3 : utilise setFixedSize (contrainte Qt dure).
+        Après cet appel, la fenêtre ne peut PLUS être redimensionnée, peu
+        importe l'historique (fold, dialog 80%, maximize, Aero Snap, drag).
+        """
+        # 1. Sortir de tout état étendu (Maximized / FullScreen / Minimized)
+        wanted = Qt.WindowState.WindowNoState
+        if self.windowState() != wanted:
+            self.setWindowState(wanted)
+        # 2. Verrou taille overlay REPLIÉ par défaut (cohérence avec _show_overlay
+        #    — demande utilisateur 21/04 : overlay non intrusif au retour du dialog).
+        self._lock_overlay_size(folded=True)
+        self.move(self._screen.width() - self._overlay_w, 48)
+
     def _close_dialog(self):
         logger.info("Fermeture dialog, retour overlay")
-        # Restaurer la geometrie overlay
-        if hasattr(self, '_overlay_geometry_backup') and self._overlay_geometry_backup:
-            w, h, x, y = self._overlay_geometry_backup
-            self.resize(w, h)
-            self.move(x, y)
-        else:
-            self.resize(self._overlay_w, self._overlay_h)
-            self.move(self._screen.width() - self._overlay_w, 48)
+        self._force_overlay_geometry()
         self._stack.setCurrentIndex(1)
 
     def reshow_launch_popup(self):
@@ -882,6 +983,15 @@ class EasyMailPopup(QMainWindow):
         logger.info('[popup] Réaffichage popup de lancement (IPC show_popup)')
         # Remettre la bonne vue (loading screen centré) + geometry
         try:
+            # Fix définitif 21/04 v3 : libérer le verrou Qt fixe (setFixedSize)
+            # posé en mode overlay. Sans ça, resize(marketing_w, marketing_h)
+            # est bloqué et la popup apparaît à la taille overlay.
+            self._unlock_size()
+            # Sortir d'un éventuel état minimisé (si user avait minimisé)
+            if self.windowState() & Qt.WindowState.WindowMinimized:
+                self.setWindowState(
+                    self.windowState() & ~Qt.WindowState.WindowMinimized
+                )
             self._stack.setCurrentIndex(0)
             self.resize(self._marketing_w, self._marketing_h)
             self.move(
@@ -910,6 +1020,40 @@ class EasyMailPopup(QMainWindow):
         if getattr(self, '_direct_mode', False):
             QApplication.quit()
 
+    def changeEvent(self, event):
+        """Fix B2 (audit 21/04) — restauration propre du dialog 80% depuis
+        la barre des tâches Windows.
+        Quand l'utilisateur clique le bouton `−` du dialog, on fait
+        showMinimized(). Si ensuite il restaure la fenêtre via l'icône
+        taskbar, Qt envoie un QEvent.WindowStateChange → on capte pour
+        forcer un rendu propre (raise_ + activate).
+
+        Fix bug overlay immense (21/04 v2) : si Windows a maximisé la
+        fenêtre (double-clic titre, Win+Up, snap), on la REMET en taille
+        normale pour qu'elle ne soit pas énorme sur l'écran.
+        """
+        if event.type() == QEvent.Type.WindowStateChange:
+            state = self.windowState()
+            # Si maximized/fullscreen (ne devrait JAMAIS arriver pour overlay),
+            # on force retour normal.
+            if state & (Qt.WindowState.WindowMaximized | Qt.WindowState.WindowFullScreen):
+                self.setWindowState(Qt.WindowState.WindowNoState)
+                # Si on est en vue overlay (pas dialog 80%), remettre la
+                # géométrie overlay attendue.
+                try:
+                    if self._stack.currentIndex() == 1:
+                        self._force_overlay_geometry()
+                except Exception:
+                    pass
+            # Si restauré depuis minimized → amener au premier plan
+            elif not (state & Qt.WindowState.WindowMinimized):
+                try:
+                    self.raise_()
+                    self.activateWindow()
+                except Exception:
+                    pass
+        super().changeEvent(event)
+
     # Plan 2 Phase 4 — handler de hot instance (reçoit params via IPC)
     def open_dialog_via_ipc(self, params):
         """
@@ -917,46 +1061,63 @@ class EasyMailPopup(QMainWindow):
         Charge dialog.html avec les nouveaux params et bascule l'affichage,
         sans relancer un nouveau process Python/PyQt (instance chaude).
         """
+        import time as _t
+        _t0 = _t.perf_counter()
+        def _elapsed():
+            return f"{(_t.perf_counter() - _t0) * 1000:.0f} ms"
         try:
             from urllib.parse import urlencode
-            logger.info(f"[hot] open_dialog_via_ipc mode={params.get('mode', 'reply')} "
+            mode = params.get('mode', 'reply')
+            logger.info(f"[hot] open_dialog_via_ipc START mode={mode} "
                         f"subject={params.get('subject', '')[:50]}")
-            # Construire l'URL avec les params (même format que mode direct)
-            query = {'standalone': '1', **{k: v for k, v in params.items() if v}}
-            dialog_url = f'{BACKEND_URL}/plugin/dialog.html?' + urlencode(query)
 
-            # Si on est en mode direct (fenêtre dédiée dialog), juste recharger
-            if getattr(self, '_direct_mode', False):
-                self._dialog_view.load(QUrl(dialog_url))
-            else:
-                # Mode overlay : charger puis basculer sur la vue dialog
-                self._dialog_view.load(QUrl(dialog_url))
-                # Sauvegarder la géométrie overlay avant redimensionnement
-                self._overlay_geometry_backup = (
-                    self.size().width(), self.size().height(),
-                    self.pos().x(), self.pos().y(),
-                )
+            # --- Bascule UI commune (overlay → dialog) ---
+            def _switch_to_dialog_view():
+                # Fix définitif 21/04 v3 : libérer le verrou setFixedSize overlay
+                self._unlock_size()
                 w = min(1200, self._screen.width() - 40)
                 h = min(800, self._screen.height() - 40)
                 self.resize(w, h)
                 self.move((self._screen.width() - w) // 2,
                           (self._screen.height() - h) // 2)
-                self._stack.setCurrentIndex(2)  # vue dialog
+                self._stack.setCurrentIndex(2)
 
-            # Ramener la fenêtre au premier plan
-            self.show()
-            self.raise_()
-            self.activateWindow()
-            if sys.platform == 'win32':
-                try:
-                    import ctypes
-                    hwnd = int(self.winId())
-                    ctypes.windll.user32.AllowSetForegroundWindow(-1)
-                    ctypes.windll.user32.SetForegroundWindow(hwnd)
-                except Exception:
-                    pass
+            def _bring_to_front():
+                # Fix 20/04 : si la fenêtre était minimisée (via bouton −
+                # du header dialog → self.showMinimized), show()/raise_() ne
+                # suffisent PAS à la restaurer — elle reste dans un état
+                # partiel (tronquée, "popup résiduelle"). Il faut retirer
+                # explicitement le flag WindowMinimized.
+                if self.windowState() & Qt.WindowState.WindowMinimized:
+                    self.setWindowState(
+                        self.windowState() & ~Qt.WindowState.WindowMinimized
+                    )
+                self.show()
+                self.raise_()
+                self.activateWindow()
+                if sys.platform == 'win32':
+                    try:
+                        import ctypes
+                        hwnd = int(self.winId())
+                        ctypes.windll.user32.AllowSetForegroundWindow(-1)
+                        ctypes.windll.user32.SetForegroundWindow(hwnd)
+                    except Exception:
+                        pass
+
+            # FULL LOAD : charger dialog.html avec les params d'URL.
+            query = {'standalone': '1', **{k: v for k, v in params.items() if v}}
+            dialog_url = f'{BACKEND_URL}/plugin/dialog.html?' + urlencode(query)
+
+            if getattr(self, '_direct_mode', False):
+                self._dialog_view.load(QUrl(dialog_url))
+            else:
+                self._dialog_view.load(QUrl(dialog_url))
+                _switch_to_dialog_view()
+
+            _bring_to_front()
+            logger.info(f"[full-load] T+{_elapsed()} DONE — mode={mode}")
         except Exception as e:
-            logger.error(f"[hot] open_dialog_via_ipc erreur : {e}")
+            logger.error(f"[hot] open_dialog_via_ipc ERREUR : {e}")
 
 
 # =============================================================================
@@ -1106,22 +1267,37 @@ class _IPCHandler(BaseHTTPRequestHandler):
             self._json_response({"error": f"bad json: {e}"}, 400)
             return
         if _ipc_bridge:
+            import time as _t
+            _rx = _t.perf_counter()
+            logger.info(f"[ipc] HTTP POST /open_dialog reçu, émission signal Qt")
             # Émettre sur le Qt thread via signal
             _ipc_bridge.open_dialog_requested.emit(params)
+            logger.info(f"[ipc] signal émis en {(_t.perf_counter() - _rx) * 1000:.0f} ms, HTTP 200 → client")
             self._json_response({"ok": True, "handled_by": "hot_instance"})
         else:
             self._json_response({"error": "bridge not initialized"}, 503)
 
 
 def _start_ipc_server():
-    """Démarre le serveur HTTP IPC dans un thread daemon."""
+    """Démarre le serveur HTTP IPC dans un thread daemon.
+
+    Fix 20/04 : allow_reuse_address = False → empêche Windows de laisser
+    2 listeners sur le même port via SO_REUSEADDR. Si le port est occupé,
+    OSError est levé immédiatement (le process a déjà fait le check
+    anti-zombie dans main(), donc normalement on arrive jamais ici quand
+    un autre popup_pyqt existe)."""
     try:
+        ThreadingHTTPServer.allow_reuse_address = False
         server = ThreadingHTTPServer((IPC_HOST, IPC_PORT), _IPCHandler)
         logger.info(f"[ipc] Hot instance serveur démarré sur {IPC_HOST}:{IPC_PORT}")
         server.serve_forever()
     except OSError as e:
-        # Port déjà occupé → un autre popup tourne déjà
-        logger.info(f"[ipc] Port {IPC_PORT} occupé ({e}) → pas de hot instance")
+        # Port déjà occupé → cas de défense : un autre popup a pris le port
+        # entre le check anti-zombie de main() et maintenant. On quitte le
+        # process pour ne pas laisser un popup_pyqt zombie.
+        logger.warning(f"[ipc] Port {IPC_PORT} occupé ({e}) → suicide pour ne pas devenir zombie")
+        import os as _os_exit
+        _os_exit._exit(0)
     except Exception as e:
         logger.warning(f"[ipc] Erreur serveur IPC : {e}")
 
@@ -1153,16 +1329,67 @@ def main():
     parser.add_argument('--hasAttachments', default='0')
     args = parser.parse_args()
 
+    # Fix 20/04 — ANTI-ZOMBIE : en mode overlay, si un popup_pyqt est déjà
+    # vivant (ping 5052 répond), on demande au hot instance de s'afficher
+    # puis on SE SUICIDE. Évite d'avoir plusieurs popup_pyqt fantômes qui
+    # se partagent le port 5052 via SO_REUSEADDR.
+    # Le mode --direct-dialog est exempté : c'est un subprocess de dialog
+    # dédié, volontairement séparé.
+    if not args.direct_dialog:
+        import urllib.request
+        try:
+            # Timeout 1.0 s (21/04 audit cycle 1 #4) : avant 0.3 s trop court
+            # sous charge. Un hot instance lent à répondre au ping pouvait
+            # être considéré comme mort, et le nouveau process essayait
+            # ensuite de prendre le port 5052 → crash mutuel.
+            with urllib.request.urlopen('http://127.0.0.1:5052/ping', timeout=1.0) as _resp:
+                if _resp.status == 200:
+                    logger.info("popup_pyqt hot instance DÉJÀ présent → on délègue /show_popup et on quitte")
+                    try:
+                        _req = urllib.request.Request(
+                            'http://127.0.0.1:5052/show_popup',
+                            data=b'{}',
+                            headers={'Content-Type': 'application/json'},
+                            method='POST',
+                        )
+                        urllib.request.urlopen(_req, timeout=0.5)
+                    except Exception:
+                        pass
+                    sys.exit(0)
+        except Exception:
+            pass  # Pas de hot instance en place, on continue le démarrage
+
     app = QApplication(sys.argv)
     app.setApplicationName('BoosterMail')
     app.setOrganizationName('BoosterMail')
     app.setStyle('Fusion')
 
-    # Cache : on ne touche PAS au profil WebEngine (ni clearHttpCache ni NoCache).
-    # Toute manipulation du cache casse la session SSL du cert auto-signé localhost
-    # (observé : dialog blanc, aucune requête atteint V2).
-    # Le Cache-Control: no-cache cote V2 (commit 3461fc5) suffit à forcer le rechargement
-    # des assets JS/CSS/HTML à chaque ouverture du dialog.
+    # Cache HTTP Chromium persistent (niveau 3 — ajout 20/04) :
+    # Stocke les assets dialog/popup (HTML/JS/CSS/images) sur disque dans
+    # %LOCALAPPDATA%\BoosterMail\WebEngine. Au 2e démarrage Windows, Chromium
+    # les sert depuis le disque local → ~150-300 ms gagnées sur le cold start.
+    #
+    # SAFE : on ne touche JAMAIS à clearHttpCache ni à NoCache (qui avaient
+    # cassé la session SSL du cert auto-signé localhost — dialog blanc).
+    # On ne fait qu'AJOUTER un emplacement disque pour un cache qui existait
+    # déjà en mémoire.
+    try:
+        _profile = QWebEngineProfile.defaultProfile()
+        _cache_root = os.path.join(
+            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+            'BoosterMail', 'WebEngine')
+        _cache_dir = os.path.join(_cache_root, 'cache')
+        _storage_dir = os.path.join(_cache_root, 'storage')
+        os.makedirs(_cache_dir, exist_ok=True)
+        os.makedirs(_storage_dir, exist_ok=True)
+        _profile.setCachePath(_cache_dir)
+        _profile.setPersistentStoragePath(_storage_dir)
+        _profile.setHttpCacheType(
+            QWebEngineProfile.HttpCacheType.DiskHttpCache)
+        _profile.setHttpCacheMaximumSize(50 * 1024 * 1024)  # 50 MB
+        logger.info(f"Cache Chromium persistent actif : {_cache_dir}")
+    except Exception as _e:
+        logger.warning(f"Config cache Chromium persistent échouée : {_e}")
 
     if args.direct_dialog:
         # Mode New Outlook : dialog direct, pas d'overlay
@@ -1225,6 +1452,16 @@ def main():
         status = _fetch_activation_full()
         show_popup = status.get('should_show_popup', True)
         popup = EasyMailPopup()
+
+        # Fix B1 (21/04 audit race) : connecter les signaux IPC AVANT
+        # popup.show(). Sinon un POST /open_dialog qui arrive entre show()
+        # et connect() émet un signal sur un bridge non connecté → dialog
+        # perdu silencieusement, utilisateur doit recliquer.
+        _ipc_bridge = _IPCBridge()
+        _ipc_bridge.open_dialog_requested.connect(popup.open_dialog_via_ipc)
+        _ipc_bridge.show_popup_requested.connect(popup.reshow_launch_popup)
+        threading.Thread(target=_start_ipc_server, daemon=True, name='ipc-server').start()
+
         if show_popup:
             popup.show()
             _mark_popup_shown()
@@ -1233,15 +1470,6 @@ def main():
             logger.info(f"Popup déjà affichée aujourd'hui "
                         f"(popup_shown_date={status.get('popup_shown_date')}) → cachée, "
                         f"service hot instance prêt pour le dialog")
-
-        # Plan 2 Phase 4 — Hot instance : serveur IPC pour éviter de relancer
-        # Python + PyQt + QWebEngineView à chaque clic bouton dans Outlook.
-        _ipc_bridge = _IPCBridge()
-        _ipc_bridge.open_dialog_requested.connect(popup.open_dialog_via_ipc)
-        # Nouveau (audit 20/04) : endpoint POST /show_popup pour que le
-        # superviseur réaffiche la popup quand Outlook rouvre sans respawn.
-        _ipc_bridge.show_popup_requested.connect(popup.reshow_launch_popup)
-        threading.Thread(target=_start_ipc_server, daemon=True, name='ipc-server').start()
 
     sys.exit(app.exec())
 

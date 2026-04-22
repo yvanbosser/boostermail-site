@@ -296,13 +296,22 @@ def is_standard_mode() -> bool:
 @app.route('/plugin/<path:filename>')
 def serve_plugin_file(filename):
     """Sert les fichiers du plugin (manifest, dialog, commands, assets).
-    Cache-Control: no-cache sur JS/CSS/HTML pour éviter que PyQt WebEngine cache
-    d'anciennes versions (problème observé avec QWebEngineProfile.defaultProfile())."""
+
+    Fix 20/04 — Cache ETag (avant : no-cache, no-store brutal) :
+      - send_from_directory pose déjà un ETag basé sur (mtime, taille) du fichier.
+      - Cache-Control: public, max-age=0, must-revalidate → Chromium stocke le
+        fichier mais demande au serveur à chaque requête "a-t-il changé ?".
+      - Flask répond automatiquement 304 Not Modified (5 ms, payload vide) si
+        l'ETag correspond, ou 200 avec le nouveau contenu sinon.
+      - Bénéfice dev : modifier un fichier change sa mtime → ETag change →
+        Chromium reçoit la nouvelle version immédiatement. Comportement
+        identique à l'ancien no-cache pour le workflow dev.
+      - Bénéfice users : 200-500 ms économisés par fichier (Chromium ne re-
+        télécharge plus dialog.html/.css/.js à chaque clic, juste un 304).
+    """
     resp = send_from_directory(PLUGIN_DIR, filename)
     if filename.endswith(('.js', '.css', '.html')):
-        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-        resp.headers['Pragma'] = 'no-cache'
-        resp.headers['Expires'] = '0'
+        resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
     return resp
 
 
@@ -455,7 +464,10 @@ def _execute_warmup(graph):
 
         with _warmup_lock:
             _warmup_progress["current_subject"] = "Recuperation des mails..."
-        mails = graph.get_received_emails(limit=10)
+        # Boost couverture cache (21/04) : 10 → 50 mails pour que les contacts
+        # connus hors top-10 soient aussi pré-spéculés. Coût API Graph nul
+        # (même appel, juste limit différent), RAM négligeable.
+        mails = graph.get_received_emails(limit=50)
         with _warmup_lock:
             _warmup_progress["total"] = len(mails)
         for i, msg in enumerate(mails):
@@ -470,9 +482,9 @@ def _execute_warmup(graph):
                     _db.save_email_cache(mid, msg)
                 except Exception:
                     pass
-        # Limiter le cache a 10 entrees (ANOMALIE #7 fix : lock requis)
+        # Limite cache 50 entrées (cohérent avec la limite fetch)
         with _warmup_lock:
-            while len(_warmup_cache) > 10:
+            while len(_warmup_cache) > 50:
                 _warmup_cache.pop(next(iter(_warmup_cache)))
         logger.info(f"Warmup: {len(mails)} mails pre-charges + caches en DB")
 
@@ -570,6 +582,22 @@ def _execute_warmup(graph):
         threading.Thread(target=_bulk_prescan_echeances, daemon=True,
                          name='ech-prescan').start()
 
+        # 3bis. Résumés IA (21/04) — Claude Haiku batch, pattern calqué sur
+        #    échéances. Génère 3-5 points + actions attendues par mail, stocke
+        #    en DB (table mail_summaries). Affiché dans le panneau gauche du
+        #    dialog (sections "Points principaux" / "Actions attendues").
+        #    Idempotent : ne re-scan pas les mails déjà résumés en DB.
+        def _bulk_summaries_warmup():
+            try:
+                gen, skipped = summarize_mails_to_db(mails[:50], chunk_size=10)
+                if gen or skipped:
+                    logger.info(f"[warmup] résumés IA : +{gen} généré(s), "
+                                f"{skipped} déjà en DB")
+            except Exception as e:
+                logger.warning(f"[warmup] résumés IA erreur : {e}")
+        threading.Thread(target=_bulk_summaries_warmup, daemon=True,
+                         name='summaries-warmup').start()
+
         # 4. Pré-charger learned_templates (évite un DB hit au 1er /api/instant_reply)
         def _preload_learned_tpl():
             try:
@@ -610,6 +638,22 @@ def _execute_warmup(graph):
 _preload_pause = threading.Event()        # set = préchargement pausé
 _preload_last_activity = [0.0]            # timestamp dernière activité utilisateur
 _preload_activity_lock = threading.Lock() # Audit : protège _preload_last_activity[0]
+
+# Phase A (21/04, copie proto pattern) — Events de synchronisation pour la
+# spéculation précoce. Avant : _start_speculative() pollait _prefetch_cache
+# toutes les 300 ms pendant max 25 s → démarrage Claude à T+15 s en moyenne.
+# Après (une fois Phase B+C appliquées) : dès que _run_prefetch a fini
+# d'enrichir les bodies (A+B), `_bodies_enriched.set()` réveille
+# `_start_speculative()` qui peut lancer Claude à T+0,6 s.
+#
+# Attention : Events GLOBAUX (copie proto lignes 646-647). La contamination
+# multi-mail est gérée par un guard anti-contamination post-`.wait()` qui
+# vérifie `_prefetch_cache[cache_key]['status']` (copie proto 1022-1045).
+#
+# Phase A = setup NO-OP : les Events sont créés mais pas encore utilisés.
+# L'état global reste identique à avant. Activation en Phase B/C.
+_bodies_enriched = threading.Event()      # set par _run_prefetch après A+B
+_c_context_ready = threading.Event()      # set par _run_prefetch après C
 
 
 def _signal_user_activity():
@@ -689,7 +733,7 @@ def _continuous_speculation_loop():
                 continue
 
             with _warmup_lock:
-                mails = list(_warmup_cache.values())[:20]
+                mails = list(_warmup_cache.values())[:50]  # Boost 21/04 : 20 → 50
             if not mails:
                 time.sleep(CYCLE_INTERVAL)
                 continue
@@ -721,7 +765,7 @@ def _continuous_speculation_loop():
                 if entry.get('status') in ('running', 'done'):
                     continue
                 candidates.append(m)
-                if len(candidates) >= 5:  # max 5 par cycle
+                if len(candidates) >= 15:  # Boost 21/04 : 5 → 15 par cycle
                     break
 
             for m in candidates:
@@ -972,8 +1016,13 @@ def _save_prefetch_cache(inbox_ids=None):
                     return obj
                 else:
                     return str(obj)
-            with open(_PREFETCH_CACHE_PATH, 'w', encoding='utf-8') as f:
+            # Fix audit 22/04 : ecriture atomique (tmp + os.replace) pour eviter
+            # la corruption du fichier si V2 est kille pendant le write. Coherent
+            # avec le pattern deja utilise par _persist_reply_cache.
+            _tmp = _PREFETCH_CACHE_PATH + '.tmp'
+            with open(_tmp, 'w', encoding='utf-8') as f:
                 json.dump(_clean_for_json(to_save), f, ensure_ascii=False)
+            os.replace(_tmp, _PREFETCH_CACHE_PATH)
             logger.info(f"[cache] Prefetch V2 sauvegardé : {len(to_save)} entrées "
                         f"({os.path.getsize(_PREFETCH_CACHE_PATH)//1024}KB)")
     except Exception as e:
@@ -1130,20 +1179,32 @@ def _reply_cache_cohesion_refresh():
     Protège toujours les entrées user_edit (safety net 4 semaines uniquement).
     """
     try:
-        # Collecter l'ensemble des message_id actuellement dans l'inbox
+        # Collecter l'ensemble des message_id actuellement dans l'inbox.
+        # Fix audit 21/04 (bug silencieux majeur) :
+        #   - `for m in _warmup_cache` itérait sur les CLÉS (strings), pas les
+        #     values, donc `m.get(...)` levait AttributeError silencieux.
+        #   - `_db.get_recent_email_cache(limit=200)` retourne une liste de
+        #     TUPLES (entry_id, email_json_dict), pas de dicts. → AttributeError.
+        # Les deux exceptions étaient absorbées par le `try/except` global du
+        # bloc, donc la fonction ne purgeait RIEN depuis son déploiement.
         inbox_ids = set()
         with _warmup_lock:
-            for m in _warmup_cache:
-                mid = m.get('message_id') or m.get('id', '')
+            # _warmup_cache est un dict {message_id: email_dict} — on prend
+            # les clés ET les valeurs pour couvrir les 2 formats possibles
+            # (Graph id hex + internet_message_id quand disponible).
+            for mid, email in _warmup_cache.items():
                 if mid:
                     inbox_ids.add(mid)
+                if isinstance(email, dict):
+                    im_id = email.get('internet_message_id') or email.get('message_id')
+                    if im_id:
+                        inbox_ids.add(im_id)
         try:
-            for row in _db.get_recent_email_cache(limit=200):
-                eid = row.get('entry_id') or row.get('message_id', '')
-                if eid:
-                    inbox_ids.add(eid)
-        except Exception:
-            pass
+            for entry_id, _email_data in _db.get_recent_email_cache(limit=200):
+                if entry_id:
+                    inbox_ids.add(entry_id)
+        except Exception as e:
+            logger.debug(f"[reply_cache cohesion] DB read : {e}")
 
         if not inbox_ids:
             return  # inbox vide ou pas chargée → skip
@@ -1295,57 +1356,85 @@ _companion_last_subject = ''
 
 def _poll_companion_loop():
     """Poll le Companion COM (Classic) ou Graph API (New Outlook) toutes les 2s.
-    Quand le mail change → met à jour _current_mail_data → SSE broadcast."""
+    Quand le mail change → met à jour _current_mail_data → SSE broadcast.
+
+    Phase 1a (21/04 — migration Graph POC) : INVERSION DE PRIORITÉ.
+    Avant : try Companion COM → fallback Graph. Problème : chaque poll COM
+    réveillait Outlook Classic et déclenchait le popup Object Model Guardian
+    ("Un programme essaie d'accéder aux informations d'adresse de courrier")
+    toutes les 2 s → inacceptable pour un déploiement user.
+    Maintenant : try Graph d'abord (Mode Complet). Companion COM reste en
+    fallback UNIQUEMENT en Mode Dégradé (pas de token Graph). En Mode Complet,
+    Companion COM n'est JAMAIS appelé → plus de popup OOM sur le polling.
+    """
     global _companion_last_subject, _current_mail_data
     import urllib.request, json as _json
     time.sleep(5)  # Attendre que le backend soit prêt
-    logger.info("Mail polling thread démarré")
+    logger.info("Mail polling thread démarré (priorité : Graph > Companion COM)")
     _companion_available = False
+    _graph_available = False
     _poll_interval = 2  # #9 : backoff dynamique
     _no_data_count = 0
     while True:
         try:
             data = None
 
-            # Essayer le Companion COM d'abord (Classic Outlook)
-            try:
-                req = urllib.request.urlopen('http://localhost:5051/current_selection', None, 2)
-                if req.status == 200:
-                    resp = _json.loads(req.read().decode())
-                    if resp.get('status') == 'ok':
+            # Source #1 (préférée) : Graph API. Aucun popup OOM, marche sur
+            # New/Classic/Mac/Web de façon identique.
+            graph = get_graph()
+            if graph:
+                try:
+                    recent = graph.get_received_emails(limit=1)
+                    if recent:
+                        msg = recent[0]
+                        to_str = ','.join([r.get('email', '') for r in msg.get('to', [])]) if isinstance(msg.get('to'), list) else str(msg.get('to', ''))
+                        cc_str = ','.join([r.get('email', '') for r in msg.get('cc', [])]) if isinstance(msg.get('cc'), list) else str(msg.get('cc', ''))
+                        data = {
+                            'subject': msg.get('subject', ''),
+                            'from_email': msg.get('from_email', ''),
+                            'from_name': msg.get('from_name', ''),
+                            'message_id': msg.get('internet_message_id', '') or msg.get('id', ''),
+                            'conversation_id': msg.get('conversation_id', ''),
+                            'has_attachments': msg.get('has_attachments', False),
+                            'attachments': msg.get('attachments', []),
+                            'to': to_str,
+                            'cc': cc_str,
+                            'body': msg.get('html_body', '') or msg.get('body', ''),
+                        }
+                        if not _graph_available:
+                            _graph_available = True
+                            logger.info("Source de donnees : Graph API")
+                except Exception as e:
+                    logger.debug(f"Graph API polling: {e}")
+                    if _graph_available:
+                        logger.warning("Graph API polling indisponible")
+                        _graph_available = False
+
+            # Source #2 (fallback Mode Dégradé) : Companion COM. Uniquement si
+            # Graph indisponible (pas de token OAuth) — évite le popup OOM en
+            # Mode Complet.
+            if not data and not graph:
+                try:
+                    # Fix audit 21/04 :
+                    #  - 127.0.0.1 au lieu de localhost (Windows + IPv6 : résolution
+                    #    ::1 d'abord → timeout → fallback v4 = +2s par requête)
+                    #  - `with urllib.request.urlopen(...)` pour fermer proprement
+                    #    la socket (sinon en Mode Dégradé toutes les 2s = ~43k
+                    #    sockets demi-fermées en 24h).
+                    with urllib.request.urlopen('http://127.0.0.1:5051/current_selection', None, 2) as req:
+                        if req.status == 200:
+                            resp = _json.loads(req.read().decode())
+                        else:
+                            resp = {}
+                    if resp and resp.get('status') == 'ok':
                         data = resp
                         if not _companion_available:
                             _companion_available = True
-                            logger.info("Source de donnees : Companion COM")
-            except Exception:
-                if _companion_available:
-                    logger.warning("Companion COM offline (#10)")  # #10 : log explicite
-                    _companion_available = False
-
-            # Fallback Graph API (New Outlook — pas de COM)
-            if not data:
-                graph = get_graph()
-                if graph:
-                    try:
-                        recent = graph.get_received_emails(limit=1)
-                        if recent:
-                            msg = recent[0]
-                            to_str = ','.join([r.get('email', '') for r in msg.get('to', [])]) if isinstance(msg.get('to'), list) else str(msg.get('to', ''))
-                            cc_str = ','.join([r.get('email', '') for r in msg.get('cc', [])]) if isinstance(msg.get('cc'), list) else str(msg.get('cc', ''))
-                            data = {
-                                'subject': msg.get('subject', ''),
-                                'from_email': msg.get('from_email', ''),
-                                'from_name': msg.get('from_name', ''),
-                                'message_id': msg.get('id', ''),
-                                'conversation_id': msg.get('conversation_id', ''),
-                                'has_attachments': msg.get('has_attachments', False),
-                                'attachments': msg.get('attachments', []),
-                                'to': to_str,
-                                'cc': cc_str,
-                                'body': msg.get('html_body', '') or msg.get('body', ''),
-                            }
-                    except Exception as e:
-                        logger.debug(f"Graph API polling: {e}")
+                            logger.info("Source de donnees : Companion COM (Mode Degrade fallback)")
+                except Exception:
+                    if _companion_available:
+                        logger.warning("Companion COM offline (#10)")
+                        _companion_available = False
 
             # #9 : backoff si aucune source disponible
             if not data:
@@ -1489,19 +1578,42 @@ def api_event_message_read():
         'body': data.get('body', ''),
         'timestamp': time.time()
     }
+
+    # Fix audit 21/04 : dédup double POST message_read pour le même mail
+    # dans une courte fenêtre (~3s). Cause : Office.js fire item_changed →
+    # POST #1, puis click BM re-poste après 1.5s → POST #2. Les deux
+    # déclenchaient un prefetch sur le même mail (coût API doublé).
+    # Si même message_id reçu dans les 3 dernières secondes → skip prefetch
+    # et counter, mais on rafraîchit quand même _current_mail_data (au cas
+    # où des champs comme `body` arrivent en 2e POST).
+    _now = time.time()
+    _prev_mid = ''
+    _prev_ts = 0
     with _mail_data_lock:
+        if _current_mail_data:
+            _prev_mid = _current_mail_data.get('message_id', '')
+            _prev_ts = _current_mail_data.get('timestamp', 0)
         _current_mail_data = new_data
+    _skip_prefetch = (
+        new_data.get('message_id')
+        and new_data.get('message_id') == _prev_mid
+        and (_now - _prev_ts) < 3.0
+    )
 
     # Broadcast SSE (sans le body)
     _sse_data = {k: v for k, v in new_data.items() if k != 'body'}
     _broadcast_sse('mail_changed', _sse_data)
 
     # Filtre #5 Smart Speculative : incrémenter le compteur d'ouvertures
-    _increment_open_counter(new_data.get('message_id', ''))
+    # (skip si dédup : éviterait de déclencher filtre 5 prématurément)
+    if not _skip_prefetch:
+        _increment_open_counter(new_data.get('message_id', ''))
 
-    # (O8) Auto-prefetch
-    if new_data.get('from_email'):
+    # (O8) Auto-prefetch — skip si dédup (déjà lancé il y a <3s)
+    if new_data.get('from_email') and not _skip_prefetch:
         threading.Thread(target=_run_prefetch, args=(new_data,), daemon=True).start()
+    elif _skip_prefetch:
+        logger.debug(f"[message_read] DEDUP (2ème POST <3s) msg={new_data.get('message_id','')[:30]}")
 
     # Phase 1.6 : préchargement du mail voisin (N+1, N-1)
     if new_data.get('message_id'):
@@ -1511,6 +1623,11 @@ def api_event_message_read():
     # Phase 4.1 : pré-extraction BG des PJ PDF (si mail avec PJ)
     if new_data.get('has_attachments') and new_data.get('message_id'):
         _start_pj_pre_extract_v2(new_data['message_id'])
+
+    # Note (21/04 audit A12) : on ne lance PAS ici le scan résumé — Office.js
+    # n'envoie pas le body dans /api/event/message_read (metadata only). Le
+    # résumé est déclenché en piggyback dans /api/email_body (qui lui a le
+    # body Graph). Pas de duplication : has_mail_summary() skip si déjà en DB.
 
     return jsonify({"status": "ok"})
 
@@ -1587,6 +1704,114 @@ def api_trigger_prefetch():
     return jsonify({"status": "started"})
 
 
+# =============================================================================
+# RÉSUMÉS DE MAILS (21/04) — pattern batch calqué sur scan_echeances_batch
+# =============================================================================
+# summarize_mails_to_db(mails)   → génère + sauve en DB (warmup + isolé)
+# Le call Claude batch utilise Haiku 3.5 (~8× moins cher que Sonnet).
+# Idempotent via _db.has_mail_summary (skip si déjà en DB).
+# =============================================================================
+
+def summarize_mails_to_db(mails, chunk_size=10):
+    """
+    Prend une liste de mails, filtre ceux déjà résumés en DB, appelle
+    summarize_mails_batch() par chunks, sauve chaque résultat en DB.
+
+    mails : liste de dicts avec au minimum {message_id, subject, body,
+            from_email, from_name}.
+    chunk_size : taille des batches Claude (10 = bon compromis coût/qualité).
+
+    Retourne (nb_generated, nb_skipped).
+    """
+    if not mails:
+        return (0, 0)
+
+    # Builder = singleton Claude (déjà init via get_ai / warmup)
+    builder = _get_prompt_builder()
+    if not builder:
+        logger.warning("[summaries] prompt builder indisponible, skip")
+        return (0, 0)
+
+    # Filtre idempotence
+    # Fix A13 (audit 21/04) : utiliser internet_message_id en priorité.
+    # autorunshared.js (Office.js) envoie internetMessageId comme clé au
+    # frontend. Le warmup récupère des emails Graph avec DEUX IDs :
+    # 'id' (Graph hex) et 'internet_message_id' (RFC 2822). On DOIT stocker
+    # l'internet_message_id pour matcher les requêtes du dialog.
+    to_scan = []
+    skipped = 0
+    for m in mails:
+        msg_id = (m.get('internet_message_id')
+                  or m.get('message_id')
+                  or m.get('id') or '')
+        if not msg_id:
+            continue
+        try:
+            if _db.has_mail_summary(msg_id):
+                skipped += 1
+                continue
+        except Exception:
+            pass
+        # Construire un dict normalisé pour Claude
+        to_scan.append({
+            'message_id': msg_id,
+            'subject': m.get('subject', '') or '',
+            'body': m.get('body') or m.get('body_preview') or '',
+            'from_email': m.get('from_email', '') or '',
+            'from_name': m.get('from_name', '') or '',
+        })
+
+    if not to_scan:
+        logger.info(f"[summaries] rien à résumer (skipped={skipped})")
+        return (0, skipped)
+
+    generated = 0
+    # Pas de lock global (fix A7) : Haiku a un rate limit très large. Si deux
+    # appels simultanés résument le même mail, INSERT OR REPLACE protège.
+    # Perte max : $0.0006 × 1 mail dupliqué. Acceptable vs blocage 30s warmup.
+    for i in range(0, len(to_scan), chunk_size):
+        chunk = to_scan[i:i + chunk_size]
+        try:
+            results = builder.summarize_mails_batch(chunk)
+        except Exception as e:
+            logger.warning(f"[summaries] erreur batch (i={i}) : {e}")
+            continue   # mails du chunk restent non-résumés → retry au prochain scan
+
+        # Fix A5 (audit 21/04) : si Claude échoue silencieusement (JSON
+        # malformé → results vide alors que chunk avait des mails), NE PAS
+        # marquer les mails comme "résumés vides" — ils resteraient bloqués
+        # à jamais via has_mail_summary(). On retry au prochain scan.
+        if not results and len(chunk) > 0:
+            logger.warning(f"[summaries] Claude a retourné vide pour {len(chunk)} "
+                           f"mail(s) — skip save (retry au prochain scan)")
+            continue
+
+        # Save : on save UNIQUEMENT les mails que Claude a explicitement
+        # renvoyés (même avec points=[] → c'est une décision de Claude, ex
+        # publicité détectée). Les mails absents de results ne sont PAS savés
+        # → seront retentés (acceptable : ~$0.001/retry, mieux que perdre).
+        for mc in chunk:
+            msg_id = mc['message_id']
+            r = results.get(msg_id)
+            if r is None:
+                continue   # Claude a oublié ce mail → retry plus tard
+            try:
+                _db.save_mail_summary({
+                    'message_id': msg_id,
+                    'subject': mc['subject'],
+                    'from_email': mc['from_email'],
+                    'points': r.get('points', []),
+                    'actions': r.get('actions', []),
+                    'model': r.get('model', ''),
+                })
+                generated += 1
+            except Exception as e:
+                logger.warning(f"[summaries] DB save erreur msg={msg_id[:30]} : {e}")
+
+    logger.info(f"[summaries] bulk terminé : {generated} généré(s), {skipped} déjà en DB")
+    return (generated, skipped)
+
+
 def _run_prefetch(mail_data):
     """
     Prefetch A+B+C parallèle via Graph API $batch (O1, O12) ou Companion COM (P44).
@@ -1600,10 +1825,40 @@ def _run_prefetch(mail_data):
     # Clé de cache pour éviter les doublons
     # Si pas de message_id, utiliser from+subject (risque de collision si 2 mails identiques)
     cache_key = message_id if message_id else f"{from_email}:{subject}"
+    # Lecture du statut existant SOUS lock (court), décision prise HORS lock
+    # (bonne pratique : ne jamais appeler .set() / .clear() / .wait() dans
+    # un `with` d'un autre lock — évite les mauvais patterns même si ici
+    # threading.Event.set() est non-bloquant).
     with _prefetch_lock:
-        if cache_key in _prefetch_cache and _prefetch_cache[cache_key].get('status') in ('running', 'done'):
-            return
-        _prefetch_cache[cache_key] = {'status': 'running', 'timestamp': time.time()}
+        existing_status = _prefetch_cache.get(cache_key, {}).get('status')
+        if existing_status not in ('running', 'done'):
+            _prefetch_cache[cache_key] = {'status': 'running', 'timestamp': time.time()}
+
+    # Phase D (21/04) — Cold cache guard : si le prefetch est DÉJÀ 'done'
+    # (re-sélection du même mail par l'utilisateur), signaler les 2 Events
+    # immédiatement. Sans ça, _start_speculative() qui attend ces signaux
+    # resterait bloqué jusqu'au timeout (15s).
+    # Si 'running' : un autre thread a déjà le prefetch en cours — il
+    # signalera les Events à la fin (ou via le safety net `except` s'il
+    # échoue). On return proprement.
+    if existing_status == 'done':
+        _bodies_enriched.set()
+        _c_context_ready.set()
+        return
+    if existing_status == 'running':
+        return
+
+    # Phase B (21/04) — Reset des Events de synchronisation pour ce prefetch.
+    # Ces Events seront signalés (.set()) au fur et à mesure que les contextes
+    # A/B/C sont prêts. Ils réveillent _start_speculative() qui attend en .wait().
+    # Contamination multi-mail : gérée par le guard anti-contamination post-wait
+    # dans _start_speculative() qui re-vérifie _prefetch_cache[cache_key]['status'].
+    _bodies_enriched.clear()
+    _c_context_ready.clear()
+
+    # Phase E (21/04) — Log timing pour mesurer empiriquement le gain
+    # apporté par Phase B/C. Timestamp de départ du prefetch effectif.
+    _t_prefetch_start = time.time()
 
     graph = get_graph()
     context_a, context_b, context_c = [], [], []
@@ -1648,6 +1903,12 @@ def _run_prefetch(mail_data):
                     except Exception as e:
                         future_c.cancel()
                         logger.warning(f"Prefetch C error: {e}")
+                # Phase B (21/04) — Signal C prêt (même si échec/timeout).
+                # Critique : toujours set() pour éviter un deadlock côté
+                # _start_speculative() qui attend ce signal. Si C a échoué,
+                # la spéculation partira avec context_c vide (graceful
+                # degradation).
+                _c_context_ready.set()
             finally:
                 pool.shutdown(wait=False)  # Ne pas bloquer — les threads non-annulables se terminent seuls
 
@@ -1658,13 +1919,20 @@ def _run_prefetch(mail_data):
             context_b = _normalize_context_b(context_b, from_email, _my_email_pre)
             # Note : context_c est déjà normalisé par _prefetch_context_c_with_table()
 
+            # Phase B (21/04) — Signal bodies A+B enrichis (peut être T+0,6 s si
+            # contextes rapides). _start_speculative() peut démarrer Claude
+            # immédiatement sans attendre C. Gain principal : −14 s sur
+            # spéculation pour les mails de contacts connus.
+            _bodies_enriched.set()
+            logger.info(f"[prefetch] Bodies A+B prêts en {time.time()-_t_prefetch_start:.2f}s pour {(message_id or cache_key)[:20]}")
+
             _broadcast_sse('prefetch_progress', {'a': len(context_a), 'b': len(context_b), 'c': len(context_c)})
 
         else:
             # Mode Perf. Réduite : prefetch via Companion COM (P44)
             try:
                 import requests as _requests
-                companion = 'http://localhost:5051'
+                companion = 'http://127.0.0.1:5051'   # Fix audit 21/04 : IPv6 fallback
                 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
                     fb = pool.submit(_requests.get, f'{companion}/prefetch_sender',
                                      params={'email': from_email, 'max': '20'}, timeout=10)
@@ -1679,11 +1947,16 @@ def _run_prefetch(mail_data):
                             context_b = resp_b.json().get('results', [])
                     except Exception:
                         pass
+                    # Phase B (21/04) — Mode Dégradé : signal bodies après B
+                    _bodies_enriched.set()
                     if fc:
                         try:
                             context_c = fc.result(timeout=15) or []
                         except Exception as e:
                             logger.debug(f"Prefetch C (Mode Dégradé) : échec {e}")
+                    # Phase B (21/04) — Mode Dégradé : signal C prêt (même si
+                    # pas de keywords ou échec). Évite deadlock côté speculative.
+                    _c_context_ready.set()
                 _broadcast_sse('prefetch_progress', {'a': 0, 'b': len(context_b), 'c': len(context_c)})
             except Exception as e:
                 logger.warning(f"Prefetch Companion error: {e}")
@@ -1732,6 +2005,12 @@ def _run_prefetch(mail_data):
         logger.error(f"Prefetch error: {e}")
         with _prefetch_lock:
             _prefetch_cache[cache_key] = {'status': 'error', 'error': str(e), 'timestamp': time.time()}
+        # Phase B (21/04) — Safety net : même en cas d'erreur globale,
+        # signaler les 2 Events pour éviter qu'un _start_speculative() reste
+        # bloqué indéfiniment sur .wait(). La spéculation détectera l'erreur
+        # via _prefetch_cache[key]['status'] == 'error' et s'arrêtera proprement.
+        _bodies_enriched.set()
+        _c_context_ready.set()
 
 
 def _prefetch_context_a(graph, conversation_id):
@@ -1993,36 +2272,45 @@ def _prefetch_context_c_with_table(keywords, graph=None, correspondent_email='',
                             f"({len(entry.get('items', []))} résultats)")
                 return list(entry['items'])
 
-    # 1. Tenter Companion GetTable (préféré — COM local, rapide)
-    import requests as _requests  # import global-level alias (cohérent avec Mode Dégradé)
+    # Phase 1b (21/04 — migration Graph POC) : INVERSION DE PRIORITÉ.
+    # Avant : try Companion GetTable → fallback Graph. Companion GetTable
+    # passe par COM Outlook, donc déclenche le popup OOM Guardian sur Classic.
+    # Maintenant : Graph $search d'abord (Mode Complet). Companion GetTable en
+    # fallback Mode Dégradé uniquement.
+    import requests as _requests
     normalized = None
     src = None
-    try:
-        resp = _requests.get(
-            'http://localhost:5051/api/get_table',
-            params={'keywords': keywords, 'max_results': '20'},
-            timeout=5,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get('status') == 'ok' and data.get('results'):
-                logger.info(f"Prefetch C via Companion GetTable : {len(data['results'])} résultats")
-                normalized = _normalize_context_c(data['results'], 'get_table',
-                                                  correspondent_email, my_email)
-                src = 'get_table'
-    except Exception as e:
-        logger.debug(f"Companion GetTable indisponible : {e}")
 
-    # 2. Fallback Graph API (retour brut Graph normalisé aussi)
-    if normalized is None and graph:
+    # 1. Source préférée : Graph $search (pas de popup OOM)
+    if graph:
         try:
             results = graph.search_emails(f'subject:{keywords}', 20)
-            logger.info(f"Prefetch C via Graph fallback : {len(results)} résultats")
+            logger.info(f"Prefetch C via Graph : {len(results)} résultats")
             normalized = _normalize_context_c(results, 'graph',
                                               correspondent_email, my_email)
             src = 'graph'
         except Exception as e:
-            logger.warning(f"Prefetch C Graph fallback error: {e}")
+            logger.warning(f"Prefetch C Graph error: {e}")
+
+    # 2. Fallback Mode Dégradé : Companion GetTable (COM Outlook) — uniquement
+    #    si Graph indisponible (pas de token). Évite le popup OOM en Mode Complet.
+    if normalized is None and not graph:
+        try:
+            resp = _requests.get(
+                'http://127.0.0.1:5051/api/get_table',   # Fix audit 21/04 : IPv6 fallback
+                params={'keywords': keywords, 'max_results': '20'},
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get('status') == 'ok' and data.get('results'):
+                    logger.info(f"Prefetch C via Companion GetTable (Mode Degrade) : "
+                                f"{len(data['results'])} résultats")
+                    normalized = _normalize_context_c(data['results'], 'get_table',
+                                                      correspondent_email, my_email)
+                    src = 'get_table'
+        except Exception as e:
+            logger.debug(f"Companion GetTable indisponible : {e}")
 
     if normalized is None:
         return []
@@ -2178,10 +2466,14 @@ def _should_speculate(mail_data):
     if len(body_stripped) < 10 and '?' not in body_stripped:
         return False, 'body < 10 chars sans question'
 
-    # Filtre 5 : mail ouvert 2+ fois sans réponse (compteur mémoire V2)
+    # Filtre 5 : mail ouvert 5+ fois sans réponse (compteur mémoire V2)
+    # Seuil 2→5 (21/04) : en New Outlook ThreeColumns, item_changed fire aussi
+    # en preview/survol — le compteur monte vite sans que l'user "ouvre"
+    # vraiment le mail. Seuil 5× = user qui voit le mail plusieurs fois sans
+    # jamais vouloir répondre → là on skip.
     with _mail_open_counter_lock:
         opens = _mail_open_counter.get(message_id, 0)
-    if opens >= 2:
+    if opens >= 5:
         return False, f'mail ouvert {opens}× sans réponse'
 
     # Filtre 6 : user en CC (pas en TO)
@@ -2228,11 +2520,27 @@ def _start_speculative(mail_data):
     cache_key = message_id  # message_id est toujours présent ici (garde au-dessus)
 
     try:
-        # Attendre que le prefetch de CE mail soit terminé (polling, max 25s)
-        # Approche polling : évite toute pollution d'events partagés entre mails parallèles
-        deadline = time.time() + 25
-        while time.time() < deadline:
-            # Vérifier annulation (template détecté en direct)
+        # Phase C (21/04, copie proto) — Attendre les signaux du prefetch via
+        # threading.Event au lieu du polling 300 ms.
+        #
+        # Gain principal : quand _run_prefetch finit d'enrichir les bodies
+        # (A+B) à T+0,6 s, _bodies_enriched.set() réveille .wait() immédiatement.
+        # Avant : polling à pas de 300 ms, au mieux T+0,9 s, au pire T+25 s si
+        # _start_speculative démarrait juste après un tick de polling.
+        #
+        # Contamination multi-mail (Events globaux) : un autre _run_prefetch()
+        # peut avoir set le signal avant notre prefetch. Le guard anti-
+        # contamination post-wait (boucle 5×200 ms) re-vérifie que NOTRE
+        # cache_key a bien son prefetch 'done' ou 'error'.
+        _t_wait_start = time.time()
+
+        # --- Wait 1 : bodies A+B enrichis ---
+        _bodies_enriched.wait(timeout=15)
+
+        # Guard anti-contamination : polling court pour valider que c'est bien
+        # NOTRE mail qui a vu son prefetch aboutir. 5×200 ms = 1 s max.
+        prefetch_status = 'none'
+        for _ in range(5):
             with _reply_lock:
                 if _reply_cache.get(message_id, {}).get('status') == 'cancelled':
                     return
@@ -2240,7 +2548,19 @@ def _start_speculative(mail_data):
                 prefetch_status = _prefetch_cache.get(cache_key, {}).get('status', 'none')
             if prefetch_status in ('done', 'error'):
                 break
-            time.sleep(0.3)
+            time.sleep(0.2)
+
+        # --- Wait 2 : contexte C prêt ---
+        # Plus court car C arrive souvent dans la foulée de A+B (parallèle).
+        _c_context_ready.wait(timeout=10)
+
+        # Check final annulation
+        with _reply_lock:
+            if _reply_cache.get(message_id, {}).get('status') == 'cancelled':
+                return
+
+        logger.info(f"[speculative] Prefetch ready in {time.time()-_t_wait_start:.2f}s "
+                    f"(status={prefetch_status}) pour {message_id[:20]}")
 
         with _prefetch_lock:
             prefetch = _prefetch_cache.get(cache_key, {})
@@ -2363,8 +2683,15 @@ def _start_speculative(mail_data):
         # Nettoyage du cache si trop plein (max 10 entrées)
         with _reply_lock:
             # ANOMALIE #9 fix : ne pas écraser un flag 'cancelled' posé par generate_reply()
-            if _reply_cache.get(message_id, {}).get('status') == 'cancelled':
+            _existing_entry = _reply_cache.get(message_id, {})
+            if _existing_entry.get('status') == 'cancelled':
                 logger.info(f"Spéculation annulée (template) pour {message_id[:20]}")
+                return
+            # Fix audit 21/04 : ne JAMAIS écraser un brouillon user (save_draft)
+            # qui aurait été posé pendant que Claude calculait (race window).
+            if _existing_entry.get('source') == 'user_edit':
+                logger.info(f"Spéculation skippée — brouillon user présent pour "
+                            f"{message_id[:20]}")
                 return
 
             if len(_reply_cache) > 10:
@@ -2399,18 +2726,21 @@ def _start_speculative(mail_data):
 
 def _run_preemptive_bg(inbox_mails):
     """
-    Thread de warmup : identifie les TIER 1 (contacts connus, top 5 récents)
-    et lance la spéculation préemptive pour chacun.
+    Thread de warmup : identifie les TIER 1 (contacts connus) et lance la
+    spéculation préemptive pour chacun.
+
+    Boost couverture 21/04 : scan 50 mails au lieu de 20, plafond 20 candidats
+    au lieu de 5. Objectif : que TOUS les mails récents de contacts connus
+    soient pré-spéculés (réponse instant au click BM).
 
     Appelé après le warmup de l'inbox.
-    Max 5 candidats, max 3 threads parallèles (ThreadPoolExecutor max_workers=3).
     """
     if not inbox_mails:
         return
 
     # Identifier les candidats TIER 1
     candidates = []
-    for mail in inbox_mails[:20]:  # Scanner les 20 plus récents
+    for mail in inbox_mails[:50]:  # Scan étendu (10 → 50)
         # ANOMALIE #6 fix : normaliser les clés (Graph liste utilise 'id', pas 'message_id')
         msg_id = mail.get('message_id') or mail.get('id', '')
         from_email = mail.get('from_email', '')
@@ -2422,7 +2752,7 @@ def _run_preemptive_bg(inbox_mails):
                 continue
         if _is_contact_known(from_email):
             candidates.append(mail)
-        if len(candidates) >= 5:
+        if len(candidates) >= 20:   # 5 → 20 : couverture max pour contacts connus
             break
 
     if not candidates:
@@ -2432,20 +2762,72 @@ def _run_preemptive_bg(inbox_mails):
     logger.info(f"Spéculation préemptive : {len(candidates)} candidat(s) TIER 1")
 
     # Fix #13 : threads daemon libres (pas de pool bloquant — chaque prefetch dure ~25s)
-    for mail in candidates:
-        mail_data = {
-            'from_email': mail.get('from_email', ''),
-            'from_name': mail.get('from_name', ''),
-            'subject': mail.get('subject', ''),
-            'body': mail.get('body') or mail.get('body_preview', ''),
-            'message_id': mail.get('message_id') or mail.get('id', ''),
-            'conversation_id': mail.get('conversation_id', ''),
-            # Plan 2 Phase 2.B : propager to/cc/date pour les filtres Smart Speculative
-            'to': mail.get('to', ''),
-            'cc': mail.get('cc', ''),
-            'date': mail.get('date', ''),
-        }
-        threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True).start()
+    # Boost 21/04 : stagger 500ms entre lancements pour éviter le flood simultané
+    # (20 threads d'un coup satureraient le rate limit Anthropic + CPU).
+    def _run_preemptive_staggered():
+        import time as _t
+        for _i, mail in enumerate(candidates):
+            mail_data = {
+                'from_email': mail.get('from_email', ''),
+                'from_name': mail.get('from_name', ''),
+                'subject': mail.get('subject', ''),
+                'body': mail.get('body') or mail.get('body_preview', ''),
+                'message_id': mail.get('message_id') or mail.get('id', ''),
+                'conversation_id': mail.get('conversation_id', ''),
+                # Plan 2 Phase 2.B : propager to/cc/date pour les filtres Smart Speculative
+                'to': mail.get('to', ''),
+                'cc': mail.get('cc', ''),
+                'date': mail.get('date', ''),
+            }
+            threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True).start()
+            if _i < len(candidates) - 1:
+                _t.sleep(0.5)  # throttle : 500ms entre lancements
+
+    threading.Thread(target=_run_preemptive_staggered, daemon=True).start()
+
+
+# --- Résumé du mail (21/04) --------------------------------------------------
+
+@app.route('/api/mail_summary')
+def api_mail_summary():
+    """
+    Retourne le résumé (points + actions) d'un mail depuis la DB.
+
+    Pipeline : les résumés sont générés en BATCH au warmup (claude_ai.py
+    summarize_mails_batch, modèle Haiku 3.5), puis en scan isolé via
+    /api/event/message_read pour les nouveaux mails. Cette route fait
+    seulement une lecture DB — pas d'appel Claude ici (~5 ms).
+
+    Query string : ?message_id=<id>
+    Retour JSON : {
+        "status": "done"|"none",
+        "points": [...], "actions": [...]
+    }
+    """
+    message_id = (request.args.get('message_id', '') or '').strip()
+    if not message_id:
+        return jsonify({"status": "none", "points": [], "actions": []})
+
+    try:
+        entry = _db.get_mail_summary(message_id)
+    except Exception as e:
+        logger.warning(f"[mail_summary] DB erreur : {e}")
+        entry = None
+
+    if entry:
+        # Fix A17 (log HIT/MISS pour diagnostic)
+        logger.info(f"[mail_summary] HIT msg={message_id[:30]} "
+                    f"points={len(entry.get('points', []))} "
+                    f"actions={len(entry.get('actions', []))}")
+        return jsonify({
+            "status": "done",
+            "points": entry.get('points', []),
+            "actions": entry.get('actions', []),
+        })
+
+    # Absent en DB : le scan isolé est peut-être en cours. Le frontend retry.
+    logger.info(f"[mail_summary] MISS msg={message_id[:30]} (pas encore en DB)")
+    return jsonify({"status": "none", "points": [], "actions": []})
 
 
 # --- Prefetch status (consommé par dialog) -----------------------------------
@@ -2526,17 +2908,25 @@ def api_companion_proxy(subpath):
         return jsonify({"status": "error", "reason": "subpath_not_allowed"}), 403
 
     import requests as _requests
-    companion_url = f'http://localhost:5051/{subpath}'
+    # Fix 20/04 — MAJEUR pour la latence : Windows + IPv6 → "localhost" se
+    # résout d'abord en ::1 (IPv6), timeout, puis fallback 127.0.0.1 (IPv4).
+    # Ce fallback ajoute ~2 secondes par requête. Mesuré : proxy 2300 ms
+    # avec "localhost", ~230 ms avec "127.0.0.1".
+    companion_url = f'http://127.0.0.1:5051/{subpath}'
 
     try:
+        # Fix D6 (21/04 audit) : timeout 10 s → 3 s. Si Companion ne répond
+        # pas en 3 s c'est qu'il est down ou bloqué — le client aura sa
+        # réponse d'erreur rapidement et pourra afficher un message propre
+        # au lieu d'un freeze UI de 10 s.
         if request.method == 'GET':
-            resp = _requests.get(companion_url, params=request.args, timeout=10)
+            resp = _requests.get(companion_url, params=request.args, timeout=3)
         elif request.method == 'POST':
-            resp = _requests.post(companion_url, json=request.get_json(silent=True), timeout=10)
+            resp = _requests.post(companion_url, json=request.get_json(silent=True), timeout=3)
         elif request.method == 'PUT':
-            resp = _requests.put(companion_url, json=request.get_json(silent=True), timeout=10)
+            resp = _requests.put(companion_url, json=request.get_json(silent=True), timeout=3)
         elif request.method == 'DELETE':
-            resp = _requests.delete(companion_url, params=request.args, timeout=10)
+            resp = _requests.delete(companion_url, params=request.args, timeout=3)
         else:
             return jsonify({"status": "error", "reason": "method_not_supported"}), 405
 
@@ -2674,6 +3064,34 @@ def api_email_body():
             email = graph.get_email_by_id(message_id)
         if not email:
             return jsonify({"error": "Email introuvable"}), 404
+
+        # Résumé IA (21/04 audit A12 + A13) — piggyback : on a le body Graph
+        # en main. Si pas en DB, on lance un scan isolé en BG. Idempotent via
+        # has_mail_summary(). Coût : $0.0006 par nouveau mail ouvert.
+        # IMPORTANT : on stocke sous internet_message_id (clé utilisée par le
+        # client Office.js) pour que le dialog matche au SELECT.
+        # Si le param reçu `message_id` EST déjà un internet ID (commence par
+        # '<'), on l'utilise en priorité (c'est le cas depuis autorunshared.js).
+        _sum_mid = (message_id if is_internet_id else
+                    (email.get('internet_message_id') or
+                     email.get('id') or message_id))
+        _sum_body = email.get('body') or email.get('html_body') or ''
+        if _sum_mid and _sum_body:
+            try:
+                if not _db.has_mail_summary(_sum_mid):
+                    _sum_mail = {
+                        'message_id': _sum_mid,
+                        'subject': email.get('subject', '') or '',
+                        'body': _sum_body,
+                        'from_email': email.get('from_email', '') or '',
+                        'from_name': email.get('from_name', '') or '',
+                    }
+                    threading.Thread(
+                        target=summarize_mails_to_db, args=([_sum_mail], 1),
+                        daemon=True, name='summary-piggyback').start()
+            except Exception as e:
+                logger.debug(f"[summary-piggyback] erreur : {e}")
+
         return jsonify({
             "html_body": email.get('html_body', ''),
             "body": email.get('body', ''),
@@ -4249,9 +4667,11 @@ def api_save_draft():
 
     with _reply_lock:
         # Annuler toute spéculation BG en cours : le brouillon user prime
-        existing = _reply_cache.get(message_id, {})
-        if existing.get('status') == 'running':
-            _reply_cache[message_id] = {'status': 'cancelled'}
+        # Fix audit 21/04 : l'ancien code posait `{status: cancelled}` puis
+        # l'écrasait immédiatement ligne suivante — le flag n'était donc
+        # jamais vu par la spéculation BG. La vraie protection vient
+        # désormais de _start_speculative qui vérifie `source == 'user_edit'`
+        # avant d'écrire (évite l'écrasement post-call Claude).
         _reply_cache[message_id] = {
             'status': 'done',
             'source': 'user_edit',
@@ -4335,6 +4755,7 @@ def api_instant_reply():
             entry = _reply_cache.get(message_id, {})
         if entry.get('source') == 'user_edit' and entry.get('status') == 'done':
             _reply_metric_inc('hits')
+            logger.info(f"[instant_reply] HIT source=draft msg={message_id[:30]}")
             return jsonify({
                 "source": "draft",
                 "text": entry.get('text', ''),
@@ -4346,6 +4767,21 @@ def api_instant_reply():
     if message_id:
         with _reply_lock:
             entry = _reply_cache.get(message_id, {})
+        # Fix 21/04 (audit génération auto) — Si spéculation EN COURS
+        # (status='running'), attendre un court instant qu'elle finisse
+        # plutôt que de retourner 'none'. Sans ça, le frontend détecte
+        # 'none' → déclenche generateReply() → 2 appels Claude en parallèle
+        # (le bg_speculation + le generateReply frontend).
+        # Max 1,5 s d'attente (15 × 100 ms) — au-delà on fallback sur
+        # template/none pour ne pas faire attendre l'utilisateur.
+        if (entry.get('source') == 'bg_speculation'
+                and entry.get('status') == 'running'):
+            for _ in range(15):
+                time.sleep(0.1)
+                with _reply_lock:
+                    entry = _reply_cache.get(message_id, {})
+                if entry.get('status') in ('done', 'error', 'cancelled'):
+                    break
         if (entry.get('source') == 'bg_speculation'
                 and entry.get('status') == 'done'
                 and entry.get('text')):
@@ -4361,9 +4797,40 @@ def api_instant_reply():
             closing = ((contact_profile or {}).get('closing', '') or 'Cordialement,')
             user_name = _db.get_setting('user_name', '') or ''
             body = entry.get('text', '')
-            parts = [greeting, '', body, '', closing]
-            if user_name:
-                parts.append(user_name)
+
+            # Fix 21/04 (doublon Bonjour) — Claude génère souvent la réponse
+            # avec un greeting ET un closing inclus. Ajouter greeting/closing
+            # en plus crée des doublons ("Bonjour,\n\nBonjour Jean, ...").
+            # Détection simple : si le body commence/finit déjà par un
+            # greeting/closing reconnu, on ne l'ajoute pas.
+            _body_stripped = body.strip()
+            _body_lower = _body_stripped.lower()
+            _greeting_patterns = ('bonjour', 'bonsoir', 'hello', 'salut',
+                                  'cher ', 'chère ', 'chers ', 'chères ',
+                                  'monsieur', 'madame', 'mesdames', 'messieurs',
+                                  'coucou', 'hi ', 'dear ')
+            has_greeting = any(_body_lower.startswith(p) for p in _greeting_patterns)
+
+            _closing_patterns = ('cordialement', 'bien cordialement',
+                                 'bien à vous', 'bien à toi', 'bien sincèrement',
+                                 'sincèrement', 'amicalement', 'bonne journée',
+                                 'bonne soirée', 'à bientôt', 'à très vite',
+                                 'merci', 'best regards', 'regards')
+            # Check si dernière ligne non-vide matche un closing
+            _last_lines = [ln.strip() for ln in _body_stripped.split('\n') if ln.strip()]
+            _last_line_lower = (_last_lines[-1] if _last_lines else '').lower()
+            has_closing = any(_last_line_lower.startswith(p) for p in _closing_patterns)
+
+            parts = []
+            if not has_greeting:
+                parts.extend([greeting, ''])
+            parts.append(body)
+            if not has_closing:
+                parts.extend(['', closing])
+                if user_name:
+                    parts.append(user_name)
+
+            logger.info(f"[instant_reply] HIT source=preemptive msg={message_id[:30]}")
             return jsonify({
                 "source": "preemptive",
                 "text": '\n'.join(parts),
@@ -4400,6 +4867,8 @@ def api_instant_reply():
             text = assemble_template(m['template_dict'], contact_profile, user_name)
         else:
             text = assemble_learned_template(m['learned'], contact_profile, user_name)
+        logger.info(f"[instant_reply] HIT source=template conf={m.get('confidence'):.2f} "
+                    f"name={m.get('template_name')} msg={message_id[:30]}")
         return jsonify({
             "source": "template",
             "text": text,
@@ -4414,6 +4883,7 @@ def api_instant_reply():
     # 4) Rien
     if message_id:
         _reply_metric_inc('misses')
+    logger.info(f"[instant_reply] MISS source=none msg={message_id[:30] if message_id else 'no-id'}")
     return jsonify({"source": "none"})
 
 
@@ -5373,11 +5843,47 @@ def _extract_learned_template_post_send(message_id, sent_raw_body, mode):
         logger.warning(f"[learned-tpl] extraction erreur : {e}")
 
 
+# =============================================================================
+# IDEMPOTENCE ENVOI (21/04 — migration OOM Guardian Phase 2)
+# =============================================================================
+# send Graph n'est PAS idempotent : un retry réseau peut envoyer 2× le même
+# mail. Registre mémoire des client_request_id ayant abouti. TTL 5 min =
+# couvre les retries, bien < délai entre 2 envois intentionnels de l'user.
+# =============================================================================
+_sent_requests = {}
+_sent_requests_lock = threading.Lock()
+_SENT_REQUESTS_TTL = 300  # 5 minutes
+
+
+def _is_already_sent(client_request_id):
+    """True si ce client_request_id a déjà été envoyé dans les 5 dernières min."""
+    if not client_request_id:
+        return False
+    now = time.time()
+    with _sent_requests_lock:
+        # Purge paresseuse des entrées expirées
+        expired = [k for k, ts in _sent_requests.items() if (now - ts) > _SENT_REQUESTS_TTL]
+        for k in expired:
+            _sent_requests.pop(k, None)
+        return client_request_id in _sent_requests
+
+
+def _mark_sent(client_request_id):
+    """Marque ce client_request_id comme envoyé avec succès."""
+    if not client_request_id:
+        return
+    with _sent_requests_lock:
+        _sent_requests[client_request_id] = time.time()
+
+
 @app.route('/send_reply', methods=['POST'])
 def send_reply():
     """
     Envoi d'un mail (Mode Standard → Graph API).
-    Squelette connecté — 12h implémentera la logique complète.
+    Enrichissements 21/04 (migration OOM Guardian Phase 2) :
+      - client_request_id : idempotence anti double-envoi (TTL 5 min)
+      - message_id accepte internet_message_id (<xxx@yyy>) → converti en Graph id
+      - attachments : liste [{name, content_b64, content_type?}] optionnelle
 
     Modes : reply, reply_all, forward, new
     """
@@ -5388,6 +5894,8 @@ def send_reply():
     to_email = data.get('to', '').strip()
     cc = data.get('cc', '').strip()
     subject = data.get('subject', '')
+    client_request_id = (data.get('client_request_id', '') or '').strip()
+    raw_attachments = data.get('attachments') or []
 
     # Ajouter la signature marketing (côté backend, JAMAIS côté dialog)
     _SIG = '<br><br><span style="color:#999;font-size:11px;">\u2014 G\u00e9n\u00e9r\u00e9 avec EasyMail</span>'
@@ -5408,26 +5916,76 @@ def send_reply():
     if mode == 'forward' and (not message_id or not to_email):
         return jsonify({"error": "message_id et to requis en mode forward"}), 400
 
+    # Idempotence (21/04) : si ce client_request_id a déjà été envoyé avec
+    # succès dans les 5 dernières minutes, on court-circuite → pas de double
+    # envoi sur retry réseau. send Graph n'est PAS idempotent côté API.
+    if _is_already_sent(client_request_id):
+        logger.info(f"[send_reply] DEDUP mode={mode} req={client_request_id[:12]}")
+        return jsonify({"success": True, "dedup": True, "error": ""})
+
     graph = get_graph()
     if not graph:
         # Mode Perf. Réduite : le dialog utilise messageParent + displayReplyForm
         return jsonify({"error": "Mode Standard requis pour l'envoi direct", "use_outlook": True}), 403
 
+    # Conversion internet_message_id → Graph id (21/04). Office.js envoie des
+    # internet IDs (format <xxx@yyy.com>) mais les routes Graph /me/messages/{id}
+    # exigent le Graph id (hex). Sans cette conversion, l'envoi échoue.
+    graph_id = message_id
+    if message_id and message_id.startswith('<'):
+        try:
+            source = graph.get_email_by_internet_id(message_id)
+            if source and source.get('id'):
+                graph_id = source['id']
+            else:
+                return jsonify({
+                    "success": False,
+                    "error": "Mail source introuvable via internet_message_id",
+                }), 404
+        except GraphAuthError:
+            return jsonify({"error": "Token expiré", "auth_required": True}), 401
+        except Exception as e:
+            logger.warning(f"[send_reply] résolution internet_id {message_id[:40]} : {e}")
+
+    # Décodage attachments base64 → bytes (21/04)
+    import base64 as _b64
+    att_list = []
+    for a in raw_attachments:
+        try:
+            content_b64 = a.get('content_b64') or a.get('content', '')
+            if not content_b64:
+                continue
+            att_list.append({
+                'name': a.get('name', 'attachment'),
+                'content': _b64.b64decode(content_b64),
+                'content_type': a.get('content_type', 'application/octet-stream'),
+            })
+        except Exception as e:
+            logger.warning(f"[send_reply] PJ '{a.get('name','?')}' décodage échec : {e}")
+    att_list = att_list or None
+
     try:
         if mode == 'reply':
-            result = graph.send_reply(message_id, body, cc=cc)
+            result = graph.send_reply(graph_id, body, cc=cc, attachments=att_list)
         elif mode == 'reply_all':
-            result = graph.send_reply_all(message_id, body, cc=cc)
+            result = graph.send_reply_all(graph_id, body, cc=cc, attachments=att_list)
         elif mode == 'forward':
-            result = graph.send_forward(message_id, body, to_email, cc=cc)
+            result = graph.send_forward(graph_id, body, to_email, cc=cc, attachments=att_list)
         elif mode == 'new':
             if not to_email or not subject:
                 return jsonify({"error": "to et subject requis en mode 'new'"}), 400
-            result = graph.send_new_email(to_email, subject, body, cc=cc)
+            result = graph.send_new_email(to_email, subject, body, cc=cc, attachments=att_list)
         else:
             return jsonify({"error": f"Mode inconnu: {mode}"}), 400
 
-        # Marquer le mail comme traite dans la DB
+        # Idempotence : marquer ce client_request_id comme envoyé (succès)
+        if result.get('success') and client_request_id:
+            _mark_sent(client_request_id)
+            logger.info(f"[send_reply] OK mode={mode} req={client_request_id[:12]} "
+                        f"pj={len(att_list) if att_list else 0}")
+
+        # Marquer le mail comme traite dans la DB (on conserve l'id original
+        # — internet ou Graph — car mark_treated est utilisé comme clé DB)
         if message_id and mode in ('reply', 'reply_all', 'forward'):
             try:
                 _db.mark_treated(message_id, action=mode)
@@ -6620,7 +7178,7 @@ def api_setup_onboarding():
             if len(sent_mails) < 50:
                 try:
                     import requests as _req
-                    resp = _req.get('http://localhost:5051/search',
+                    resp = _req.get('http://127.0.0.1:5051/search',   # Fix audit 21/04 : IPv6 fallback
                                    params={'q': '*', 'type': 'email', 'max_results': 300},
                                    timeout=5)
                     if resp.ok:
@@ -6761,10 +7319,65 @@ if __name__ == '__main__':
     _auto_trigger_warmup()  # Fix #5 : warmup automatique 3s après démarrage
     threading.Thread(target=_check_git_updates, daemon=True).start()  # MAJ auto Git
 
-    _is_dev = os.path.exists(os.path.join(EASYMAIL_DIR, '.dev_mode'))
-    app.run(
-        host='localhost',
-        port=PORT,
-        debug=_is_dev,  # audit : debug=True uniquement si .dev_mode existe
-        ssl_context=(CERT_FILE, KEY_FILE)
-    )
+    # Fix 22/04 — bouton BM manquant après reboot :
+    #   Symptôme : après reboot PC, Outlook/WebView2 ne charge pas le manifest
+    #   de l'addin → aucun bouton BM dans la barre d'action.
+    #   Cause : Windows résout "localhost" EN PRIORITÉ en ::1 (IPv6). Or
+    #   `app.run(host='localhost')` bind uniquement 127.0.0.1 (IPv4) via
+    #   Werkzeug → V2 refuse les connexions IPv6 → Outlook échoue sur
+    #   https://localhost:3443/plugin/manifest.xml → pas d'addin.
+    #   Fix : lancer DEUX serveurs Werkzeug (127.0.0.1 + ::1) qui pointent
+    #   sur la même app Flask. Le nouveau cert TLS a une SAN couvrant les
+    #   trois (localhost + 127.0.0.1 + ::1) → aucun rejet "CN mismatch".
+    #
+    # Pourquoi pas basculer tout sur 127.0.0.1 :
+    #   - Le redirect_uri OAuth Microsoft (config.json + Azure AD) contient
+    #     "https://localhost:3443/auth/callback" — changer casserait l'auth.
+    #   - localhost reste le hostname canonique, v4/v6 sont des IPs de bind.
+    import ssl as _ssl
+    from werkzeug.serving import make_server as _make_server
+
+    # SSLContext serveur pur (PROTOCOL_TLS_SERVER) — ne demande PAS de cert
+    # client. Fix 22/04 : sans verify_mode=CERT_NONE explicite, certains
+    # builds de Werkzeug tombent dans une boucle de renegotiation TLS
+    # quand le client (curl, WebView2) n'envoie pas de cert client.
+    _ssl_ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
+    _ssl_ctx.load_cert_chain(CERT_FILE, KEY_FILE)
+    _ssl_ctx.verify_mode = _ssl.CERT_NONE   # serveur HTTPS public, pas de mTLS
+    # Fix audit B1 : forcer TLS 1.2+ uniquement (pas de 1.0/1.1 vulnérables,
+    # et pas de TLS 1.3 avec ses renegotiation quirks sur Werkzeug vieux).
+    # WebView2 / Chromium récents parlent parfaitement TLS 1.2 et 1.3.
+    _ssl_ctx.minimum_version = _ssl.TLSVersion.TLSv1_2
+
+    def _serve_on(host_addr, label):
+        """Lance un serveur Werkzeug threaded sur (host_addr, PORT).
+        Bloque tant que le serveur tourne. Logge les erreurs de bind."""
+        try:
+            _srv = _make_server(host_addr, PORT, app, threaded=True,
+                                ssl_context=_ssl_ctx)
+            logger.info(f"[bind] V2 écoute sur [{host_addr}]:{PORT} ({label})")
+            _srv.serve_forever()
+        except OSError as e:
+            logger.warning(f"[bind] [{host_addr}]:{PORT} ({label}) : {e}")
+        except Exception as e:
+            logger.error(f"[bind] erreur sur {host_addr} : {e}")
+
+    # Fix audit 22/04 (A7) : pattern 2-threads non-daemon + join.
+    # L'ancienne version démarrait IPv6 en daemon PUIS tentait IPv4 en blocking
+    # — avec un fallback IPv6 si IPv4 fail. Mais ce fallback était voué à
+    # échouer car le port était déjà pris par le daemon IPv6.
+    # Nouvelle version : les 2 threads sont peers, non-daemon, le process
+    # reste vivant tant qu'AU MOINS UN tourne. Si IPv4 fail au bind → son
+    # thread meurt, IPv6 continue. Si les 2 bind OK → les 2 servent en
+    # parallèle. Si les 2 fail → le process termine.
+    _t_ipv4 = threading.Thread(target=_serve_on,
+                               args=('127.0.0.1', 'IPv4'), name='v2-ipv4')
+    _t_ipv6 = threading.Thread(target=_serve_on,
+                               args=('::1', 'IPv6'), name='v2-ipv6')
+    _t_ipv4.start()
+    _t_ipv6.start()
+    try:
+        _t_ipv4.join()
+        _t_ipv6.join()
+    except KeyboardInterrupt:
+        logger.info("V2 : arrêt demandé (Ctrl+C)")

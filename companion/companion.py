@@ -905,33 +905,84 @@ def api_get_table():
 
 import subprocess
 import threading as _th
+import time
 _dialog_process_lock = _th.Lock()
 _current_dialog_process = None   # Singleton : une seule fenêtre dialog à la fois
+_last_open_dialog_ts = 0.0       # Debounce clics multiples (ajout 20/04, point D)
 
 _IPC_HOT_URL = 'http://127.0.0.1:5052/open_dialog'
 _IPC_PING_URL = 'http://127.0.0.1:5052/ping'
+
+
+def _hot_instance_alive():
+    """Fix 20/04 — ping ultra rapide (GET /ping) pour savoir si le hot
+    instance vit. Plus fiable qu'un POST avec timeout car /ping est un
+    simple renvoi JSON sans interaction Qt (ne peut pas bloquer).
+
+    Retry 1 fois (21/04 audit) : WinError 10053 = "connexion abandonnée
+    par un logiciel hôte" peut arriver intermittemment à cause d'un
+    antivirus/firewall qui inspecte le trafic local. Un retry immédiat
+    suffit dans 99 % des cas.
+    """
+    import urllib.request
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(_IPC_PING_URL, timeout=0.5) as resp:
+                return resp.status == 200
+        except Exception as e:
+            if attempt == 0 and 'WinError 10053' in str(e):
+                time.sleep(0.1)
+                continue
+            return False
+    return False
 
 
 def _try_hot_instance(params):
     """
     Plan 2 Phase 4 — Essayer le popup_pyqt déjà en mémoire (hot instance) avant
     de spawn un nouveau process Python + PyQt (coût ~1.5-2s).
-    Retourne True si succès, False si pas de hot instance (ou crashé).
+
+    Fix 20/04 — séparation ping / POST pour éviter le double spawn :
+      1. Ping rapide (/ping, timeout 0.5 s) : le hot instance est-il vivant ?
+      2. Si OUI → POST /open_dialog avec timeout long (5 s). Le hot instance
+         étant confirmé vivant, on ATTEND sa réponse au lieu de fallback.
+      3. Si NON → retourne False → Companion fait subprocess fallback.
+
+    Avant : timeout 1 s sur /open_dialog → si le hot instance était busy
+    (parse Chromium lourd), Companion spawn un 2e subprocess en parallèle.
+    D'où les "popups blanches" résiduelles signalées par l'utilisateur.
     """
-    import urllib.request, urllib.error
-    try:
-        data = json.dumps(params).encode('utf-8')
-        req = urllib.request.Request(
-            _IPC_HOT_URL, data=data,
-            headers={'Content-Type': 'application/json'},
-            method='POST',
-        )
-        with urllib.request.urlopen(req, timeout=1.0) as resp:
-            if resp.status == 200:
-                body = json.loads(resp.read().decode('utf-8'))
-                return bool(body.get('ok'))
-    except Exception as e:
-        logger.debug(f"Hot instance indispo ({e}) → fallback subprocess")
+    if not _hot_instance_alive():
+        logger.debug("Hot instance NON détecté au ping → subprocess fallback")
+        return False
+
+    import urllib.request
+    data = json.dumps(params).encode('utf-8')
+
+    # Retry 2 fois max (21/04 audit cycle 1 #1) : avant on faisait un
+    # "return True" silencieux si POST échouait pour éviter le double
+    # spawn → mais si le signal Qt n'a pas été émis, le dialog ne
+    # s'ouvrait PAS et l'utilisateur attendait. Maintenant on retry
+    # une fois (< 100 ms supplémentaires), et SEULEMENT si ça échoue
+    # encore on retourne False → fallback subprocess.
+    last_error = None
+    for attempt in range(2):
+        try:
+            req = urllib.request.Request(
+                _IPC_HOT_URL, data=data,
+                headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                if resp.status == 200:
+                    body = json.loads(resp.read().decode('utf-8'))
+                    return bool(body.get('ok'))
+        except Exception as e:
+            last_error = e
+            if attempt == 0:
+                time.sleep(0.05)  # petite pause avant retry
+                continue
+    logger.warning(f"Hot instance POST échec après 2 tentatives ({last_error}) → fallback subprocess")
     return False
 
 
@@ -949,64 +1000,115 @@ def open_dialog_native():
 
     Body JSON attendu : { mode, messageId, subject, fromName, fromEmail, to, cc, hasAttachments }
     """
-    global _current_dialog_process
-    try:
-        data = request.get_json(force=True) or {}
-        # Valider le mode
-        mode = data.get('mode', 'reply')
-        if mode not in ('reply', 'reply_all', 'forward', 'new'):
-            mode = 'reply'
-        data['mode'] = mode
+    global _current_dialog_process, _last_open_dialog_ts
+    # Mutex GLOBAL (21/04 audit) : Flask threaded=True → 2 requêtes peuvent
+    # arriver en parallèle. On sérialise tout le corps pour éviter doubles
+    # spawns et races sur _last_open_dialog_ts / _current_dialog_process.
+    with _dialog_process_lock:
+        try:
+            data = request.get_json(force=True) or {}
+            # Valider le mode
+            mode = data.get('mode', 'reply')
+            if mode not in ('reply', 'reply_all', 'forward', 'new'):
+                mode = 'reply'
+            data['mode'] = mode
 
-        # Voie 1 — Hot instance (rapide)
-        if _try_hot_instance(data):
-            logger.info(f"Dialog via HOT instance (5052) — mode={mode}")
-            return jsonify({"status": "ok", "via": "hot_instance"})
+            # Debounce clics multiples (fenêtre 1 s)
+            _now = time.time()
+            if _now - _last_open_dialog_ts < 1.0:
+                logger.info(f"Clic rapproché ignoré ({(_now - _last_open_dialog_ts)*1000:.0f} ms depuis le dernier)")
+                return jsonify({"status": "ok", "via": "debounced"})
+            _last_open_dialog_ts = _now
 
-        # Voie 2 — Fallback subprocess (lent mais fiable)
-        # Localiser popup_pyqt.py (même dossier que ce fichier)
-        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'popup_pyqt.py')
-        if not os.path.exists(script_path):
-            return jsonify({"status": "error", "reason": "popup_pyqt.py introuvable"}), 500
+            # Voie 1 — Hot instance (rapide, ~50 ms)
+            _hot_t0 = time.perf_counter()
+            hot_ok = _try_hot_instance(data)
+            _hot_ms = (time.perf_counter() - _hot_t0) * 1000
+            if hot_ok:
+                logger.info(f"Dialog via HOT instance (5052) en {_hot_ms:.0f} ms — mode={mode}")
+                return jsonify({"status": "ok", "via": "hot_instance", "hot_ms": int(_hot_ms)})
+            logger.info(f"Hot instance échec en {_hot_ms:.0f} ms — fallback subprocess")
 
-        # Construire la commande
-        args = [sys.executable, script_path, '--direct-dialog', '--mode', mode]
-        for key in ('messageId', 'subject', 'fromName', 'fromEmail', 'to', 'cc', 'hasAttachments'):
-            val = data.get(key, '')
-            if val:
-                args.extend([f'--{key}', str(val)])
+            # Voie 2 — Fallback subprocess (~1.5-2 s)
+            script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'popup_pyqt.py')
+            if not os.path.exists(script_path):
+                return jsonify({"status": "error", "reason": "popup_pyqt.py introuvable"}), 500
 
-        # Fermer la précédente fenêtre dialog si encore active (évite empilement)
-        with _dialog_process_lock:
+            # Fix 21/04 audit — avant de spawner, tuer TOUTES les instances
+            # --direct-dialog existantes (précédentes fenêtres non fermées).
+            # Évite l'empilement de fenêtres BoosterMail à chaque clic BM.
+            _kill_existing_direct_dialog_processes()
+
+            # Construire la commande
+            args = [sys.executable, script_path, '--direct-dialog', '--mode', mode]
+            for key in ('messageId', 'subject', 'fromName', 'fromEmail', 'to', 'cc', 'hasAttachments'):
+                val = data.get(key, '')
+                if val:
+                    args.extend([f'--{key}', str(val)])
+
+            # Fermer la précédente fenêtre dialog si encore active (mémoire)
             if _current_dialog_process and _current_dialog_process.poll() is None:
                 try:
                     _current_dialog_process.terminate()
                 except Exception:
                     pass
             # Lancer le nouveau processus PyQt en arrière-plan (détaché)
-            # CREATE_NO_WINDOW=0x08000000 pour ne pas afficher de console Windows
             creation_flags = 0x08000000 if sys.platform == 'win32' else 0
-            # Capturer stdout/stderr dans un fichier pour diagnostiquer les plantages PyQt
             pyqt_log_path = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                 'pyqt_dialog.log'
             )
+            # Fix audit 22/04 : close() du handle cote parent apres Popen.
+            # Le FD est duplique par Popen pour le subprocess → fermer cote
+            # parent n'affecte pas le subprocess mais evite l'accumulation de
+            # FD ouverts sur des sessions longues (100+ clics BM).
             pyqt_log = open(pyqt_log_path, 'a', encoding='utf-8', buffering=1)
-            pyqt_log.write(f"\n\n=== {datetime.now().isoformat()} | subject={data.get('subject','')[:60]} ===\n")
-            pyqt_log.flush()
-            _current_dialog_process = subprocess.Popen(
-                args,
-                creationflags=creation_flags,
-                stdout=pyqt_log,
-                stderr=subprocess.STDOUT,
-            )
+            try:
+                pyqt_log.write(f"\n\n=== {datetime.now().isoformat()} | subject={data.get('subject','')[:60]} ===\n")
+                pyqt_log.flush()
+                _current_dialog_process = subprocess.Popen(
+                    args,
+                    creationflags=creation_flags,
+                    stdout=pyqt_log,
+                    stderr=subprocess.STDOUT,
+                )
+            finally:
+                pyqt_log.close()
 
-        logger.info(f"Dialog PyQt lancé via subprocess : mode={mode} subject={data.get('subject', '')[:50]}")
-        return jsonify({"status": "ok", "via": "subprocess", "pid": _current_dialog_process.pid})
+            logger.info(f"Dialog PyQt lancé via subprocess : mode={mode} subject={data.get('subject', '')[:50]}")
+            return jsonify({"status": "ok", "via": "subprocess", "pid": _current_dialog_process.pid})
 
+        except Exception as e:
+            logger.error(f"open_dialog_native error: {e}")
+            return jsonify({"status": "error", "reason": str(e)}), 500
+
+
+def _kill_existing_direct_dialog_processes():
+    """Tue toutes les instances popup_pyqt.py --direct-dialog en cours.
+    Appelé avant de spawner un nouveau subprocess fallback pour éviter
+    l'empilement de fenêtres BoosterMail (plusieurs clics BM rapprochés
+    sans hot instance accessible)."""
+    try:
+        import subprocess as _sp
+        # WMIC : liste les pythonw.exe dont la CommandLine contient --direct-dialog
+        result = _sp.run(
+            ['wmic', 'process', 'where',
+             "name='pythonw.exe' and CommandLine like '%%--direct-dialog%%'",
+             'get', 'ProcessId', '/format:value'],
+            capture_output=True, text=True, timeout=5,
+            creationflags=0x08000000,
+        )
+        for line in result.stdout.split('\n'):
+            line = line.strip()
+            if line.startswith('ProcessId=') and line != 'ProcessId=':
+                pid = line.split('=', 1)[1].strip()
+                if pid and pid.isdigit():
+                    _sp.run(['taskkill', '/F', '/PID', pid],
+                            capture_output=True, timeout=3,
+                            creationflags=0x08000000)
+                    logger.info(f"Ancien --direct-dialog tué (PID {pid})")
     except Exception as e:
-        logger.error(f"open_dialog_native error: {e}")
-        return jsonify({"status": "error", "reason": str(e)}), 500
+        logger.debug(f"_kill_existing_direct_dialog_processes: {e}")
 
 
 # =============================================================================

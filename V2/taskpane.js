@@ -318,8 +318,6 @@ function _sendViaOutlook(msg) {
 // BACKEND : statut + profil contact
 // ============================================================================
 
-var _companionAvailable = false;
-
 function _checkBackendStatus() {
     fetch(_backendUrl + '/api/status')
         .then(function (r) { return r.json(); })
@@ -336,29 +334,10 @@ function _checkBackendStatus() {
             badge.textContent = 'hors ligne';
         });
 
-    // Détecter le Companion Windows (localhost:5051)
-    _detectCompanion();
-}
-
-function _detectCompanion() {
-    try {
-        fetch('http://localhost:5051/status', {
-            mode: 'cors',
-            signal: AbortSignal.timeout(2000),
-        })
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-            if (data && data.status === 'ok') {
-                _companionAvailable = true;
-                console.log('[taskpane] Companion detecte v' + (data.version || '?'));
-            }
-        })
-        .catch(function () {
-            _companionAvailable = false;
-        });
-    } catch (e) {
-        _companionAvailable = false;
-    }
+    // Fix audit 22/04 : la detection Companion via fetch('http://localhost:5051/status')
+    // etait DEAD CODE - la taskpane tourne en HTTPS, fetch HTTP bloque par mixed-content,
+    // et _companionAvailable jamais lu ailleurs. Pour detecter Companion, utiliser le
+    // proxy V2 /api/companion/status si besoin un jour.
 }
 
 function _loadContactProfile(email) {

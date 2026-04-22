@@ -64,3 +64,33 @@ companion/.popup_pid
 .claude/worktrees/elegant-saha
 .claude/worktrees/dreamy-ishizaka
 .claude/worktrees/vibrant-poincare
+
+# Logs debug temporaires (session d'audit 22/04)
+V2_stdout.log
+V2_stderr.log
+popup_pyqt.log
+addin_debug.log
+pyqt_dialog.log
+boostermail.log
+
+# Backups de certs / manifest (conserves localement pour rollback)
+*.bak
+V2/localhost.crt.bak
+V2/localhost.key.bak
+V2/manifest.xml.bak
+V2/prefetch_cache_v2.json
+V2/prefetch_cache.json
+
+# DB V2
+V2/boostermail.db
+V2/boostermail.db-wal
+V2/boostermail.db-shm
+
+# Test files temporaires
+test_com_selection.py
+
+# Worktrees Claude Code
+.claude/worktrees/
+
+# Dossier site web (work in progress)
+site web/

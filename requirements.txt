@@ -1,3 +1,26 @@
+# BoosterMail - Dependances Python
+# Installer avec : pip install -r requirements.txt
+# Utilise aussi par install.ps1 (step 2/5)
+
+# Backend web
 flask==3.0.0
+requests
+
+# Claude AI
 anthropic==0.40.0
+
+# Windows COM (Outlook Classic fallback)
 pywin32
+
+# Authentification Microsoft (Graph API, Mode Complet)
+msal
+cryptography
+
+# UI desktop (popup + dialog Chromium)
+PyQt6
+PyQt6-WebEngine
+
+# Analyse pieces jointes
+PyPDF2
+python-docx
+openpyxl

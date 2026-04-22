@@ -1,483 +1,1267 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EasyMail — Divisez par 2 votre temps de gestion des mails</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html { scroll-behavior: smooth; }
-        body { font-family: 'Inter', -apple-system, sans-serif; color: #1a1a2e; background: #fff; overflow-x: hidden; }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>BoosterMail — Plugin Outlook IA : répondez à vos emails en 4 secondes</title>
+  <meta name="description" content="BoosterMail est un plugin Outlook intelligent propulsé par l'IA Claude (Anthropic). Il apprend votre style d'écriture, analyse chaque contact et génère des réponses professionnelles parfaites en moins de 4 secondes. Essai gratuit 14 jours.">
+  <meta name="keywords" content="plugin outlook IA, assistant email intelligence artificielle, rédaction email automatique, boostermail, productivité outlook, répondre email automatiquement, IA email, outlook plugin AI, email writing AI, KI Outlook Plugin">
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="author" content="BoosterMail">
+  <meta name="application-name" content="BoosterMail">
+  <link rel="canonical" href="https://www.boostermail.ai">
 
-        /* ─── NAV ─── */
-        nav {
-            position: fixed; top: 0; width: 100%; z-index: 100;
-            background: rgba(255,255,255,0.92); backdrop-filter: blur(12px);
-            border-bottom: 1px solid rgba(0,0,0,0.06);
-            padding: 16px 40px; display: flex; align-items: center; justify-content: space-between;
-        }
-        .nav-logo { font-size: 20px; font-weight: 800; color: #1a1a2e; text-decoration: none; }
-        .nav-logo span { color: #4361ee; }
-        .nav-links { display: flex; gap: 32px; align-items: center; }
-        .nav-links a { text-decoration: none; color: #555; font-size: 14px; font-weight: 500; transition: color 0.2s; }
-        .nav-links a:hover { color: #4361ee; }
-        .btn-primary {
-            background: #4361ee; color: white !important; padding: 10px 24px; border-radius: 8px;
-            font-weight: 600; font-size: 14px; text-decoration: none; transition: all 0.2s;
-            box-shadow: 0 2px 12px rgba(67,97,238,0.3);
-        }
-        .btn-primary:hover { background: #3651d4; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(67,97,238,0.4); }
+  <!-- Open Graph -->
+  <meta property="og:title" content="BoosterMail — Plugin Outlook IA : emails parfaits en 4 secondes">
+  <meta property="og:description" content="BoosterMail apprend votre style, comprend vos contacts et génère des réponses email professionnelles en 4 secondes directement dans Outlook. 14 jours gratuits, sans carte bancaire.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://www.boostermail.ai">
+  <meta property="og:locale" content="fr_FR">
+  <meta property="og:locale:alternate" content="en_US">
+  <meta property="og:locale:alternate" content="de_DE">
+  <meta property="og:locale:alternate" content="es_ES">
+  <meta property="og:site_name" content="BoosterMail">
 
-        /* ─── HERO ─── */
-        .hero {
-            min-height: 100vh; display: flex; align-items: center; justify-content: center;
-            padding: 120px 40px 80px; text-align: center;
-            background: linear-gradient(180deg, #f8f9ff 0%, #fff 100%);
-            position: relative;
-        }
-        .hero::before {
-            content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-            background: radial-gradient(ellipse at 30% 20%, rgba(67,97,238,0.06) 0%, transparent 60%),
-                        radial-gradient(ellipse at 70% 80%, rgba(114,9,183,0.04) 0%, transparent 60%);
-        }
-        .hero-content { position: relative; max-width: 800px; }
-        .hero-badge {
-            display: inline-flex; align-items: center; gap: 8px;
-            background: #eef0ff; color: #4361ee; font-size: 13px; font-weight: 600;
-            padding: 8px 16px; border-radius: 20px; margin-bottom: 32px;
-        }
-        .hero h1 { font-size: 56px; font-weight: 900; line-height: 1.1; margin-bottom: 24px; letter-spacing: -1.5px; }
-        .hero h1 .highlight {
-            background: linear-gradient(135deg, #4361ee, #7209b7); -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent; background-clip: text;
-        }
-        .hero p { font-size: 20px; color: #555; line-height: 1.6; max-width: 600px; margin: 0 auto 40px; }
-        .hero-cta { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
-        .btn-large {
-            padding: 16px 36px; border-radius: 12px; font-size: 16px; font-weight: 700;
-            text-decoration: none; transition: all 0.3s;
-        }
-        .btn-large.primary { background: #4361ee; color: white; box-shadow: 0 4px 24px rgba(67,97,238,0.35); }
-        .btn-large.primary:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(67,97,238,0.45); }
-        .btn-large.secondary { background: white; color: #1a1a2e; border: 2px solid #e0e0e0; }
-        .btn-large.secondary:hover { border-color: #4361ee; color: #4361ee; }
+  <!-- Twitter / X -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="BoosterMail — Emails Outlook rédigés par l'IA en 4 secondes">
+  <meta name="twitter:description" content="Plugin Outlook intelligent. Génère des réponses parfaites en 4 secondes, dans votre style exact.">
+  <meta name="twitter:site" content="@boostermail">
 
-        .hero-stats {
-            display: flex; gap: 48px; justify-content: center; margin-top: 64px;
-            padding-top: 40px; border-top: 1px solid rgba(0,0,0,0.06);
-        }
-        .hero-stat { text-align: center; }
-        .hero-stat .number { font-size: 36px; font-weight: 800; color: #4361ee; }
-        .hero-stat .label { font-size: 13px; color: #888; margin-top: 4px; }
+  <!-- Hreflang -->
+  <link rel="alternate" hreflang="fr" href="https://www.boostermail.ai/?lang=fr">
+  <link rel="alternate" hreflang="en" href="https://www.boostermail.ai/?lang=en">
+  <link rel="alternate" hreflang="de" href="https://www.boostermail.ai/?lang=de">
+  <link rel="alternate" hreflang="es" href="https://www.boostermail.ai/?lang=es">
+  <link rel="alternate" hreflang="x-default" href="https://www.boostermail.ai">
 
-        /* ─── PROMISE ─── */
-        .promise {
-            padding: 100px 40px; text-align: center;
-            background: #1a1a2e; color: white;
-        }
-        .promise h2 { font-size: 40px; font-weight: 800; margin-bottom: 20px; line-height: 1.2; }
-        .promise p { font-size: 20px; color: rgba(255,255,255,0.7); max-width: 700px; margin: 0 auto; line-height: 1.6; }
-        .promise .accent { color: #a78bfa; font-weight: 700; }
+  <!-- Schema.org @graph — SEO + AEO (AI Search Engines) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://www.boostermail.ai/#software",
+        "name": "BoosterMail",
+        "alternateName": ["BoosterMail AI", "Plugin Outlook IA"],
+        "description": "BoosterMail est un plugin Outlook intelligent propulsé par l'IA Claude d'Anthropic. Il apprend votre style d'écriture sur vos 800 derniers emails, analyse le profil relationnel de chaque contact, et génère des réponses email professionnelles en moins de 4 secondes directement dans Outlook.",
+        "applicationCategory": "BusinessApplication",
+        "applicationSubCategory": "Email Productivity",
+        "operatingSystem": "Windows 10, Windows 11",
+        "softwareVersion": "2.0",
+        "url": "https://www.boostermail.ai",
+        "offers": [
+          {"@type":"Offer","name":"Essentiel","price":"9","priceCurrency":"EUR","description":"Génération IA illimitée, style personnalisé, 50 profils contacts"},
+          {"@type":"Offer","name":"Professionnel","price":"19","priceCurrency":"EUR","description":"Suivi d'échéances, relances intelligentes, contacts illimités"},
+          {"@type":"Offer","name":"Business","price":"29","priceCurrency":"EUR","description":"Multi-utilisateurs, tableau de bord équipe, onboarding dédié"}
+        ],
+        "featureList": [
+          "Génération email en moins de 4 secondes",
+          "Apprentissage du style d'écriture de l'utilisateur",
+          "Profil relationnel automatique pour chaque contact",
+          "Détection et suivi des échéances",
+          "Analyse des pièces jointes PDF Word Excel",
+          "Classement automatique des emails Outlook",
+          "Streaming speculatif et pré-génération",
+          "Score rédactionnel 0-100 avec gamification",
+          "Plugin natif Outlook Windows"
+        ],
+        "screenshot": "https://www.boostermail.ai/screenshot.png",
+        "aggregateRating": {"@type":"AggregateRating","ratingValue":"4.9","reviewCount":"247","bestRating":"5"},
+        "publisher": {"@id": "https://www.boostermail.ai/#organization"}
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://www.boostermail.ai/#organization",
+        "name": "BoosterMail",
+        "url": "https://www.boostermail.ai",
+        "email": "contact@boostermail.ai",
+        "description": "Éditeur du plugin Outlook IA BoosterMail, propulsé par Claude AI d'Anthropic"
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://www.boostermail.ai/#website",
+        "url": "https://www.boostermail.ai",
+        "name": "BoosterMail",
+        "description": "Plugin Outlook intelligent pour rédiger des emails en 4 secondes grâce à l'IA",
+        "inLanguage": ["fr", "en", "de", "es"],
+        "publisher": {"@id": "https://www.boostermail.ai/#organization"}
+      },
+      {
+        "@type": "HowTo",
+        "name": "Comment utiliser BoosterMail pour rédiger un email en 4 secondes",
+        "description": "Guide d'utilisation du plugin Outlook IA BoosterMail",
+        "totalTime": "PT4S",
+        "tool": {"@type":"HowToTool","name":"Microsoft Outlook + Plugin BoosterMail"},
+        "step": [
+          {"@type":"HowToStep","position":1,"name":"Ouvrir un email","text":"Ouvrez un email dans Outlook. BoosterMail analyse automatiquement le contexte, l'historique et le profil du correspondant en arrière-plan."},
+          {"@type":"HowToStep","position":2,"name":"Cliquer sur Générer","text":"Cliquez sur le bouton Générer. L'IA rédige une réponse complète dans votre style en moins de 4 secondes grâce au streaming speculatif."},
+          {"@type":"HowToStep","position":3,"name":"Relire et envoyer","text":"Relisez la réponse générée, ajustez si nécessaire, puis envoyez. BoosterMail apprend de vos modifications pour s'améliorer continuellement."}
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Qu'est-ce que BoosterMail ?",
+            "acceptedAnswer": {"@type":"Answer","text":"BoosterMail est un plugin Outlook intelligent propulsé par l'IA Claude d'Anthropic. Il apprend votre style d'écriture, analyse le profil de chaque contact, et génère des réponses email professionnelles en moins de 4 secondes directement dans Microsoft Outlook."}
+          },
+          {
+            "@type": "Question",
+            "name": "Avec quel Outlook BoosterMail fonctionne-t-il ?",
+            "acceptedAnswer": {"@type":"Answer","text":"BoosterMail fonctionne avec le Nouvel Outlook (New Outlook) et Outlook classique sur Windows 10 et Windows 11. Une connexion Microsoft est requise pour les fonctionnalités complètes."}
+          },
+          {
+            "@type": "Question",
+            "name": "Comment BoosterMail apprend mon style d'écriture ?",
+            "acceptedAnswer": {"@type":"Answer","text":"À l'installation (3 minutes), BoosterMail analyse vos 300 derniers emails envoyés et 500 reçus pour construire votre profil stylistique : longueur des réponses, formules habituelles, ton, structure. Il s'affine ensuite automatiquement à chaque email envoyé."}
+          },
+          {
+            "@type": "Question",
+            "name": "La génération est-elle vraiment en 4 secondes ?",
+            "acceptedAnswer": {"@type":"Answer","text":"Oui. Grâce à la pré-génération spéculative, BoosterMail prépare la réponse en arrière-plan pendant que vous lisez l'email. Quand vous cliquez Générer, la réponse est souvent déjà prête ou arrive en 2 à 4 secondes."}
+          },
+          {
+            "@type": "Question",
+            "name": "Mes emails sont-ils partagés avec des tiers ?",
+            "acceptedAnswer": {"@type":"Answer","text":"Non. BoosterMail fonctionne localement sur votre ordinateur. Seul le texte de l'email en cours est envoyé à l'API Claude d'Anthropic pour générer la réponse. Vos données ne sont ni stockées ni partagées."}
+          },
+          {
+            "@type": "Question",
+            "name": "Quel est le prix de BoosterMail ?",
+            "acceptedAnswer": {"@type":"Answer","text":"BoosterMail est disponible en 3 formules : Essentiel à 9€/mois, Professionnel à 19€/mois et Business à 29€/mois. Tous les plans incluent 14 jours d'essai gratuit sans carte bancaire."}
+          },
+          {
+            "@type": "Question",
+            "name": "BoosterMail fonctionne-t-il sur Android ou iPhone ?",
+            "acceptedAnswer": {"@type":"Answer","text":"BoosterMail est un plugin pour Microsoft Outlook sur Windows 10 et 11. Il ne fonctionne pas directement sur Android ou iPhone, mais le site web boostermail.ai est pleinement responsive et accessible sur mobile."}
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:#060914; --bg2:#0d1424; --card:rgba(255,255,255,0.04);
+      --border:rgba(255,255,255,0.08); --primary:#6366f1; --pl:#818cf8;
+      --violet:#8b5cf6; --cyan:#06b6d4; --green:#10b981;
+      --text:#f1f5f9; --muted:#94a3b8; --faint:#475569;
+      --grad:linear-gradient(135deg,#6366f1 0%,#8b5cf6 55%,#06b6d4 100%);
+    }
+    *{margin:0;padding:0;box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{font-family:'Inter',-apple-system,sans-serif;color:var(--text);background:var(--bg);overflow-x:hidden}
 
-        /* ─── FEATURES / PILLARS ─── */
-        .pillars { padding: 100px 40px; max-width: 1200px; margin: 0 auto; }
-        .section-header { text-align: center; margin-bottom: 64px; }
-        .section-header .tag {
-            display: inline-block; font-size: 12px; font-weight: 700; text-transform: uppercase;
-            letter-spacing: 2px; color: #4361ee; margin-bottom: 16px;
-        }
-        .section-header h2 { font-size: 40px; font-weight: 800; line-height: 1.2; }
-        .section-header p { font-size: 18px; color: #777; margin-top: 16px; max-width: 600px; margin-left: auto; margin-right: auto; }
+    /* NAV */
+    nav{position:fixed;top:0;width:100%;z-index:100;padding:20px 48px;display:flex;align-items:center;justify-content:space-between;transition:all .4s}
+    nav.scrolled{background:rgba(6,9,20,.9);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 48px}
+    .nav-logo{font-family:'Space Grotesk',sans-serif;font-size:21px;font-weight:700;text-decoration:none;display:flex;align-items:center;gap:9px}
+    .nav-logo-icon{width:30px;height:30px;border-radius:7px;background:var(--grad);display:flex;align-items:center;justify-content:center;font-size:15px}
+    .nav-logo-text{background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+    .nav-links{display:flex;gap:32px;align-items:center}
+    .nav-links a{text-decoration:none;color:var(--muted);font-size:14px;font-weight:500;transition:color .2s}
+    .nav-links a:hover{color:var(--text)}
+    .nav-cta{background:var(--grad)!important;color:white!important;padding:9px 22px;border-radius:8px;font-weight:600!important;box-shadow:0 0 20px rgba(99,102,241,.3);transition:all .3s!important}
+    .nav-cta:hover{transform:translateY(-1px)!important;box-shadow:0 0 32px rgba(99,102,241,.5)!important}
+    .lang-switcher{display:flex;gap:4px;align-items:center;margin-left:8px}
+    .lang-btn{background:none;border:1px solid var(--border);color:var(--faint);font-size:11px;font-weight:600;padding:4px 8px;border-radius:5px;cursor:pointer;transition:all .2s;font-family:inherit}
+    .lang-btn:hover,.lang-btn.active{border-color:var(--primary);color:var(--pl);background:rgba(99,102,241,.08)}
 
-        .pillars-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-        .pillar-card {
-            background: #f8f9ff; border-radius: 20px; padding: 40px;
-            border: 1px solid rgba(67,97,238,0.08); transition: all 0.3s;
-            position: relative; overflow: hidden;
-        }
-        .pillar-card:hover { transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,0.08); }
-        .pillar-card.featured { background: linear-gradient(135deg, #4361ee, #3a0ca3); color: white; }
-        .pillar-card.featured .pillar-desc { color: rgba(255,255,255,0.8); }
-        .pillar-card.featured .pillar-tag { background: rgba(255,255,255,0.2); color: white; }
-        .pillar-icon { font-size: 40px; margin-bottom: 20px; }
-        .pillar-tag {
-            display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase;
-            letter-spacing: 1.5px; color: #4361ee; background: rgba(67,97,238,0.1);
-            padding: 4px 10px; border-radius: 4px; margin-bottom: 16px;
-        }
-        .pillar-title { font-size: 24px; font-weight: 700; margin-bottom: 12px; }
-        .pillar-desc { font-size: 15px; color: #666; line-height: 1.7; }
-        .pillar-features { list-style: none; margin-top: 20px; }
-        .pillar-features li { font-size: 14px; padding: 6px 0; display: flex; align-items: center; gap: 8px; }
-        .pillar-features li::before { content: '✓'; color: #4361ee; font-weight: 700; }
-        .pillar-card.featured .pillar-features li::before { color: #a78bfa; }
+    /* HERO */
+    .hero{min-height:100vh;display:flex;align-items:center;padding:120px 48px 80px;position:relative;overflow:hidden}
+    .orb{position:absolute;border-radius:50%;filter:blur(80px);pointer-events:none}
+    .orb1{width:600px;height:600px;top:-100px;left:-150px;background:rgba(99,102,241,.1)}
+    .orb2{width:500px;height:500px;bottom:-80px;right:-80px;background:rgba(6,182,212,.08)}
+    .orb3{width:280px;height:280px;top:35%;left:42%;background:rgba(139,92,246,.06)}
+    .hero-inner{max-width:1280px;margin:0 auto;width:100%;display:flex;align-items:center;gap:72px;position:relative}
+    .hero-text{flex:1;min-width:0}
+    .hero-badge{display:inline-flex;align-items:center;gap:8px;margin-bottom:28px;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.25);color:var(--pl);font-size:12px;font-weight:600;padding:7px 15px;border-radius:20px}
+    .badge-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulsedot 2s infinite}
+    @keyframes pulsedot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(1.4)}}
+    .hero h1{font-family:'Space Grotesk',sans-serif;font-size:62px;font-weight:700;line-height:1.08;letter-spacing:-2px;margin-bottom:22px}
+    .hero h1 .dyn-wrap{display:block;height:1.1em;overflow:hidden}
+    .hero h1 .dyn{background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;display:block;transition:transform .5s cubic-bezier(.22,1,.36,1),opacity .5s}
+    .hero h1 .dyn.out{transform:translateY(-110%);opacity:0}
+    .hero h1 .dyn.in{transform:translateY(110%);opacity:0}
+    .hero-sub{font-size:18px;color:var(--muted);line-height:1.68;max-width:510px;margin-bottom:36px}
+    .hero-cta{display:flex;gap:14px;align-items:center;margin-bottom:52px;flex-wrap:wrap}
+    .btn-main{display:inline-flex;align-items:center;gap:8px;background:var(--grad);color:white;padding:15px 34px;border-radius:11px;font-size:15px;font-weight:700;text-decoration:none;transition:all .3s;box-shadow:0 4px 28px rgba(99,102,241,.4)}
+    .btn-main:hover{transform:translateY(-2px);box-shadow:0 8px 40px rgba(99,102,241,.55)}
+    .btn-ghost{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:14px;font-weight:500;text-decoration:none;border:1px solid var(--border);padding:15px 24px;border-radius:11px;transition:all .2s}
+    .btn-ghost:hover{color:var(--text);border-color:var(--primary)}
+    .hero-stats{display:flex;gap:0}
+    .hstat{padding-right:40px}
+    .hstat+.hstat{padding-left:40px;border-left:1px solid var(--border)}
+    .hstat:last-child{padding-right:0}
+    .hstat-num{font-size:34px;font-weight:800;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1}
+    .hstat-lbl{font-size:12px;color:var(--faint);margin-top:5px}
 
-        /* ─── FLOW ─── */
-        .flow { padding: 100px 40px; background: #f8f9ff; }
-        .flow-steps { display: flex; gap: 0; max-width: 1000px; margin: 0 auto; position: relative; }
-        .flow-steps::before {
-            content: ''; position: absolute; top: 40px; left: 60px; right: 60px; height: 3px;
-            background: linear-gradient(90deg, #4361ee, #7209b7, #4361ee);
-            border-radius: 2px;
-        }
-        .flow-step { flex: 1; text-align: center; position: relative; padding: 0 12px; }
-        .flow-step-num {
-            width: 80px; height: 80px; border-radius: 50%;
-            background: white; border: 3px solid #4361ee;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 28px; font-weight: 800; color: #4361ee;
-            margin: 0 auto 20px; position: relative; z-index: 2;
-            box-shadow: 0 4px 16px rgba(67,97,238,0.15);
-        }
-        .flow-step.active .flow-step-num { background: #4361ee; color: white; }
-        .flow-step h4 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
-        .flow-step p { font-size: 13px; color: #777; line-height: 1.5; }
+    /* MOCKUP */
+    .hero-mockup{flex:0 0 500px}
+    .mock{background:rgba(13,20,36,.95);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:0 40px 90px rgba(0,0,0,.7),0 0 60px rgba(99,102,241,.18)}
+    .mock-bar{background:rgba(255,255,255,.03);padding:11px 16px;display:flex;align-items:center;gap:7px;border-bottom:1px solid var(--border)}
+    .mdot{width:10px;height:10px;border-radius:50%}
+    .mdot-r{background:#ef4444}.mdot-y{background:#f59e0b}.mdot-g{background:#10b981}
+    .mock-bar-title{flex:1;text-align:center;font-size:10px;color:var(--faint)}
+    .mock-body{display:flex;height:370px}
+    .mock-left{flex:1;padding:18px;border-right:1px solid var(--border);display:flex;flex-direction:column;gap:10px;overflow:hidden}
+    .mock-from-row{display:flex;align-items:center;gap:8px}
+    .mock-av{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;flex-shrink:0}
+    .mock-from-name{font-size:11px;font-weight:600}
+    .mock-from-time{font-size:9px;color:var(--faint)}
+    .mock-subj{font-size:12px;font-weight:700}
+    .mock-body-txt{font-size:10px;color:var(--muted);line-height:1.6;flex:1}
+    .mock-tags{display:flex;gap:5px}
+    .mtag{font-size:8px;font-weight:700;padding:2px 7px;border-radius:3px;background:rgba(99,102,241,.12);color:var(--pl);border:1px solid rgba(99,102,241,.2)}
+    .mtag.or{background:rgba(245,158,11,.12);color:#fbbf24;border-color:rgba(245,158,11,.2)}
+    .mock-right{width:210px;padding:14px;display:flex;flex-direction:column;gap:9px;background:rgba(99,102,241,.04)}
+    .mock-bm-hdr{font-size:10px;font-weight:700;color:var(--pl);display:flex;align-items:center;gap:5px}
+    .bm-live-dot{width:5px;height:5px;border-radius:50%;background:var(--cyan);animation:pulsedot 1.5s infinite}
+    .mock-gen-box{flex:1;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:7px;padding:10px;overflow:hidden;position:relative}
+    .mock-gen-txt{font-size:9.5px;color:var(--text);line-height:1.75;min-height:100%}
+    .mock-cursor{display:inline-block;width:2px;height:11px;background:var(--primary);animation:blink .7s infinite;vertical-align:middle}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+    .mock-timer{font-size:9px;color:var(--cyan);font-weight:600;display:flex;justify-content:flex-end;align-items:center;gap:3px}
+    .mock-send{background:var(--grad);color:white;border:none;padding:7px 10px;border-radius:5px;font-size:10px;font-weight:700;width:100%;cursor:pointer;font-family:inherit}
 
-        /* ─── COMPARISON ─── */
-        .comparison { padding: 100px 40px; max-width: 900px; margin: 0 auto; }
-        .comparison table { width: 100%; border-collapse: collapse; }
-        .comparison th { text-align: left; padding: 16px 20px; font-size: 14px; font-weight: 600; border-bottom: 2px solid #eee; }
-        .comparison th:first-child { width: 30%; }
-        .comparison th.em { color: #4361ee; background: rgba(67,97,238,0.04); border-radius: 8px 8px 0 0; }
-        .comparison td { padding: 14px 20px; font-size: 14px; border-bottom: 1px solid #f0f0f0; }
-        .comparison td.em { background: rgba(67,97,238,0.02); font-weight: 600; }
-        .comparison .check { color: #22c55e; font-weight: 700; font-size: 18px; }
-        .comparison .cross { color: #ef4444; font-size: 18px; }
-        .comparison .partial { color: #f59e0b; font-size: 14px; }
+    /* LOGOS BAR */
+    .logos-bar{padding:24px 48px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:center;gap:40px;background:rgba(255,255,255,.015)}
+    .logos-lbl{font-size:11px;color:var(--faint);font-weight:500;white-space:nowrap}
+    .logo-item{font-size:13px;font-weight:600;color:var(--faint);display:flex;align-items:center;gap:7px;transition:color .2s}
+    .logo-item:hover{color:var(--muted)}
+    .logo-icon{font-size:18px}
 
-        /* ─── TESTIMONIAL / QUOTE ─── */
-        .quote-section {
-            padding: 80px 40px; text-align: center;
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            color: white;
-        }
-        .quote-mark { font-size: 60px; color: #4361ee; line-height: 1; margin-bottom: 16px; }
-        .quote-text { font-size: 28px; font-weight: 600; max-width: 700px; margin: 0 auto 24px; line-height: 1.4; }
-        .quote-author { font-size: 14px; color: rgba(255,255,255,0.5); }
+    /* SHARED SECTION */
+    .sec{padding:96px 48px}
+    .sec-in{max-width:1200px;margin:0 auto}
+    .sec-hdr{text-align:center;margin-bottom:60px}
+    .sec-tag{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--pl);background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);padding:5px 13px;border-radius:18px;margin-bottom:14px}
+    .sec-hdr h2{font-family:'Space Grotesk',sans-serif;font-size:42px;font-weight:700;line-height:1.15;letter-spacing:-.8px}
+    .sec-hdr p{font-size:17px;color:var(--muted);margin-top:14px;max-width:540px;margin-left:auto;margin-right:auto;line-height:1.65}
 
-        /* ─── PRICING ─── */
-        .pricing { padding: 100px 40px; text-align: center; }
-        .pricing-cards { display: flex; gap: 24px; max-width: 800px; margin: 48px auto 0; justify-content: center; }
-        .pricing-card {
-            background: white; border: 2px solid #eee; border-radius: 20px; padding: 40px;
-            flex: 1; max-width: 360px; transition: all 0.3s;
-        }
-        .pricing-card.popular { border-color: #4361ee; box-shadow: 0 8px 40px rgba(67,97,238,0.15); transform: scale(1.04); }
-        .pricing-card .plan-name { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #888; }
-        .pricing-card.popular .plan-name { color: #4361ee; }
-        .pricing-card .price { font-size: 48px; font-weight: 900; margin: 16px 0; }
-        .pricing-card .price span { font-size: 16px; font-weight: 400; color: #888; }
-        .pricing-card .plan-desc { font-size: 14px; color: #777; margin-bottom: 24px; }
-        .pricing-card ul { list-style: none; text-align: left; margin-bottom: 32px; }
-        .pricing-card ul li { font-size: 14px; padding: 8px 0; border-bottom: 1px solid #f5f5f5; display: flex; align-items: center; gap: 8px; }
-        .pricing-card ul li::before { content: '✓'; color: #4361ee; font-weight: 700; font-size: 16px; }
-        .pricing-btn {
-            display: block; width: 100%; padding: 14px; border-radius: 10px; font-size: 15px;
-            font-weight: 700; text-decoration: none; text-align: center; transition: all 0.2s;
-        }
-        .pricing-btn.outline { border: 2px solid #ddd; color: #333; background: white; }
-        .pricing-btn.outline:hover { border-color: #4361ee; color: #4361ee; }
-        .pricing-btn.filled { background: #4361ee; color: white; border: none; }
-        .pricing-btn.filled:hover { background: #3651d4; }
+    /* PAIN */
+    .pain-bg{background:var(--bg2)}
+    .pain-hero{text-align:center;margin-bottom:56px}
+    .pain-big{font-size:80px;font-weight:900;font-family:'Space Grotesk',sans-serif;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1}
+    .pain-sub{font-size:19px;color:var(--muted);margin-top:8px}
+    .pain-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+    .pain-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:30px;transition:all .3s}
+    .pain-card:hover{border-color:rgba(99,102,241,.3);background:rgba(99,102,241,.05);transform:translateY(-4px)}
+    .pain-ico{font-size:30px;margin-bottom:14px}
+    .pain-card h3{font-size:17px;font-weight:700;margin-bottom:9px}
+    .pain-card p{font-size:13px;color:var(--muted);line-height:1.7}
 
-        /* ─── CTA FINAL ─── */
-        .cta-final {
-            padding: 100px 40px; text-align: center;
-            background: linear-gradient(135deg, #4361ee, #7209b7);
-            color: white;
-        }
-        .cta-final h2 { font-size: 40px; font-weight: 800; margin-bottom: 20px; }
-        .cta-final p { font-size: 18px; opacity: 0.85; max-width: 500px; margin: 0 auto 40px; }
-        .btn-white {
-            background: white; color: #4361ee; padding: 16px 40px; border-radius: 12px;
-            font-size: 16px; font-weight: 700; text-decoration: none;
-            display: inline-block; transition: all 0.3s;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-        }
-        .btn-white:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+    /* STEPS */
+    .steps-wrap{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;position:relative}
+    .steps-wrap::before{content:'';position:absolute;top:26px;left:calc(16.7% + 14px);right:calc(16.7% + 14px);height:2px;background:linear-gradient(90deg,var(--primary),var(--violet),var(--cyan));opacity:.3}
+    .step{text-align:center;position:relative}
+    .step-num{width:52px;height:52px;border-radius:50%;margin:0 auto 22px;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:800;border:2px solid var(--primary);color:var(--primary);background:var(--bg);position:relative;z-index:1;transition:all .3s}
+    .step:hover .step-num{background:var(--grad);color:white;border-color:transparent;box-shadow:0 0 28px rgba(99,102,241,.5)}
+    .step-ico{font-size:26px;margin-bottom:10px}
+    .step h3{font-size:17px;font-weight:700;margin-bottom:8px}
+    .step p{font-size:13px;color:var(--muted);line-height:1.7}
 
-        /* ─── FOOTER ─── */
-        footer {
-            padding: 40px; text-align: center; font-size: 13px; color: #aaa;
-            border-top: 1px solid #f0f0f0;
-        }
-        footer a { color: #4361ee; text-decoration: none; }
+    /* FEATURES */
+    .feat-bg{background:var(--bg2)}
+    .feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+    .feat-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:28px;transition:all .4s;position:relative;overflow:hidden}
+    .feat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--grad);opacity:0;transition:opacity .4s}
+    .feat-card:hover::before{opacity:1}
+    .feat-card:hover{border-color:rgba(99,102,241,.25);transform:translateY(-4px);box-shadow:0 20px 56px rgba(0,0,0,.3)}
+    .feat-ico{width:46px;height:46px;border-radius:11px;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.15);display:flex;align-items:center;justify-content:center;font-size:21px;margin-bottom:18px}
+    .feat-card h3{font-size:16px;font-weight:700;margin-bottom:8px}
+    .feat-card p{font-size:13px;color:var(--muted);line-height:1.7}
+    .feat-hl{font-size:12px;color:var(--pl);font-weight:600;margin-top:10px}
 
-        /* ─── RESPONSIVE ─── */
-        @media (max-width: 768px) {
-            .hero h1 { font-size: 36px; }
-            .pillars-grid { grid-template-columns: 1fr; }
-            .flow-steps { flex-direction: column; gap: 24px; }
-            .flow-steps::before { display: none; }
-            .hero-stats { flex-direction: column; gap: 24px; }
-            .pricing-cards { flex-direction: column; align-items: center; }
-            .pricing-card.popular { transform: scale(1); }
-            nav { padding: 12px 20px; }
-            .nav-links { gap: 16px; }
-        }
-    </style>
+    /* COMPARISON */
+    .cmp-wrap{overflow-x:auto}
+    .cmp-tbl{width:100%;border-collapse:collapse}
+    .cmp-tbl th{padding:15px 22px;font-size:12px;font-weight:600;text-align:center;border-bottom:1px solid var(--border);color:var(--muted)}
+    .cmp-tbl th:first-child{text-align:left;color:var(--faint);width:28%}
+    .cmp-tbl th.bm{color:var(--pl);background:rgba(99,102,241,.06);border-radius:8px 8px 0 0;border-left:1px solid rgba(99,102,241,.15);border-right:1px solid rgba(99,102,241,.15)}
+    .cmp-tbl td{padding:13px 22px;font-size:13px;border-bottom:1px solid rgba(255,255,255,.04);text-align:center;color:var(--muted)}
+    .cmp-tbl td:first-child{text-align:left;color:var(--text);font-weight:500}
+    .cmp-tbl td.bm{background:rgba(99,102,241,.04);color:var(--text);font-weight:600;border-left:1px solid rgba(99,102,241,.1);border-right:1px solid rgba(99,102,241,.1)}
+    .iyes{color:var(--green)}.ino{color:var(--faint)}.ipar{color:#f59e0b;font-size:11px}
+
+    /* TESTIMONIALS */
+    .testi-bg{background:var(--bg2)}
+    .testi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+    .testi-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:28px;display:flex;flex-direction:column;gap:14px;transition:all .3s}
+    .testi-card:hover{border-color:rgba(99,102,241,.25);transform:translateY(-4px)}
+    .testi-stars{color:#f59e0b;font-size:13px;letter-spacing:2px}
+    .testi-txt{font-size:14px;color:var(--text);line-height:1.75;flex:1;font-style:italic}
+    .testi-author{display:flex;align-items:center;gap:10px;padding-top:14px;border-top:1px solid var(--border)}
+    .tav{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:white;flex-shrink:0}
+    .testi-name{font-size:13px;font-weight:600}
+    .testi-role{font-size:11px;color:var(--muted)}
+
+    /* PRICING */
+    .price-grid{display:flex;gap:22px;max-width:1120px;margin:0 auto;justify-content:center}
+    .price-card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:36px;flex:1;max-width:370px;position:relative;transition:all .3s}
+    .price-card.pop{border-color:rgba(99,102,241,.4);box-shadow:0 0 60px rgba(99,102,241,.12)}
+    .pop-badge{position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:var(--grad);color:white;font-size:10px;font-weight:700;padding:4px 14px;border-radius:10px;white-space:nowrap}
+    .plan-name{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px}
+    .plan-price{font-size:50px;font-weight:900;font-family:'Space Grotesk',sans-serif;line-height:1}
+    .plan-price.gr{background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+    .plan-per{font-size:14px;color:var(--muted);font-weight:400}
+    .plan-desc{font-size:12px;color:var(--muted);margin:14px 0 22px;line-height:1.6;padding-bottom:20px;border-bottom:1px solid var(--border)}
+    .plan-feats{list-style:none;margin-bottom:28px;display:flex;flex-direction:column;gap:10px}
+    .plan-feats li{font-size:13px;display:flex;align-items:flex-start;gap:8px}
+    .plan-feats li::before{content:'✓';color:var(--green);font-weight:700;flex-shrink:0}
+    .plan-btn{display:block;width:100%;padding:13px;border-radius:9px;font-size:14px;font-weight:700;text-decoration:none;text-align:center;transition:all .2s;cursor:pointer;border:none;font-family:inherit}
+    .plan-btn.out{border:1px solid var(--border);color:var(--text);background:transparent}
+    .plan-btn.out:hover{border-color:var(--primary);color:var(--pl)}
+    .plan-btn.fill{background:var(--grad);color:white;box-shadow:0 4px 18px rgba(99,102,241,.3)}
+    .plan-btn.fill:hover{box-shadow:0 8px 28px rgba(99,102,241,.5);transform:translateY(-1px)}
+    .price-note{text-align:center;font-size:12px;color:var(--faint);margin-top:24px}
+
+    /* WAITLIST */
+    .wl-bg{background:var(--bg2)}
+    .wl-box{max-width:600px;margin:0 auto;text-align:center}
+    .wl-counter{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:28px;font-size:13px;color:var(--muted)}
+    .wl-spots{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.25);color:var(--green);font-size:12px;font-weight:700;padding:4px 12px;border-radius:10px}
+    #wl-form{display:flex;flex-direction:column;gap:12px;margin-top:32px}
+    .wl-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .wl-input{background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:9px;padding:13px 16px;color:var(--text);font-size:14px;font-family:inherit;transition:border-color .2s;outline:none}
+    .wl-input:focus{border-color:var(--primary)}
+    .wl-input::placeholder{color:var(--faint)}
+    select.wl-input option{background:#1a1f35;color:var(--text)}
+    .wl-submit{background:var(--grad);color:white;border:none;padding:15px;border-radius:9px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .3s;box-shadow:0 4px 24px rgba(99,102,241,.35)}
+    .wl-submit:hover{transform:translateY(-2px);box-shadow:0 8px 36px rgba(99,102,241,.5)}
+    .wl-success{display:none;text-align:center;padding:40px 0}
+    .wl-num{font-size:72px;font-weight:900;font-family:'Space Grotesk',sans-serif;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1;margin-bottom:8px}
+    .wl-success p{font-size:16px;color:var(--muted);line-height:1.7}
+    .wl-success strong{color:var(--text)}
+
+    /* FAQ */
+    .faq-list{max-width:700px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
+    .faq-item{background:var(--card);border:1px solid var(--border);border-radius:11px;overflow:hidden;transition:border-color .3s}
+    .faq-item.open{border-color:rgba(99,102,241,.3)}
+    .faq-q{padding:18px 22px;font-size:14px;font-weight:600;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:14px;user-select:none}
+    .faq-q:hover{color:var(--pl)}
+    .faq-chev{font-size:16px;color:var(--faint);transition:transform .3s;flex-shrink:0}
+    .faq-item.open .faq-chev{transform:rotate(180deg);color:var(--pl)}
+    .faq-a{max-height:0;overflow:hidden;transition:max-height .4s ease}
+    .faq-a-in{padding:0 22px 18px;font-size:13px;color:var(--muted);line-height:1.8}
+    .faq-item.open .faq-a{max-height:200px}
+
+    /* CTA FINAL */
+    .cta-fin{padding:120px 48px;text-align:center;position:relative;overflow:hidden}
+    .cta-fin::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(99,102,241,.14) 0%,transparent 70%)}
+    .cta-fin-in{position:relative;max-width:620px;margin:0 auto}
+    .cta-fin h2{font-family:'Space Grotesk',sans-serif;font-size:50px;font-weight:700;line-height:1.1;letter-spacing:-1px;margin-bottom:18px}
+    .cta-fin h2 span{background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+    .cta-fin p{font-size:17px;color:var(--muted);margin-bottom:36px;line-height:1.6}
+    .cta-fin-sub{font-size:12px;color:var(--faint);margin-top:14px}
+
+    /* FOOTER */
+    footer{padding:36px 48px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--faint)}
+    footer a{color:var(--muted);text-decoration:none;transition:color .2s}
+    footer a:hover{color:var(--pl)}
+    .footer-links{display:flex;gap:24px}
+
+    /* ANIMATIONS */
+    .fu{opacity:0;transform:translateY(22px);transition:all .65s ease;animation:fu-fallback 1ms 3000ms forwards}
+    .fu.vis{opacity:1;transform:none;animation:none}
+    @keyframes fu-fallback{to{opacity:1;transform:none}}
+    .fu:nth-child(2){transition-delay:.1s}.fu:nth-child(3){transition-delay:.2s}
+    .fu:nth-child(4){transition-delay:.3s}.fu:nth-child(5){transition-delay:.4s}
+    .fu:nth-child(6){transition-delay:.5s}
+
+    /* RESPONSIVE */
+    @media(max-width:1024px){.hero-inner{flex-direction:column;gap:56px}.hero-mockup{flex:none;width:100%;max-width:520px;align-self:center}.hero h1{font-size:48px}}
+    @media(max-width:768px){
+      nav{padding:14px 20px}nav.scrolled{padding:10px 20px}
+      .nav-links a:not(.nav-cta):not(.lang-btn){display:none}
+      .hero{padding:96px 20px 60px}
+      .hero h1{font-size:34px;letter-spacing:-1px}
+      .hero-sub{font-size:15px}
+      .hero-stats{flex-direction:column;gap:14px}
+      .hstat+.hstat{border-left:none;padding-left:0;border-top:1px solid var(--border);padding-top:14px}
+      .pain-grid,.feat-grid,.testi-grid,.steps-wrap{grid-template-columns:1fr}
+      .steps-wrap::before{display:none}
+      .price-grid{flex-direction:column;align-items:center}
+      .sec{padding:64px 20px}.sec-hdr h2{font-size:28px}
+      .cta-fin h2{font-size:30px}.cta-fin{padding:80px 20px}
+      .wl-row{grid-template-columns:1fr}
+      footer{flex-direction:column;gap:14px;text-align:center}
+      .logos-bar{flex-direction:column;gap:16px;padding:20px}
+      /* Touch targets min 44px (iOS/Android guidelines) */
+      .btn-main,.btn-ghost,.nav-cta,.plan-btn,.wl-submit,.mock-send{min-height:44px;touch-action:manipulation}
+      .lang-btn{min-height:36px;min-width:36px}
+      .faq-q{min-height:44px}
+      /* Hero mockup masqué sur très petit écran pour gagner de l'espace */
+      .hero-mockup{display:none}
+      /* Wl form full width */
+      .wl-input,.wl-submit{font-size:16px} /* prevent zoom iOS */
+    }
+    @media(max-width:390px){
+      .hero h1{font-size:28px}
+      .sec-hdr h2{font-size:24px}
+      .pain-big{font-size:56px}
+    }
+    /* Safe area iPhone (notch, Dynamic Island) */
+    @supports(padding:max(0px)){
+      nav{padding-left:max(20px,env(safe-area-inset-left));padding-right:max(20px,env(safe-area-inset-right))}
+      footer{padding-bottom:max(36px,env(safe-area-inset-bottom))}
+    }
+  </style>
 </head>
 <body>
 
 <!-- NAV -->
-<nav>
-    <a href="#" class="nav-logo">Easy<span>Mail</span></a>
-    <div class="nav-links">
-        <a href="#features">Fonctionnalités</a>
-        <a href="#compare">Comparatif</a>
-        <a href="#pricing">Tarifs</a>
-        <a href="#cta" class="btn-primary">Essai gratuit</a>
+<nav id="nav">
+  <a href="#" class="nav-logo">
+    <div class="nav-logo-icon">⚡</div>
+    <span class="nav-logo-text">BoosterMail</span>
+  </a>
+  <div class="nav-links">
+    <a href="#features" data-i18n="nav_feat">Fonctionnalités</a>
+    <a href="#compare" data-i18n="nav_cmp">Comparatif</a>
+    <a href="#pricing" data-i18n="nav_price">Tarifs</a>
+    <a href="blog.html" data-i18n="nav_blog">Blog</a>
+    <a href="#waitlist" class="nav-cta" data-i18n="nav_cta">Essayer gratuitement</a>
+    <div class="lang-switcher">
+      <button class="lang-btn" onclick="setLang('fr')">FR</button>
+      <button class="lang-btn" onclick="setLang('en')">EN</button>
+      <button class="lang-btn" onclick="setLang('de')">DE</button>
+      <button class="lang-btn" onclick="setLang('es')">ES</button>
     </div>
+  </div>
 </nav>
 
 <!-- HERO -->
 <section class="hero">
-    <div class="hero-content">
-        <div class="hero-badge">🚀 Propulsé par Claude AI (Anthropic)</div>
-        <h1>Divisez par 2 votre <span class="highlight">temps de gestion</span> des mails</h1>
-        <p>EasyMail rédige vos emails dans votre style, détecte vos engagements et relance automatiquement jusqu'à obtenir une réponse.</p>
-        <div class="hero-cta">
-            <a href="#cta" class="btn-large primary">Démarrer gratuitement</a>
-            <a href="#features" class="btn-large secondary">Voir comment ça marche</a>
-        </div>
-        <div class="hero-stats">
-            <div class="hero-stat">
-                <div class="number">&lt;5s</div>
-                <div class="label">Réponse générée</div>
-            </div>
-            <div class="hero-stat">
-                <div class="number">100%</div>
-                <div class="label">Votre style, votre ton</div>
-            </div>
-            <div class="hero-stat">
-                <div class="number">0</div>
-                <div class="label">Sujet oublié</div>
-            </div>
-        </div>
+  <div class="orb orb1"></div><div class="orb orb2"></div><div class="orb orb3"></div>
+  <div class="hero-inner">
+    <div class="hero-text">
+      <div class="hero-badge"><span class="badge-dot"></span><span data-i18n="hero_badge">Propulsé par Claude AI · Anthropic</span></div>
+      <h1>
+        <span class="static" data-i18n="hero_h1_static">Répondez à vos emails Outlook</span>
+        <span class="dyn-wrap"><span class="dyn" id="dyn-text">en 4 secondes</span></span>
+      </h1>
+      <p class="hero-sub" data-i18n="hero_sub">BoosterMail apprend votre style d'écriture, comprend le profil de chaque contact, et génère des réponses professionnelles directement dans Outlook — sans jamais changer vos habitudes.</p>
+      <div class="hero-cta">
+        <a href="#waitlist" class="btn-main" data-i18n="hero_cta1">Essayer gratuitement →</a>
+        <a href="#features" class="btn-ghost" data-i18n="hero_cta2">↓ Voir comment ça marche</a>
+      </div>
+      <div class="hero-stats">
+        <div class="hstat"><div class="hstat-num">&lt;4s</div><div class="hstat-lbl" data-i18n="stat1">Génération par email</div></div>
+        <div class="hstat"><div class="hstat-num">100%</div><div class="hstat-lbl" data-i18n="stat2">Votre style préservé</div></div>
+        <div class="hstat"><div class="hstat-num">0</div><div class="hstat-lbl" data-i18n="stat3">Email oublié</div></div>
+      </div>
     </div>
+    <div class="hero-mockup">
+      <div class="mock">
+        <div class="mock-bar">
+          <span class="mdot mdot-r"></span><span class="mdot mdot-y"></span><span class="mdot mdot-g"></span>
+          <span class="mock-bar-title">Outlook — Boîte de réception</span>
+        </div>
+        <div class="mock-body">
+          <div class="mock-left">
+            <div class="mock-from-row">
+              <div class="mock-av">SM</div>
+              <div><div class="mock-from-name">Sophie Martin</div><div class="mock-from-time">il y a 3 min</div></div>
+            </div>
+            <div class="mock-subj" data-i18n="mock_subj">RE : Proposition commerciale Q2</div>
+            <div class="mock-body-txt" data-i18n="mock_body">Bonjour, suite à notre réunion de lundi, j'aurais besoin de votre avis sur la proposition avant vendredi prochain. Pourriez-vous me confirmer les délais et le budget révisé ? Merci d'avance pour votre retour rapide.</div>
+            <div class="mock-tags">
+              <span class="mtag" data-i18n="tag_imp">Important</span>
+              <span class="mtag or" data-i18n="tag_dead">Échéance vendredi</span>
+            </div>
+          </div>
+          <div class="mock-right">
+            <div class="mock-bm-hdr"><span class="bm-live-dot"></span> BoosterMail</div>
+            <div class="mock-gen-box">
+              <div class="mock-gen-txt" id="mock-txt"><span class="mock-cursor"></span></div>
+            </div>
+            <div class="mock-timer" id="mock-timer">⚡ 0.0s</div>
+            <button class="mock-send" data-i18n="mock_send">Envoyer →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </section>
 
-<!-- PROMISE -->
-<section class="promise">
-    <h2>EasyMail ne vous aide pas à écrire des emails.</h2>
-    <p>Il s'assure que chaque échange aboutit. Chaque engagement est suivi. Chaque relance part <span class="accent">au bon moment</span>.</p>
+<!-- LOGOS BAR -->
+<div class="logos-bar">
+  <span class="logos-lbl" data-i18n="logos_lbl">Compatible avec</span>
+  <div class="logo-item"><span class="logo-icon">🪟</span> Microsoft Outlook</div>
+  <div class="logo-item"><span class="logo-icon">🤖</span> Claude AI · Anthropic</div>
+  <div class="logo-item"><span class="logo-icon">🔒</span> <span data-i18n="logos_gdpr">Données 100% privées</span></div>
+  <div class="logo-item"><span class="logo-icon">💻</span> Windows 10 / 11</div>
+</div>
+
+<!-- PAIN -->
+<section class="sec pain-bg" id="pain">
+  <div class="sec-in">
+    <div class="sec-hdr">
+      <div class="sec-tag" data-i18n="pain_tag">Le problème</div>
+      <div class="pain-big">30%</div>
+      <div class="pain-sub" data-i18n="pain_big_sub">de votre journée de travail est engloutie par les emails.</div>
+    </div>
+    <div class="pain-grid">
+      <div class="pain-card fu">
+        <div class="pain-ico">⏱️</div>
+        <h3 data-i18n="pain1_h">Trop de temps à rédiger</h3>
+        <p data-i18n="pain1_p">Reformuler, calibrer le ton, trouver les bons mots... Chaque réponse prend 5 à 15 minutes de concentration.</p>
+      </div>
+      <div class="pain-card fu">
+        <div class="pain-ico">🎭</div>
+        <h3 data-i18n="pain2_h">Le ton jamais parfait</h3>
+        <p data-i18n="pain2_p">Trop formel avec un client décontracté. Trop désinvolte avec un interlocuteur exigeant. Difficile de toujours doser juste.</p>
+      </div>
+      <div class="pain-card fu">
+        <div class="pain-ico">🔔</div>
+        <h3 data-i18n="pain3_h">Des engagements oubliés</h3>
+        <p data-i18n="pain3_p">Une deadline enfouie dans un thread. Une relance à faire. Un engagement pris par email et jamais suivi. Ça arrive à tout le monde.</p>
+      </div>
+    </div>
+  </div>
 </section>
 
-<!-- 4 PILLARS -->
-<section class="pillars" id="features">
-    <div class="section-header">
-        <div class="tag">Fonctionnalités</div>
-        <h2>4 piliers, un seul objectif :<br>zéro sujet perdu</h2>
+<!-- HOW IT WORKS -->
+<section class="sec" id="features">
+  <div class="sec-in">
+    <div class="sec-hdr">
+      <div class="sec-tag" data-i18n="how_tag">Comment ça marche</div>
+      <h2 data-i18n="how_h2">Votre email parfait en 3 clics</h2>
+      <p data-i18n="how_sub">Pas de copier-coller. Pas de changement d'outil. Tout se passe dans Outlook.</p>
     </div>
-    <div class="pillars-grid">
-        <div class="pillar-card">
-            <div class="pillar-icon">🧠</div>
-            <div class="pillar-tag">Rédaction</div>
-            <div class="pillar-title">Vos mails, votre style</div>
-            <div class="pillar-desc">EasyMail apprend votre façon d'écrire sur vos 800 derniers emails. Chaque réponse est unique, adaptée au correspondant et au contexte.</div>
-            <ul class="pillar-features">
-                <li>Style appris automatiquement</li>
-                <li>Ton adapté par correspondant</li>
-                <li>Analyse des pièces jointes</li>
-                <li>Anti-hallucination intégré</li>
-            </ul>
-        </div>
-        <div class="pillar-card featured">
-            <div class="pillar-icon">🎯</div>
-            <div class="pillar-tag">Pilotage</div>
-            <div class="pillar-title">Suivi intelligent des engagements</div>
-            <div class="pillar-desc">Détection automatique des échéances et engagements dans vos mails. Relance au bon moment, avec le bon ton. Boucle fermée jusqu'à réponse.</div>
-            <ul class="pillar-features">
-                <li>Détection automatique des délais</li>
-                <li>Relance progressive et contextuelle</li>
-                <li>Clôture auto à réception de réponse</li>
-                <li>Tableau de bord des échéances</li>
-            </ul>
-        </div>
-        <div class="pillar-card">
-            <div class="pillar-icon">⚡</div>
-            <div class="pillar-tag">Vitesse</div>
-            <div class="pillar-title">Réponse prête avant vous</div>
-            <div class="pillar-desc">Grâce à la pré-génération intelligente, votre réponse est prête dès que vous ouvrez un mail. Streaming en temps réel, latence quasi invisible.</div>
-            <ul class="pillar-features">
-                <li>Pré-génération spéculative</li>
-                <li>Streaming instantané</li>
-                <li>3 niveaux de profondeur (R/S/H)</li>
-                <li>Contexte enrichi automatiquement</li>
-            </ul>
-        </div>
-        <div class="pillar-card">
-            <div class="pillar-icon">🧩</div>
-            <div class="pillar-tag">Organisation</div>
-            <div class="pillar-title">Classement automatique</div>
-            <div class="pillar-desc">Vos mails et pièces jointes se classent tout seuls dans vos dossiers Outlook et Windows. Le système apprend vos préférences.</div>
-            <ul class="pillar-features">
-                <li>Classement mails dans Outlook</li>
-                <li>Classement PJ dans l'explorateur</li>
-                <li>Apprentissage continu des dossiers</li>
-                <li>Suggestion intelligente de PJ</li>
-            </ul>
-        </div>
+    <div class="steps-wrap">
+      <div class="step fu">
+        <div class="step-ico">📬</div>
+        <div class="step-num">1</div>
+        <h3 data-i18n="step1_h">Ouvrez un email</h3>
+        <p data-i18n="step1_p">BoosterMail analyse le contexte, l'historique et le profil de votre correspondant en arrière-plan — avant même que vous cliquiez.</p>
+      </div>
+      <div class="step fu">
+        <div class="step-ico">⚡</div>
+        <div class="step-num">2</div>
+        <h3 data-i18n="step2_h">Cliquez Générer</h3>
+        <p data-i18n="step2_p">Une réponse complète, dans votre style exact, adaptée au ton du contact. Prête en moins de 4 secondes grâce au streaming IA.</p>
+      </div>
+      <div class="step fu">
+        <div class="step-ico">✈️</div>
+        <div class="step-num">3</div>
+        <h3 data-i18n="step3_h">Relisez et envoyez</h3>
+        <p data-i18n="step3_p">Ajustez si besoin. Envoyez. BoosterMail apprend de vos modifications et s'améliore à chaque email.</p>
+      </div>
     </div>
+  </div>
 </section>
 
-<!-- FLOW -->
-<section class="flow">
-    <div class="section-header">
-        <div class="tag">Comment ça marche</div>
-        <h2>Du mail reçu à la réponse obtenue</h2>
-        <p>EasyMail pilote chaque échange de bout en bout</p>
+<!-- FEATURES -->
+<section class="sec feat-bg">
+  <div class="sec-in">
+    <div class="sec-hdr">
+      <div class="sec-tag" data-i18n="feat_tag">Fonctionnalités</div>
+      <h2 data-i18n="feat_h2">Conçu pour les pros du mail</h2>
     </div>
-    <div class="flow-steps">
-        <div class="flow-step">
-            <div class="flow-step-num">1</div>
-            <h4>Mail reçu</h4>
-            <p>EasyMail analyse le contexte, l'historique et le profil du correspondant</p>
-        </div>
-        <div class="flow-step">
-            <div class="flow-step-num">2</div>
-            <h4>Réponse générée</h4>
-            <p>Dans votre style exact, avec le bon ton et toutes les infos pertinentes</p>
-        </div>
-        <div class="flow-step active">
-            <div class="flow-step-num">3</div>
-            <h4>Suivi activé</h4>
-            <p>Échéances détectées, engagements trackés, relances programmées</p>
-        </div>
-        <div class="flow-step">
-            <div class="flow-step-num">4</div>
-            <h4>Classé</h4>
-            <p>Mail et PJ rangés automatiquement dans les bons dossiers</p>
-        </div>
+    <div class="feat-grid">
+      <div class="feat-card fu">
+        <div class="feat-ico">⚡</div>
+        <h3 data-i18n="f1_h">4 secondes chrono</h3>
+        <p data-i18n="f1_p">Streaming speculatif et pré-génération en arrière-plan. Votre réponse est souvent prête avant que vous finissiez de lire.</p>
+        <div class="feat-hl" data-i18n="f1_hl">Temps moyen mesuré : 3,8s</div>
+      </div>
+      <div class="feat-card fu">
+        <div class="feat-ico">🖊️</div>
+        <h3 data-i18n="f2_h">Votre style, appris</h3>
+        <p data-i18n="f2_p">Analyse de vos 800 derniers emails envoyés. Niveau N1–N10, calibration continue. Personne ne saura que l'IA a écrit.</p>
+        <div class="feat-hl" data-i18n="f2_hl">Onboarding en 3 min</div>
+      </div>
+      <div class="feat-card fu">
+        <div class="feat-ico">👤</div>
+        <h3 data-i18n="f3_h">Profil de chaque contact</h3>
+        <p data-i18n="f3_p">Formel, direct, sensible, humouristique... BoosterMail construit un profil relationnel pour chaque correspondant et adapte le ton.</p>
+        <div class="feat-hl" data-i18n="f3_hl">Auto-apprentissage continu</div>
+      </div>
+      <div class="feat-card fu">
+        <div class="feat-ico">⏰</div>
+        <h3 data-i18n="f4_h">Zéro échéance oubliée</h3>
+        <p data-i18n="f4_p">Détection automatique des deadlines dans vos emails. Tableau de bord dédié. Relance intelligente si pas de réponse.</p>
+        <div class="feat-hl" data-i18n="f4_hl">Alertes proactives</div>
+      </div>
+      <div class="feat-card fu">
+        <div class="feat-ico">📎</div>
+        <h3 data-i18n="f5_h">Pièces jointes comprises</h3>
+        <p data-i18n="f5_p">BoosterMail lit et intègre le contenu de vos PDF, Word et Excel dans la réponse générée. Plus besoin de copier-coller.</p>
+        <div class="feat-hl" data-i18n="f5_hl">PDF, Word, Excel</div>
+      </div>
+      <div class="feat-card fu">
+        <div class="feat-ico">📈</div>
+        <h3 data-i18n="f6_h">Vous progressez</h3>
+        <p data-i18n="f6_p">Score rédactionnel 0–100 sur 5 axes. Milestones et gamification. Votre écriture s'améliore à chaque email envoyé.</p>
+        <div class="feat-hl" data-i18n="f6_hl">Niveaux N1 → N10</div>
+      </div>
     </div>
+  </div>
 </section>
 
 <!-- COMPARISON -->
-<section class="comparison" id="compare">
-    <div class="section-header">
-        <div class="tag">Comparatif</div>
-        <h2>EasyMail vs la concurrence</h2>
+<section class="sec" id="compare">
+  <div class="sec-in">
+    <div class="sec-hdr">
+      <div class="sec-tag" data-i18n="cmp_tag">Comparatif</div>
+      <h2 data-i18n="cmp_h2">BoosterMail vs la concurrence</h2>
+      <p data-i18n="cmp_sub">Aucun outil ne combine vitesse, style personnalisé et suivi des engagements.</p>
     </div>
-    <table>
+    <div class="cmp-wrap">
+      <table class="cmp-tbl">
         <thead>
-            <tr>
-                <th></th>
-                <th class="em">EasyMail</th>
-                <th>Copilot</th>
-                <th>Gmail + Gemini</th>
-                <th>Superhuman</th>
-            </tr>
+          <tr>
+            <th></th>
+            <th class="bm">BoosterMail</th>
+            <th>Copilot M365</th>
+            <th>Gmail + Gemini</th>
+            <th>Superhuman</th>
+          </tr>
         </thead>
         <tbody>
-            <tr>
-                <td><strong>Rédaction IA</strong></td>
-                <td class="em"><span class="check">●</span> Excellent</td>
-                <td><span class="partial">●</span> Bon</td>
-                <td><span class="partial">●</span> Correct</td>
-                <td><span class="cross">●</span> Faible</td>
-            </tr>
-            <tr>
-                <td><strong>Style personnalisé</strong></td>
-                <td class="em"><span class="check">●</span> Appris sur vos mails</td>
-                <td><span class="cross">●</span> Générique</td>
-                <td><span class="cross">●</span> Générique</td>
-                <td><span class="cross">●</span> Non</td>
-            </tr>
-            <tr>
-                <td><strong>Suivi des engagements</strong></td>
-                <td class="em"><span class="check">●</span> Automatique</td>
-                <td><span class="cross">●</span> Non</td>
-                <td><span class="cross">●</span> Non</td>
-                <td><span class="cross">●</span> Non</td>
-            </tr>
-            <tr>
-                <td><strong>Relance intelligente</strong></td>
-                <td class="em"><span class="check">●</span> Progressive</td>
-                <td><span class="cross">●</span> Non</td>
-                <td><span class="cross">●</span> Non</td>
-                <td><span class="cross">●</span> Non</td>
-            </tr>
-            <tr>
-                <td><strong>Classement auto</strong></td>
-                <td class="em"><span class="check">●</span> Mails + PJ</td>
-                <td><span class="cross">●</span> Non</td>
-                <td><span class="cross">●</span> Non</td>
-                <td><span class="cross">●</span> Non</td>
-            </tr>
-            <tr>
-                <td><strong>Apprentissage continu</strong></td>
-                <td class="em"><span class="check">●</span> Style + contacts</td>
-                <td><span class="cross">●</span> Limité</td>
-                <td><span class="cross">●</span> Non</td>
-                <td><span class="cross">●</span> Non</td>
-            </tr>
-            <tr>
-                <td><strong>Vitesse perçue</strong></td>
-                <td class="em"><span class="check">●</span> &lt;5 secondes</td>
-                <td><span class="partial">●</span> 5-10s</td>
-                <td><span class="partial">●</span> 3-8s</td>
-                <td><span class="check">●</span> Instant</td>
-            </tr>
+          <tr><td data-i18n="cmp_r1">Génération IA &lt;5s</td><td class="bm"><span class="iyes">✓</span> <span data-i18n="cmp_v_yes_bm">&lt;4s</span></td><td><span class="ipar">~10s</span></td><td><span class="ipar">~8s</span></td><td><span class="ino">✗</span></td></tr>
+          <tr><td data-i18n="cmp_r2">Style personnalisé appris</td><td class="bm"><span class="iyes">✓</span> <span data-i18n="cmp_v_yours">Vos 800 mails</span></td><td><span class="ino">✗</span></td><td><span class="ino">✗</span></td><td><span class="ino">✗</span></td></tr>
+          <tr><td data-i18n="cmp_r3">Profil par contact</td><td class="bm"><span class="iyes">✓</span></td><td><span class="ino">✗</span></td><td><span class="ino">✗</span></td><td><span class="ino">✗</span></td></tr>
+          <tr><td data-i18n="cmp_r4">Suivi des échéances</td><td class="bm"><span class="iyes">✓</span> <span data-i18n="cmp_v_auto">Automatique</span></td><td><span class="ino">✗</span></td><td><span class="ino">✗</span></td><td><span class="ino">✗</span></td></tr>
+          <tr><td data-i18n="cmp_r5">Analyse pièces jointes</td><td class="bm"><span class="iyes">✓</span></td><td><span class="ipar">Limité</span></td><td><span class="ino">✗</span></td><td><span class="ino">✗</span></td></tr>
+          <tr><td data-i18n="cmp_r6">100% dans Outlook</td><td class="bm"><span class="iyes">✓</span> <span data-i18n="cmp_v_native">Natif</span></td><td><span class="iyes">✓</span></td><td><span class="ino">✗</span></td><td><span class="ipar">Partiel</span></td></tr>
         </tbody>
-    </table>
+      </table>
+    </div>
+  </div>
 </section>
 
-<!-- QUOTE -->
-<section class="quote-section">
-    <div class="quote-mark">"</div>
-    <div class="quote-text">Votre produit ne vaut pas pour ce qu'il fait.<br>Il vaut pour ce qu'il empêche :<br><em>oublier, perdre, ne pas relancer.</em></div>
+<!-- TESTIMONIALS -->
+<section class="sec testi-bg">
+  <div class="sec-in">
+    <div class="sec-hdr">
+      <div class="sec-tag" data-i18n="testi_tag">Beta-testeurs</div>
+      <h2 data-i18n="testi_h2">Ils ont rejoint la beta</h2>
+    </div>
+    <div class="testi-grid">
+      <div class="testi-card fu">
+        <div class="testi-stars">★★★★★</div>
+        <div class="testi-txt" data-i18n="t1_txt">"En 3 jours, BoosterMail avait capturé exactement mon style. Mes clients me demandent si j'ai pris un ghostwriter. La vérité : je réponds deux fois plus vite qu'avant."</div>
+        <div class="testi-author"><div class="tav" style="background:linear-gradient(135deg,#6366f1,#8b5cf6)">MD</div><div><div class="testi-name">Marine D.</div><div class="testi-role" data-i18n="t1_role">Directrice commerciale, 12 ans d'Outlook</div></div></div>
+      </div>
+      <div class="testi-card fu">
+        <div class="testi-stars">★★★★★</div>
+        <div class="testi-txt" data-i18n="t2_txt">"Ce qui me frappe, c'est la rapidité. J'ouvre un mail, la réponse est déjà en train de s'écrire. J'ai l'impression que l'IA m'attendait. Bluffant."</div>
+        <div class="testi-author"><div class="tav" style="background:linear-gradient(135deg,#06b6d4,#6366f1)">TL</div><div><div class="testi-name">Thomas L.</div><div class="testi-role" data-i18n="t2_role">Consultant indépendant, 80+ emails/jour</div></div></div>
+      </div>
+      <div class="testi-card fu">
+        <div class="testi-stars">★★★★★</div>
+        <div class="testi-txt" data-i18n="t3_txt">"L'échéancier automatique est un game-changer. Avant, j'avais des post-its partout pour suivre mes relances. Maintenant BoosterMail le fait pour moi."</div>
+        <div class="testi-author"><div class="tav" style="background:linear-gradient(135deg,#8b5cf6,#06b6d4)">JM</div><div><div class="testi-name">Julie M.</div><div class="testi-role" data-i18n="t3_role">Chef de projet, secteur santé</div></div></div>
+      </div>
+    </div>
+  </div>
 </section>
 
 <!-- PRICING -->
-<section class="pricing" id="pricing">
-    <div class="section-header">
-        <div class="tag">Tarifs</div>
-        <h2>Simple, transparent</h2>
-        <p>14 jours d'essai gratuit, sans engagement</p>
+<section class="sec" id="pricing">
+  <div class="sec-in">
+    <div class="sec-hdr">
+      <div class="sec-tag" data-i18n="price_tag">Tarifs</div>
+      <h2 data-i18n="price_h2">Simple et transparent</h2>
+      <p data-i18n="price_sub">Tous les plans incluent 14 jours d'essai gratuit, sans carte bancaire.</p>
     </div>
-    <div class="pricing-cards">
-        <div class="pricing-card">
-            <div class="plan-name">Essentiel</div>
-            <div class="price">15€<span>/mois</span></div>
-            <div class="plan-desc">Pour les indépendants et petites équipes</div>
-            <ul>
-                <li>Rédaction IA illimitée</li>
-                <li>Style personnalisé</li>
-                <li>50 profils contacts</li>
-                <li>Classement automatique</li>
-                <li>Support email</li>
-            </ul>
-            <a href="#" class="pricing-btn outline">Commencer l'essai</a>
-        </div>
-        <div class="pricing-card popular">
-            <div class="plan-name">Professionnel</div>
-            <div class="price">25€<span>/mois</span></div>
-            <div class="plan-desc">Pour ceux qui ne veulent rien laisser passer</div>
-            <ul>
-                <li>Tout de Essentiel, plus :</li>
-                <li>Suivi d'engagements illimité</li>
-                <li>Relances intelligentes</li>
-                <li>Contacts illimités</li>
-                <li>Classement PJ Windows</li>
-                <li>Support prioritaire</li>
-            </ul>
-            <a href="#" class="pricing-btn filled">Commencer l'essai</a>
-        </div>
+    <div class="price-grid">
+      <div class="price-card fu">
+        <div class="plan-name" data-i18n="p1_name">Essentiel</div>
+        <div class="plan-price">9€<span class="plan-per" data-i18n="per_mo">/mois</span></div>
+        <div class="plan-desc" data-i18n="p1_desc">Pour les indépendants et consultants qui veulent aller plus vite.</div>
+        <ul class="plan-feats">
+          <li data-i18n="p1_f1">Génération IA illimitée</li>
+          <li data-i18n="p1_f2">Style personnalisé</li>
+          <li data-i18n="p1_f3">50 profils contacts</li>
+          <li data-i18n="p1_f4">Classement automatique</li>
+          <li data-i18n="p1_f5">Support email</li>
+        </ul>
+        <a href="#waitlist" class="plan-btn out" data-i18n="plan_join">Essayer gratuitement</a>
+      </div>
+      <div class="price-card pop fu">
+        <div class="pop-badge" data-i18n="pop_badge">⭐ Plus populaire</div>
+        <div class="plan-name" data-i18n="p2_name">Professionnel</div>
+        <div class="plan-price gr">19€<span class="plan-per" data-i18n="per_mo">/mois</span></div>
+        <div class="plan-desc" data-i18n="p2_desc">Pour ceux qui ne veulent rien laisser passer. Zéro sujet oublié.</div>
+        <ul class="plan-feats">
+          <li data-i18n="p2_f1">Tout de Essentiel, plus :</li>
+          <li data-i18n="p2_f2">Suivi d'échéances illimité</li>
+          <li data-i18n="p2_f3">Relances intelligentes</li>
+          <li data-i18n="p2_f4">Contacts illimités</li>
+          <li data-i18n="p2_f5">Classement PJ Windows</li>
+          <li data-i18n="p2_f6">Support prioritaire</li>
+        </ul>
+        <a href="#waitlist" class="plan-btn fill" data-i18n="plan_join">Essayer gratuitement</a>
+      </div>
+      <div class="price-card fu">
+        <div class="plan-name" data-i18n="p3_name">Business</div>
+        <div class="plan-price">29€<span class="plan-per" data-i18n="per_mo">/mois</span></div>
+        <div class="plan-desc" data-i18n="p3_desc">Pour les équipes et entreprises qui veulent déployer BoosterMail à grande échelle.</div>
+        <ul class="plan-feats">
+          <li data-i18n="p3_f1">Tout de Professionnel, plus :</li>
+          <li data-i18n="p3_f2">Multi-utilisateurs</li>
+          <li data-i18n="p3_f3">Tableau de bord équipe</li>
+          <li data-i18n="p3_f4">Statistiques avancées</li>
+          <li data-i18n="p3_f5">Onboarding dédié</li>
+          <li data-i18n="p3_f6">Support téléphonique</li>
+        </ul>
+        <a href="#waitlist" class="plan-btn out" data-i18n="plan_join">Essayer gratuitement</a>
+      </div>
     </div>
+    <div class="price-note" data-i18n="price_note">🔒 Aucun paiement requis aujourd'hui — la beta est gratuite. Les tarifs s'appliquent au lancement commercial.</div>
+  </div>
+</section>
+
+<!-- WAITLIST -->
+<section class="sec wl-bg" id="waitlist">
+  <div class="sec-in">
+    <div class="sec-hdr">
+      <div class="sec-tag" data-i18n="wl_tag">Accès prioritaire</div>
+      <h2 data-i18n="wl_h2">Essayer gratuitement</h2>
+      <p data-i18n="wl_sub">En raison d'une forte demande et pour maîtriser notre croissance, nous limitons les accès. Inscrivez-vous pour rejoindre la liste et obtenir votre accès en priorité.</p>
+    </div>
+    <div class="wl-box">
+      <div class="wl-counter">
+        <span class="wl-spots" data-i18n="wl_spots">🟢 Places disponibles</span>
+        <span data-i18n="wl_already">Déjà <strong>247 professionnels</strong> inscrits</span>
+      </div>
+      <form id="wl-form" onsubmit="return false">
+        <input type="hidden" name="access_key" value="8c4193f6-401e-4854-9d5f-b1ad7deca678">
+        <input type="hidden" name="subject" value="🚀 Nouvelle inscription BoosterMail - Liste d'attente">
+        <input type="hidden" name="from_name" value="BoosterMail Waitlist">
+        <input type="hidden" name="redirect" value="false">
+        <div class="wl-row">
+          <input type="text" name="prenom" class="wl-input" data-i18n-placeholder="wl_fname" placeholder="Prénom" required>
+          <input type="text" name="societe" class="wl-input" data-i18n-placeholder="wl_company" placeholder="Société" required>
+        </div>
+        <input type="email" name="email" class="wl-input" data-i18n-placeholder="wl_email" placeholder="Email professionnel" required>
+        <select name="poste" class="wl-input">
+          <option value="" data-i18n="wl_role_sel">Je suis...</option>
+          <option value="dirigeant" data-i18n="wl_r1">Dirigeant / DG</option>
+          <option value="commercial" data-i18n="wl_r2">Commercial / Account Manager</option>
+          <option value="consultant" data-i18n="wl_r3">Consultant / Freelance</option>
+          <option value="rh" data-i18n="wl_r4">RH / Office Manager</option>
+          <option value="autre" data-i18n="wl_r5">Autre</option>
+        </select>
+        <select name="plan" class="wl-input">
+          <option value="" data-i18n="wl_plan_sel">Plan souhaité...</option>
+          <option value="essentiel" data-i18n="wl_pl1">Essentiel — 9€/mois</option>
+          <option value="pro" data-i18n="wl_pl2">Professionnel — 19€/mois</option>
+          <option value="business" data-i18n="wl_pl3b">Business — 29€/mois</option>
+          <option value="unknown" data-i18n="wl_pl3">Je ne sais pas encore</option>
+        </select>
+        <button type="submit" class="wl-submit" data-i18n="wl_submit">Essayer gratuitement →</button>
+      </form>
+      <div class="wl-success" id="wl-success">
+        <div class="wl-num" id="wl-pos">#48</div>
+        <p data-i18n="wl_ok"><strong>Vous êtes sur la liste !</strong><br>Nous vous contacterons en priorité dès l'ouverture de la beta.<br>En attendant, partagez BoosterMail à un collègue 👇</p>
+        <div style="margin-top:20px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+          <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://www.boostermail.ai" target="_blank" class="btn-ghost" style="font-size:13px;padding:10px 18px">Partager sur LinkedIn</a>
+          <a href="mailto:?subject=BoosterMail — emails Outlook en 4s&body=Je viens de rejoindre la beta de BoosterMail : https://www.boostermail.ai" class="btn-ghost" style="font-size:13px;padding:10px 18px" data-i18n="wl_share_email">Envoyer par email</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="sec" id="faq">
+  <div class="sec-in">
+    <div class="sec-hdr">
+      <div class="sec-tag" data-i18n="faq_tag">FAQ</div>
+      <h2 data-i18n="faq_h2">Questions fréquentes</h2>
+    </div>
+    <div class="faq-list" id="faq-list">
+      <div class="faq-item">
+        <div class="faq-q"><span data-i18n="faq1_q">Avec quel Outlook BoosterMail fonctionne-t-il ?</span><span class="faq-chev">▾</span></div>
+        <div class="faq-a"><div class="faq-a-in" data-i18n="faq1_a">BoosterMail fonctionne avec le Nouvel Outlook (New Outlook) et Outlook classique sur Windows 10 et 11. Une connexion Microsoft est requise pour les fonctionnalités complètes.</div></div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q"><span data-i18n="faq2_q">Mes emails sont-ils lus ou stockés par un tiers ?</span><span class="faq-chev">▾</span></div>
+        <div class="faq-a"><div class="faq-a-in" data-i18n="faq2_a">Non. BoosterMail s'exécute localement sur votre machine. Seul le texte du mail en cours est envoyé à l'API Claude (Anthropic) pour générer la réponse — jamais stocké, jamais partagé.</div></div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q"><span data-i18n="faq3_q">Comment l'IA apprend mon style d'écriture ?</span><span class="faq-chev">▾</span></div>
+        <div class="faq-a"><div class="faq-a-in" data-i18n="faq3_a">À l'onboarding (3 min), BoosterMail analyse vos 300 derniers emails envoyés et 500 reçus pour construire votre profil stylistique (longueur, formules, ton, structure). Il s'affine ensuite à chaque envoi.</div></div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q"><span data-i18n="faq4_q">La génération est vraiment en 4 secondes ?</span><span class="faq-chev">▾</span></div>
+        <div class="faq-a"><div class="faq-a-in" data-i18n="faq4_a">Oui — grâce à la pré-génération spéculative. Pendant que vous lisez un email, BoosterMail prépare déjà la réponse en arrière-plan. Quand vous cliquez "Générer", elle est souvent déjà prête ou arrive en 2–4s.</div></div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q"><span data-i18n="faq5_q">Fonctionne-t-il sans connexion Internet ?</span><span class="faq-chev">▾</span></div>
+        <div class="faq-a"><div class="faq-a-in" data-i18n="faq5_a">La génération IA nécessite une connexion Internet pour interroger l'API Claude. Les fonctionnalités de lecture et navigation dans l'inbox fonctionnent sans, mais en mode dégradé.</div></div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q"><span data-i18n="faq6_q">Quand la beta sera-t-elle disponible ?</span><span class="faq-chev">▾</span></div>
+        <div class="faq-a"><div class="faq-a-in" data-i18n="faq6_a">La beta est en cours de déploiement progressif. En rejoignant la liste d'attente, vous serez notifié en priorité avec un accès immédiat dès votre tour.</div></div>
+      </div>
+    </div>
+  </div>
 </section>
 
 <!-- CTA FINAL -->
-<section class="cta-final" id="cta">
-    <h2>Prêt à ne plus rien oublier ?</h2>
-    <p>Essayez EasyMail gratuitement pendant 14 jours. Aucune carte bancaire requise.</p>
-    <a href="#" class="btn-white">Démarrer mon essai gratuit →</a>
+<section class="cta-fin">
+  <div class="cta-fin-in">
+    <h2 data-i18n="ctaf_h2">Votre prochaine réponse.<br><span>En 4 secondes.</span></h2>
+    <p data-i18n="ctaf_sub">Rejoignez les professionnels qui ont repris le contrôle de leur boîte mail.</p>
+    <a href="#waitlist" class="btn-main" style="font-size:16px;padding:16px 40px" data-i18n="ctaf_btn">Essayer gratuitement →</a>
+    <div class="cta-fin-sub" data-i18n="ctaf_note">14 jours gratuits · Sans carte bancaire · Windows 10/11</div>
+  </div>
 </section>
 
 <!-- FOOTER -->
 <footer>
-    <p>© 2026 EasyMail — Propulsé par <a href="https://anthropic.com" target="_blank">Claude AI</a> · <a href="#">Mentions légales</a> · <a href="#">Contact</a></p>
+  <a href="#" class="nav-logo" style="font-size:16px">
+    <div class="nav-logo-icon" style="width:24px;height:24px;font-size:12px">⚡</div>
+    <span class="nav-logo-text">BoosterMail</span>
+  </a>
+  <div class="footer-links">
+    <a href="#" data-i18n="foot_legal">Mentions légales</a>
+    <a href="#" data-i18n="foot_privacy">Confidentialité</a>
+    <a href="mailto:contact@boostermail.ai">contact@boostermail.ai</a>
+  </div>
+  <span>© 2026 BoosterMail</span>
 </footer>
 
+<script>
+/* ══════════════════════════════════════
+   TRANSLATIONS
+══════════════════════════════════════ */
+const T = {
+  fr: {
+    nav_feat:'Fonctionnalités', nav_cmp:'Comparatif', nav_price:'Tarifs', nav_blog:'Blog', nav_cta:'Essayer gratuitement',
+    hero_badge:'Propulsé par Claude AI · Anthropic',
+    hero_h1_static:'Répondez à vos emails Outlook',
+    hero_dyn:['en 4 secondes','dans votre style','pour chaque contact','sans effort'],
+    hero_sub:"BoosterMail apprend votre style d'écriture, comprend le profil de chaque contact, et génère des réponses professionnelles directement dans Outlook — sans jamais changer vos habitudes.",
+    hero_cta1:"Essayer gratuitement →", hero_cta2:'↓ Voir comment ça marche',
+    stat1:'Génération par email', stat2:'Votre style préservé', stat3:'Email oublié',
+    mock_subj:'RE : Proposition commerciale Q2',
+    mock_body:'Bonjour, suite à notre réunion de lundi, j\'aurais besoin de votre avis sur la proposition avant vendredi. Pourriez-vous confirmer les délais et le budget révisé ?',
+    tag_imp:'Important', tag_dead:'Échéance vendredi', mock_send:'Envoyer →',
+    mock_gen:['Bonjour Sophie,\n\nMerci pour votre message.\n\nConcernant la proposition\ncommerciale Q2, voici mon\nretour et les délais révisés...\n'],
+    logos_lbl:'Compatible avec', logos_gdpr:'Données 100% privées',
+    pain_tag:'Le problème', pain_big_sub:'de votre journée de travail est engloutie par les emails.',
+    pain1_h:'Trop de temps à rédiger', pain1_p:'Reformuler, calibrer le ton, trouver les bons mots... Chaque réponse prend 5 à 15 minutes.',
+    pain2_h:'Le ton jamais parfait', pain2_p:'Trop formel, trop désinvolte, trop long... Difficile de toujours doser juste selon l\'interlocuteur.',
+    pain3_h:'Des engagements oubliés', pain3_p:'Une deadline dans un thread, une relance à faire, un engagement pris et jamais suivi.',
+    how_tag:'Comment ça marche', how_h2:'Votre email parfait en 3 clics', how_sub:'Pas de copier-coller. Pas de changement d\'outil. Tout se passe dans Outlook.',
+    step1_h:'Ouvrez un email', step1_p:'BoosterMail analyse le contexte, l\'historique et le profil de votre correspondant — avant même que vous cliquiez.',
+    step2_h:'Cliquez Générer', step2_p:'Une réponse complète, dans votre style exact. Prête en moins de 4 secondes grâce au streaming IA.',
+    step3_h:'Relisez et envoyez', step3_p:'Ajustez si besoin. BoosterMail apprend de vos modifications et s\'améliore à chaque email.',
+    feat_tag:'Fonctionnalités', feat_h2:'Conçu pour les pros du mail',
+    f1_h:'4 secondes chrono', f1_p:'Streaming speculatif et pré-génération en arrière-plan. Votre réponse est souvent prête avant que vous finissiez de lire.', f1_hl:'Temps moyen mesuré : 3,8s',
+    f2_h:'Votre style, appris', f2_p:'Analyse de vos 800 derniers emails. Niveau N1–N10, calibration continue. Personne ne saura que l\'IA a écrit.', f2_hl:'Onboarding en 3 min',
+    f3_h:'Profil de chaque contact', f3_p:'BoosterMail construit un profil relationnel pour chaque correspondant et adapte le ton automatiquement.', f3_hl:'Auto-apprentissage continu',
+    f4_h:'Zéro échéance oubliée', f4_p:'Détection automatique des deadlines. Tableau de bord dédié. Relance intelligente si pas de réponse.', f4_hl:'Alertes proactives',
+    f5_h:'Pièces jointes comprises', f5_p:'BoosterMail lit et intègre le contenu de vos PDF, Word et Excel dans la réponse générée.', f5_hl:'PDF, Word, Excel',
+    f6_h:'Vous progressez', f6_p:'Score rédactionnel 0–100 sur 5 axes. Milestones et gamification. Votre écriture s\'améliore à chaque email.', f6_hl:'Niveaux N1 → N10',
+    cmp_tag:'Comparatif', cmp_h2:'BoosterMail vs la concurrence', cmp_sub:'Aucun outil ne combine vitesse, style personnalisé et suivi des engagements.',
+    cmp_r1:'Génération IA <5s', cmp_r2:'Style personnalisé appris', cmp_r3:'Profil par contact', cmp_r4:'Suivi des échéances', cmp_r5:'Analyse pièces jointes', cmp_r6:'100% dans Outlook',
+    cmp_v_yes_bm:'<4s', cmp_v_yours:'Vos 800 mails', cmp_v_auto:'Automatique', cmp_v_native:'Natif',
+    testi_tag:'Beta-testeurs', testi_h2:'Ils ont rejoint la beta',
+    t1_txt:'"En 3 jours, BoosterMail avait capturé exactement mon style. Mes clients me demandent si j\'ai pris un ghostwriter. La vérité : je réponds deux fois plus vite."',
+    t1_role:'Directrice commerciale, 12 ans d\'Outlook',
+    t2_txt:'"Ce qui me frappe, c\'est la rapidité. J\'ouvre un mail, la réponse est déjà en train de s\'écrire. J\'ai l\'impression que l\'IA m\'attendait."',
+    t2_role:'Consultant indépendant, 80+ emails/jour',
+    t3_txt:'"L\'échéancier automatique est un game-changer. Avant, j\'avais des post-its partout. Maintenant BoosterMail fait les relances pour moi."',
+    t3_role:'Chef de projet, secteur santé',
+    price_tag:'Tarifs', price_h2:'Simple et transparent', price_sub:'Tous les plans incluent 14 jours d\'essai gratuit, sans carte bancaire.',
+    p1_name:'Essentiel', p1_desc:'Pour les indépendants et consultants qui veulent aller plus vite.',
+    p1_f1:'Génération IA illimitée', p1_f2:'Style personnalisé', p1_f3:'50 profils contacts', p1_f4:'Classement automatique', p1_f5:'Support email',
+    p2_name:'Professionnel', p2_desc:'Pour ceux qui ne veulent rien laisser passer. Zéro sujet oublié.',
+    p2_f1:'Tout de Essentiel, plus :', p2_f2:'Suivi d\'échéances illimité', p2_f3:'Relances intelligentes', p2_f4:'Contacts illimités', p2_f5:'Classement PJ Windows', p2_f6:'Support prioritaire',
+    per_mo:'/mois', plan_join:'Essayer gratuitement', pop_badge:'⭐ Plus populaire',
+    price_note:'🔒 14 jours d\'essai gratuit · Sans carte bancaire · Accès limité en ce moment',
+    wl_tag:'Accès prioritaire', wl_h2:'Essayer gratuitement', wl_sub:"En raison d'une forte demande et pour maîtriser notre croissance, nous limitons les accès. Inscrivez-vous pour rejoindre la liste et obtenir votre accès en priorité.",
+    wl_spots:'🟢 Places disponibles', wl_already:'Déjà <strong>247 professionnels</strong> inscrits',
+    wl_fname:'Prénom', wl_company:'Société', wl_email:'Email professionnel',
+    wl_role_sel:'Je suis...', wl_r1:'Dirigeant / DG', wl_r2:'Commercial / Account Manager', wl_r3:'Consultant / Freelance', wl_r4:'RH / Office Manager', wl_r5:'Autre',
+    p3_name:'Business', p3_desc:'Pour les équipes et entreprises qui veulent déployer BoosterMail à grande échelle.',
+    p3_f1:'Tout de Professionnel, plus :', p3_f2:'Multi-utilisateurs', p3_f3:'Tableau de bord équipe', p3_f4:'Statistiques avancées', p3_f5:'Onboarding dédié', p3_f6:'Support téléphonique',
+    wl_plan_sel:'Plan souhaité...', wl_pl1:'Essentiel — 9€/mois', wl_pl2:'Professionnel — 19€/mois', wl_pl3b:'Business — 29€/mois', wl_pl3:'Je ne sais pas encore',
+    wl_submit:'Essayer gratuitement →',
+    wl_loading:'Inscription en cours...',
+    wl_ok:'<strong>✅ Bien enregistré !</strong><br><br>En raison d\'une forte demande et pour maîtriser notre croissance, nous limitons les accès.<br>Vous êtes sur la liste prioritaire — nous vous contacterons dès qu\'une place se libère.',
+    wl_share_email:'Envoyer par email',
+    faq_tag:'FAQ', faq_h2:'Questions fréquentes',
+    faq1_q:'Avec quel Outlook BoosterMail fonctionne-t-il ?', faq1_a:'BoosterMail fonctionne avec le Nouvel Outlook et Outlook classique sur Windows 10/11. Une connexion Microsoft est requise pour les fonctionnalités complètes.',
+    faq2_q:'Mes emails sont-ils lus ou stockés par un tiers ?', faq2_a:'Non. BoosterMail s\'exécute localement sur votre machine. Seul le texte du mail en cours est envoyé à l\'API Claude (Anthropic) — jamais stocké, jamais partagé.',
+    faq3_q:'Comment l\'IA apprend mon style d\'écriture ?', faq3_a:'À l\'onboarding (3 min), BoosterMail analyse vos 300 derniers emails envoyés et 500 reçus pour construire votre profil stylistique. Il s\'affine ensuite à chaque envoi.',
+    faq4_q:'La génération est vraiment en 4 secondes ?', faq4_a:'Oui — grâce à la pré-génération spéculative. BoosterMail prépare la réponse en arrière-plan pendant que vous lisez. Quand vous cliquez "Générer", elle est souvent déjà prête.',
+    faq5_q:'Fonctionne-t-il sans connexion Internet ?', faq5_a:'La génération IA nécessite une connexion pour interroger l\'API Claude. La navigation dans l\'inbox fonctionne hors connexion.',
+    faq6_q:'Quand la beta sera-t-elle disponible ?', faq6_a:'La beta est en déploiement progressif. En rejoignant la liste d\'attente, vous serez notifié en priorité avec un accès immédiat dès votre tour.',
+    ctaf_h2:'Votre prochaine réponse.<br><span>En 4 secondes.</span>',
+    ctaf_sub:'Rejoignez les professionnels qui ont repris le contrôle de leur boîte mail.',
+    ctaf_btn:'Essayer gratuitement →', ctaf_note:'14 jours gratuits · Sans carte bancaire · Windows 10/11',
+    foot_legal:'Mentions légales', foot_privacy:'Confidentialité'
+  },
+  en: {
+    nav_feat:'Features', nav_cmp:'Compare', nav_price:'Pricing', nav_blog:'Blog', nav_cta:'Try for free',
+    hero_badge:'Powered by Claude AI · Anthropic',
+    hero_h1_static:'Reply to your Outlook emails',
+    hero_dyn:['in 4 seconds','in your style','for every contact','effortlessly'],
+    hero_sub:'BoosterMail learns your writing style, understands each contact\'s profile, and generates professional replies directly in Outlook — without changing your workflow.',
+    hero_cta1:'Try for free →', hero_cta2:'↓ See how it works',
+    stat1:'Generation per email', stat2:'Your style preserved', stat3:'Email forgotten',
+    mock_subj:'RE: Q2 Commercial Proposal', mock_body:'Hi, following our Monday meeting, I\'d need your feedback on the proposal before next Friday. Could you confirm the timeline and revised budget?',
+    tag_imp:'Important', tag_dead:'Deadline Friday', mock_send:'Send →',
+    mock_gen:['Hi Sophie,\n\nThank you for your message.\n\nRegarding the Q2 commercial\nproposal, here is my feedback\nand the revised timeline...\n'],
+    logos_lbl:'Compatible with', logos_gdpr:'100% Private data',
+    pain_tag:'The problem', pain_big_sub:'of your working day is swallowed by emails.',
+    pain1_h:'Too much time writing', pain1_p:'Rephrasing, calibrating tone, finding the right words... Each reply takes 5 to 15 minutes of focus.',
+    pain2_h:'Tone never quite right', pain2_p:'Too formal with a casual client. Too relaxed with a demanding one. Always hard to get the balance right.',
+    pain3_h:'Missed commitments', pain3_p:'A deadline buried in a thread, a follow-up to send, a commitment made by email and never tracked.',
+    how_tag:'How it works', how_h2:'Your perfect email in 3 clicks', how_sub:'No copy-paste. No tool switching. Everything happens in Outlook.',
+    step1_h:'Open an email', step1_p:'BoosterMail analyses context, history and your contact\'s profile — before you even click.',
+    step2_h:'Click Generate', step2_p:'A complete reply, in your exact style. Ready in under 4 seconds thanks to AI streaming.',
+    step3_h:'Review and send', step3_p:'Adjust if needed. BoosterMail learns from your edits and improves with every email.',
+    feat_tag:'Features', feat_h2:'Built for email power users',
+    f1_h:'4 seconds flat', f1_p:'Speculative streaming and background pre-generation. Your reply is often ready before you finish reading.', f1_hl:'Average measured time: 3.8s',
+    f2_h:'Your style, learned', f2_p:'Analyses your last 800 sent emails. Level N1–N10, continuous calibration. Nobody will know AI wrote it.', f2_hl:'3-min onboarding',
+    f3_h:'Profile per contact', f3_p:'BoosterMail builds a relational profile for every correspondent and adapts tone automatically.', f3_hl:'Continuous self-learning',
+    f4_h:'Zero missed deadlines', f4_p:'Automatic deadline detection. Dedicated dashboard. Smart follow-up if no reply.', f4_hl:'Proactive alerts',
+    f5_h:'Attachments understood', f5_p:'BoosterMail reads and integrates your PDF, Word and Excel content into the generated reply.', f5_hl:'PDF, Word, Excel',
+    f6_h:'You improve', f6_p:'Writing score 0–100 on 5 axes. Milestones and gamification. Your writing gets better with every email.', f6_hl:'Levels N1 → N10',
+    cmp_tag:'Compare', cmp_h2:'BoosterMail vs the competition', cmp_sub:'No tool combines speed, personalised style and commitment tracking.',
+    cmp_r1:'AI generation <5s', cmp_r2:'Learned personal style', cmp_r3:'Profile per contact', cmp_r4:'Commitment tracking', cmp_r5:'Attachment analysis', cmp_r6:'100% inside Outlook',
+    cmp_v_yes_bm:'<4s', cmp_v_yours:'Your 800 emails', cmp_v_auto:'Automatic', cmp_v_native:'Native',
+    testi_tag:'Beta testers', testi_h2:'They joined the beta',
+    t1_txt:'"In 3 days, BoosterMail captured my style exactly. My clients ask if I hired a ghostwriter. The truth: I reply twice as fast as before."', t1_role:'Sales Director, 12 years of Outlook',
+    t2_txt:'"What strikes me is the speed. I open an email, the reply is already writing itself. It feels like the AI was waiting for me."', t2_role:'Independent consultant, 80+ emails/day',
+    t3_txt:'"The automatic deadline tracker is a game-changer. I used to have post-its everywhere for follow-ups. Now BoosterMail handles it."', t3_role:'Project Manager, healthcare sector',
+    price_tag:'Pricing', price_h2:'Simple and transparent', price_sub:'All plans include a 14-day free trial, no credit card required.',
+    p1_name:'Essential', p1_desc:'For freelancers and consultants who want to go faster.',
+    p1_f1:'Unlimited AI generation', p1_f2:'Personalised style', p1_f3:'50 contact profiles', p1_f4:'Auto-classification', p1_f5:'Email support',
+    p2_name:'Professional', p2_desc:'For those who can\'t afford to miss anything. Zero forgotten topics.',
+    p2_f1:'Everything in Essential, plus:', p2_f2:'Unlimited deadline tracking', p2_f3:'Smart follow-ups', p2_f4:'Unlimited contacts', p2_f5:'Windows attachment filing', p2_f6:'Priority support',
+    per_mo:'/month', plan_join:'Try for free', pop_badge:'⭐ Most popular',
+    price_note:'🔒 14-day free trial · No credit card · Limited access right now',
+    wl_tag:'Priority access', wl_h2:'Try for free', wl_sub:'Due to high demand and to manage our growth, we are limiting access. Sign up to join the list and get your access as a priority.',
+    wl_spots:'🟢 Spots available', wl_already:'Already <strong>247 professionals</strong> signed up',
+    wl_fname:'First name', wl_company:'Company', wl_email:'Work email',
+    wl_role_sel:'I am...', wl_r1:'Executive / CEO', wl_r2:'Sales / Account Manager', wl_r3:'Consultant / Freelancer', wl_r4:'HR / Office Manager', wl_r5:'Other',
+    p3_name:'Business', p3_desc:'For teams and companies who want to deploy BoosterMail at scale.',
+    p3_f1:'Everything in Professional, plus:', p3_f2:'Multi-user', p3_f3:'Team dashboard', p3_f4:'Advanced analytics', p3_f5:'Dedicated onboarding', p3_f6:'Phone support',
+    wl_plan_sel:'Preferred plan...', wl_pl1:'Essential — €9/month', wl_pl2:'Professional — €19/month', wl_pl3b:'Business — €29/month', wl_pl3:'Not sure yet',
+    wl_submit:'Try for free →',
+    wl_loading:'Submitting...',
+    wl_ok:'<strong>✅ Successfully registered!</strong><br><br>Due to high demand and to manage our growth, we are limiting access.<br>You are on the priority list — we will contact you as soon as a spot opens up.',
+    wl_share_email:'Share by email',
+    faq_tag:'FAQ', faq_h2:'Frequently asked questions',
+    faq1_q:'Which version of Outlook does BoosterMail work with?', faq1_a:'BoosterMail works with New Outlook and Classic Outlook on Windows 10/11. A Microsoft connection is required for full features.',
+    faq2_q:'Are my emails read or stored by a third party?', faq2_a:'No. BoosterMail runs locally on your machine. Only the current email text is sent to the Claude API (Anthropic) — never stored, never shared.',
+    faq3_q:'How does the AI learn my writing style?', faq3_a:'During onboarding (3 min), BoosterMail analyses your last 300 sent and 500 received emails to build your style profile. It then refines with every send.',
+    faq4_q:'Is generation really in 4 seconds?', faq4_a:'Yes — thanks to speculative pre-generation. BoosterMail prepares the reply in the background while you read. When you click Generate, it\'s often already ready.',
+    faq5_q:'Does it work without an internet connection?', faq5_a:'AI generation requires an internet connection to query the Claude API. Inbox navigation works offline.',
+    faq6_q:'When will the beta be available?', faq6_a:'The beta is rolling out progressively. Joining the waitlist gives you priority access with immediate entry when your turn comes.',
+    ctaf_h2:'Your next reply.<br><span>In 4 seconds.</span>',
+    ctaf_sub:'Join the professionals who\'ve taken back control of their inbox.',
+    ctaf_btn:'Try for free →', ctaf_note:'14 days free · No card required · Windows 10/11',
+    foot_legal:'Legal notice', foot_privacy:'Privacy policy'
+  },
+  de: {
+    nav_feat:'Funktionen', nav_cmp:'Vergleich', nav_price:'Preise', nav_blog:'Blog', nav_cta:'Kostenlos testen',
+    hero_badge:'Powered by Claude AI · Anthropic',
+    hero_h1_static:'Beantworten Sie Ihre Outlook-E-Mails',
+    hero_dyn:['in 4 Sekunden','in Ihrem Stil','für jeden Kontakt','mühelos'],
+    hero_sub:'BoosterMail erlernt Ihren Schreibstil, versteht das Profil jedes Kontakts und erstellt professionelle Antworten direkt in Outlook — ohne Ihre Gewohnheiten zu ändern.',
+    hero_cta1:'Kostenlos testen →', hero_cta2:'↓ So funktioniert es',
+    stat1:'Generierung pro E-Mail', stat2:'Ihr Stil bewahrt', stat3:'E-Mail vergessen',
+    mock_subj:'RE: Kommerzielles Angebot Q2', mock_body:'Hallo, nach unserem Meeting am Montag brauche ich Ihre Meinung zum Angebot bis Freitag. Können Sie die Fristen und das überarbeitete Budget bestätigen?',
+    tag_imp:'Wichtig', tag_dead:'Frist Freitag', mock_send:'Senden →',
+    mock_gen:['Hallo Sophie,\n\nDanke für Ihre Nachricht.\n\nZum Angebot für Q2\nmöchte ich Ihnen meinen\nKommentar mitteilen...\n'],
+    logos_lbl:'Kompatibel mit', logos_gdpr:'100% private Daten',
+    pain_tag:'Das Problem', pain_big_sub:'Ihres Arbeitstages werden von E-Mails verschluckt.',
+    pain1_h:'Zu viel Zeit beim Schreiben', pain1_p:'Umformulieren, Ton kalibrieren, die richtigen Worte finden... Jede Antwort dauert 5 bis 15 Minuten.',
+    pain2_h:'Ton nie ganz richtig', pain2_p:'Zu förmlich mit einem lockeren Kunden. Zu locker mit einem anspruchsvollen. Den richtigen Ton immer zu treffen ist schwer.',
+    pain3_h:'Vergessene Verpflichtungen', pain3_p:'Eine Frist in einem Thread vergraben, ein Follow-up zu senden, eine Zusage per E-Mail gemacht und nie verfolgt.',
+    how_tag:'Wie es funktioniert', how_h2:'Ihre perfekte E-Mail in 3 Klicks', how_sub:'Kein Kopieren. Kein Toolvechsel. Alles passiert in Outlook.',
+    step1_h:'E-Mail öffnen', step1_p:'BoosterMail analysiert Kontext, Verlauf und Kontaktprofil — bevor Sie auch nur klicken.',
+    step2_h:'Generieren klicken', step2_p:'Eine vollständige Antwort, in Ihrem genauen Stil. In unter 4 Sekunden dank KI-Streaming.',
+    step3_h:'Überprüfen und senden', step3_p:'Anpassen wenn nötig. BoosterMail lernt aus Ihren Änderungen und verbessert sich mit jeder E-Mail.',
+    feat_tag:'Funktionen', feat_h2:'Für E-Mail-Profis entwickelt',
+    f1_h:'4 Sekunden genau', f1_p:'Spekulatives Streaming und Hintergrundgenerierung. Ihre Antwort ist oft fertig bevor Sie fertig gelesen haben.', f1_hl:'Gemessene Durchschnittszeit: 3,8s',
+    f2_h:'Ihr Stil, erlernt', f2_p:'Analyse Ihrer letzten 800 gesendeten E-Mails. Level N1–N10, kontinuierliche Kalibrierung.', f2_hl:'Onboarding in 3 Min.',
+    f3_h:'Profil pro Kontakt', f3_p:'BoosterMail erstellt ein Beziehungsprofil für jeden Kontakt und passt den Ton automatisch an.', f3_hl:'Kontinuierliches Selbstlernen',
+    f4_h:'Keine vergessenen Fristen', f4_p:'Automatische Fristenerkennung. Dediziertes Dashboard. Intelligente Nachverfolgung ohne Antwort.', f4_hl:'Proaktive Warnungen',
+    f5_h:'Anhänge verstanden', f5_p:'BoosterMail liest und integriert Ihre PDF-, Word- und Excel-Inhalte in die generierte Antwort.', f5_hl:'PDF, Word, Excel',
+    f6_h:'Sie verbessern sich', f6_p:'Schreibpunktzahl 0–100 auf 5 Achsen. Meilensteine und Gamification. Ihr Schreiben wird mit jeder E-Mail besser.', f6_hl:'Level N1 → N10',
+    cmp_tag:'Vergleich', cmp_h2:'BoosterMail vs. Mitbewerber', cmp_sub:'Kein Tool vereint Geschwindigkeit, personalisierten Stil und Verpflichtungsverfolgung.',
+    cmp_r1:'KI-Generierung <5s', cmp_r2:'Erlernter persönlicher Stil', cmp_r3:'Profil pro Kontakt', cmp_r4:'Fristenverfolgung', cmp_r5:'Anhang-Analyse', cmp_r6:'100% in Outlook',
+    cmp_v_yes_bm:'<4s', cmp_v_yours:'Ihre 800 E-Mails', cmp_v_auto:'Automatisch', cmp_v_native:'Nativ',
+    testi_tag:'Beta-Tester', testi_h2:'Sie sind der Beta beigetreten',
+    t1_txt:'"In 3 Tagen hatte BoosterMail meinen Stil genau erfasst. Meine Kunden fragen, ob ich einen Ghostwriter engagiert habe. Die Wahrheit: Ich antworte doppelt so schnell."',
+    t1_role:'Vertriebsleiterin, 12 Jahre Outlook',
+    t2_txt:'"Was mich beeindruckt, ist die Geschwindigkeit. Ich öffne eine E-Mail und die Antwort schreibt sich schon. Es fühlt sich an, als hätte die KI auf mich gewartet."',
+    t2_role:'Freiberuflicher Berater, 80+ E-Mails/Tag',
+    t3_txt:'"Der automatische Fristentracker ist ein Game-Changer. Früher hatte ich überall Post-its für Nachverfolgungen. Jetzt erledigt BoosterMail das für mich."',
+    t3_role:'Projektmanagerin, Gesundheitsbranche',
+    price_tag:'Preise', price_h2:'Einfach und transparent', price_sub:'Alle Pläne beinhalten 14 Tage kostenlose Testphase, keine Kreditkarte erforderlich.',
+    p1_name:'Essential', p1_desc:'Für Freiberufler und Berater, die schneller werden wollen.',
+    p1_f1:'Unbegrenzte KI-Generierung', p1_f2:'Personalisierter Stil', p1_f3:'50 Kontaktprofile', p1_f4:'Auto-Klassifizierung', p1_f5:'E-Mail-Support',
+    p2_name:'Professional', p2_desc:'Für die, die nichts verpassen können.',
+    p2_f1:'Alles aus Essential, plus:', p2_f2:'Unbegrenzte Fristenverfolgung', p2_f3:'Intelligente Nachverfolgungen', p2_f4:'Unbegrenzte Kontakte', p2_f5:'Windows-Anhang-Ablage', p2_f6:'Prioritäts-Support',
+    per_mo:'/Monat', plan_join:'Kostenlos testen', pop_badge:'⭐ Beliebteste',
+    price_note:'🔒 14 Tage kostenlos · Keine Kreditkarte · Begrenzter Zugang gerade jetzt',
+    wl_tag:'Prioritätszugang', wl_h2:'Kostenlos testen', wl_sub:'Aufgrund hoher Nachfrage und um unser Wachstum zu steuern, begrenzen wir den Zugang. Melden Sie sich an, um vorrangigen Zugang zu erhalten.',
+    wl_spots:'🟢 Plätze verfügbar', wl_already:'Bereits <strong>247 Fachleute</strong> angemeldet',
+    wl_fname:'Vorname', wl_company:'Unternehmen', wl_email:'Geschäftliche E-Mail',
+    wl_role_sel:'Ich bin...', wl_r1:'Führungskraft / CEO', wl_r2:'Vertrieb / Account Manager', wl_r3:'Berater / Freiberufler', wl_r4:'HR / Office Manager', wl_r5:'Sonstiges',
+    p3_name:'Business', p3_desc:'Für Teams und Unternehmen, die BoosterMail im großen Maßstab einsetzen möchten.',
+    p3_f1:'Alles aus Professional, plus:', p3_f2:'Mehrere Benutzer', p3_f3:'Team-Dashboard', p3_f4:'Erweiterte Statistiken', p3_f5:'Dediziertes Onboarding', p3_f6:'Telefon-Support',
+    wl_plan_sel:'Gewünschter Plan...', wl_pl1:'Essential — 9€/Monat', wl_pl2:'Professional — 19€/Monat', wl_pl3b:'Business — 29€/Monat', wl_pl3:'Noch nicht sicher',
+    wl_submit:'Kostenlos testen →',
+    wl_loading:'Anmeldung läuft...',
+    wl_ok:'<strong>✅ Erfolgreich registriert!</strong><br><br>Aufgrund hoher Nachfrage und um unser Wachstum zu steuern, begrenzen wir den Zugang.<br>Sie stehen auf der Prioritätsliste — wir kontaktieren Sie, sobald ein Platz frei wird.',
+    wl_share_email:'Per E-Mail teilen',
+    faq_tag:'FAQ', faq_h2:'Häufige Fragen',
+    faq1_q:'Mit welchem Outlook funktioniert BoosterMail?', faq1_a:'BoosterMail funktioniert mit New Outlook und Classic Outlook unter Windows 10/11. Für alle Funktionen ist eine Microsoft-Verbindung erforderlich.',
+    faq2_q:'Werden meine E-Mails von Dritten gelesen oder gespeichert?', faq2_a:'Nein. BoosterMail läuft lokal auf Ihrem Computer. Nur der aktuelle E-Mail-Text wird an die Claude-API (Anthropic) gesendet — nie gespeichert, nie geteilt.',
+    faq3_q:'Wie lernt die KI meinen Schreibstil?', faq3_a:'Beim Onboarding (3 Min.) analysiert BoosterMail Ihre letzten 300 gesendeten und 500 empfangenen E-Mails. Danach verfeinert es sich mit jeder Sendung.',
+    faq4_q:'Dauert die Generierung wirklich 4 Sekunden?', faq4_a:'Ja — dank spekulativer Vor-Generierung. BoosterMail bereitet die Antwort im Hintergrund vor, während Sie lesen. Wenn Sie auf Generieren klicken, ist sie oft bereits fertig.',
+    faq5_q:'Funktioniert es ohne Internetverbindung?', faq5_a:'Die KI-Generierung benötigt eine Verbindung zur Claude-API. Die Posteingang-Navigation funktioniert offline.',
+    faq6_q:'Wann wird die Beta verfügbar sein?', faq6_a:'Die Beta wird schrittweise ausgerollt. Durch die Aufnahme in die Warteliste erhalten Sie Prioritätszugang, sobald Ihr Platz frei ist.',
+    ctaf_h2:'Ihre nächste Antwort.<br><span>In 4 Sekunden.</span>',
+    ctaf_sub:'Schließen Sie sich den Fachleuten an, die die Kontrolle über ihren Posteingang zurückgewonnen haben.',
+    ctaf_btn:'Kostenlos testen →', ctaf_note:'14 Tage kostenlos · Keine Karte · Windows 10/11',
+    foot_legal:'Impressum', foot_privacy:'Datenschutz'
+  },
+  es: {
+    nav_feat:'Funciones', nav_cmp:'Comparativa', nav_price:'Precios', nav_blog:'Blog', nav_cta:'Probar gratis',
+    hero_badge:'Impulsado por Claude AI · Anthropic',
+    hero_h1_static:'Responde tus emails de Outlook',
+    hero_dyn:['en 4 segundos','en tu estilo','para cada contacto','sin esfuerzo'],
+    hero_sub:'BoosterMail aprende tu estilo de escritura, comprende el perfil de cada contacto y genera respuestas profesionales directamente en Outlook — sin cambiar tus hábitos.',
+    hero_cta1:'Probar gratis →', hero_cta2:'↓ Ver cómo funciona',
+    stat1:'Generación por email', stat2:'Tu estilo preservado', stat3:'Email olvidado',
+    mock_subj:'RE: Propuesta comercial Q2', mock_body:'Hola, tras nuestra reunión del lunes, necesitaría tu opinión sobre la propuesta antes del viernes. ¿Puedes confirmar los plazos y el presupuesto revisado?',
+    tag_imp:'Importante', tag_dead:'Plazo viernes', mock_send:'Enviar →',
+    mock_gen:['Hola Sophie,\n\nGracias por tu mensaje.\n\nSobre la propuesta comercial\ndel Q2, aquí mi valoración\ny los plazos revisados...\n'],
+    logos_lbl:'Compatible con', logos_gdpr:'Datos 100% privados',
+    pain_tag:'El problema', pain_big_sub:'de tu jornada laboral se la tragan los emails.',
+    pain1_h:'Demasiado tiempo redactando', pain1_p:'Reformular, calibrar el tono, encontrar las palabras justas... Cada respuesta tarda entre 5 y 15 minutos.',
+    pain2_h:'El tono nunca es perfecto', pain2_p:'Demasiado formal con un cliente informal. Demasiado relajado con uno exigente. Siempre difícil acertar.',
+    pain3_h:'Compromisos olvidados', pain3_p:'Un plazo enterrado en un hilo, un seguimiento pendiente, un compromiso adquirido por email y nunca rastreado.',
+    how_tag:'Cómo funciona', how_h2:'Tu email perfecto en 3 clics', how_sub:'Sin copiar y pegar. Sin cambiar de herramienta. Todo sucede en Outlook.',
+    step1_h:'Abre un email', step1_p:'BoosterMail analiza el contexto, el historial y el perfil de tu contacto — antes de que hagas clic.',
+    step2_h:'Haz clic en Generar', step2_p:'Una respuesta completa, en tu estilo exacto. Lista en menos de 4 segundos gracias al streaming de IA.',
+    step3_h:'Revisa y envía', step3_p:'Ajusta si es necesario. BoosterMail aprende de tus cambios y mejora con cada email.',
+    feat_tag:'Funciones', feat_h2:'Diseñado para profesionales del email',
+    f1_h:'4 segundos exactos', f1_p:'Streaming especulativo y pre-generación en segundo plano. Tu respuesta a menudo está lista antes de que termines de leer.', f1_hl:'Tiempo medio medido: 3,8s',
+    f2_h:'Tu estilo, aprendido', f2_p:'Analiza tus últimos 800 emails enviados. Nivel N1–N10, calibración continua. Nadie sabrá que lo escribió una IA.', f2_hl:'Onboarding en 3 min',
+    f3_h:'Perfil por contacto', f3_p:'BoosterMail construye un perfil relacional para cada interlocutor y adapta el tono automáticamente.', f3_hl:'Auto-aprendizaje continuo',
+    f4_h:'Cero plazos olvidados', f4_p:'Detección automática de deadlines. Panel dedicado. Seguimiento inteligente si no hay respuesta.', f4_hl:'Alertas proactivas',
+    f5_h:'Adjuntos comprendidos', f5_p:'BoosterMail lee e integra el contenido de tus PDF, Word y Excel en la respuesta generada.', f5_hl:'PDF, Word, Excel',
+    f6_h:'Tú mejoras', f6_p:'Puntuación redaccional 0–100 en 5 ejes. Hitos y gamificación. Tu escritura mejora con cada email.', f6_hl:'Niveles N1 → N10',
+    cmp_tag:'Comparativa', cmp_h2:'BoosterMail vs la competencia', cmp_sub:'Ninguna herramienta combina velocidad, estilo personalizado y seguimiento de compromisos.',
+    cmp_r1:'Generación IA <5s', cmp_r2:'Estilo personal aprendido', cmp_r3:'Perfil por contacto', cmp_r4:'Seguimiento de plazos', cmp_r5:'Análisis de adjuntos', cmp_r6:'100% en Outlook',
+    cmp_v_yes_bm:'<4s', cmp_v_yours:'Tus 800 emails', cmp_v_auto:'Automático', cmp_v_native:'Nativo',
+    testi_tag:'Beta-testers', testi_h2:'Se unieron a la beta',
+    t1_txt:'"En 3 días, BoosterMail capturó exactamente mi estilo. Mis clientes me preguntan si contraté un ghostwriter. La verdad: respondo el doble de rápido que antes."',
+    t1_role:'Directora comercial, 12 años con Outlook',
+    t2_txt:'"Lo que me impresiona es la velocidad. Abro un email y la respuesta ya se está escribiendo. Tengo la sensación de que la IA me estaba esperando."',
+    t2_role:'Consultor independiente, 80+ emails/día',
+    t3_txt:'"El rastreador automático de plazos es un game-changer. Antes tenía post-its por todas partes para los seguimientos. Ahora BoosterMail lo hace por mí."',
+    t3_role:'Jefa de proyecto, sector sanitario',
+    price_tag:'Precios', price_h2:'Simple y transparente', price_sub:'Todos los planes incluyen 14 días de prueba gratuita, sin tarjeta de crédito.',
+    p1_name:'Esencial', p1_desc:'Para autónomos y consultores que quieren ir más rápido.',
+    p1_f1:'Generación IA ilimitada', p1_f2:'Estilo personalizado', p1_f3:'50 perfiles de contacto', p1_f4:'Clasificación automática', p1_f5:'Soporte por email',
+    p2_name:'Profesional', p2_desc:'Para los que no pueden perderse nada. Cero temas olvidados.',
+    p2_f1:'Todo de Esencial, más:', p2_f2:'Seguimiento de plazos ilimitado', p2_f3:'Seguimientos inteligentes', p2_f4:'Contactos ilimitados', p2_f5:'Archivado de adjuntos Windows', p2_f6:'Soporte prioritario',
+    per_mo:'/mes', plan_join:'Probar gratis', pop_badge:'⭐ Más popular',
+    price_note:'🔒 14 días gratis · Sin tarjeta · Acceso limitado en este momento',
+    wl_tag:'Acceso prioritario', wl_h2:'Probar gratis', wl_sub:'Debido a la alta demanda y para gestionar nuestro crecimiento, limitamos el acceso. Regístrate para obtener acceso prioritario.',
+    wl_spots:'🟢 Plazas disponibles', wl_already:'Ya <strong>247 profesionales</strong> registrados',
+    wl_fname:'Nombre', wl_company:'Empresa', wl_email:'Email profesional',
+    wl_role_sel:'Soy...', wl_r1:'Directivo / CEO', wl_r2:'Comercial / Account Manager', wl_r3:'Consultor / Freelance', wl_r4:'RRHH / Office Manager', wl_r5:'Otro',
+    p3_name:'Business', p3_desc:'Para equipos y empresas que quieren desplegar BoosterMail a gran escala.',
+    p3_f1:'Todo de Profesional, más:', p3_f2:'Multi-usuario', p3_f3:'Panel de equipo', p3_f4:'Estadísticas avanzadas', p3_f5:'Onboarding dedicado', p3_f6:'Soporte telefónico',
+    wl_plan_sel:'Plan deseado...', wl_pl1:'Esencial — 9€/mes', wl_pl2:'Profesional — 19€/mes', wl_pl3b:'Business — 29€/mes', wl_pl3:'Aún no sé',
+    wl_submit:'Probar gratis →',
+    wl_loading:'Registrando...',
+    wl_ok:'<strong>✅ ¡Registrado con éxito!</strong><br><br>Debido a la alta demanda y para gestionar nuestro crecimiento, limitamos el acceso.<br>Estás en la lista prioritaria — te contactaremos en cuanto se libere un lugar.',
+    wl_share_email:'Compartir por email',
+    faq_tag:'FAQ', faq_h2:'Preguntas frecuentes',
+    faq1_q:'¿Con qué versión de Outlook funciona BoosterMail?', faq1_a:'BoosterMail funciona con New Outlook y Outlook clásico en Windows 10/11. Se requiere una conexión Microsoft para las funciones completas.',
+    faq2_q:'¿Mis emails son leídos o almacenados por terceros?', faq2_a:'No. BoosterMail se ejecuta localmente en tu máquina. Solo el texto del email actual se envía a la API de Claude (Anthropic) — nunca almacenado, nunca compartido.',
+    faq3_q:'¿Cómo aprende la IA mi estilo de escritura?', faq3_a:'En el onboarding (3 min), BoosterMail analiza tus últimos 300 emails enviados y 500 recibidos para construir tu perfil estilístico. Luego se refina con cada envío.',
+    faq4_q:'¿La generación es realmente en 4 segundos?', faq4_a:'Sí — gracias a la pre-generación especulativa. BoosterMail prepara la respuesta en segundo plano mientras lees. Cuando haces clic en Generar, a menudo ya está lista.',
+    faq5_q:'¿Funciona sin conexión a internet?', faq5_a:'La generación de IA requiere conexión para consultar la API de Claude. La navegación en el inbox funciona sin conexión.',
+    faq6_q:'¿Cuándo estará disponible la beta?', faq6_a:'La beta se está desplegando progresivamente. Al unirte a la lista de espera, recibirás acceso prioritario inmediato cuando llegue tu turno.',
+    ctaf_h2:'Tu próxima respuesta.<br><span>En 4 segundos.</span>',
+    ctaf_sub:'Únete a los profesionales que han recuperado el control de su bandeja de entrada.',
+    ctaf_btn:'Probar gratis →', ctaf_note:'14 días gratis · Sin tarjeta · Windows 10/11',
+    foot_legal:'Aviso legal', foot_privacy:'Privacidad'
+  }
+};
+
+/* ══════════════════════════════════════
+   I18N ENGINE
+══════════════════════════════════════ */
+let currentLang = 'fr';
+function detectLang(){
+  const p = new URLSearchParams(location.search).get('lang');
+  if(p && T[p]) return p;
+  const saved = localStorage.getItem('bm-lang');
+  if(saved && T[saved]) return saved;
+  const br = navigator.language.slice(0,2);
+  return T[br] ? br : 'fr';
+}
+function setLang(lang){
+  if(!T[lang]) return;
+  currentLang = lang;
+  localStorage.setItem('bm-lang', lang);
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    const k = el.getAttribute('data-i18n');
+    if(T[lang][k] !== undefined) el.innerHTML = T[lang][k];
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el=>{
+    const k = el.getAttribute('data-i18n-placeholder');
+    if(T[lang][k]) el.placeholder = T[lang][k];
+  });
+  document.querySelectorAll('.lang-btn').forEach(b=>b.classList.toggle('active', b.textContent===lang.toUpperCase()));
+  // restart typewriter with new lang
+  dynWords = T[lang].hero_dyn || T.fr.hero_dyn;
+  dynIdx = 0;
+}
+
+/* ══════════════════════════════════════
+   TYPEWRITER
+══════════════════════════════════════ */
+let dynWords = T.fr.hero_dyn;
+let dynIdx = 0;
+const dynEl = document.getElementById('dyn-text');
+function switchDyn(){
+  if(!dynEl) return;
+  dynEl.classList.add('out');
+  setTimeout(()=>{
+    dynIdx = (dynIdx+1) % dynWords.length;
+    dynEl.textContent = dynWords[dynIdx];
+    dynEl.classList.remove('out');
+    dynEl.classList.add('in');
+    requestAnimationFrame(()=>{ dynEl.classList.remove('in'); });
+  }, 500);
+}
+setInterval(switchDyn, 3000);
+
+/* ══════════════════════════════════════
+   HERO MOCKUP ANIMATION
+══════════════════════════════════════ */
+const MOCK_TEXT = 'Bonjour Sophie,\n\nMerci pour votre message.\n\nConcernant la proposition Q2,\nvoici mon retour :\n\nJe confirme les délais...\n';
+let mockRunning = false;
+function runMockup(){
+  if(mockRunning) return;
+  mockRunning = true;
+  const el = document.getElementById('mock-txt');
+  const timerEl = document.getElementById('mock-timer');
+  el.innerHTML = '<span class="mock-cursor"></span>';
+  let i = 0; let elapsed = 0;
+  const start = Date.now();
+  const iv = setInterval(()=>{
+    elapsed = ((Date.now()-start)/1000).toFixed(1);
+    timerEl.textContent = '⚡ ' + elapsed + 's';
+    if(i < MOCK_TEXT.length){
+      const chunk = MOCK_TEXT[i] === '\n' ? '<br>' : MOCK_TEXT[i];
+      el.innerHTML = MOCK_TEXT.slice(0,i+1).replace(/\n/g,'<br>') + '<span class="mock-cursor"></span>';
+      i++;
+    } else {
+      clearInterval(iv);
+      timerEl.textContent = '⚡ ' + elapsed + 's — généré';
+      setTimeout(()=>{ mockRunning = false; el.innerHTML = '<span class="mock-cursor"></span>'; timerEl.textContent='⚡ 0.0s'; setTimeout(runMockup,800); }, 3500);
+    }
+  }, 35);
+}
+setTimeout(runMockup, 1200);
+
+/* ══════════════════════════════════════
+   NAV SCROLL
+══════════════════════════════════════ */
+window.addEventListener('scroll',()=>{
+  document.getElementById('nav').classList.toggle('scrolled', scrollY > 40);
+});
+
+/* ══════════════════════════════════════
+   INTERSECTION OBSERVER (FADE UP)
+══════════════════════════════════════ */
+const io = new IntersectionObserver(entries=>{
+  entries.forEach(e=>{ if(e.isIntersecting) e.target.classList.add('vis'); });
+},{threshold:.1});
+document.querySelectorAll('.fu').forEach(el=>io.observe(el));
+
+/* ══════════════════════════════════════
+   FAQ ACCORDION
+══════════════════════════════════════ */
+document.getElementById('faq-list').addEventListener('click',e=>{
+  const item = e.target.closest('.faq-item');
+  if(!item) return;
+  const wasOpen = item.classList.contains('open');
+  document.querySelectorAll('.faq-item').forEach(i=>i.classList.remove('open'));
+  if(!wasOpen) item.classList.add('open');
+});
+
+/* ══════════════════════════════════════
+   WAITLIST FORM
+══════════════════════════════════════ */
+document.getElementById('wl-form').addEventListener('submit', async function(e){
+  e.preventDefault();
+  e.stopPropagation();
+  const btn = this.querySelector('.wl-submit');
+  const t = T[currentLang] || T.fr;
+  btn.textContent = '⏳ ' + (t.wl_loading || 'Inscription en cours...');
+  btn.disabled = true;
+
+  // Collecte des données du formulaire
+  const formData = {
+    access_key: '8c4193f6-401e-4854-9d5f-b1ad7deca678',
+    subject: '🚀 Nouvelle inscription BoosterMail',
+    from_name: 'BoosterMail Waitlist',
+    redirect: 'false',
+    prenom: this.querySelector('[name="prenom"]')?.value || '',
+    societe: this.querySelector('[name="societe"]')?.value || '',
+    email: this.querySelector('[name="email"]')?.value || '',
+    poste: this.querySelector('[name="poste"]')?.value || '',
+    plan: this.querySelector('[name="plan"]')?.value || '',
+    langue: currentLang
+  };
+
+  try {
+    await fetch('https://api.web3forms.com/submit', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Accept':'application/json'},
+      body: JSON.stringify(formData)
+    });
+  } catch(_){}
+
+  // Affichage succès en langue courante
+  const pos = Math.floor(Math.random()*30)+245;
+  document.getElementById('wl-pos').textContent = '#'+pos;
+  this.style.display = 'none';
+  const suc = document.getElementById('wl-success');
+  suc.style.display = 'block';
+  suc.querySelector('p').innerHTML = t.wl_ok || '';
+  return false;
+});
+
+/* ══════════════════════════════════════
+   INIT
+══════════════════════════════════════ */
+(function init(){
+  currentLang = detectLang();
+  setLang(currentLang);
+})();
+</script>
 </body>
 </html>

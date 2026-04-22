@@ -13,7 +13,16 @@ body {
     height: 100vh;
     display: flex;
     flex-direction: column;
+    /* Contour du dialog 80% (ajout 20/04) — la fenêtre Qt est Frameless,
+       le contour est dessiné côté HTML pour un rendu net et homogène. */
+    border: 2px solid #0F6CBD;
 }
+.em-header {
+    /* Drag du dialog (ajout 20/04) — cursor move sur le header, sauf
+       sur les boutons qui gardent cursor pointer. */
+    cursor: move;
+}
+.em-hdr-btn, .em-header-actions { cursor: pointer; }
 
 /* === BANDEAU BLEU UNIFIÉ === */
 .em-header {
@@ -83,6 +92,26 @@ body {
     font-size: 14px;
 }
 .em-hdr-btn:hover { background: rgba(255,255,255,0.3); }
+
+/* Fix UX 22/04 : bouton "Retour Outlook" rouge (remplace la croix + minimize) */
+.em-hdr-return {
+    margin-left: 12px;
+    padding: 0 14px;
+    width: auto !important;   /* override du width fixe 28px de .em-hdr-btn */
+    height: 28px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #e53e3e !important;   /* rouge EasyMail */
+    background: #fff !important;
+    border-radius: 4px;
+    letter-spacing: 0.2px;
+    text-transform: none;
+    transition: background 0.12s, color 0.12s;
+}
+.em-hdr-return:hover {
+    background: #e53e3e !important;
+    color: #fff !important;
+}
 
 /* === ZONE SPLIT === */
 .em-split {

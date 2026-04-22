@@ -217,25 +217,97 @@ def validate_prerequisites():
     return len(errors) == 0
 
 
+def _auto_sideload_outlook_addin():
+    """Enregistre l'add-in BoosterMail dans Outlook (New + Classic).
+
+    Délègue à `install_outlook_addin.py` qui fait :
+      1. certutil -user -addstore Root (cert localhost trusté, pas d'UAC)
+      2. winreg SetValueEx HKCU\\Software\\Microsoft\\Office\\16.0\\Wef\\Developer
+         [<manifest_id>] = <manifest path>  (mécanisme officiel Microsoft)
+
+    Fix 21/04 : remplace l'ancien code qui copiait le fichier dans
+    Wef\\Developer\\BoosterMail.manifest.xml — ce dossier est uniquement
+    pour le Classic, pas New Outlook. Le mécanisme correct c'est le
+    registre, identifié via les sources officielles (office-addin-scripts).
+
+    Idempotent : si déjà fait, ne refait rien (vérifié dans le sous-script).
+    """
+    installer = os.path.join(EASYMAIL_DIR, 'install_outlook_addin.py')
+    if not os.path.exists(installer):
+        logger.warning(f"Auto-sideload : {installer} introuvable")
+        return
+
+    python_exe = find_pythonw()
+    try:
+        result = subprocess.run(
+            [python_exe, installer],
+            capture_output=True, text=True, timeout=30,
+            creationflags=_NW,  # CREATE_NO_WINDOW
+        )
+        if result.returncode == 0:
+            logger.info("Auto-sideload addin : OK (bouton BM enregistré dans Outlook)")
+        else:
+            logger.warning(f"Auto-sideload addin : échec (rc={result.returncode}) "
+                           f"stderr={result.stderr.strip()[:200]}")
+    except Exception as e:
+        logger.warning(f"Auto-sideload addin : erreur exec : {e}")
+
+
 def _popup_is_alive():
-    """True si le PID stocké correspond à un process vivant (anti-doublon)."""
+    """True si popup_pyqt répond à un ping HTTP sur 5052.
+
+    Fix 20/04 : avant on lisait un PID file + OpenProcess Windows. Problème :
+    si le PID file était périmé (process tué sans nettoyage du fichier), ou
+    si deux appels à show_pyqt_popup arrivaient en parallèle avant l'écriture
+    du PID file, on spawnait des doublons.
+    Le ping HTTP teste la RÉPONSE RÉELLE de popup_pyqt → plus fiable, plus
+    rapide, aucun PID file requis.
+
+    Timeout 1.0 s (21/04 audit C10) : assez pour absorber une petite latence
+    locale sous charge sans faux négatif (qui provoquerait un spawn en double).
+    """
+    import urllib.request
     try:
-        with open(POPUP_PID_FILE, 'r') as f:
-            pid = int(f.read().strip())
+        with urllib.request.urlopen('http://127.0.0.1:5052/ping', timeout=1.0) as resp:
+            return resp.status == 200
     except Exception:
         return False
+
+
+# Fix 20/04 — mutex anti-concurrence sur show_pyqt_popup.
+# Sans ce lock, 2 appels parallèles (ex: superviseur détecte Outlook + autre
+# trigger) pouvaient tous deux passer _popup_is_alive() avant que le premier
+# spawn ne réponde → 2 popup_pyqt lancés en parallèle.
+import threading as _bm_threading
+_show_popup_lock = _bm_threading.Lock()
+
+
+def _should_show_popup_now():
+    """Anti-spam popup (ajout 20/04, point C du nettoyage).
+
+    Interroge le backend V2 /api/activation_status pour savoir si la popup
+    marketing/warmup doit être affichée :
+      - Si déjà affichée aujourd'hui → False (pas de réapparition au
+        redémarrage Outlook dans la même journée)
+      - Si user activé et cache chaud → False (mode flash inutile au reopen)
+      - Sinon → True
+    En cas d'erreur réseau → True (fallback safe : on affiche).
+    """
     try:
-        kernel32 = ctypes.windll.kernel32
-        PROCESS_QUERY_LIMITED = 0x1000
-        h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED, False, pid)
-        if not h:
-            return False
-        exit_code = wintypes.DWORD()
-        kernel32.GetExitCodeProcess(h, ctypes.byref(exit_code))
-        kernel32.CloseHandle(h)
-        return exit_code.value == 259  # STILL_ACTIVE
-    except Exception:
-        return False
+        import urllib.request, ssl as _ssl
+        ctx = _ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl.CERT_NONE
+        req = urllib.request.Request(
+            'https://localhost:3443/api/activation_status',
+            headers={'Accept': 'application/json'},
+        )
+        with urllib.request.urlopen(req, timeout=1.5, context=ctx) as resp:
+            body = json.loads(resp.read().decode('utf-8'))
+        return bool(body.get('should_show_popup', True))
+    except Exception as e:
+        logger.debug(f"activation_status check échoué ({e}) — on affiche par défaut")
+        return True
 
 
 def show_pyqt_popup():
@@ -244,38 +316,55 @@ def show_pyqt_popup():
     1) Si popup process déjà vivant → POST http://127.0.0.1:5052/show_popup
        → réaffichage instantané (~100 ms), pas de respawn Python+Qt.
     2) Sinon → subprocess.Popen popup_pyqt.py (premier lancement, ~5 s).
-    Gain attendu : ouverture Outlook → popup visible en ~2 s au lieu de 7 s."""
-    if _popup_is_alive():
-        # Voie 1 : IPC show_popup (rapide)
-        try:
-            import urllib.request
-            req = urllib.request.Request(
-                'http://127.0.0.1:5052/show_popup',
-                data=b'{}', headers={'Content-Type': 'application/json'},
-                method='POST',
-            )
-            urllib.request.urlopen(req, timeout=1.0)
-            logger.info("Popup réaffichée via IPC (hot)")
-            return
-        except Exception as e:
-            logger.info(f"IPC show_popup échoué ({e}) → fallback subprocess")
-            # fallthrough → subprocess
+    Gain attendu : ouverture Outlook → popup visible en ~2 s au lieu de 7 s.
 
-    # Voie 2 : subprocess fresh spawn
-    try:
-        pythonw = find_pythonw()
-        proc = subprocess.Popen(
-            [pythonw, POPUP_SCRIPT], cwd=EASYMAIL_DIR,
-            creationflags=_NW,
-        )
+    Ajout 20/04 (point C) : vérification anti-spam via _should_show_popup_now
+    avant d'appeler l'IPC pour éviter que la popup marketing ne ressurgisse
+    à chaque redémarrage d'Outlook dans la même journée."""
+    if not _should_show_popup_now():
+        logger.info("Popup déjà affichée aujourd'hui — pas de réaffichage (anti-spam)")
+        return
+
+    # Mutex anti-concurrence (fix 20/04) : garantit qu'UN SEUL appel à
+    # show_pyqt_popup peut décider de spawner à la fois → plus de doublons
+    # quand le superviseur détecte plusieurs triggers rapprochés.
+    with _show_popup_lock:
+        if _popup_is_alive():
+            # Voie 1 : IPC show_popup (rapide)
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    'http://127.0.0.1:5052/show_popup',
+                    data=b'{}', headers={'Content-Type': 'application/json'},
+                    method='POST',
+                )
+                # Timeout 2.5 s (21/04 audit cycle 1 #5) : avant 1.0 s
+                # trop court sous charge (Chromium parse lourd au cold
+                # start). Éviter les faux timeouts qui déclenchaient
+                # fallback subprocess inutilement.
+                urllib.request.urlopen(req, timeout=2.5)
+                logger.info("Popup réaffichée via IPC (hot)")
+                return
+            except Exception as e:
+                logger.info(f"IPC show_popup échoué ({e}) → fallback subprocess")
+                # fallthrough → subprocess (DANS le mutex)
+
+        # Voie 2 : subprocess fresh spawn (TOUJOURS dans le mutex pour éviter
+        # que 2 appels parallèles ne spawnent tous les deux).
         try:
-            with open(POPUP_PID_FILE, 'w') as f:
-                f.write(str(proc.pid))
-        except Exception:
-            pass
-        logger.info(f"Popup PyQt lancee (PID {proc.pid})")
-    except Exception as e:
-        logger.warning(f"Popup PyQt erreur: {e}")
+            pythonw = find_pythonw()
+            proc = subprocess.Popen(
+                [pythonw, POPUP_SCRIPT], cwd=EASYMAIL_DIR,
+                creationflags=_NW,
+            )
+            try:
+                with open(POPUP_PID_FILE, 'w') as f:
+                    f.write(str(proc.pid))
+            except Exception:
+                pass
+            logger.info(f"Popup PyQt lancee (PID {proc.pid})")
+        except Exception as e:
+            logger.warning(f"Popup PyQt erreur: {e}")
 
 
 # =============================================================================
@@ -309,13 +398,61 @@ class ProcessManager:
             return False
 
     def is_alive(self):
+        # Fix audit 22/04 (Option C) : verifier la VRAIE sante du service via
+        # HTTP avant de le declarer mort. Avant : on checkait uniquement que
+        # self.process etait vivant ET que le port ecoutait. Probleme : si V2
+        # etait lance manuellement (autre PID), self.process est mort mais V2
+        # tourne bien. Resultat : "mort detecte" en boucle, "5 tentatives
+        # abandon", spam de log.
+        #
+        # Nouveau : si le service repond a un HTTP check, il est ALIVE peu
+        # importe quel PID. Et on reset le restart_count car il tient debout.
+        if self._http_health_check():
+            if self.restart_count > 0:
+                logger.info(f"{self.name}: service repond via HTTP, reset "
+                            f"compteur restart ({self.restart_count} -> 0)")
+                self.restart_count = 0
+            return True
+        # Fallback : check classique (process + port)
         if self.process is None or self.process.poll() is not None:
             return False
         return is_port_listening(self.port)
 
+    def _http_health_check(self):
+        """Verifie via HTTP que le service repond vraiment (pas juste port
+        listening). Plus fiable pour detecter des services zombies ou
+        lances manuellement. Retourne True si status 2xx en <3s.
+        """
+        import urllib.request, ssl, socket
+        # V2 (3443) = HTTPS, Companion (5051) = HTTP
+        if self.port == 3443:
+            url = f'https://127.0.0.1:{self.port}/api/status'
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        else:
+            url = f'http://127.0.0.1:{self.port}/status'
+            ctx = None
+        try:
+            if ctx:
+                with urllib.request.urlopen(url, timeout=3, context=ctx) as r:
+                    return 200 <= r.status < 300
+            else:
+                with urllib.request.urlopen(url, timeout=3) as r:
+                    return 200 <= r.status < 300
+        except (urllib.error.URLError, socket.timeout, ConnectionError, OSError):
+            return False
+        except Exception:
+            return False
+
     def restart(self):
         if self.restart_count >= MAX_RESTART:
-            logger.error(f"{self.name}: {MAX_RESTART} tentatives, abandon")
+            # Fix audit 22/04 : ne logger que la PREMIERE fois l'abandon,
+            # sinon spam toutes les 30s quand V2 est zombie-lance-manuel.
+            if not getattr(self, '_abandon_logged', False):
+                logger.error(f"{self.name}: {MAX_RESTART} tentatives, abandon "
+                             f"(redemarrer le superviseur pour reset)")
+                self._abandon_logged = True
             return False
         wait = 5 * (2 ** self.restart_count)
         if time.time() - self.last_restart < wait:
@@ -426,6 +563,17 @@ def run_supervisor(first_launch=True):
 
     # Ecrire le PID du superviseur (sans enfants pour l'instant)
     write_pid_file(os.getpid(), [])
+
+    # =========================================================
+    # PHASE 0 : Auto-sideload du manifest New Outlook (21/04 audit)
+    # Copie manifest.xml dans %LOCALAPPDATA%\Microsoft\Office\16.0\Wef\Developer
+    # pour que le bouton BoosterMail apparaisse automatiquement dans le ruban
+    # Outlook sans intervention user. Persiste entre redémarrages.
+    # =========================================================
+    try:
+        _auto_sideload_outlook_addin()
+    except Exception as e:
+        logger.warning(f"Auto-sideload manifest échoué : {e}")
 
     # =========================================================
     # PHASE 1 : Lancer backends IMMEDIATEMENT au logon (audit 20/04)

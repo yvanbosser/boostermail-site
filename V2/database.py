@@ -176,6 +176,22 @@ class Database:
             )
         """)
 
+        # -- Table résumés de mails (21/04) --
+        # Populée par _bulk_prescan_summaries au warmup (+ rescan isolé à
+        # l'ouverture d'un mail absent). Lue par /api/mail_summary.
+        # 1 ligne par message_id, remplacement sur re-scan.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS mail_summaries (
+                message_id TEXT PRIMARY KEY,
+                subject TEXT,
+                from_email TEXT,
+                points TEXT,            -- JSON array : ["point 1", ...]
+                actions TEXT,           -- JSON array : ["action 1", ...]
+                model TEXT,             -- ex: claude-haiku-3-5-20241022
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+
         # -- Table classement mails dans dossiers Outlook --
         c.execute("""
             CREATE TABLE IF NOT EXISTS folder_classifications (
@@ -1306,6 +1322,70 @@ class Database:
             ORDER BY date_echeance ASC
         """, (correspondant,))
         return [dict(r) for r in c.fetchall()]
+
+    # --- RÉSUMÉS DE MAILS (21/04) ------------------------------------------
+
+    def save_mail_summary(self, data):
+        """Sauvegarde ou remplace un résumé de mail.
+        data = {
+          'message_id' (obligatoire), 'subject', 'from_email',
+          'points' (list[str]), 'actions' (list[str]), 'model'
+        }
+        Retourne True si OK.
+        """
+        import json as _json
+        message_id = (data.get('message_id') or '').strip()
+        if not message_id:
+            return False
+        conn = self._conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT OR REPLACE INTO mail_summaries
+                (message_id, subject, from_email, points, actions, model, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            message_id,
+            data.get('subject', '') or '',
+            data.get('from_email', '') or '',
+            _json.dumps(data.get('points', []) or [], ensure_ascii=False),
+            _json.dumps(data.get('actions', []) or [], ensure_ascii=False),
+            data.get('model', '') or '',
+            datetime.now().isoformat(),
+        ))
+        conn.commit()
+        return True
+
+    def get_mail_summary(self, message_id):
+        """Retourne le résumé d'un mail ou None si absent.
+        Renvoie un dict : { message_id, subject, from_email, points [list],
+                            actions [list], model, created_at } """
+        import json as _json
+        if not message_id:
+            return None
+        c = self._conn().cursor()
+        c.execute("SELECT * FROM mail_summaries WHERE message_id = ?", (message_id,))
+        row = c.fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d['points'] = _json.loads(d.get('points') or '[]')
+        except Exception:
+            d['points'] = []
+        try:
+            d['actions'] = _json.loads(d.get('actions') or '[]')
+        except Exception:
+            d['actions'] = []
+        return d
+
+    def has_mail_summary(self, message_id):
+        """True si un résumé existe déjà pour ce mail (guard bulk idempotent)."""
+        if not message_id:
+            return False
+        c = self._conn().cursor()
+        c.execute("SELECT 1 FROM mail_summaries WHERE message_id = ? LIMIT 1",
+                  (message_id,))
+        return c.fetchone() is not None
 
     # --- MÉTRIQUES ---------------------------------------------------------
 

@@ -515,6 +515,12 @@ class GraphClient(EmailProvider):
             else:
                 # Envoi avec PJ via brouillon
                 return self._send_via_draft('createReply', message_id, body, cc=cc, attachments=attachments)
+        except GraphAuthError:
+            # Fix audit 21/04 : ne PAS swallow GraphAuthError — le caller
+            # (app_plugin.py `/send_reply`) a son propre except GraphAuthError
+            # qui retourne HTTP 401 auth_required. Sans ce raise, l'user ne
+            # sait pas qu'il doit se reconnecter.
+            raise
         except Exception as e:
             logger.error(f"Erreur send_reply: {e}")
             return {'success': False, 'error': str(e)[:200]}
@@ -535,6 +541,8 @@ class GraphClient(EmailProvider):
                 return {'success': True, 'error': ''}
             else:
                 return self._send_via_draft('createReplyAll', message_id, body, cc=cc, attachments=attachments)
+        except GraphAuthError:
+            raise
         except Exception as e:
             logger.error(f"Erreur send_reply_all: {e}")
             return {'success': False, 'error': str(e)[:200]}
@@ -561,6 +569,8 @@ class GraphClient(EmailProvider):
                     'createForward', message_id, body,
                     to_email=to_email, cc=cc, attachments=attachments
                 )
+        except GraphAuthError:
+            raise
         except Exception as e:
             logger.error(f"Erreur send_forward: {e}")
             return {'success': False, 'error': str(e)[:200]}
@@ -596,6 +606,8 @@ class GraphClient(EmailProvider):
 
             self._request('POST', '/me/sendMail', json=payload)
             return {'success': True, 'error': ''}
+        except GraphAuthError:
+            raise
         except Exception as e:
             logger.error(f"Erreur send_new_email: {e}")
             return {'success': False, 'error': str(e)[:200]}
@@ -801,6 +813,47 @@ class GraphClient(EmailProvider):
         except Exception as e:
             logger.error(f"Erreur copy_to_folder: {e}")
             return {'success': False, 'copy_id': '', 'error': str(e)[:200]}
+
+    def delete_message(self, message_id: str) -> dict:
+        """
+        DELETE /me/messages/{id}
+        Supprime définitivement un mail (déplacement vers Deleted Items).
+        Fix audit 21/04 : cette méthode manquait alors que `/api/delete_email`
+        côté V2 l'appelait → AttributeError → 500, purge locale quand même faite
+        mais pas le delete réel Graph.
+
+        Accepte aussi bien Graph id que internet_message_id (auto-résolution).
+        """
+        try:
+            # Résolution internet_message_id → Graph id si nécessaire
+            target_id = message_id
+            if message_id and message_id.startswith('<'):
+                email = self.get_email_by_internet_id(message_id)
+                if not email or not email.get('id'):
+                    return {'success': False, 'error': 'Mail introuvable'}
+                target_id = email['id']
+            self._request('DELETE', f'/me/messages/{target_id}')
+            return {'success': True}
+        except GraphAuthError:
+            raise
+        except Exception as e:
+            logger.error(f"Erreur delete_message: {e}")
+            return {'success': False, 'error': str(e)[:200]}
+
+    def move_message(self, message_id: str, folder_id: str) -> dict:
+        """
+        Alias public de move_to_folder — certains callers utilisaient ce nom
+        (ex: /api/archive_email). Accepte aussi internet_message_id.
+        """
+        target_id = message_id
+        if message_id and message_id.startswith('<'):
+            try:
+                email = self.get_email_by_internet_id(message_id)
+                if email and email.get('id'):
+                    target_id = email['id']
+            except Exception:
+                pass
+        return self.move_to_folder(target_id, folder_id)
 
     # =========================================================================
     # 12d-6 : PIÈCES JOINTES (à implémenter)

@@ -57,12 +57,42 @@ function openEasyMailDialog(event) {
     ];
     var dialogUrl = baseUrl + '?' + params.join('&');
 
-    // Récupérer le body du mail (pour le transmettre au dialog en Mode Perf. Réduite)
+    // Fix audit 21/04 : race condition — `item.body.getAsync` est async
+    // (peut durer >1s sur gros mails), l'ancien code envoyait mail_body via
+    // setTimeout(1000) sans vérifier que getAsync avait fini → body vide
+    // transmis au dialog en Mode Perf. Réduite → dialog n'a pas de body.
+    // Nouveau pattern : attendre que les DEUX (body + dialog) soient prêts.
     var mailBody = '';
+    var _bodyReady = false;
+    var _dialogRef = null;
+
+    function _sendBodyToDialog() {
+        if (!_bodyReady || !_dialogRef) return;
+        var _attempts = [100, 700, 1500];  // retry si dialog pas encore listener ready
+        _attempts.forEach(function(delay) {
+            setTimeout(function() {
+                try {
+                    if (_dialogRef && mailBody) {
+                        _dialogRef.messageChild(JSON.stringify({
+                            action: 'mail_body',
+                            body: mailBody,
+                            from_name: fromName,
+                            from_email: from,
+                        }));
+                    }
+                } catch(e) {
+                    // Dialog fermé ou pas prêt → silencieux
+                }
+            }, delay);
+        });
+    }
+
     item.body.getAsync(Office.CoercionType.Text, function(bodyResult) {
         if (bodyResult.status === Office.AsyncResultStatus.Succeeded) {
             mailBody = bodyResult.value || '';
         }
+        _bodyReady = true;
+        _sendBodyToDialog();
     });
 
     // Ouvrir le dialog (80% largeur, 80% hauteur)
@@ -77,23 +107,8 @@ function openEasyMailDialog(event) {
             }
 
             var dialog = asyncResult.value;
-
-            // Envoyer le body du mail au dialog (Mode Perf. Réduite)
-            // Le dialog ne peut pas lire le mail via Graph, on lui envoie via messageChild
-            setTimeout(function() {
-                try {
-                    if (mailBody) {
-                        dialog.messageChild(JSON.stringify({
-                            action: 'mail_body',
-                            body: mailBody,
-                            from_name: fromName,
-                            from_email: from,
-                        }));
-                    }
-                } catch(e) {
-                    console.log('EasyMail: messageChild non supporté ou dialog pas prêt');
-                }
-            }, 1000);  // Attendre 1s que le dialog soit chargé
+            _dialogRef = dialog;
+            _sendBodyToDialog();  // Déclenche si body déjà arrivé
 
             // Écouter les messages du dialog
             dialog.addEventHandler(Office.EventType.DialogMessageReceived, function (arg) {

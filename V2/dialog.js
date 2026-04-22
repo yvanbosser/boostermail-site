@@ -51,6 +51,55 @@ try {
 
 
 // =============================================================================
+// SAFETY NET GLOBAL (21/04 — P3)
+// =============================================================================
+
+/** Affiche un toast discret en bas-droit. Auto-disparaît après 5 s. */
+function _showErrorToast(msg) {
+    try {
+        var t = document.getElementById('em-error-toast');
+        if (!t) {
+            t = document.createElement('div');
+            t.id = 'em-error-toast';
+            t.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:99999;' +
+                'background:#c00;color:#fff;padding:10px 14px;border-radius:6px;' +
+                'font:12px "Segoe UI",sans-serif;box-shadow:0 3px 12px rgba(0,0,0,0.3);' +
+                'max-width:320px;';
+            document.body.appendChild(t);
+        }
+        t.textContent = msg;
+        t.style.display = 'block';
+        setTimeout(function() { t.style.display = 'none'; }, 5000);
+    } catch(_){}
+}
+
+/** Intercepte toute exception JS non catchée + toute rejection de Promise. */
+window.addEventListener('error', function(ev) {
+    try {
+        var msg = (ev.error && ev.error.message) || ev.message || 'Erreur JS';
+        var src = (ev.filename || '').split('/').pop();
+        _showErrorToast('BoosterMail : ' + msg.substring(0, 80));
+        // POST diagnostic non-bloquant (backend si disponible)
+        fetch(_backendUrl + '/api/debug_addin_log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                event: 'dialog_js_error',
+                details: { msg: msg, src: src, line: ev.lineno, col: ev.colno }
+            }),
+            keepalive: true
+        }).catch(function(){});
+    } catch(_){}
+});
+window.addEventListener('unhandledrejection', function(ev) {
+    try {
+        var reason = (ev.reason && ev.reason.message) || String(ev.reason);
+        _showErrorToast('BoosterMail : ' + reason.substring(0, 80));
+    } catch(_){}
+});
+
+
+// =============================================================================
 // INITIALISATION
 // =============================================================================
 
@@ -120,17 +169,91 @@ try {
         _closeDialog();
     });
 
-    // Garde forward : bouton Générer grisé si champ À vide en mode forward
-    if (_mode === 'forward') {
-        var fieldTo = document.getElementById('fieldTo');
-        var btnGen = document.getElementById('btnGenerate');
-        btnGen.disabled = true;
-        fieldTo.addEventListener('input', function() {
-            btnGen.disabled = !fieldTo.value.trim();
-        });
+    // Fix UX 22/04 : bouton "Reduire" (btnMinimizeDialog) supprime du HTML.
+    // Plus besoin du handler ici — le bouton Retour Outlook (btnClose) gere
+    // tout via le handler existant ligne ~119 (easymail://close-dialog).
+
+    // Drag du dialog 80% via le header — Qt Frameless ne fournit pas de drag
+    // natif, on envoie les coordonnees screen a PyQt via easymail:// intercepte
+    // sans navigation reelle. Ameliore 22/04 :
+    //  - throttle 60fps (evite spam WebView2)
+    //  - iframe hidden pour nav (comme popup.js, plus robuste que location.href)
+    //  - cursor: move + user-select: none sur le header
+    if (_isStandaloneMode) {
+        (function _initDialogDrag() {
+            var header = document.querySelector('.em-header');
+            if (!header) return;
+
+            // CSS drag : curseur move + pas de selection texte
+            header.style.userSelect = 'none';
+            header.style.cursor = 'move';
+
+            // IFRAME hidden pour nav easymail:// (pas de page reload)
+            var _dragFrame = document.createElement('iframe');
+            _dragFrame.style.display = 'none';
+            document.body.appendChild(_dragFrame);
+            function _nav(action, x, y) {
+                var url = 'easymail://' + action + '/';
+                if (typeof x === 'number' && typeof y === 'number') {
+                    url += x + ',' + y;
+                }
+                _dragFrame.src = url;
+            }
+
+            var dragging = false;
+            var lastMove = 0;
+
+            header.addEventListener('mousedown', function(e) {
+                if (e.target.closest('.em-hdr-btn')) return;
+                if (e.button !== 0) return;
+                dragging = true;
+                e.preventDefault();
+                _nav('drag-start', e.screenX, e.screenY);
+            });
+            document.addEventListener('mousemove', function(e) {
+                if (!dragging) return;
+                var now = Date.now();
+                if (now - lastMove < 16) return;  // throttle ~60 fps
+                lastMove = now;
+                _nav('drag-move', e.screenX, e.screenY);
+            });
+            document.addEventListener('mouseup', function() {
+                if (!dragging) return;
+                dragging = false;
+                _nav('drag-end');
+            });
+            // Safety : curseur quitte fenetre pendant drag
+            document.addEventListener('mouseleave', function() {
+                if (dragging) {
+                    dragging = false;
+                    _nav('drag-end');
+                }
+            });
+        })();
     }
+
+    // Garde forward : bouton Générer grisé si champ À vide en mode forward
+    _applyForwardGuard();
+
 })();
 
+// Garde forward extraite en fonction pour pouvoir être ré-attachée sur rebind
+function _applyForwardGuard() {
+    var fieldTo = document.getElementById('fieldTo');
+    var btnGen = document.getElementById('btnGenerate');
+    if (!fieldTo || !btnGen) return;
+    if (_mode === 'forward') {
+        btnGen.disabled = !fieldTo.value.trim();
+        if (!fieldTo.__fwGuardBound) {
+            fieldTo.addEventListener('input', function() {
+                if (_mode === 'forward') btnGen.disabled = !fieldTo.value.trim();
+            });
+            fieldTo.__fwGuardBound = true;
+        }
+    } else {
+        btnGen.disabled = false;
+    }
+}
 
 // =============================================================================
 // HEADER
@@ -265,14 +388,19 @@ function setReplyMode(mode) {
     _updateHeader();
 
     // Garde forward : bouton Générer grisé si champ À vide
+    // Fix audit 21/04 : utiliser le flag __fwGuardBound (même pattern que
+    // _applyForwardGuard ligne 222) pour éviter d'accumuler N handlers à
+    // chaque clic sur le bouton Transférer.
     var btnGen = document.getElementById('btnGenerate');
     var fieldTo = document.getElementById('fieldTo');
     if (mode === 'forward') {
         btnGen.disabled = !fieldTo.value.trim();
-        // Écouter le champ À
-        fieldTo.addEventListener('input', function _fwdGuard() {
-            btnGen.disabled = !fieldTo.value.trim();
-        });
+        if (!fieldTo.__fwGuardBound) {
+            fieldTo.addEventListener('input', function _fwdGuard() {
+                btnGen.disabled = !fieldTo.value.trim();
+            });
+            fieldTo.__fwGuardBound = true;
+        }
     } else {
         btnGen.disabled = false;
     }
@@ -465,16 +593,12 @@ function includeSelectedFwdAttachments() {
     });
     document.getElementById('popupFwdPj').classList.remove('active');
 
-    // Sauvegarder les PJ sélectionnées côté serveur pour l'envoi forward
-    if (_fwdSelectedIndexes.length > 0 && _messageId) {
-        fetch(_backendUrl + '/api/save_original_attachments/' + encodeURIComponent(_messageId), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ indices: _fwdSelectedIndexes }),
-        }).catch(function(err) {
-            console.log('[dialog] Erreur sauvegarde PJ forward:', err.message);
-        });
-    }
+    // Note audit 21/04 : la route /api/save_original_attachments n'existe pas
+    // côté V2 backend (appel produisait 404 silencieux). Le forward côté
+    // Graph inclut automatiquement TOUTES les PJ du mail source — le filtrage
+    // côté utilisateur n'est donc pas respecté en pratique. La variable
+    // `_fwdSelectedIndexes` reste pour un usage futur (quand on voudra filtrer
+    // via createForward + DELETE attachments spécifiques).
 }
 
 
@@ -624,6 +748,11 @@ function _loadMailBody() {
             document.getElementById('mailBody').innerHTML =
                 '<p style="color:#c00; font-size:11px;">Erreur chargement : ' + _escapeHtml(err.message) + '</p>';
         });
+
+    // Résumé IA (21/04) : parallèle au chargement body (Office.js path)
+    if (_messageId) {
+        _fetchMailSummary();
+    }
 }
 
 
@@ -804,7 +933,9 @@ function generateReply() {
     _isGenerating = true;
     btnGen.disabled = true;
     spinner.classList.add('active');
-    editor.innerHTML = '';
+    // Phase 2/3 progression : force l'affichage (remplace le texte user
+    // comme le faisait le editor.innerHTML = '' d'origine).
+    _showProgressPlaceholder(_mailBodyForGeneration ? 'writing' : 'context', true);
     document.getElementById('headerStatus').textContent = 'Lecture du contexte...';
     _sendStartTime = Date.now();
 
@@ -825,6 +956,11 @@ function generateReply() {
             pj_context: _extractedPjContext || '',
             fwd_pj_indices: _fwdSelectedIndexes.length > 0 ? _fwdSelectedIndexes : undefined,
         });
+        // Placeholder final : "Rédaction en cours..." (avant le stream SSE).
+        // Si le template matche, _tryTemplateMatch écrase l'éditeur avec le
+        // template → placeholder remplacé proprement.
+        if (_progressPlaceholderActive) _showProgressPlaceholder('writing');
+
         // Plan 2 Phase 1 — tenter un template ($0, <100 ms) avant Claude
         // Sauf si l'user vient de cliquer "Autre réponse" → skip template
         if (_skipTemplateMatch) {
@@ -894,7 +1030,10 @@ function _tryTemplateMatch(brief, callback) {
         // MATCH — afficher le template en remplaçant le contenu éditeur
         console.log('[dialog] Template match', result.template_name,
                     'conf=' + result.confidence, 'src=' + result.source);
-        var html = (result.template || '').replace(/\n/g, '<br>');
+        // Fix XSS audit 21/04 : escape le template avant innerHTML. Les templates
+        // appris (learned_templates) peuvent contenir du texte user copié avec
+        // potentiels caractères HTML. Escape = défense en profondeur.
+        var html = _escapeHtml(result.template || '').replace(/\n/g, '<br>');
         editor.innerHTML = html;
         _isGenerating = false;
         btnGen.disabled = false;
@@ -962,11 +1101,16 @@ function _tryInstantReply() {
     .then(function(r) { return r.json(); })
     .then(function(res) {
         if (!res || res.source === 'none') {
-            console.log('[dialog] instant_reply: aucun hit, génération standard requise');
+            console.log('[dialog] instant_reply: aucun hit → déclenchement auto generateReply()');
+            // Test 21/04 — Génération automatique si pas de cache hit.
+            _triggerAutoGenerate();
             return;
         }
         console.log('[dialog] instant_reply HIT', res.source, res.badge || '');
-        editor.innerHTML = (res.text || '').replace(/\n/g, '<br>');
+        // Fix XSS audit 21/04 : escape. res.text = cache draft/preemptive/template
+        // qui peut contenir du HTML (draft user, Claude, template). Safe par design
+        // probablement, mais on applique la défense en profondeur.
+        editor.innerHTML = _escapeHtml(res.text || '').replace(/\n/g, '<br>');
         _showInstantReplyBadge(res);
         if (res.source === 'template') {
             _lastTemplateMatch = {
@@ -976,6 +1120,54 @@ function _tryInstantReply() {
         }
     })
     .catch(function(e) { console.warn('[dialog] instant_reply erreur', e); });
+}
+
+/**
+ * Test 21/04 — Déclenche generateReply() automatiquement avec garde-fous :
+ *   - Skip si mode='new' (brief obligatoire)
+ *   - Skip si user a déjà tapé
+ *   - Skip si _isGenerating (protection double trigger avec _checkSpeculativeCache)
+ *   - ATTEND que _mailBodyForGeneration soit peuplé (sinon generateReply
+ *     envoie body vide → réponse dégradée). Retry jusqu'à 3 s max.
+ */
+var _autoGeneratePending = false;
+
+function _triggerAutoGenerate() {
+    if (_autoGeneratePending) return;       // Garde double déclenchement
+    if (_isGenerating) return;               // Déjà en cours (via _checkSpeculativeCache)
+    if (_mode === 'new') return;             // Brief obligatoire
+    var editor = document.getElementById('editor');
+    if (editor && editor.innerText && editor.innerText.trim()) return;  // user a déjà tapé
+
+    _autoGeneratePending = true;
+    var _t0 = Date.now();
+    var _waitBodyAndGen = function() {
+        // Si user a commencé à taper entre-temps → on abandonne
+        var ed = document.getElementById('editor');
+        if (ed && ed.innerText && ed.innerText.trim()) {
+            _autoGeneratePending = false;
+            return;
+        }
+        // Si autre flow a lancé une génération entre-temps (ex: _checkSpeculativeCache) → abandon
+        if (_isGenerating) {
+            _autoGeneratePending = false;
+            return;
+        }
+        // Body prêt OU mode sans body OU timeout 3 s → lancer
+        if (_mailBodyForGeneration || _mode === 'forward' || (Date.now() - _t0) > 3000) {
+            _autoGeneratePending = false;
+            if (typeof generateReply === 'function') {
+                console.log('[dialog] auto-generateReply() déclenchée après ' +
+                            (Date.now() - _t0) + 'ms, body_len=' +
+                            (_mailBodyForGeneration || '').length);
+                generateReply();
+            }
+            return;
+        }
+        // Retry 150 ms plus tard
+        setTimeout(_waitBodyAndGen, 150);
+    };
+    setTimeout(_waitBodyAndGen, 150);
 }
 
 function _showInstantReplyBadge(res) {
@@ -1016,7 +1208,8 @@ function _restoreDraft() {
             var editor = document.getElementById('editor');
             // Ne pas écraser si l'user a déjà commencé à taper
             if (editor.innerText && editor.innerText.trim()) return;
-            editor.innerHTML = (res.text || '').replace(/\n/g, '<br>');
+            // Fix XSS audit 21/04 : escape avant innerHTML (res.text = draft DB)
+            editor.innerHTML = _escapeHtml(res.text || '').replace(/\n/g, '<br>');
             _showDraftBadge(res.timestamp);
             console.log('[dialog] Brouillon restauré pour', _messageId.substring(0, 20));
         })
@@ -1046,9 +1239,13 @@ function _saveDraftNow() {
     var editor = document.getElementById('editor');
     var text = (editor.innerText || '').trim();
     if (!text) return;  // n'écrase pas avec un éditeur vide
+    // Fix audit 21/04 : keepalive:true pour que la requête survive au
+    // beforeunload (sinon le navigateur annule le fetch quand la page ferme →
+    // brouillon user perdu). Limite : payload < 64KB (largement suffisant).
     fetch(_backendUrl + '/api/save_draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        keepalive: true,
         body: JSON.stringify({
             message_id: _messageId,
             text: text,
@@ -1106,11 +1303,14 @@ function _fetchGenerateReply(body) {
                         try {
                             var last = JSON.parse(_lineBuffer.substring(6));
                             if (last.chunk) {
+                                if (_progressPlaceholderActive) _clearProgressPlaceholder();
                                 editor.insertAdjacentText('beforeend', last.chunk);
                                 streamedText += last.chunk;
                             }
                         } catch(e) {}
                     }
+                    // Safety : si aucun chunk n'est arrivé (erreur silencieuse), vider le placeholder
+                    if (_progressPlaceholderActive) _clearProgressPlaceholder();
                     _onGenerationDone(streamedText);
                     return;
                 }
@@ -1122,6 +1322,8 @@ function _fetchGenerateReply(body) {
                         try {
                             var data = JSON.parse(line.substring(6));
                             if (data.chunk) {
+                                // Placeholder → supprimé juste avant le 1er chunk
+                                if (_progressPlaceholderActive) _clearProgressPlaceholder();
                                 spinner.classList.remove('active');
                                 document.getElementById('headerStatus').textContent = 'Generation en cours...';
                                 editor.insertAdjacentText('beforeend', data.chunk);
@@ -1131,6 +1333,7 @@ function _fetchGenerateReply(body) {
                             // Le reformatage final se fait UNE fois dans result.done
                             // (vrai end-of-stream, après tous les chunks résiduels).
                             if (data.error) {
+                                if (_progressPlaceholderActive) _clearProgressPlaceholder();
                                 spinner.classList.remove('active');
                                 editor.innerHTML = '<p style="color:#c00;">' + _escapeHtml(data.error) + '</p>';
                                 if (data.auth_required) {
@@ -1147,6 +1350,7 @@ function _fetchGenerateReply(body) {
         }
         read();
     }).catch(function(err) {
+        if (_progressPlaceholderActive) _clearProgressPlaceholder();
         spinner.classList.remove('active');
         editor.innerHTML = '<p style="color:#c00;">Erreur : ' + _escapeHtml(err.message) + '</p>';
         _onGenerationDone();
@@ -1171,10 +1375,13 @@ function _onGenerationDone(streamedText) {
     document.getElementById('headerStatus').textContent = 'Reponse prete \u2022 ' + elapsed + 's';
 
     // Structurer le texte streamé en paragraphes HTML pour l'envoi ET le rendu final.
+    // Fix XSS audit 21/04 : escape HTML avant injection — protection contre
+    // prompt injection qui ferait générer du <script> ou <img onerror=…> par
+    // Claude (ex: mail malveillant qui demande à Claude d'inclure un payload).
     var editor = document.getElementById('editor');
     if (streamedText && !editor.querySelector('p')) {
         var paragraphs = streamedText.split(/\n\n+/).map(function(p) {
-            return '<p>' + p.replace(/\n/g, '<br>') + '</p>';
+            return '<p>' + _escapeHtml(p).replace(/\n/g, '<br>') + '</p>';
         }).join('');
         editor.innerHTML = paragraphs;
     }
@@ -1204,7 +1411,8 @@ function refineReply() {
     document.getElementById('genSpinner').textContent = 'Modification en cours...';
     document.getElementById('genSpinner').classList.add('active');
     document.getElementById('headerStatus').textContent = 'Modification en cours...';
-    editor.innerHTML = '';
+    // Placeholder "Rédaction en cours" aussi pour la modif (force : écrase le contenu existant)
+    _showProgressPlaceholder('writing', true);
 
     fetch(_backendUrl + '/refine_reply', {
         method: 'POST',
@@ -1244,11 +1452,13 @@ function refineReply() {
                         try {
                             var last = JSON.parse(_lineBufferRefine.substring(6));
                             if (last.chunk) {
+                                if (_progressPlaceholderActive) _clearProgressPlaceholder();
                                 editor.insertAdjacentText('beforeend', last.chunk);
                                 streamedText += last.chunk;
                             }
                         } catch(e) {}
                     }
+                    if (_progressPlaceholderActive) _clearProgressPlaceholder();
                     _onGenerationDone(streamedText);
                     document.getElementById('refineInput').value = '';
                     return;
@@ -1261,6 +1471,7 @@ function refineReply() {
                         try {
                             var data = JSON.parse(line.substring(6));
                             if (data.chunk) {
+                                if (_progressPlaceholderActive) _clearProgressPlaceholder();
                                 document.getElementById('genSpinner').classList.remove('active');
                                 editor.insertAdjacentText('beforeend', data.chunk);
                                 streamedText += data.chunk;
@@ -1268,6 +1479,7 @@ function refineReply() {
                             // Idem generate : on n'agit pas sur data.done — tout
                             // se passe au vrai end-of-stream (result.done ci-dessus).
                             if (data.error) {
+                                if (_progressPlaceholderActive) _clearProgressPlaceholder();
                                 document.getElementById('genSpinner').classList.remove('active');
                                 editor.innerHTML = '<p style="color:#c00;">' + _escapeHtml(data.error) + '</p>';
                                 _onGenerationDone();
@@ -1281,6 +1493,7 @@ function refineReply() {
         }
         read();
     }).catch(function(err) {
+        if (_progressPlaceholderActive) _clearProgressPlaceholder();
         document.getElementById('genSpinner').classList.remove('active');
         editor.innerHTML = '<p style="color:#c00;">Erreur : ' + _escapeHtml(err.message) + '</p>';
         _onGenerationDone();
@@ -1383,22 +1596,46 @@ function undoReply() {
 // =============================================================================
 
 function _detectMode() {
+    // Fix 2 (20/04) — cache localStorage avec TTL 1 h.
+    // /api/status change rarement (seul connexion/deconnexion Microsoft le fait).
+    // Si on a un cache frais, on l'utilise instantanément + on revalide en BG.
+    var _applyStatus = function(data) {
+        _isStandardMode = data.authenticated && data.mode === 'standard';
+        var btnSend = document.getElementById('btnSend');
+        if (btnSend) {
+            btnSend.innerHTML = _isStandardMode
+                ? '&#x1f4e4; Relire et envoyer'
+                : '&#x2709; Valider et envoyer';
+        }
+        _sendStartTime = Date.now();
+    };
+    try {
+        var cached = JSON.parse(localStorage.getItem('em_status_v1') || 'null');
+        if (cached && (Date.now() - cached.ts) < 3600000) {
+            _applyStatus(cached.data);   // 0 ms — appliqué instantanément
+        }
+    } catch(e) {
+        // Fix D5 (21/04 audit) : cache corrompu → fallback safe + purge
+        _isStandardMode = false;
+        try { localStorage.removeItem('em_status_v1'); } catch(_){}
+    }
+
+    // Revalidation réseau en arrière-plan (met à jour le cache si changé)
     fetch(_backendUrl + '/api/status')
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            _isStandardMode = data.authenticated && data.mode === 'standard';
-            var btnSend = document.getElementById('btnSend');
-            if (_isStandardMode) {
-                btnSend.innerHTML = '&#x1f4e4; Relire et envoyer';
-            } else {
-                btnSend.innerHTML = '&#x2709; Valider et envoyer';
-            }
-            _sendStartTime = Date.now();
+            _applyStatus(data);
+            try {
+                localStorage.setItem('em_status_v1', JSON.stringify({ ts: Date.now(), data: data }));
+            } catch(e) {}
         })
         .catch(function() {
-            _isStandardMode = false;
-            _sendStartTime = Date.now();
-            document.getElementById('headerStatus').textContent = 'Backend indisponible';
+            if (!_sendStartTime) {
+                _isStandardMode = false;
+                _sendStartTime = Date.now();
+                var hs = document.getElementById('headerStatus');
+                if (hs) hs.textContent = 'Backend indisponible';
+            }
         });
 }
 
@@ -1454,6 +1691,16 @@ function _sendViaGraph(body, to, cc, subject) {
     btnSend.disabled = true;
     btnSend.innerHTML = '&#x23F3; Envoi en cours...';
 
+    // Idempotence (21/04) : UUID unique au click, évite double envoi sur retry
+    var clientReqId = '';
+    try {
+        clientReqId = (window.crypto && typeof window.crypto.randomUUID === 'function')
+            ? window.crypto.randomUUID()
+            : ('c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10));
+    } catch(_) {
+        clientReqId = 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+    }
+
     fetch(_backendUrl + '/send_reply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1464,6 +1711,7 @@ function _sendViaGraph(body, to, cc, subject) {
             to: to,
             cc: cc,
             subject: subject,
+            client_request_id: clientReqId,
         }),
     }).then(function(r) {
         if (!r.ok && r.status !== 403) {
@@ -1970,18 +2218,43 @@ var _contactsCacheLoaded = false;
 function _loadContacts() {
     if (_contactsCacheLoaded) return;
     _contactsCacheLoaded = true;
+
+    // Fix 2 (20/04) — cache localStorage TTL 1 h.
+    // /api/contact_profiles change rarement (nouveau contact rencontré).
+    // Cache hit → autocomplete dispo instantanément + revalidation BG.
+    var _apply = function(profiles) {
+        _contactsCache = (profiles || []).map(function(p) {
+            return {
+                name: p.display_name || '',
+                email: p.email || '',
+                org: p.organization || '',
+            };
+        });
+    };
+    try {
+        var cached = JSON.parse(localStorage.getItem('em_contacts_v1') || 'null');
+        if (cached && (Date.now() - cached.ts) < 3600000) {
+            _apply(cached.profiles);   // 0 ms — appliqué instantanément
+        }
+    } catch(e) {
+        // Fix D5 (21/04 audit) : cache corrompu → fallback safe + purge
+        _contactsCache = [];
+        try { localStorage.removeItem('em_contacts_v1'); } catch(_){}
+    }
+
+    // Revalidation BG
     fetch(_backendUrl + '/api/contact_profiles')
         .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(function(data) {
-            _contactsCache = (data.profiles || []).map(function(p) {
-                return {
-                    name: p.display_name || '',
-                    email: p.email || '',
-                    org: p.organization || '',
-                };
-            });
+            _apply(data.profiles);
+            try {
+                localStorage.setItem('em_contacts_v1', JSON.stringify({
+                    ts: Date.now(),
+                    profiles: data.profiles || [],
+                }));
+            } catch(e) {}
         })
-        .catch(function() { _contactsCache = []; });
+        .catch(function() { if (!_contactsCache.length) _contactsCache = []; });
 }
 
 function _initAutocomplete(inputId, dropdownId) {
@@ -2058,12 +2331,17 @@ function _initAutocomplete(inputId, dropdownId) {
         }
     });
 
-    // Fermer si clic ailleurs
-    document.addEventListener('click', function(e) {
-        if (e.target !== input && !dropdown.contains(e.target)) {
-            dropdown.classList.remove('active');
-        }
-    });
+    // Fermer si clic ailleurs — fix audit 21/04 : flag sur l'élément pour
+    // éviter d'accumuler des handlers click au document (un par appel de
+    // _initAutocomplete : appelé pour fieldTo + fieldCc → 2 handlers sinon).
+    if (!input.__autocompleteGlobalClickBound) {
+        document.addEventListener('click', function(e) {
+            if (e.target !== input && !dropdown.contains(e.target)) {
+                dropdown.classList.remove('active');
+            }
+        });
+        input.__autocompleteGlobalClickBound = true;
+    }
 }
 
 
@@ -2096,112 +2374,301 @@ function _formatSize(bytes) {
 // PHASE 3 — MODE STANDALONE (QWebEngineView / window.open)
 // =============================================================================
 
-/**
- * Charge le body du mail reçu depuis le backend (mode standalone).
- * Les données ont été alimentées par la popup PyQt via POST /api/event/message_read.
- */
-function _loadMailBodyStandalone() {
-    fetch(_backendUrl + '/api/current_mail')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.status !== 'ok' || !data.mail) {
-                document.getElementById('mailBody').innerHTML =
-                    '<p style="color:#999; font-size:11px;">Donnees du mail non disponibles.</p>';
-                var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
-                return;
-            }
+/** Nettoyage HTML (factorisé 21/04 — évite 3 copies identiques) */
+function _sanitizeHtml(html) {
+    if (!html) return '';
+    return html
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+        .replace(/<iframe\b[^>]*>/gi, '<!-- blocked -->')
+        .replace(/<object\b[^>]*>/gi, '<!-- blocked -->')
+        .replace(/<embed\b[^>]*>/gi, '<!-- blocked -->')
+        .replace(/on\w+\s*=/gi, 'data-blocked=');
+}
 
-            var mail = data.mail;
+function _applyMailMeta() {
+    var mf = document.getElementById('mailFrom');
+    if (mf) mf.textContent = _fromName ? _fromName + ' <' + _fromEmail + '>' : (_fromEmail || '—');
+    var ms = document.getElementById('mailSubject');
+    if (ms) ms.textContent = _subject || '—';
+    _updateHeader();
+    // (O6) Pré-remplir les champs dest / sujet (pas écraser ce qu'a saisi user)
+    if (!document.getElementById('fieldTo').value && _fromEmail && (_mode === 'reply' || _mode === 'reply_all')) {
+        document.getElementById('fieldTo').value = _fromEmail;
+    }
+    if (!document.getElementById('fieldSubject').value && _subject) {
+        var prefix = _mode === 'forward' ? 'Fw: ' : 'Re: ';
+        var subjectClean = _subject.replace(/^(re\s*:|fw\s*:|fwd\s*:|tr\s*:)\s*/i, '');
+        document.getElementById('fieldSubject').value = prefix + subjectClean;
+    }
+}
 
-            // Mettre à jour les infos du mail reçu (panneau gauche)
-            _fromName = mail.from_name || _fromName;
-            _fromEmail = mail.from_email || _fromEmail;
-            _subject = mail.subject || _subject;
-            _messageId = mail.message_id || _messageId;
+function _setMailBody(rawBody) {
+    if (!rawBody) return false;
+    document.getElementById('mailBody').innerHTML = _sanitizeHtml(rawBody);
+    _receivedBody = rawBody;
+    _mailBodyForGeneration = rawBody;
+    var bs = document.getElementById('bodySpinner');
+    if (bs) bs.classList.remove('active');
+    // Phase 2 progression : body chargé → passage à "Intégration du contexte"
+    if (_progressPlaceholderActive) _showProgressPlaceholder('context');
+    return true;
+}
 
-            document.getElementById('mailFrom').textContent = _fromName
-                ? _fromName + ' <' + _fromEmail + '>'
-                : _fromEmail || '—';
-            document.getElementById('mailSubject').textContent = _subject || '—';
-            _updateHeader();
+// =============================================================================
+// Messages de progression dans l'éditeur (21/04) — la popup s'affiche quasi
+// instantanément (apparition), mais le CONTENU se construit progressivement.
+// On affiche des messages d'attente dans l'éditeur pour donner un feedback
+// visuel pendant les ~3-6s que prend la génération Claude.
+//
+// Phases :
+//   1. "Recherche de l'historique..." : au chargement du dialog (fetch body)
+//   2. "Intégration du contexte..."   : body chargé, préparation Claude
+//   3. "Rédaction en cours..."        : Claude streame (juste avant 1er chunk)
+//
+// Règles :
+//   - JAMAIS écraser du texte utilisateur (si editor non vide sans placeholder)
+//   - JAMAIS écraser une vraie réponse (draft / template / préemptif) : ces
+//     chemins appellent editor.innerHTML = ... qui supprime le placeholder
+//   - Le 1er chunk Claude vide le placeholder avant insertion
+// =============================================================================
+var _progressPlaceholderActive = false;
 
-            // Body
-            var body = mail.body || '';
-            if (body) {
-                // Sanitize HTML
-                var sanitized = body
-                    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                    .replace(/<iframe\b[^>]*>/gi, '<!-- blocked -->')
-                    .replace(/<object\b[^>]*>/gi, '<!-- blocked -->')
-                    .replace(/<embed\b[^>]*>/gi, '<!-- blocked -->')
-                    .replace(/on\w+\s*=/gi, 'data-blocked=');
-                document.getElementById('mailBody').innerHTML = sanitized;
-                _receivedBody = body;
-                _mailBodyForGeneration = body;
-                var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
-            } else if (_messageId) {
-                // Pas de body dans /api/current_mail → fetch séparé via /api/email_body
-                // (flow New Outlook : autorunshared.js POST /open_dialog_native qui lance PyQt
-                //  sans passer par /api/event/message_read → body absent de _current_mail_data)
-                fetch(_backendUrl + '/api/email_body?messageId=' + encodeURIComponent(_messageId))
-                    .then(function(r) { return r.json(); })
-                    .then(function(ebody) {
-                        var _bs2 = document.getElementById('bodySpinner'); if (_bs2) _bs2.classList.remove('active');
-                        if (ebody && (ebody.body || ebody.html_body)) {
-                            var fullBody = ebody.html_body || ebody.body;
-                            var sanitized = fullBody
-                                .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                                .replace(/<iframe\b[^>]*>/gi, '<!-- blocked -->')
-                                .replace(/<object\b[^>]*>/gi, '<!-- blocked -->')
-                                .replace(/<embed\b[^>]*>/gi, '<!-- blocked -->')
-                                .replace(/on\w+\s*=/gi, 'data-blocked=');
-                            document.getElementById('mailBody').innerHTML = sanitized;
-                            // Pour la génération IA : utiliser le body texte (strippe par _normalize_email),
-                            // pas le HTML brut (trop bruyant pour Claude)
-                            _receivedBody = ebody.body || ebody.html_body || '';
-                            _mailBodyForGeneration = ebody.body || ebody.html_body || '';
-                        } else {
-                            document.getElementById('mailBody').innerHTML =
-                                '<p style="color:#999;">Contenu du mail non disponible.</p>';
-                        }
-                    })
-                    .catch(function(err) {
-                        var _bs2 = document.getElementById('bodySpinner'); if (_bs2) _bs2.classList.remove('active');
-                        document.getElementById('mailBody').innerHTML =
-                            '<p style="color:#c00;">Erreur chargement body : ' + _escapeHtml(err.message || '') + '</p>';
-                    });
-            } else {
-                document.getElementById('mailBody').innerHTML =
-                    '<p style="color:#999;">Body en attente (cliquez le bouton EasyMail dans Outlook).</p>';
-                var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
-            }
+function _showProgressPlaceholder(phase, force) {
+    var editor = document.getElementById('editor');
+    if (!editor) return;
+    // Sync DOM ↔ flag : si notre placeholder a été remplacé par du contenu
+    // réel (draft/template/préemptif), le flag doit refléter cette réalité
+    // pour que le garde "ne pas écraser l'user" redevienne actif.
+    if (_progressPlaceholderActive && !document.getElementById('progressPlaceholder')) {
+        _progressPlaceholderActive = false;
+    }
+    // Sans force : si pas de placeholder actif ET l'éditeur contient du
+    // texte user → on touche pas. Avec force (click explicite sur "Générer"
+    // après que l'user a tapé), on écrase.
+    if (!force && !_progressPlaceholderActive) {
+        if (editor.innerText && editor.innerText.trim()) return;
+    }
+    var labels = {
+        'history': '🔍 Recherche de l\'historique...',
+        'context': '📧 Intégration du contexte...',
+        'writing': '✍️ Rédaction en cours...',
+    };
+    var label = labels[phase] || labels.writing;
+    editor.innerHTML = '<p id="progressPlaceholder" style="color:#888;' +
+                       'font-style:italic;margin:0;padding:0;">' +
+                       label + '</p>';
+    _progressPlaceholderActive = true;
+}
 
-            // (O6) Pré-remplir les champs
-            if (!document.getElementById('fieldTo').value && _fromEmail && (_mode === 'reply' || _mode === 'reply_all')) {
-                document.getElementById('fieldTo').value = _fromEmail;
-            }
-            if (!document.getElementById('fieldSubject').value && _subject) {
-                var prefix = _mode === 'forward' ? 'Fw: ' : 'Re: ';
-                var subjectClean = _subject.replace(/^(re\s*:|fw\s*:|fwd\s*:|tr\s*:)\s*/i, '');
-                document.getElementById('fieldSubject').value = prefix + subjectClean;
-            }
-        })
-        .catch(function(err) {
-            var mb = document.getElementById('mailBody');
-            if (mb) mb.innerHTML = '<p style="color:#c00;">Erreur chargement : ' + err.message + '</p>';
-            var sp = document.getElementById('bodySpinner');
-            if (sp) sp.classList.remove('active');
-        });
-
-    // (O13) Vérifier le speculative cache (fonctionne dans les 2 modes)
-    _checkSpeculativeCache();
+function _clearProgressPlaceholder() {
+    if (!_progressPlaceholderActive) return;
+    var editor = document.getElementById('editor');
+    if (editor) {
+        var ph = document.getElementById('progressPlaceholder');
+        if (ph) editor.innerHTML = '';
+    }
+    _progressPlaceholderActive = false;
 }
 
 /**
- * (O13) Vérifie si une réponse spéculative est prête.
- * Appelé au chargement du dialog (standalone ET Office.js).
+ * fetch avec timeout explicite (21/04 audit cycle 2 #A).
+ * fetch() natif n'a pas de timeout → peut bloquer indéfiniment si le
+ * serveur ne ferme jamais la connexion (ex: V2 down, réseau freeze).
+ * Wrap via AbortController.
+ */
+function _fetchTimeout(url, options, timeoutMs) {
+    var ctrl = new AbortController();
+    var timer = setTimeout(function(){ ctrl.abort(); }, timeoutMs || 5000);
+    var opts = Object.assign({}, options || {}, { signal: ctrl.signal });
+    return fetch(url, opts).finally(function(){ clearTimeout(timer); });
+}
+
+/**
+ * Charge le body du mail (mode standalone) — P2 audit 21/04 :
+ *   - Si on a _messageId (params URL du dialog), on fetch DIRECT /api/email_body
+ *     EN PARALLÈLE de /api/current_mail. Le premier qui a un body gagne.
+ *   - Économise jusqu'à 500 ms vs chaîne séquentielle courante → email_body.
+ *   - _applyMailMeta s'exécute immédiatement avec les données URL.
+ */
+function _loadMailBodyStandalone() {
+    _applyMailMeta();   // Immédiat : infos déjà en URL params
+
+    // Phase 1 progression : feedback immédiat dans l'éditeur (mode reply/forward)
+    if (_mode !== 'new') _showProgressPlaceholder('history');
+
+    var done = false;   // Garde course : premier résultat gagne
+    var fetches = [];
+
+    // Path 1 — /api/email_body (direct si on a le messageId). Timeout 5s.
+    if (_messageId) {
+        fetches.push(
+            _fetchTimeout(_backendUrl + '/api/email_body?messageId=' + encodeURIComponent(_messageId), null, 5000)
+                .then(function(r) { return r.json(); })
+                .then(function(ebody) {
+                    if (done) return;
+                    var full = ebody && (ebody.html_body || ebody.body);
+                    if (full && _setMailBody(full)) done = true;
+                })
+                .catch(function(){ /* other path or timeout */ })
+        );
+    }
+
+    // Path 2 — /api/current_mail (fallback : le backend a parfois le body). Timeout 5s.
+    fetches.push(
+        _fetchTimeout(_backendUrl + '/api/current_mail', null, 5000)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (done || !data || data.status !== 'ok' || !data.mail) return;
+                var mail = data.mail;
+                // Backend fait autorité sur les métadonnées : rafraîchit si différent
+                if (mail.from_name) _fromName = mail.from_name;
+                if (mail.from_email) _fromEmail = mail.from_email;
+                if (mail.subject) _subject = mail.subject;
+                if (mail.message_id) _messageId = mail.message_id;
+                _applyMailMeta();
+                if (mail.body && _setMailBody(mail.body)) done = true;
+            })
+            .catch(function(){ /* other path or timeout */ })
+    );
+
+    // Quand tous les fetches sont terminés, si aucun n'a fourni de body → message d'erreur
+    Promise.allSettled(fetches).then(function() {
+        if (done) return;
+        var mb = document.getElementById('mailBody');
+        if (mb) mb.innerHTML = _messageId
+            ? '<p style="color:#999;">Contenu du mail non disponible.</p>'
+            : '<p style="color:#999;">Body en attente (cliquez le bouton EasyMail dans Outlook).</p>';
+        var bs = document.getElementById('bodySpinner');
+        if (bs) bs.classList.remove('active');
+    });
+
+    // Fix 21/04 (user-reported "cache écrasé par nouvelle génération") :
+    //   _checkSpeculativeCache() était l'ANCIEN chemin : il POSTait
+    //   /api/prefetch_status, et si speculative_ready=true, appelait
+    //   generateReply() qui WIPE l'éditeur et lance une nouvelle Claude SSE
+    //   depuis zéro. C'est une RÉGÉNÉRATION, pas une lecture de cache.
+    //   Résultat : l'user voyait brièvement la cachée puis elle disparaissait
+    //   au profit d'une nouvelle.
+    //
+    //   _tryInstantReply() couvre déjà tout le pipeline (draft > préemptif >
+    //   template > fallback auto-generate) et affiche DIRECTEMENT le texte
+    //   caché via editor.innerHTML — pas d'appel Claude inutile.
+    //
+    //   On supprime donc _checkSpeculativeCache() et on garde _tryInstantReply
+    //   comme seul point d'entrée. Le 400ms d'attente laisse le body se
+    //   peupler pour que le payload /api/instant_reply soit complet.
+    setTimeout(_tryInstantReply, 400);
+
+    // Résumé du mail (21/04) : fetch /api/mail_summary et peupler les
+    // sections "Points principaux" + "Actions attendues" du panneau gauche.
+    // Non-bloquant — se déroule en parallèle du chargement du body.
+    if (_messageId) {
+        _fetchMailSummary();
+    }
+}
+
+/**
+ * Charge le résumé IA du mail (points principaux + actions attendues).
+ * Backend : /api/mail_summary. SELECT DB pur côté backend (~5 ms).
+ *
+ * Retry logic (fix A8 audit 21/04) : si le résumé n'est pas encore en DB
+ * (status=none), le piggyback sur /api/email_body est en train de générer
+ * — on retente 3 fois avec backoff (1.5 s, 3 s, 5 s) pour laisser Haiku
+ * finir (~1-2 s en batch=1).
+ */
+function _fetchMailSummary() {
+    var pointsBox = document.getElementById('resumePoints');
+    var actionsBox = document.getElementById('resumeActionsList');
+    var spinner = document.getElementById('resumeSpinner');
+    var attempts = 0;
+    var maxAttempts = 4;           // 4 essais : 0, 1.5s, 3s, 5s
+    var delays = [0, 1500, 3000, 5000];
+
+    function _render(points, actions) {
+        if (spinner) spinner.classList.remove('active');
+
+        if (pointsBox) {
+            var title = pointsBox.querySelector('.resume-section-title');
+            pointsBox.innerHTML = '';
+            if (title) pointsBox.appendChild(title);
+            if (points.length === 0) {
+                var empty = document.createElement('div');
+                empty.style.cssText = 'color:#999;font-size:10px;';
+                empty.textContent = 'Pas de points clés identifiés.';
+                pointsBox.appendChild(empty);
+            } else {
+                var ul = document.createElement('ul');
+                ul.style.cssText = 'margin:0;padding-left:16px;font-size:11px;line-height:1.5;';
+                points.forEach(function(p) {
+                    var li = document.createElement('li');
+                    li.textContent = p;
+                    ul.appendChild(li);
+                });
+                pointsBox.appendChild(ul);
+            }
+        }
+        if (actionsBox) {
+            actionsBox.innerHTML = '';
+            if (actions.length === 0) {
+                var emptyA = document.createElement('span');
+                emptyA.style.cssText = 'color:#999;font-size:10px;';
+                emptyA.textContent = 'Aucune action explicite.';
+                actionsBox.appendChild(emptyA);
+            } else {
+                var ulA = document.createElement('ul');
+                ulA.style.cssText = 'margin:0;padding-left:16px;font-size:11px;line-height:1.5;';
+                actions.forEach(function(a) {
+                    var li = document.createElement('li');
+                    li.textContent = a;
+                    ulA.appendChild(li);
+                });
+                actionsBox.appendChild(ulA);
+            }
+        }
+    }
+
+    function _tryFetch() {
+        fetch(_backendUrl + '/api/mail_summary?message_id=' + encodeURIComponent(_messageId))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var status = (data && data.status) || 'none';
+                var points = (data && data.points) || [];
+                var actions = (data && data.actions) || [];
+                // Status 'done' → on rend (même si points/actions vides,
+                // c'est une décision de Claude : "mail sans point saillant").
+                if (status === 'done') {
+                    _render(points, actions);
+                    return;
+                }
+                // Status 'none' : pas encore en DB, retry ou abandonne
+                attempts++;
+                if (attempts < maxAttempts) {
+                    setTimeout(_tryFetch, delays[attempts]);
+                } else {
+                    // Dernière tentative : afficher un état neutre
+                    console.info('[dialog] mail_summary : pas disponible après '
+                                 + maxAttempts + ' essais');
+                    _render([], []);
+                }
+            })
+            .catch(function(e) {
+                if (spinner) spinner.classList.remove('active');
+                console.warn('[dialog] mail_summary erreur :', e);
+            });
+    }
+
+    _tryFetch();
+}
+
+/**
+ * DEPRECATED 21/04 — remplacé par _tryInstantReply() qui lit directement
+ * le texte caché au lieu de rappeler generateReply() (qui régénérait depuis
+ * zéro et écrasait la réponse cachée). Fonction gardée pour compat mais
+ * PLUS APPELÉE au démarrage.
  */
 function _checkSpeculativeCache() {
+    console.warn('[dialog] _checkSpeculativeCache est deprecated — use _tryInstantReply');
+    return;
     var url = _backendUrl + '/api/prefetch_status';  // fix #6 : utiliser _backendUrl comme tous les autres fetch
     if (_messageId) url += '?message_id=' + encodeURIComponent(_messageId);
 
@@ -2252,10 +2719,10 @@ function _preloadMailData(data) {
     document.getElementById('mailSubject').textContent = _subject || '—';
 
     if (_receivedBody) {
-        var sanitized = _receivedBody
-            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-            .replace(/on\w+\s*=/gi, 'data-blocked=');
-        document.getElementById('mailBody').innerHTML = sanitized;
+        // Fix audit 21/04 : utiliser _sanitizeHtml (5 regex) au lieu d'un
+        // sanitize partiel (2 regex) qui laissait passer <iframe>, <object>,
+        // <embed>, <link rel=import>. Cohérence avec _setMailBody().
+        document.getElementById('mailBody').innerHTML = _sanitizeHtml(_receivedBody);
         var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
     }
 
@@ -2274,37 +2741,107 @@ function _preloadMailData(data) {
 }
 
 /**
- * (P18) Envoi en Mode Perf. Réduite standalone : via Companion /inject_reply.
- * Remplace _sendViaOutlook quand messageParent n'est pas disponible.
+ * Envoi en mode standalone — GRAPH-FIRST routing (21/04 migration OOM).
+ *
+ *   1. Essai /send_reply (Mode Complet, route existante enrichie) :
+ *      - Envoi HTTPS pur via Graph, aucun popup OOM Guardian
+ *      - Marche sur New / Classic / Mac / Web identique
+ *      - Idempotence via client_request_id (évite double envoi sur retry)
+ *   2. Fallback /api/companion/inject_reply (Mode Dégradé / Graph KO) :
+ *      - COM Outlook — popup OOM possible mais accepté en transitoire
  */
 function _sendViaCompanion(body, to, cc, subject) {
-    fetch(_backendUrl + '/api/companion/inject_reply', {
+    // UUID idempotence unique au click (crypto.randomUUID dispo Chromium récent)
+    var clientReqId = '';
+    try {
+        clientReqId = (window.crypto && typeof window.crypto.randomUUID === 'function')
+            ? window.crypto.randomUUID()
+            : ('c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10));
+    } catch(_) {
+        clientReqId = 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+    }
+
+    function _onSuccessUi(route) {
+        document.getElementById('headerStatus').textContent =
+            route === 'graph' ? 'Mail envoyé' : 'Reponse injectee dans Outlook';
+        document.getElementById('btnSend').innerHTML = '&#x2705; Envoye';
+        _postSend(body, to, cc, subject);
+    }
+
+    function _onErrorUi(msg) {
+        alert(msg);
+        document.getElementById('btnSend').disabled = false;
+        document.getElementById('btnSend').innerHTML = '&#x1f4e4; Envoyer';
+    }
+
+    function _sendViaCompanionFallback() {
+        fetch(_backendUrl + '/api/companion/inject_reply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                html_body: body,
+                mode: _mode,
+                to: to,
+                cc: cc,
+                subject: subject,
+                compose_already_open: true,  // standalone : compose ouvert par OnNewMessageCompose
+            })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.status === 'ok') {
+                _onSuccessUi('companion');
+            } else {
+                _onErrorUi('Erreur injection : ' + (data.reason || 'inconnue'));
+            }
+        })
+        .catch(function(err) {
+            _onErrorUi('Companion non disponible : ' + err.message);
+        });
+    }
+
+    // 1. Graph first via /send_reply (route existante, enrichie 21/04 avec
+    //    idempotence + conversion internet_id → Graph id + attachments).
+    fetch(_backendUrl + '/send_reply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            html_body: body,
             mode: _mode,
-            to: to,
-            cc: cc,
-            subject: subject,
-            compose_already_open: true,  // En standalone, le compose est ouvert par Outlook via OnNewMessageCompose
+            message_id: _messageId || '',
+            body: body,
+            to: to || '',
+            cc: cc || '',
+            subject: subject || '',
+            client_request_id: clientReqId,
         })
     })
-    .then(function(r) { return r.json(); })
+    .then(function(r) {
+        if (r.status === 403) {
+            // Mode Dégradé (pas de token Graph) → fallback Companion COM
+            console.info('[dialog] Graph 403 (Mode Complet requis) → fallback Companion');
+            _sendViaCompanionFallback();
+            return null;
+        }
+        if (!r.ok) {
+            return r.json().then(function(err) {
+                throw new Error(err.error || err.reason || ('HTTP ' + r.status));
+            });
+        }
+        return r.json();
+    })
     .then(function(data) {
-        if (data.status === 'ok') {
-            document.getElementById('headerStatus').textContent = 'Reponse injectee dans Outlook';
-            document.getElementById('btnSend').innerHTML = '&#x2705; Envoye';
-            _postSend(body, to, cc, subject);
+        if (!data) return;  // fallback déjà déclenché
+        if (data.success) {
+            _onSuccessUi('graph');
+        } else if (data.auth_required) {
+            _onErrorUi('Session expirée. Reconnectez-vous via Profil > Mode Standard.');
         } else {
-            alert('Erreur injection : ' + (data.reason || 'inconnue'));
-            document.getElementById('btnSend').disabled = false;
-            document.getElementById('btnSend').innerHTML = '&#x1f4e4; Envoyer';
+            _onErrorUi('Erreur envoi : ' + (data.error || data.reason || 'inconnue'));
         }
     })
     .catch(function(err) {
-        alert('Companion non disponible : ' + err.message);
-        document.getElementById('btnSend').disabled = false;
-        document.getElementById('btnSend').innerHTML = '&#x1f4e4; Envoyer';
+        // Erreur Graph (réseau, exception, etc.) : dernier recours Companion
+        console.warn('[dialog] Envoi Graph échoué (' + err.message + ') → fallback Companion');
+        _sendViaCompanionFallback();
     });
 }

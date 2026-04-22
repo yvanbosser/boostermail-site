@@ -43,9 +43,13 @@ cert = (
     .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
     .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365))
     .add_extension(
+        # Fix 22/04 : SAN couvrant localhost + IPv4 + IPv6. Sans ::1 dans
+        # la SAN, WebView2 qui résout "localhost" en IPv6 d'abord peut
+        # rejeter le cert comme "CN mismatch" → addin jamais chargé.
         x509.SubjectAlternativeName([
             x509.DNSName("localhost"),
             x509.IPAddress(ipaddress_module.ip_address("127.0.0.1")),
+            x509.IPAddress(ipaddress_module.ip_address("::1")),
         ]),
         critical=False,
     )

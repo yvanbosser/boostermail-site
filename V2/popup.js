@@ -980,3 +980,77 @@ function _pollOnboarding() {
         })
         .catch(function() { setTimeout(_pollOnboarding, 2000); });
 }
+
+
+// =============================================================================
+// DRAG overlay — fix audit 22/04
+// =============================================================================
+// Le Qt handler (_on_easymail_action) gere deja drag-start / drag-move / drag-end
+// mais aucun code JS ne les emettait. Cablage mousedown sur header + mousemove
+// global. Throttle 16ms (~60fps) pour ne pas spam QWebEngine.
+(function _setupOverlayDrag() {
+    var header = document.querySelector('.tp-header');
+    if (!header) return;
+
+    // CSS : curseur move + pas de selection texte pendant drag
+    header.style.userSelect = 'none';
+    header.style.cursor = 'move';
+
+    var dragging = false;
+    var lastMove = 0;
+
+    // Exclure les boutons du header (reduire, fermer) du drag
+    function isDragTarget(el) {
+        while (el && el !== header) {
+            if (el.classList && el.classList.contains('tp-header-nav-btn')) {
+                return false;
+            }
+            el = el.parentElement;
+        }
+        return true;
+    }
+
+    // Navigation vers easymail:// via un IFRAME hidden pour ne pas perturber
+    // la page principale (window.location.href changerait de page dans certains
+    // moteurs, meme si Qt intercepte en theorie).
+    var _dragFrame = document.createElement('iframe');
+    _dragFrame.style.display = 'none';
+    document.body.appendChild(_dragFrame);
+    function _nav(action, x, y) {
+        var url = 'easymail://' + action + '/';
+        if (typeof x === 'number' && typeof y === 'number') {
+            url += x + ',' + y;
+        }
+        _dragFrame.src = url;
+    }
+
+    header.addEventListener('mousedown', function(e) {
+        if (e.button !== 0) return;          // uniquement click gauche
+        if (!isDragTarget(e.target)) return; // boutons exclus
+        e.preventDefault();
+        dragging = true;
+        _nav('drag-start', e.screenX, e.screenY);
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (!dragging) return;
+        var now = Date.now();
+        if (now - lastMove < 16) return;  // throttle ~60 fps max
+        lastMove = now;
+        _nav('drag-move', e.screenX, e.screenY);
+    });
+
+    document.addEventListener('mouseup', function() {
+        if (!dragging) return;
+        dragging = false;
+        _nav('drag-end');
+    });
+
+    // Safety : si la souris quitte la fenetre pendant drag
+    document.addEventListener('mouseleave', function() {
+        if (dragging) {
+            dragging = false;
+            _nav('drag-end');
+        }
+    });
+})();

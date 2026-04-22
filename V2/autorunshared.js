@@ -35,8 +35,29 @@ function _debugLog(eventName, details) {
 
 // Marqueur de version : s'écrit dès le chargement du JS → permet de vérifier
 // en lisant addin_debug.log que Outlook a bien rechargé le nouveau fichier.
-var _ADDIN_VERSION = 'v3-complete-after-fetch';
+var _ADDIN_VERSION = 'v4-audit-21-04';
 _debugLog('js_loaded', { version: _ADDIN_VERSION });
+
+// Safety net global (21/04 P3) : toute exception non catchée → log backend
+// (non bloquant). Évite qu'une erreur silencieuse casse les handlers suivants.
+if (typeof window !== 'undefined') {
+    window.addEventListener('error', function(ev) {
+        try {
+            _debugLog('addin_js_error', {
+                msg: (ev.error && ev.error.message) || ev.message || '',
+                src: (ev.filename || '').split('/').pop(),
+                line: ev.lineno, col: ev.colno,
+            });
+        } catch(_){}
+    });
+    window.addEventListener('unhandledrejection', function(ev) {
+        try {
+            _debugLog('addin_unhandled_rejection', {
+                reason: String(ev.reason && ev.reason.message || ev.reason),
+            });
+        } catch(_){}
+    });
+}
 
 // ============================================================================
 // INITIALISATION
@@ -166,6 +187,15 @@ function openEasyMailDialog(event) {
 /**
  * Ouvre le dialog depuis le mode LECTURE (propriétés synchrones).
  * C'est le cas le plus courant : l'utilisateur lit un mail et clique le bouton EasyMail.
+ *
+ * Fix Levier 2 (20/04) — POST open_dialog_native en PREMIER pour New Outlook.
+ * Avant : _notifyBackend + body.getAsync + _buildAndOpenDialog (qui détecte la
+ *   plateforme et fait le fetch) partaient dans cet ordre → fetch open_dialog
+ *   en dernier, ~2-2.5 s après le clic.
+ * Après : on détecte la plateforme tout de suite. Si newOutlook, on tire le
+ *   fetch /api/companion/open_dialog_native AVANT tout le reste. _notifyBackend
+ *   et body.getAsync partent en parallèle (non bloquants).
+ * Gain attendu : 500-800 ms sur le temps clic → fenêtre visible.
  */
 function _openDialogFromRead(item, event) {
     var subject = item.subject || '';
@@ -187,6 +217,63 @@ function _openDialogFromRead(item, event) {
         cc = item.cc.map(function(r) { return r.emailAddress; }).join(',');
     }
 
+    // === FAST PATH : New Outlook → POST open_dialog_native EN PREMIER ===
+    // Tout ce qui n'est pas strictement nécessaire à l'ouverture de la fenêtre
+    // part APRÈS ce fetch critique, en parallèle (non bloquant).
+    var platform = _detectOutlookPlatform();
+    if (platform === 'newOutlook') {
+        var payload = {
+            mode: 'reply',
+            messageId: internetMessageId,
+            subject: subject,
+            fromName: fromName,
+            fromEmail: from,
+            from: from,
+            to: to,
+            cc: cc,
+            hasAttachments: hasAttachments ? '1' : '0'
+        };
+        // FETCH CRITIQUE — part en tête de queue
+        try {
+            fetch(_backendUrl + '/api/companion/open_dialog_native', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(function(r) {
+                _debugLog('newOutlook_fetch_result', { status: r.status, ok: r.ok });
+                event.completed();
+            }).catch(function(err) {
+                _debugLog('newOutlook_fetch_error', { error: String(err) });
+                event.completed();
+            });
+        } catch(e) {
+            _debugLog('newOutlook_fetch_exception', { error: String(e) });
+            event.completed();
+        }
+        _debugLog('newOutlook_click', { platform: platform, payload: payload });
+
+        // Fix 20/04 — /api/event/message_read DIFFÉRÉ de 1.5 s.
+        // Non critique pour l'ouverture du dialog (PyQt a déjà les params via
+        // l'URL). Le différer évite de saturer V2 avec une requête pendant
+        // que le dialog se charge.
+        setTimeout(function() {
+            _notifyBackend('/api/event/message_read', {
+                subject: subject,
+                from_email: from,
+                from_name: fromName,
+                message_id: internetMessageId,
+                conversation_id: conversationId,
+                has_attachments: hasAttachments,
+                to: to,
+                cc: cc
+            });
+        }, 1500);
+        // body.getAsync n'a aucune utilité en mode newOutlook (standalone PyQt
+        // lit le body via /api/email_body). Skipped.
+        return;
+    }
+
+    // === CLASSIC / AUTRE PLATEFORME : flow original préservé ===
     // Notifier le backend (turbo : alimentation + auto-prefetch O8)
     _notifyBackend('/api/event/message_read', {
         subject: subject,
@@ -201,15 +288,11 @@ function _openDialogFromRead(item, event) {
 
     // IMPORTANT : displayDialogAsync DOIT être appelé dans le contexte user-gesture (le clic).
     // Tout appel async AVANT (body.getAsync, fetch...) fait perdre ce contexte → popup blocker.
-    // Solution : lancer getAsync en parallèle, stocker le résultat dans _mailBody,
-    // puis le lire depuis le closure APRÈS que le dialog est ouvert (setTimeout 1000ms dans
-    // _buildAndOpenDialog laisse largement le temps à getAsync de finir, ~50-200ms en pratique).
     var _mailBody = '';
     item.body.getAsync(Office.CoercionType.Text, function(bodyResult) {
         if (bodyResult.status === Office.AsyncResultStatus.Succeeded) {
             _mailBody = bodyResult.value || '';
         }
-        // (Mode Perf. Réduite uniquement — en Mode Standard, le body vient de Graph /api/email_body)
     });
 
     // Ouvrir le dialog IMMÉDIATEMENT pendant qu'on est encore dans le contexte du clic
@@ -238,19 +321,29 @@ function _openDialogFromCompose(item, event) {
     function _trySendComposeData() {
         // N'envoie que si les deux conditions sont réunies
         if (!_dataReady || !_dialogRef) return;
-        setTimeout(function() {
-            try {
-                _dialogRef.messageChild(JSON.stringify({
-                    action: 'compose_data',
-                    subject: _cd.subject,
-                    to: _cd.to,
-                    cc: _cd.cc,
-                    mode: _cd.mode
-                }));
-            } catch(e) {
-                console.log('EasyMail: messageChild compose_data failed', e);
-            }
-        }, 500);  // Laisser le temps au dialog de charger
+
+        // Fix audit 21/04 : envoi répété (3 essais à 500ms, 1200ms, 2000ms)
+        // car le dialog peut ne pas avoir enregistré son listener dans les
+        // 500ms initiaux (Office.js dialog boot + fetches parallèles). Le
+        // handler côté dialog est idempotent : il ne remplit que les champs
+        // vides, donc plusieurs envois sont safe.
+        var _delays = [500, 1200, 2000];
+        var _payload = JSON.stringify({
+            action: 'compose_data',
+            subject: _cd.subject,
+            to: _cd.to,
+            cc: _cd.cc,
+            mode: _cd.mode
+        });
+        _delays.forEach(function(delay) {
+            setTimeout(function() {
+                try {
+                    if (_dialogRef) _dialogRef.messageChild(_payload);
+                } catch(e) {
+                    // Dialog peut être fermé entre-temps → silencieux
+                }
+            }, delay);
+        });
     }
 
     var _pending = 3;
@@ -313,27 +406,28 @@ function _openDialogFromCompose(item, event) {
  *  - web        → postMessage vers extension BoosterMail (zéro popup)
  *  - mac/mobile → fallback displayDialogAsync (meilleur effort)
  */
+var _cachedPlatform = null;
 function _detectOutlookPlatform() {
+    if (_cachedPlatform !== null) return _cachedPlatform;   // Cache session (21/04 nettoyage)
     try {
         var diag = Office.context.mailbox && Office.context.mailbox.diagnostics;
         var host = diag ? (diag.hostName || '') : '';
-        if (host === 'newOutlookWindows') return 'newOutlook';
-        if (host === 'newOutlookMac') return 'newOutlook';
-        if (host === 'OutlookWebApp' || host === 'OutlookWeb') return 'web';
-        if (host === 'Outlook') {
+        if (host === 'newOutlookWindows') _cachedPlatform = 'newOutlook';
+        else if (host === 'newOutlookMac') _cachedPlatform = 'newOutlook';
+        else if (host === 'OutlookWebApp' || host === 'OutlookWeb') _cachedPlatform = 'web';
+        else if (host === 'Outlook') {
             // Classic Windows desktop
             var plat = Office.context.platform;
-            if (plat === Office.PlatformType.Mac) return 'mac';
-            return 'classic';
+            _cachedPlatform = (plat === Office.PlatformType.Mac) ? 'mac' : 'classic';
         }
-        if (host === 'OutlookIOS' || host === 'OutlookAndroid') return 'mobile';
-        // Fallback via Office.context.platform
-        if (Office.context.platform === Office.PlatformType.OfficeOnline) return 'web';
-        if (Office.context.platform === Office.PlatformType.PC) return 'classic';
-        return 'unknown';
+        else if (host === 'OutlookIOS' || host === 'OutlookAndroid') _cachedPlatform = 'mobile';
+        else if (Office.context.platform === Office.PlatformType.OfficeOnline) _cachedPlatform = 'web';
+        else if (Office.context.platform === Office.PlatformType.PC) _cachedPlatform = 'classic';
+        else _cachedPlatform = 'unknown';
     } catch (e) {
-        return 'unknown';
+        _cachedPlatform = 'unknown';
     }
+    return _cachedPlatform;
 }
 
 /**

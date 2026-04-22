@@ -5,9 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BoosterMail</title>
     <link rel="stylesheet" href="dialog.css">
-    <!-- Office.js statique (bloquant) pour le mode Office.js (displayDialogAsync).
-         En standalone, Office.context sera null — dialog.js gère via _isOfficeContext. -->
-    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <!-- Office.js avec 'defer' (21/04 audit cycle 1 #8) — le téléchargement
+         se fait en parallèle du parse HTML (gain 500 ms à 2 s sur le cold
+         start selon la latence CDN Microsoft), l'exécution reste ordonnée
+         après le parse et avant dialog.js. En standalone, Office.context
+         sera null — dialog.js gère via feature checks `typeof Office`. -->
+    <script defer src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 </head>
 <body>
     <!-- ============================================================ -->
@@ -26,9 +29,9 @@
                 <button class="em-hdr-btn" id="btnNavProfil" onclick="window.open(_backendUrl+'/plugin/popup.html?container=extension&view=profil','_blank','width=600,height=500')" title="Profil">&#x1f464;</button>
                 <button class="em-hdr-btn" id="btnNavContacts" onclick="window.open(_backendUrl+'/plugin/popup.html?container=extension&view=contacts','_blank','width=600,height=500')" title="Contacts">&#x1f4d1;</button>
                 <button class="em-hdr-btn" id="btnNavEcheances" onclick="window.open(_backendUrl+'/plugin/popup.html?container=extension&view=echeances','_blank','width=600,height=500')" title="Echeances">&#x23f0;</button>
+                <!-- Fix UX 22/04 : bouton "Retour Outlook" rouge remplace la croix + minimize supprime -->
+                <button class="em-hdr-btn em-hdr-return" id="btnClose" title="Retour Outlook">Retour Outlook</button>
             </div>
-            <!-- Pas de bouton fermer — l'utilisateur ferme via la croix Windows -->
-            <button class="em-hdr-btn" id="btnClose" style="display:none;">&times;</button>
         </div>
     </div>
 
@@ -132,7 +135,11 @@
                         &#x1f4ce;
                     </button>
 
-                    <button class="em-gen-btn" id="btnGenerate" onclick="generateReply()">
+                    <!-- Test 21/04 — Bouton Générer caché : la génération est
+                         maintenant AUTOMATIQUE à l'ouverture du dialog (cache hit
+                         ou déclenchement automatique via _tryInstantReply). -->
+                    <button class="em-gen-btn" id="btnGenerate" onclick="generateReply()"
+                            style="display:none;">
                         &#x2728; Generer
                     </button>
                 </div>
@@ -376,6 +383,6 @@
         </div>
     </div>
 
-    <script src="dialog.js"></script>
+    <script defer src="dialog.js"></script>
 </body>
 </html>

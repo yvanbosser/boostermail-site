@@ -2,8 +2,9 @@
 # ------------------------------------------------------------
 # Ce script :
 #   1. Vérifie Python + installe les dépendances
-#   2. Crée la tâche planifiée "BoosterMail" (trigger: at logon)
-#   3. Démarre le service immédiatement pour la session en cours
+#   2. Sideload le manifest Outlook (bouton BM dans le ruban, zéro action user)
+#   3. Crée la tâche planifiée "BoosterMail" (trigger: at logon)
+#   4. Démarre le service immédiatement pour la session en cours
 #
 # Usage :
 #   Dans PowerShell (user normal, pas admin) :
@@ -24,7 +25,7 @@ Write-Host '============================================================'
 Write-Host ''
 
 # ---- 1. Vérifier Python ----
-Write-Host '[1/4] Vérification de Python...' -ForegroundColor Cyan
+Write-Host '[1/5] Vérification de Python...' -ForegroundColor Cyan
 $python = $null
 foreach ($cmd in @('py', 'python', 'python3')) {
     try {
@@ -45,40 +46,57 @@ if (-not $python) {
     exit 1
 }
 
-# ---- 2. Installer les dépendances ----
+# ---- 2. Installer les dépendances (via requirements.txt) ----
 Write-Host ''
-Write-Host '[2/4] Installation des dépendances Python (peut prendre 1-2 min)...' -ForegroundColor Cyan
-$deps = @(
-    'flask==3.0.0',
-    'anthropic==0.40.0',
-    'msal',
-    'cryptography',
-    'PyQt6',
-    'PyQt6-WebEngine',
-    'pywin32',
-    'PyPDF2',
-    'python-docx',
-    'openpyxl',
-    'requests'
-)
+Write-Host '[2/5] Installation des dépendances Python (peut prendre 1-2 min)...' -ForegroundColor Cyan
+
+$requirementsFile = Join-Path $InstallDir 'requirements.txt'
+if (-not (Test-Path $requirementsFile)) {
+    Write-Host "  ✗ requirements.txt introuvable : $requirementsFile" -ForegroundColor Red
+    exit 1
+}
+
 & $python -m pip install --quiet --upgrade pip
 if ($LASTEXITCODE -ne 0) {
     Write-Host '  ✗ pip upgrade échoué' -ForegroundColor Red
     exit 1
 }
-foreach ($d in $deps) {
-    Write-Host "    - $d" -ForegroundColor DarkGray
-    & $python -m pip install --quiet $d
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "      ✗ Échec install $d" -ForegroundColor Red
-        exit 1
-    }
+
+# Single source of truth : requirements.txt. Évite la divergence entre le
+# script d'install et les deps documentées (fix 21/04 audit cycle 5).
+& $python -m pip install --quiet -r $requirementsFile
+if ($LASTEXITCODE -ne 0) {
+    Write-Host '  ✗ Échec install des dépendances' -ForegroundColor Red
+    Write-Host '    Pistes : vérifier la connexion réseau, proxy entreprise, quarantaine antivirus.' -ForegroundColor Yellow
+    Write-Host "    Vous pouvez retry manuellement : pip install -r $requirementsFile" -ForegroundColor Yellow
+    exit 1
 }
 Write-Host '  ✓ Dépendances installées' -ForegroundColor Green
 
-# ---- 3. Créer la tâche planifiée (logon trigger) ----
+# ---- 3. Sideload du manifest Outlook (bouton BM dans le ruban) ----
 Write-Host ''
-Write-Host '[3/4] Création de la tâche planifiée BoosterMail (logon)...' -ForegroundColor Cyan
+Write-Host '[3/5] Installation du bouton BoosterMail dans Outlook...' -ForegroundColor Cyan
+
+$installerScript = Join-Path $InstallDir 'install_outlook_addin.py'
+if (-not (Test-Path $installerScript)) {
+    Write-Host "  ⚠ Script install_outlook_addin.py introuvable" -ForegroundColor Yellow
+} else {
+    # Script Python : écrit la clé registre HKCU\...\Wef\Developer (sideload
+    # New + Classic Outlook) + installe le cert localhost dans Trusted Root
+    # du user courant. Aucun UAC requis.
+    & $python $installerScript --verbose
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host '  ✓ Bouton BoosterMail enregistré dans Outlook' -ForegroundColor Green
+        Write-Host '    (Apparaîtra au prochain démarrage d''Outlook, dans le ruban.)' -ForegroundColor DarkGray
+    } else {
+        Write-Host "  ⚠ Installation addin incomplète (code $LASTEXITCODE)" -ForegroundColor Yellow
+        Write-Host '    Le superviseur réessaiera automatiquement au prochain logon.' -ForegroundColor Yellow
+    }
+}
+
+# ---- 4. Créer la tâche planifiée (logon trigger) ----
+Write-Host ''
+Write-Host '[4/5] Création de la tâche planifiée BoosterMail (logon)...' -ForegroundColor Cyan
 
 # Supprimer une tâche existante (update propre)
 try {
@@ -99,9 +117,9 @@ $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interac
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
 Write-Host '  ✓ Tâche planifiée créée' -ForegroundColor Green
 
-# ---- 4. Lancer le service immédiatement ----
+# ---- 5. Lancer le service immédiatement ----
 Write-Host ''
-Write-Host '[4/4] Lancement immédiat du service (sans attendre le prochain logon)...' -ForegroundColor Cyan
+Write-Host '[5/5] Lancement immédiat du service (sans attendre le prochain logon)...' -ForegroundColor Cyan
 try {
     Start-ScheduledTask -TaskName $TaskName
     Start-Sleep -Seconds 2
@@ -131,6 +149,8 @@ Write-Host ' Installation terminée.'
 Write-Host '============================================================'
 Write-Host ''
 Write-Host 'BoosterMail se lancera automatiquement à chaque démarrage.'
+Write-Host 'Le bouton BM apparaîtra dans Outlook dès le prochain démarrage d''Outlook.'
+Write-Host ''
 Write-Host 'Pour arrêter manuellement : py boostermail_service.py --stop'
-Write-Host 'Pour désinstaller la tâche : Unregister-ScheduledTask -TaskName BoosterMail -Confirm:$false'
+Write-Host 'Pour désinstaller complètement : .\uninstall.ps1'
 Write-Host ''
