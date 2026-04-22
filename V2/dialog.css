@@ -258,6 +258,11 @@ body {
     gap: 4px;
     flex-wrap: wrap;
     margin-top: 8px;
+    /* Phase C audit 22/04 : content-visibility évite le rendu initial du bloc
+       PJ si aucune PJ (cas fréquent). Le browser skip le layout tant que ce
+       bloc n'est pas dans le viewport ou peuplé. Gain ~5-10ms LCP. */
+    content-visibility: auto;
+    contain-intrinsic-size: 40px;
 }
 .pj-chip {
     background: #fff;

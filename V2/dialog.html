@@ -11,6 +11,29 @@
          après le parse et avant dialog.js. En standalone, Office.context
          sera null — dialog.js gère via feature checks `typeof Office`. -->
     <script defer src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+
+    <!-- Phase C audit 22/04 — EAGER FETCH bundle /api/dialog_init
+         Déclenche le fetch AVANT que dialog.js parse (~100-300 ms gagnées).
+         Le résultat est stashé sur `window.__bundlePromise` que dialog.js
+         consomme via `_loadDialogBundle()`. Fallback gracieux si window.fetch
+         indisponible ou URL malformée. -->
+    <script>
+    (function() {
+        try {
+            var p = new URLSearchParams(window.location.search);
+            var mid = p.get('messageId') || '';
+            var fromE = p.get('fromEmail') || p.get('from') || '';
+            if (!mid) return;   // mode new / standalone : pas de bundle
+            var origin = window.location.origin || 'https://localhost:3443';
+            var url = origin + '/api/dialog_init?message_id=' + encodeURIComponent(mid)
+                      + (fromE ? '&from_email=' + encodeURIComponent(fromE) : '');
+            window.__bundlePromise = fetch(url).then(function(r) {
+                return r.ok ? r.json() : null;
+            }).catch(function() { return null; });
+            window.__bundleTriggeredAt = performance.now();
+        } catch (_) { /* noop */ }
+    })();
+    </script>
 </head>
 <body>
     <!-- ============================================================ -->

@@ -262,9 +262,13 @@ _perfMonitor.mark('T0_script_start');
     // Plan 2 Phase 5 — Pipeline unifié "réponse instantanée" à l'ouverture du dialog
     // Priorité : brouillon user > préemptif BG > template > rien
     // Remplace les appels séparés _checkSpeculativeCache / _restoreDraft / _tryTemplateMatch.
+    //
+    // Phase C audit 22/04 : délai réduit 250 → 60 ms (body arrive maintenant via
+    // /api/dialog_init bundle, beaucoup plus vite qu'avant). Gain perceptif ~200 ms.
+    // _tryInstantReply tolère un body vide (cache draft/preemptive/template
+    // indépendants du body), on évite de bloquer le pipeline de réponse.
     if (!_isStandaloneMode) {
-        // Délai court pour laisser _loadMailBody peupler _mailBodyForGeneration
-        setTimeout(_tryInstantReply, 250);
+        setTimeout(_tryInstantReply, 60);
     }
 
     // Plan 2 Phase 2.A — Auto-save brouillon en édition (debounced)
@@ -383,27 +387,17 @@ function _updateHeader() {
 }
 
 function _loadContactTags() {
-    // Charger le profil contact depuis le backend pour les tags header
+    // Fix audit 22/04 bis : le dialog standalone (PyQt) n'utilise PAS le
+    // bundle /api/dialog_init côté consommation — _loadDialogBundle ne fire
+    // qu'en mode Office.js natif (jamais atteint en pratique). Le bundle
+    // backend tourne quand même (pré-chauffe des caches) mais les tags DOIVENT
+    // être fetchés directement pour apparaître. Architecture 3 portes : chaque
+    // livreur a sa porte dédiée, celle-ci est celle du livreur "fiche contact".
     if (!_fromEmail) return;
     fetch(_backendUrl + '/api/contact_profile/' + encodeURIComponent(_fromEmail))
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            if (data && data.profile) {
-                var p = data.profile;
-                // Tag registre (vouvoiement/tutoiement)
-                var tagReg = document.getElementById('tagRegister');
-                if (tagReg && p.register) {
-                    tagReg.textContent = p.register;
-                    tagReg.style.display = '';
-                }
-                // Tag confiance
-                var tagConf = document.getElementById('tagConfidence');
-                if (tagConf && p.confidence !== undefined) {
-                    tagConf.textContent = 'confiance ' + p.confidence + '%';
-                    tagConf.style.display = '';
-                }
-                _perfMonitor.mark('T6_contact_profile');
-            }
+            if (data && data.profile) _applyContactProfile(data.profile);
         })
         .catch(function() {});
 }
@@ -799,11 +793,199 @@ function _loadMailBody() {
         return;
     }
 
-    // Tenter de charger le body via Graph API (Mode Standard)
+    // Phase C audit 22/04 — route bundle : 1 seul round-trip pour
+    // body + résumé + profil contact (élimine 3 TLS handshakes successifs).
+    // Fallback individuel si /api/dialog_init échoue.
+    _loadDialogBundle();
+}
+
+/**
+ * Phase C — charge body + résumé + profil contact en 1 seul fetch bundle.
+ * Fallback gracieux : si la route bundle KO, on retombe sur les fetches
+ * individuels existants (compat arrière garantie).
+ *
+ * Eager fetch : si `window.__bundlePromise` est déjà en cours (déclenché par
+ * le <script> inline de dialog.html AVANT le parse dialog.js), on consomme
+ * cette promesse → gain ~100-300 ms sur le cold start.
+ */
+function _loadDialogBundle() {
+    var _bs = function() { var el = document.getElementById('bodySpinner'); if (el) el.classList.remove('active'); };
+    // Prioriser la promesse pré-déclenchée par dialog.html (eager fetch)
+    var bundlePromise;
+    if (window.__bundlePromise) {
+        bundlePromise = window.__bundlePromise;
+        if (window.__bundleTriggeredAt) {
+            var eagerMs = Math.round((performance.now() - window.__bundleTriggeredAt) * 10) / 10;
+            console.info('[dialog] bundle consommé depuis eager fetch (age=' + eagerMs + 'ms)');
+        }
+    } else {
+        var url = _backendUrl + '/api/dialog_init?message_id=' + encodeURIComponent(_messageId)
+                  + (_fromEmail ? '&from_email=' + encodeURIComponent(_fromEmail) : '');
+        bundlePromise = fetch(url).then(function(r) { return r.ok ? r.json() : null; });
+    }
+    bundlePromise
+        .then(function(bundle) {
+            if (!bundle) {
+                // Fallback : ancienne logique (3 fetches)
+                _legacyFetchBody();
+                _legacyFetchContactTags();
+                if (_messageId) _fetchMailSummary();
+                return;
+            }
+            // --- Email body ---
+            var email = bundle.email;
+            if (email && email.error === 'auth_required') {
+                document.getElementById('mailBody').innerHTML =
+                    '<p style="color:#999; font-size:11px;">Reconnexion Microsoft requise.</p>';
+                _bs();
+            } else if (email) {
+                _renderMailBody(email);
+                if (email.attachments && email.attachments.length > 0) {
+                    _renderAttachments(email.attachments);
+                }
+            } else {
+                // Mode Dégradé ou pas de email_body dispo — fallback
+                _legacyFetchBody();
+            }
+            // --- Résumé ---
+            var summary = bundle.summary;
+            if (summary && summary.status === 'done') {
+                _renderSummaryInstant(summary.points || [], summary.actions || []);
+            } else {
+                // MISS → fallback SSE stream
+                _fetchMailSummary();
+            }
+            // --- Profil contact ---
+            var profile = bundle.contact_profile;
+            if (profile) {
+                _applyContactProfile(profile);
+            }
+        })
+        .catch(function(e) {
+            console.warn('[dialog] dialog_init bundle échec, fallback:', e);
+            _legacyFetchBody();
+            _legacyFetchContactTags();
+            if (_messageId) _fetchMailSummary();
+        });
+}
+
+/** Rendu body (extrait de _loadMailBody pour réutilisation dans bundle) */
+function _renderMailBody(data) {
+    var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
+    var _bodyCached = !!(data && data.cached);
+    var _mailBodyEl = document.getElementById('mailBody');
+    if (data.html_body) {
+        var sanitized = data.html_body
+            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+            .replace(/<iframe\b[^>]*>/gi, '<!-- blocked -->')
+            .replace(/<object\b[^>]*>/gi, '<!-- blocked -->')
+            .replace(/<embed\b[^>]*>/gi, '<!-- blocked -->')
+            .replace(/on\w+\s*=/gi, 'data-blocked=');
+        if (!_bodyCached && _mailBodyEl) {
+            _mailBodyEl.style.opacity = '0';
+            _mailBodyEl.style.transition = 'opacity 0.25s ease-in';
+        }
+        _mailBodyEl.innerHTML = sanitized;
+        if (!_bodyCached) {
+            requestAnimationFrame(function() { if (_mailBodyEl) _mailBodyEl.style.opacity = '1'; });
+        }
+        _receivedBody = data.body || data.html_body || '';
+        _mailBodyForGeneration = data.body || data.html_body || '';
+    } else if (data.body) {
+        var bodyHtml = data.body.split(/\n\n+/).map(function(p) {
+            return '<p>' + _escapeHtml(p).replace(/\n/g, '<br>') + '</p>';
+        }).join('');
+        if (!_bodyCached && _mailBodyEl) {
+            _mailBodyEl.style.opacity = '0';
+            _mailBodyEl.style.transition = 'opacity 0.25s ease-in';
+        }
+        _mailBodyEl.innerHTML = bodyHtml;
+        if (!_bodyCached) {
+            requestAnimationFrame(function() { if (_mailBodyEl) _mailBodyEl.style.opacity = '1'; });
+        }
+        _mailBodyForGeneration = data.body || '';
+    } else {
+        _mailBodyEl.innerHTML = '<p style="color:#999;">Contenu non disponible.</p>';
+    }
+    _perfMonitor.mark('T3_body_rendered', _bodyCached ? 'cache' : 'graph');
+    // Meta
+    if (data.date || data.to) {
+        var metaParts2 = [];
+        if (data.to) metaParts2.push('A : ' + data.to);
+        else if (_toEmail) metaParts2.push('A : ' + _toEmail);
+        if (data.cc || _ccEmail) metaParts2.push('Cc : ' + (data.cc || _ccEmail));
+        if (data.date) metaParts2.push(new Date(data.date).toLocaleString('fr-FR'));
+        document.getElementById('mailMeta').textContent = metaParts2.join(' | ') || '—';
+    }
+}
+
+/** Application tags contact (extrait de _loadContactTags) */
+function _applyContactProfile(p) {
+    if (!p) return;
+    var tagReg = document.getElementById('tagRegister');
+    if (tagReg && p.register) { tagReg.textContent = p.register; tagReg.style.display = ''; }
+    var tagConf = document.getElementById('tagConfidence');
+    if (tagConf && p.confidence !== undefined) {
+        tagConf.textContent = 'confiance ' + p.confidence + '%';
+        tagConf.style.display = '';
+    }
+    _perfMonitor.mark('T6_contact_profile');
+}
+
+/** Rendu instant résumé depuis bundle cache DB */
+function _renderSummaryInstant(points, actions) {
+    var pointsBox = document.getElementById('resumePoints');
+    var actionsBox = document.getElementById('resumeActionsList');
+    var spinner = document.getElementById('resumeSpinner');
+    _perfMonitor.mark('T4_summary_first_point', 'cache');
+    if (pointsBox) {
+        var title = pointsBox.querySelector('.resume-section-title');
+        pointsBox.innerHTML = '';
+        if (title) pointsBox.appendChild(title);
+        if (points.length === 0) {
+            var empty = document.createElement('div');
+            empty.style.cssText = 'color:#999;font-size:10px;';
+            empty.textContent = 'Pas de points clés identifiés.';
+            pointsBox.appendChild(empty);
+        } else {
+            var ul = document.createElement('ul');
+            ul.style.cssText = 'margin:0;padding-left:16px;font-size:11px;line-height:1.5;';
+            points.forEach(function(p) {
+                var li = document.createElement('li');
+                li.textContent = p;
+                ul.appendChild(li);
+            });
+            pointsBox.appendChild(ul);
+        }
+    }
+    if (actionsBox) {
+        actionsBox.innerHTML = '';
+        if (actions.length === 0) {
+            var emptyA = document.createElement('span');
+            emptyA.style.cssText = 'color:#999;font-size:10px;';
+            emptyA.textContent = 'Aucune action explicite.';
+            actionsBox.appendChild(emptyA);
+        } else {
+            var ulA = document.createElement('ul');
+            ulA.style.cssText = 'margin:0;padding-left:16px;font-size:11px;line-height:1.5;';
+            actions.forEach(function(a) {
+                var li = document.createElement('li');
+                li.textContent = a;
+                ulA.appendChild(li);
+            });
+            actionsBox.appendChild(ulA);
+        }
+    }
+    if (spinner) spinner.classList.remove('active');
+    _perfMonitor.mark('T4_summary_done', 'cache');
+    _perfMonitor.mark('T4_summary_source', 'cache');
+}
+
+/** Fallback body : ancien /api/email_body (si bundle KO) */
+function _legacyFetchBody() {
     fetch(_backendUrl + '/api/email_body?messageId=' + encodeURIComponent(_messageId))
         .then(function(r) {
             if (r.status === 403) {
-                // Mode Perf. Réduite : le body sera transmis par le taskpane
                 document.getElementById('mailBody').innerHTML =
                     '<p style="color:#999; font-size:11px;">Body disponible apres generation (Mode Perf. Reduite).</p>';
                 var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
@@ -813,70 +995,7 @@ function _loadMailBody() {
         })
         .then(function(data) {
             if (!data) return;
-            var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
-
-            // Phase 3 audit 22/04 : `cached` true = HIT email_cache DB
-            // (body déjà en local) → affichage instantané. false = fetched via
-            // Graph en live → anim fade-in pour signaler le delta perceptif
-            // (l'utilisateur voit que c'est un tout nouveau mail).
-            var _bodyCached = !!(data && data.cached);
-            var _mailBodyEl = document.getElementById('mailBody');
-
-            if (data.html_body) {
-                // Sanitize : supprimer les scripts du HTML reçu (protection XSS basique)
-                var sanitized = data.html_body
-                    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                    .replace(/<iframe\b[^>]*>/gi, '<!-- blocked -->')
-                    .replace(/<object\b[^>]*>/gi, '<!-- blocked -->')
-                    .replace(/<embed\b[^>]*>/gi, '<!-- blocked -->')
-                    .replace(/on\w+\s*=/gi, 'data-blocked=');
-                if (!_bodyCached && _mailBodyEl) {
-                    _mailBodyEl.style.opacity = '0';
-                    _mailBodyEl.style.transition = 'opacity 0.25s ease-in';
-                }
-                _mailBodyEl.innerHTML = sanitized;
-                if (!_bodyCached) {
-                    requestAnimationFrame(function() {
-                        if (_mailBodyEl) _mailBodyEl.style.opacity = '1';
-                    });
-                }
-                // Stocker pour le post-envoi (save_to_thread direction=received)
-                _receivedBody = data.body || data.html_body || '';
-                _mailBodyForGeneration = data.body || data.html_body || '';
-            } else if (data.body) {
-                // Convertir texte brut en paragraphes
-                var bodyHtml = data.body.split(/\n\n+/).map(function(p) {
-                    return '<p>' + _escapeHtml(p).replace(/\n/g, '<br>') + '</p>';
-                }).join('');
-                if (!_bodyCached && _mailBodyEl) {
-                    _mailBodyEl.style.opacity = '0';
-                    _mailBodyEl.style.transition = 'opacity 0.25s ease-in';
-                }
-                _mailBodyEl.innerHTML = bodyHtml;
-                if (!_bodyCached) {
-                    requestAnimationFrame(function() {
-                        if (_mailBodyEl) _mailBodyEl.style.opacity = '1';
-                    });
-                }
-                _mailBodyForGeneration = data.body || '';
-            } else {
-                _mailBodyEl.innerHTML =
-                    '<p style="color:#999;">Contenu non disponible.</p>';
-            }
-            _perfMonitor.mark('T3_body_rendered',
-                _bodyCached ? 'cache' : 'graph');
-
-            // Mettre à jour les métadonnées (À + Cc + date comme mockup v14)
-            if (data.date || data.to) {
-                var metaParts2 = [];
-                if (data.to) metaParts2.push('A : ' + data.to);
-                else if (_toEmail) metaParts2.push('A : ' + _toEmail);
-                if (data.cc || _ccEmail) metaParts2.push('Cc : ' + (data.cc || _ccEmail));
-                if (data.date) metaParts2.push(new Date(data.date).toLocaleString('fr-FR'));
-                document.getElementById('mailMeta').textContent = metaParts2.join(' | ') || '—';
-            }
-
-            // PJ
+            _renderMailBody(data);
             if (data.attachments && data.attachments.length > 0) {
                 _renderAttachments(data.attachments);
             }
@@ -886,11 +1005,17 @@ function _loadMailBody() {
             document.getElementById('mailBody').innerHTML =
                 '<p style="color:#c00; font-size:11px;">Erreur chargement : ' + _escapeHtml(err.message) + '</p>';
         });
+}
 
-    // Résumé IA (21/04) : parallèle au chargement body (Office.js path)
-    if (_messageId) {
-        _fetchMailSummary();
-    }
+/** Fallback tags contact : ancien /api/contact_profile/<email> (si bundle KO) */
+function _legacyFetchContactTags() {
+    if (!_fromEmail) return;
+    fetch(_backendUrl + '/api/contact_profile/' + encodeURIComponent(_fromEmail))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data && data.profile) _applyContactProfile(data.profile);
+        })
+        .catch(function() {});
 }
 
 
