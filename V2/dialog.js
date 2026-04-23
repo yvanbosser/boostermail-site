@@ -2697,6 +2697,9 @@ function _setMailBody(rawBody, isCached) {
     if (bs) bs.classList.remove('active');
     // Phase 2 progression : body chargé → passage à "Intégration du contexte"
     if (_progressPlaceholderActive) _showProgressPlaceholder('context');
+    // Fix 23/04 : T3 mark manquant dans path standalone — sans ça le perf log
+    // n'enregistrait jamais le moment où le body devient visible.
+    _perfMonitor.mark('T3_body_rendered', isCached ? 'cache' : 'graph');
     return true;
 }
 
@@ -2794,7 +2797,16 @@ function _loadMailBodyStandalone() {
                     if (done) return;
                     var full = ebody && (ebody.html_body || ebody.body);
                     // Phase 3 : propager le flag cached (true = email_cache DB hit)
-                    if (full && _setMailBody(full, !!(ebody && ebody.cached))) done = true;
+                    if (full && _setMailBody(full, !!(ebody && ebody.cached))) {
+                        done = true;
+                        // Fix 23/04 : PJ jamais rendues en standalone. La réponse
+                        // /api/email_body contient déjà attachments, on les rend
+                        // maintenant. Sinon l'onglet "PJ" reste vide même pour les
+                        // mails avec pièces jointes.
+                        if (ebody.attachments && ebody.attachments.length > 0) {
+                            try { _renderAttachments(ebody.attachments); } catch(e){}
+                        }
+                    }
                 })
                 .catch(function(){ /* other path or timeout */ })
         );
