@@ -206,6 +206,47 @@ _perfMonitor.mark('T0_script_start');
 
 
 // =============================================================================
+// CHEF SORTANT (23/04) — Cleanup des streams à la fermeture du dialog
+//
+// Problème diagnostiqué : quand le dialog 80% se ferme (user clique Retour
+// Outlook ou change de mail), les streams SSE en cours (résumé Haiku, réponse
+// Claude) restaient actifs côté serveur. Chromium n'envoyait pas de FIN_TCP
+// immédiat → V2 conservait les threads occupés → saturation du pool pour
+// quelques secondes → le CLIC SUIVANT mettait 5 s à atteindre le backend.
+//
+// Fix : registre d'objets "fermables" (_activeStreams). Chaque création de
+// stream SSE ou fetch streamé s'y enregistre. À beforeunload, on parcourt et
+// on close/abort/cancel TOUT → les threads V2 se libèrent instantanément.
+// =============================================================================
+
+var _activeStreams = [];
+
+/** Enregistre un objet fermable (EventSource, AbortController, Reader). */
+function _registerStream(obj) {
+    if (!obj) return obj;
+    _activeStreams.push(obj);
+    return obj;
+}
+
+/** Ferme TOUS les streams actifs. Appelé à beforeunload. Idempotent. */
+function _cleanupAllStreams() {
+    for (var i = 0; i < _activeStreams.length; i++) {
+        var s = _activeStreams[i];
+        if (!s) continue;
+        try {
+            if (typeof s.close === 'function') s.close();          // EventSource
+            else if (typeof s.abort === 'function') s.abort();     // AbortController
+            else if (typeof s.cancel === 'function') s.cancel();   // Reader
+        } catch(_) { /* silent */ }
+    }
+    _activeStreams = [];
+}
+
+// Wire au beforeunload — le "chef sortant" qui libère les portes
+window.addEventListener('beforeunload', _cleanupAllStreams);
+
+
+// =============================================================================
 // INITIALISATION
 // =============================================================================
 
@@ -1558,11 +1599,16 @@ function _fetchGenerateReply(body) {
     var editor = document.getElementById('editor');
     var spinner = document.getElementById('genSpinner');
     var btnGen = document.getElementById('btnGenerate');
+    // Chef sortant : AbortController enregistré → abort au beforeunload.
+    var _genAbort = _registerStream(
+        (typeof AbortController !== 'undefined') ? new AbortController() : null
+    );
     // SSE streaming
     fetch(_backendUrl + '/generate_reply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: body,
+        signal: _genAbort ? _genAbort.signal : undefined,
     }).then(function(response) {
         /* #14 : verifier que la reponse est OK */
         if (!response.ok) {
@@ -1575,7 +1621,7 @@ function _fetchGenerateReply(body) {
             _onGenerationDone();
             return;
         }
-        var reader = response.body.getReader();
+        var reader = _registerStream(response.body.getReader());
         var decoder = new TextDecoder();
         var _lineBuffer = '';   // Buffer anti-fragmentation SSE
         var streamedText = '';  // Texte brut accumulé pendant le stream (préserve \n)
@@ -1704,6 +1750,10 @@ function refineReply() {
     // Placeholder "Rédaction en cours" aussi pour la modif (force : écrase le contenu existant)
     _showProgressPlaceholder('writing', true);
 
+    // Chef sortant : AbortController enregistré
+    var _refAbort = _registerStream(
+        (typeof AbortController !== 'undefined') ? new AbortController() : null
+    );
     fetch(_backendUrl + '/refine_reply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1718,6 +1768,7 @@ function refineReply() {
             to_email: document.getElementById('fieldTo').value.trim(),
             body: _mailBodyForGeneration,
         }),
+        signal: _refAbort ? _refAbort.signal : undefined,
     }).then(function(response) {
         /* #14 : verifier que la reponse est OK */
         if (!response.ok) {
@@ -1730,7 +1781,7 @@ function refineReply() {
             _onGenerationDone();
             return;
         }
-        var reader = response.body.getReader();
+        var reader = _registerStream(response.body.getReader());
         var decoder = new TextDecoder();
         var _lineBufferRefine = '';
         var streamedText = '';   // Texte brut accumulé pendant le stream (préserve \n)
@@ -2415,6 +2466,13 @@ function _messageParent(msg) {
 }
 
 function _closeDialog() {
+    // Chef sortant : libérer les portes AVANT de signaler la fermeture.
+    // beforeunload tire aussi _cleanupAllStreams mais il arrive parfois trop
+    // tard en PyQt (la nav easymail:// est interceptée avant qu'unload ne
+    // fire proprement). On appelle explicitement ici pour que V2 voie les
+    // TCP close immédiatement → le prochain clic BM trouve le pool vide.
+    try { _cleanupAllStreams(); } catch(_) {}
+
     if (!_messageParent({ action: 'close' })) {
         // (B45) En standalone PyQt, signaler au conteneur de revenir à la popup
         try {
@@ -3012,6 +3070,8 @@ function _fetchMailSummary() {
                   + encodeURIComponent(_messageId);
         try {
             _sseSource = new EventSource(url);
+            // Chef sortant : EventSource enregistré → close() au beforeunload
+            _registerStream(_sseSource);
         } catch (e) {
             console.warn('[dialog] EventSource indisponible :', e);
             _finalize(false, false);
