@@ -1015,6 +1015,14 @@ class EasyMailPopup(QMainWindow):
         self.move(self._screen.width() - self._overlay_w, 48)
 
     def _close_dialog(self):
+        # Fix 23/04 : en mode --direct-dialog + hot service IPC, il n'y a pas
+        # d'overlay widget à l'index 1 (_direct_mode skip l'init overlay).
+        # On se contente de hide() la fenêtre. Le prochain IPC open_dialog
+        # fera load(new_url) + show() pour la réafficher avec le nouveau mail.
+        if getattr(self, '_hot_service', False):
+            logger.info("Fermeture dialog (hot-direct) → hide, en attente prochain clic")
+            self.hide()
+            return
         logger.info("Fermeture dialog, retour overlay")
         self._force_overlay_geometry()
         self._stack.setCurrentIndex(1)
@@ -1058,8 +1066,11 @@ class EasyMailPopup(QMainWindow):
         if hasattr(self, '_wp'):
             self._wp['done'] = True
         event.accept()
-        # Mode direct : quitter l'application quand la fenêtre se ferme
-        if getattr(self, '_direct_mode', False):
+        # Mode direct : quitter l'application quand la fenêtre se ferme...
+        # SAUF si on tient le hot service IPC (_hot_service=True) — dans ce
+        # cas, on reste vivant pour servir les clics suivants via reload URL.
+        # L'user peut toujours killer via taskkill/superviseur si besoin.
+        if getattr(self, '_direct_mode', False) and not getattr(self, '_hot_service', False):
             QApplication.quit()
 
     def changeEvent(self, event):
@@ -1450,6 +1461,24 @@ def main():
         popup.show()
         popup.raise_()
         popup.activateWindow()
+
+        # Fix 23/04 (cold-start répétés) : démarrer AUSSI le serveur IPC en
+        # mode --direct-dialog. Avant : seul le mode overlay activait
+        # _start_ipc_server → les clics suivants ne trouvaient pas de hot
+        # instance sur 5052 → companion fallback subprocess → relance
+        # complète Python+Qt+Chromium à chaque clic (1-3 s de cold start).
+        # Maintenant : le process --direct-dialog écoute aussi sur 5052,
+        # les clics suivants passent par IPC (reload URL WebEngineView,
+        # ~30 ms au lieu de 1-3 s).
+        # _direct_mode reste True pour la logique UI (pas d'overlay) mais
+        # on ajoute un flag _hot_service qui indique qu'on doit rester vivant
+        # entre les clics. _close_dialog et closeEvent le respectent.
+        popup._hot_service = True
+        _ipc_bridge = _IPCBridge()
+        _ipc_bridge.open_dialog_requested.connect(popup.open_dialog_via_ipc)
+        _ipc_bridge.show_popup_requested.connect(popup.reshow_launch_popup)
+        threading.Thread(target=_start_ipc_server, daemon=True, name='ipc-server').start()
+        logger.info("[hot-direct] IPC serveur démarré sur 5052 en mode --direct-dialog → clics suivants via reload URL")
 
         # Forcer la fenêtre au PREMIER PLAN (devant Outlook).
         # Sur Windows, popup.raise_() ne suffit pas car un autre process (Outlook)
