@@ -1,6 +1,6 @@
 # Anomalies récurrentes — mémoire des patterns
 
-> **Dernière mise à jour** : 22/04/2026
+> **Dernière mise à jour** : 23/04/2026 (ajout Pattern #14 — clé cache producteur/consommateur)
 > **Règle** : à chaque nouveau bug détecté, ajouter ici **immédiatement**. À chaque nouveau symptôme, consulter ici **d'abord**.
 
 ---
@@ -383,6 +383,48 @@ L'audit valide la **cohérence du code** (les fonctions sont là, les routes ré
 - User signale "ça répond mais c'est vide" → Pattern #13, cf. I-DATA
 - Modification récente d'un modèle Claude dans le code → tester API avant commit (I-DATA-06)
 - Nouvelle DB / migration / restauration → I-DATA-05 (DB "fraîche suspecte")
+
+---
+
+## Pattern #14 — Mismatch de clé cache entre producteur et consommateur
+
+**Historique** :
+- 23/04/2026 soir : découverte que `_reply_cache` était rempli correctement par le BG loop (7 entrées en 2 min après restart V2) MAIS aucune n'était jamais trouvée au clic utilisateur → 100% streaming Claude 9 s alors que le cache aurait dû servir. Cause : producteur écrit avec Entry ID Graph (`AQMkAD...`), consommateur lit avec Internet Message-ID (`<...@domain>`). Fix commit `d2d88a1` sur 5 sites d'écriture.
+
+**Symptôme générique** :
+- User signale "le cache ne semble jamais consulté"
+- Logs : `writes_bg` / compteur d'écritures croissant MAIS `hits` à 0
+- Cache "rempli" (rows présentes côté disque ou mémoire) mais tous les lookups retournent miss
+- L'endpoint répond rapidement (le lookup est instantané) et enchaîne sur le fallback live
+
+**Cause racine** :
+Deux formats d'ID possibles pour le même objet métier (mail, ticket, user). Producteur (BG loop, warmup, script batch) utilise format A ; consommateur (route API appelée par le client) utilise format B. Aucune normalisation à l'écriture. Les deux caches coexistent silencieusement : l'un est peuplé, l'autre est vide, mais le code "marche" (pas d'exception, pas de 500).
+
+**Fix canonique** :
+1. Identifier **LE** format canonique imposé par le client (ici : Office.js envoie `internetMessageId` → canonique = Internet Message-ID)
+2. Toute écriture de cache doit passer par une fonction de normalisation : `m.get('internet_message_id') or m.get('message_id') or m.get('id', '')`
+3. Auditer systématiquement TOUS les sites d'écriture (`grep "'message_id': .*\.get\('id'"` et équivalents)
+4. Accepter un fallback documenté (Entry ID pour drafts locaux sans RFC ID)
+5. Écrire un invariant testable : cf. `I-DATA-11` dans `INVARIANTS.md`
+
+**Test de non-régression** :
+- `I-DATA-11` : échantillon de clés cache doivent matcher `^<.+@.+>$`
+- `smoke_test.ps1` section Cat.11 : vérifier `drafts_v2.json`, table `email_cache`, table `mail_summaries`
+
+**Signaux d'alerte** :
+- Grep renvoie 2+ sites qui construisent un dict mail avec `'message_id': mail.get('id')` (sans priorité `internet_message_id`)
+- Logs V2 : compteur `writes_bg` monte mais pas `hits`
+- User dit "ça devrait être rapide mais c'est toujours long"
+
+**Caches à surveiller (inventaire 23/04)** :
+| Cache | État fix 23/04 |
+|---|---|
+| `_reply_cache` / `drafts_v2.json` | ✅ fix d2d88a1 |
+| `_warmup_cache` | ✅ fix d2d88a1 |
+| `email_cache` SQLite | ✅ fix d2d88a1 |
+| `mail_summaries` SQLite | ✅ déjà cohérent (fix A13 du 21/04) |
+| `_prefetch_cache` | ✅ se corrige via propagation en amont |
+| `_pj_text_cache`, `_attachment_cache` | 🟡 à re-vérifier si symptômes |
 
 ---
 

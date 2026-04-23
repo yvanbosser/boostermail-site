@@ -437,14 +437,49 @@ Check-Invariant "I-DATA-09" "prefetch_cache_v2.json present (si V2 tourne >5min)
     }
     # Tolere V2 demarre recemment (<5min) : le fichier est ecrit par atexit
     # OU apres BG preload (5-30s). On lui laisse le temps.
-    $pid = $v2Proc[0].OwningProcess
-    $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+    # Fix 23/04 : $pid est reserve PowerShell → renomme $v2Pid
+    $v2Pid = $v2Proc[0].OwningProcess
+    $proc = Get-Process -Id $v2Pid -ErrorAction SilentlyContinue
     if ($proc -and ((Get-Date) - $proc.StartTime).TotalMinutes -lt 5) {
         $script:Skipped += "I-DATA-09 : V2 started <5min, cache not yet persisted"
         return $true
     }
-    $f = 'C:\EasyMail\V2\prefetch_cache_v2.json'
+    # Fix 23/04 : chemin reel = C:\EasyMail\ (racine), pas V2/
+    $f = 'C:\EasyMail\prefetch_cache_v2.json'
     return (Test-Path $f)
+}
+
+Check-Invariant "I-DATA-11" "Cles cache au format canonique (internet_message_id)" {
+    # Verifie drafts_v2.json : toutes les cles doivent matcher <...@...> (RFC 2822)
+    # ou etre un fallback Entry ID explicite (tolere transitoire post-fix).
+    # Violation = mismatch producteur/consommateur (Pattern #14 ANOMALIES_RECURRENTES)
+    $f = 'C:\EasyMail\drafts_v2.json'
+    if (-not (Test-Path $f)) {
+        $script:Skipped += "I-DATA-11 : drafts_v2.json absent (normal si V2 fresh)"
+        return $true
+    }
+    try {
+        $data = Get-Content $f -Raw | ConvertFrom-Json
+    } catch {
+        $script:Skipped += "I-DATA-11 : drafts_v2.json invalide"
+        return $true
+    }
+    if (-not $data.entries) { return $true }  # vide = OK
+    $keys = @($data.entries.PSObject.Properties.Name)
+    if ($keys.Count -eq 0) { return $true }
+    $nonCanonical = 0
+    foreach ($k in $keys) {
+        if (-not ($k -match '^<.+@.+>$')) {
+            $nonCanonical++
+        }
+    }
+    # Tolerance : <20% legacy (periode de transition post-fix)
+    $ratio = [double]$nonCanonical / [double]$keys.Count
+    if ($ratio -ge 0.20) {
+        Write-Host ("    ({0}/{1} cles non-canoniques)" -f $nonCanonical, $keys.Count) -ForegroundColor Yellow
+        return $false
+    }
+    return $true
 }
 
 # ==========================================================================
