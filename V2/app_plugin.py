@@ -1424,6 +1424,12 @@ def _load_reply_cache():
     Fix 23/04 (T2) : charge maintenant AUSSI les bg_speculation (pas seulement
     user_edit). Au restart V2, les pré-réponses Claude de la session
     précédente sont disponibles immédiatement → clics BM cache HIT instant.
+
+    Auto-clean 23/04 (option B) : purge les "faux brouillons" legacy créés
+    par le bug pré-refactor 1-source — entrées `source='user_edit'` sans flag
+    `user_modified` (pré-gen Claude sauvées par erreur au `beforeunload`).
+    Le nouveau `save_draft` pose toujours `user_modified=True`, donc son
+    absence = entrée suspecte → purgée + disque ré-écrit.
     """
     try:
         if not os.path.exists(_DRAFTS_CACHE_PATH):
@@ -1433,6 +1439,7 @@ def _load_reply_cache():
         entries = payload.get('entries', {})
         now = time.time()
         loaded = {'user_edit': 0, 'bg_speculation': 0, 'preemptive': 0}
+        legacy_fake_drafts_purged = 0
         with _reply_lock:
             for mid, entry in entries.items():
                 ts = entry.get('timestamp', 0)
@@ -1442,6 +1449,10 @@ def _load_reply_cache():
                 src = entry.get('source', 'user_edit')
                 # Filtre : n'accepter que les sources connues (robustesse)
                 if src not in ('user_edit', 'bg_speculation', 'preemptive'):
+                    continue
+                # Auto-clean faux brouillons legacy (bug pré-refactor 23/04)
+                if src == 'user_edit' and 'user_modified' not in entry:
+                    legacy_fake_drafts_purged += 1
                     continue
                 # Forcer status='done' (les 'running'/'cancelled' n'auraient
                 # pas dû être persistés, mais protection contre fichier corrompu)
@@ -1453,6 +1464,14 @@ def _load_reply_cache():
         if total:
             logger.info(f"[reply_cache] {total} entrée(s) restaurée(s) depuis disque "
                         f"({breakdown})")
+        if legacy_fake_drafts_purged:
+            logger.info(
+                f"[reply_cache AUTO-CLEAN] {legacy_fake_drafts_purged} faux "
+                f"brouillon(s) legacy purgé(s) (source='user_edit' sans flag "
+                f"user_modified — zombies du bug pré-refactor 23/04)"
+            )
+            # Re-persiste pour que les zombies ne reviennent pas au prochain load
+            _persist_reply_cache()
     except Exception as e:
         logger.warning(f"[reply_cache] Échec chargement : {e}")
 
