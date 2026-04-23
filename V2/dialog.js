@@ -1560,8 +1560,22 @@ function _showDraftBadge(timestamp) {
     editor.parentNode.insertBefore(badge, editor);
 }
 
+// Fix 23/04 (bug brouillon fantôme) : flag qui distingue vrai édit user vs
+// simple affichage programmatique (innerHTML = ...) d'un préemptif Claude.
+// L'event 'input' fire UNIQUEMENT sur frappe clavier / coller / drop — pas
+// sur innerHTML ni insertAdjacentText. Donc c'est un signal fiable de
+// "l'user a tapé au moins une touche".
+// Sans ce flag, _saveDraftNow() au beforeunload sauvegardait le préemptif
+// Claude affiché comme si c'était un brouillon user → au clic BM suivant,
+// affichage trompeur "Brouillon sauvegardé il y a 3h" pour une réponse
+// que l'user n'a jamais touchée.
+var _userHasTypedSomething = false;
+
 function _saveDraftNow() {
     if (!_messageId) return;
+    // Fix 23/04 : ne JAMAIS sauver si l'user n'a pas tapé — sinon on sauve
+    // un préemptif Claude affiché comme s'il s'agissait d'un brouillon user.
+    if (!_userHasTypedSomething) return;
     var editor = document.getElementById('editor');
     var text = (editor.innerText || '').trim();
     if (!text) return;  // n'écrase pas avec un éditeur vide
@@ -1586,6 +1600,7 @@ function _setupDraftAutoSave() {
     if (!editor) return;
     // Debounce 2 s après la dernière frappe
     var schedule = function() {
+        _userHasTypedSomething = true;  // fix 23/04 : seul signal fiable
         if (_draftSaveTimer) clearTimeout(_draftSaveTimer);
         _draftSaveTimer = setTimeout(_saveDraftNow, 2000);
     };

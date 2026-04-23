@@ -1166,6 +1166,36 @@ atexit.register(_save_prefetch_cache)
 # Purge purement événementielle (classify/send/delete/archive/consume/cohesion)
 # + safety net 4 semaines (Plan 3 §9.1). Plus de TTL 30 min en lecture.
 _reply_cache = {}
+
+
+# =============================================================================
+# Refactor 23/04 — Source de vérité "entrée modifiée par user" : champ booléen
+# `user_modified` sur chaque entrée de _reply_cache. Remplace la distinction
+# par `source` (qui reste pour le badge UI / rétro-compat disque).
+#
+# Règle simple (chronologie user validée) :
+#   T0 : Claude pré-génère     → {text, user_modified: False, ...}
+#   T1 : user ouvre + ferme    → entrée inchangée (flag JS _userHasTypedSomething=false)
+#   T2 : user modifie + ferme  → entrée ÉCRASÉE {text_edited, user_modified: True}
+#   T3 : BG loop tourne        → SKIP si existing a user_modified=True
+#   T4 : user envoie           → entrée purgée (peu importe user_modified)
+#
+# Helper ci-dessous encapsule la vérité : regarde le flag True en priorité,
+# fallback sur source=='user_edit' pour les entrées pré-refactor (disque ou
+# code non encore migré). Compat 100 %.
+# =============================================================================
+
+def _is_user_modified(entry):
+    """True si l'entrée a été modifiée par l'user (pas juste affichée).
+    - Priorité 1 : champ `user_modified` (nouveau refactor 23/04)
+    - Priorité 2 : `source == 'user_edit'` (rétro-compat)
+    Retourne False si entry None / vide.
+    """
+    if not entry:
+        return False
+    if 'user_modified' in entry:
+        return bool(entry['user_modified'])
+    return entry.get('source') == 'user_edit'
 _reply_lock = threading.Lock()
 _REPLY_CACHE_SAFETY_NET = 28 * 24 * 3600  # 4 semaines — safety net anti-fuite
 _DRAFTS_CACHE_PATH = os.path.join(EASYMAIL_DIR, 'drafts_v2.json')
@@ -1285,15 +1315,16 @@ def _reply_cache_cohesion_refresh():
         if not inbox_ids:
             return  # inbox vide ou pas chargée → skip
 
-        # Purger les orphelins (sauf brouillons user)
+        # Purger les orphelins (sauf entrées modifiées par user — gardées par safety net 4 semaines)
+        # Refactor 23/04 : helper _is_user_modified() remplace le check source=='user_edit'.
         purged = 0
         with _reply_lock:
             for mid in list(_reply_cache.keys()):
                 if mid in inbox_ids:
                     continue
                 entry = _reply_cache[mid]
-                if entry.get('source') == 'user_edit':
-                    continue  # brouillons user : safety net 4 semaines seulement
+                if _is_user_modified(entry):
+                    continue  # entrées user_modified : safety net 4 semaines seulement
                 _reply_cache.pop(mid, None)
                 purged += 1
         if purged:
@@ -1319,11 +1350,12 @@ def api_reply_cache_purge():
     if not mid:
         return jsonify({"error": "message_id requis"}), 400
     with _reply_lock:
-        was_user = _reply_cache.get(mid, {}).get('source') == 'user_edit'
+        # Refactor 23/04 : était source=='user_edit', maintenant via helper
+        was_user = _is_user_modified(_reply_cache.get(mid, {}))
         _reply_cache.pop(mid, None)
     with _prefetch_lock:
         _prefetch_cache.pop(mid, None)
-    # Si c'était un brouillon user, re-persister le disque (suppression effective)
+    # Si c'était une entrée user_modified, re-persister le disque (suppression effective)
     if was_user:
         threading.Thread(target=_persist_reply_cache, daemon=True).start()
     logger.info(f"[reply_cache purge] {mid[:20]} ({reason})")
@@ -2702,13 +2734,15 @@ def _start_speculative(mail_data):
     # Éviter les doublons (déjà en cache ou en cours)
     with _reply_lock:
         entry = _reply_cache.get(message_id, {})
-        # Ne pas écraser un brouillon user ('source': 'user_edit') — priorité éditeur
-        if entry.get('source') == 'user_edit':
+        # Ne pas écraser une entrée modifiée par user — priorité éditeur
+        # Refactor 23/04 : helper _is_user_modified() (compat source='user_edit')
+        if _is_user_modified(entry):
             return
         if entry.get('status') in ('running', 'done'):
             return
         _reply_cache[message_id] = {
             'status': 'running', 'source': 'bg_speculation',
+            'user_modified': False,
             'timestamp': time.time(),
         }
 
@@ -2883,10 +2917,12 @@ def _start_speculative(mail_data):
             if _existing_entry.get('status') == 'cancelled':
                 logger.info(f"Spéculation annulée (template) pour {message_id[:20]}")
                 return
-            # Fix audit 21/04 : ne JAMAIS écraser un brouillon user (save_draft)
-            # qui aurait été posé pendant que Claude calculait (race window).
-            if _existing_entry.get('source') == 'user_edit':
-                logger.info(f"Spéculation skippée — brouillon user présent pour "
+            # Refactor 23/04 : protection anti-écrasement via helper unique.
+            # Avant : regardait source=='user_edit'. Maintenant : regarde
+            # user_modified=True (avec fallback source pour compat). Même
+            # comportement fonctionnel, logique centralisée.
+            if _is_user_modified(_existing_entry):
+                logger.info(f"Spéculation skippée — entrée modifiée par user pour "
                             f"{message_id[:20]}")
                 return
 
@@ -2903,7 +2939,7 @@ def _start_speculative(mail_data):
             # les 50 plus anciennes non-user_edit pour éviter fuite mémoire.
             if len(_reply_cache) > 500:
                 evictable = [(k, v) for k, v in _reply_cache.items()
-                             if v.get('source') != 'user_edit'
+                             if not _is_user_modified(v)
                              and v.get('status') == 'done']
                 evictable.sort(key=lambda x: x[1].get('timestamp', 0))
                 for k, _ in evictable[:50]:
@@ -2913,7 +2949,8 @@ def _start_speculative(mail_data):
 
             _reply_cache[message_id] = {
                 'status': 'done',
-                'source': 'bg_speculation',
+                'source': 'bg_speculation',      # pour badge UI "pré-généré"
+                'user_modified': False,          # refactor 23/04 : source de vérité
                 'text': full_text,
                 'chunks': chunks,
                 'timestamp': time.time(),
@@ -3978,7 +4015,8 @@ def _event_purge_mail(message_id, action, reason):
         logger.warning(f"[event-purge] mark_treated échec msg={message_id[:20]} "
                        f"action={action} : {e}")
     with _reply_lock:
-        was_user = _reply_cache.get(message_id, {}).get('source') == 'user_edit'
+        # Refactor 23/04 : helper _is_user_modified() (était source=='user_edit')
+        existed = message_id in _reply_cache
         _reply_cache.pop(message_id, None)
     with _prefetch_lock:
         _prefetch_cache.pop(message_id, None)
@@ -3986,7 +4024,11 @@ def _event_purge_mail(message_id, action, reason):
         _db.purge_email_cache_for(message_id)
     except Exception as e:
         logger.debug(f"[event-purge] purge_email_cache_for échec msg={message_id[:20]} : {e}")
-    if was_user:
+    # Fix 23/04 (nettoyage cohérent 2 sources) : persister le disque dès qu'une
+    # entrée du cache est purgée, peu importe son type. Avant : persist seulement
+    # si user_edit → les bg_speculation purgées restaient sur disque jusqu'au
+    # prochain _persist_reply_cache déclenché ailleurs → zombies au restart.
+    if existed:
         threading.Thread(target=_persist_reply_cache, daemon=True).start()
     _reply_metric_inc('purges_event')
     logger.info(f"[event-purge] {action} {message_id[:20]} ({reason})")
@@ -5329,11 +5371,14 @@ def api_save_draft():
         # Fix audit 21/04 : l'ancien code posait `{status: cancelled}` puis
         # l'écrasait immédiatement ligne suivante — le flag n'était donc
         # jamais vu par la spéculation BG. La vraie protection vient
-        # désormais de _start_speculative qui vérifie `source == 'user_edit'`
+        # désormais de _start_speculative qui vérifie _is_user_modified()
         # avant d'écrire (évite l'écrasement post-call Claude).
+        # Refactor 23/04 : champ `user_modified=True` = source de vérité.
+        # `source='user_edit'` gardé pour badge UI rétro-compat.
         _reply_cache[message_id] = {
             'status': 'done',
-            'source': 'user_edit',
+            'source': 'user_edit',           # badge "Brouillon il y a X"
+            'user_modified': True,           # refactor 23/04 : source de vérité
             'text': text,
             'timestamp': time.time(),
             'contact': from_email,
@@ -5359,8 +5404,9 @@ def api_get_draft():
     with _reply_lock:
         entry = _reply_cache.get(message_id, {})
 
-    # Seuls les brouillons user_edit sont "officiels" ici
-    if entry.get('source') == 'user_edit' and entry.get('status') == 'done':
+    # Seules les entrées modifiées par user sont renvoyées comme "brouillon officiel"
+    # Refactor 23/04 : helper _is_user_modified() (compat source='user_edit')
+    if _is_user_modified(entry) and entry.get('status') == 'done':
         return jsonify({
             "found": True,
             "text": entry.get('text', ''),
@@ -5409,10 +5455,13 @@ def api_instant_reply():
         importance_int = 0
 
     # 1) BROUILLON USER (priorité absolue)
+    # Refactor 23/04 : helper _is_user_modified() = source de vérité
+    # (au lieu de source=='user_edit'). Corrige le bug où un préemptif Claude
+    # sauvé par erreur au beforeunload était renvoyé comme "Brouillon il y a 3h".
     if message_id:
         with _reply_lock:
             entry = _reply_cache.get(message_id, {})
-        if entry.get('source') == 'user_edit' and entry.get('status') == 'done':
+        if _is_user_modified(entry) and entry.get('status') == 'done':
             _reply_metric_inc('hits')
             logger.info(f"[instant_reply] HIT source=draft msg={message_id[:30]}")
             return jsonify({
