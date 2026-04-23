@@ -754,7 +754,10 @@ def _preload_neighbors(message_id):
         # Trouver l'index du mail courant
         current_idx = -1
         for i, em in enumerate(mails_list):
-            if em.get('id') == message_id:
+            # I-DATA-11 : message_id côté route = Internet Message-ID (Office.js).
+            # Comparer aux deux champs pour rester tolérant aux caches mixtes.
+            if (em.get('internet_message_id') == message_id
+                or em.get('id') == message_id):
                 current_idx = i
                 break
         if current_idx < 0:
@@ -925,7 +928,8 @@ def _background_preload_loop():
                     _preload_pause.clear()
                     break
                 time.sleep(2)
-            mid = msg.get('id', '')
+            # I-DATA-11 : internet_message_id en priorité (matche Office.js)
+            mid = msg.get('internet_message_id') or msg.get('id', '')
             if not mid:
                 continue
             # Déjà traité ?
@@ -960,7 +964,11 @@ def _background_preload_loop():
                 pass
         if preloaded:
             logger.info(f"[preload-ctx] Terminé : {preloaded} mails avec contexte A/B/C prêt")
-            inbox_ids = {m.get('id', '') for m in mails if m.get('id')}
+            # I-DATA-11 : construire l'inbox_ids avec le format canonique
+            # pour matcher les clés de _prefetch_cache (Internet Message-ID).
+            inbox_ids = {(m.get('internet_message_id') or m.get('id', ''))
+                         for m in mails
+                         if (m.get('internet_message_id') or m.get('id'))}
             try:
                 _save_prefetch_cache(inbox_ids=inbox_ids)
             except Exception as _e:
