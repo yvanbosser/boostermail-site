@@ -61,12 +61,57 @@ DIALOG_URL = f'{BACKEND_URL}/plugin/dialog.html?standalone=1'
 class _BlackholePage(QWebEnginePage):
     """Page QWebEngine qui refuse TOUTE navigation.
 
-    Fix 21/04 — bug popup blanche résiduelle Edge : utilisée comme retour
-    de `createWindow()`. Chromium croit qu'il a créé une nouvelle fenêtre,
-    mais notre page rejette systématiquement toute URL → aucun rendu,
-    aucune fenêtre visible, aucune fuite vers le navigateur système.
+    Utilisée en dernier recours pour bloquer les fuites vers le navigateur
+    système quand l'URL n'est pas locale. Évite les popups résiduelles
+    type admin.cloud.microsoft ou Edge qui s'ouvraient silencieusement.
     """
     def acceptNavigationRequest(self, url, nav_type, is_main_frame):
+        return False
+
+
+class _ChildPopupPage(QWebEnginePage):
+    """Page pour les window.open() depuis le dialog (Profil/Contacts/Echeances).
+
+    Fix 23/04 (Front 2) : avant, createWindow retournait _BlackholePage qui
+    bloquait TOUT — y compris les URLs internes popup.html?view=profil. Les
+    3 boutons de nav du header dialog étaient donc muets (user pouvait pas
+    voir son profil, ses contacts, ses échéances).
+
+    Maintenant :
+    - URL localhost/127.0.0.1 (interne BoosterMail) : on crée une vraie
+      QWebEngineView enfant qui s'affiche comme fenêtre Qt secondaire.
+    - URL externe (ex: admin.cloud.microsoft) : on refuse (fuite bloquée
+      comme avant).
+
+    La fenêtre enfant a WA_DeleteOnClose : quand user la ferme, tout est
+    nettoyé automatiquement. Elle est 700×600 centrée.
+    """
+    _child_view = None
+
+    def certificateError(self, error):
+        u = error.url()
+        if u.host() in ('localhost', '127.0.0.1'):
+            error.acceptCertificate()
+        else:
+            error.rejectCertificate()
+
+    def acceptNavigationRequest(self, url, nav_type, is_main_frame):
+        # URL interne → créer la fenêtre au 1er main-frame load
+        if url.host() in ('localhost', '127.0.0.1', ''):
+            if self._child_view is None and is_main_frame:
+                v = QWebEngineView()
+                v.setPage(self)
+                v.setWindowTitle('BoosterMail')
+                v.resize(700, 600)
+                v.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+                v.show()
+                v.raise_()
+                v.activateWindow()
+                self._child_view = v
+                logger.info(f"[child-popup] fenêtre secondaire ouverte : {url.toString()[:80]}")
+            return True
+        # URL externe → refuser (évite fuite Edge / admin.cloud.microsoft)
+        logger.info(f"[child-popup] URL externe bloquée : {url.toString()[:80]}")
         return False
 
 
@@ -82,21 +127,18 @@ class LocalhostPage(QWebEnginePage):
 
 
     def createWindow(self, window_type):
-        """Intercepte window.open() — BLOCAGE COMPLET (renforcé 21/04).
+        """Intercepte window.open() depuis le dialog 80%.
 
-        Avant : on retournait une QWebEnginePage vide qui faisait
-        `deleteLater()` sur urlChanged → mais Chromium pouvait créer un
-        shell de fenêtre flash (visible ~100 ms ou résiduelle). Les boutons
-        nav du header (profil/contacts/échéances) faisaient `window.open`
-        et Edge pouvait s'ouvrir avec admin.cloud.microsoft et autres
-        pages résiduelles qui s'accumulaient.
+        Fix 23/04 (Front 2) : retourne maintenant _ChildPopupPage qui accepte
+        les URLs internes localhost (Profil/Contacts/Échéances s'ouvrent dans
+        une vraie fenêtre Qt) et continue à bloquer les URLs externes (pas de
+        fuite vers Edge/admin.cloud.microsoft).
 
-        Maintenant : on retourne un _BlackholePage qui REFUSE toute
-        navigation (acceptNavigationRequest → False) → aucune URL n'est
-        jamais chargée, aucune fenêtre n'est jamais créée visible.
+        Avant (21/04 → 22/04) : _BlackholePage bloquait TOUT y compris les
+        URLs internes, ce qui désactivait les 3 boutons nav du header.
         """
-        logger.info(f"window.open bloqué (type={window_type})")
-        return _BlackholePage(self.profile(), self)
+        logger.info(f"window.open intercepté (type={window_type}) -> _ChildPopupPage")
+        return _ChildPopupPage(self.profile(), self)
 
     def acceptNavigationRequest(self, url, nav_type, is_main_frame):
         if url.scheme() == 'easymail':
