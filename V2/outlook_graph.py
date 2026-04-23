@@ -452,15 +452,33 @@ class GraphClient(EmailProvider):
             logger.error(f"Erreur get_sent_emails: {e}")
             return []
 
-    def get_received_emails(self, limit: int = 500) -> list[dict]:
+    def get_received_emails(self, limit: int = 500, include_body: bool = False) -> list[dict]:
         """
         GET /me/mailFolders/inbox/messages
-        Récupère les derniers mails reçus (onboarding).
+        Récupère les derniers mails reçus.
+
+        Args:
+            limit: nombre max de mails à retourner
+            include_body: si True, inclut le body HTML complet (pour pré-résumé,
+                         pré-réponse préemptive). Si False (défaut), seul
+                         bodyPreview (255 chars) → plus léger et plus rapide.
+
+        Fix 23/04 (T3) : le warmup V2 appelait get_received_emails(limit=50)
+        sans body complet → summarize_mails_to_db skippait tout (filtre <100
+        chars après strip HTML) → mail_summaries restait quasi-vide (14 rows)
+        → clics BM = stream Haiku à chaque fois (lent). De plus, les
+        pré-réponses Claude générées par _start_speculative étaient basées
+        sur 255 chars seulement → qualité dégradée.
+
+        Passer include_body=True résout les deux problèmes simultanément.
+        Coût : ~1 MB de bande passante en plus au warmup (body de 50 mails)
+        au lieu de ~100 KB (bodyPreview). Négligeable.
         """
         try:
+            select = _FULL_SELECT if include_body else _LIST_SELECT
             url = (
                 f'/me/mailFolders/inbox/messages'
-                f'?$select={_LIST_SELECT}'
+                f'?$select={select}'
                 f'&$orderby=receivedDateTime desc'
                 f'&$top={min(limit, 1000)}'
             )

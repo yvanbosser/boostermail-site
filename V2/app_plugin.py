@@ -530,7 +530,10 @@ def _execute_warmup(graph):
         # Boost couverture cache (21/04) : 10 → 50 mails pour que les contacts
         # connus hors top-10 soient aussi pré-spéculés. Coût API Graph nul
         # (même appel, juste limit différent), RAM négligeable.
-        mails = graph.get_received_emails(limit=50)
+        # Fix 23/04 (T3) : include_body=True pour que summarize_mails_to_db
+        # puisse générer les résumés (sinon body_preview 255 chars = skip)
+        # et que _start_speculative ait le body complet pour Claude.
+        mails = graph.get_received_emails(limit=50, include_body=True)
         with _warmup_lock:
             _warmup_progress["total"] = len(mails)
         for i, msg in enumerate(mails):
@@ -891,7 +894,9 @@ def _background_preload_loop():
         if not graph:
             return
         try:
-            mails = graph.get_received_emails(limit=50)
+            # Fix 23/04 (T3) : include_body=True nécessaire pour que le
+            # prefetch A/B/C + _start_speculative reçoivent le body réel.
+            mails = graph.get_received_emails(limit=50, include_body=True)
         except Exception as _e:
             logger.debug(f"[preload-ctx] Graph get_received_emails échoué : {_e}")
             return
@@ -1344,28 +1349,50 @@ threading.Thread(target=_continuous_speculation_loop, daemon=True, name='cont-sp
 
 
 def _persist_reply_cache():
-    """Sauvegarde les entrées `user_edit` du cache sur disque (drafts_v2.json).
-    Appelé à l'exit + après chaque save_draft explicite. Les entrées
-    `bg_speculation` ne sont PAS persistées (re-générables à la volée)."""
+    """Sauvegarde le cache réponse sur disque (drafts_v2.json).
+
+    Fix 23/04 (T2) : on persiste maintenant AUSSI les entrées `bg_speculation`
+    (pré-réponses Claude). Avant : seules les user_edit étaient sauvées →
+    au restart V2, toutes les pré-réponses Claude étaient perdues → il fallait
+    2-3 min à continuous_speculation_loop pour les re-générer → gâchis API
+    (chaque pré-gen = ~0.03 $) et cache vide pendant la reconstruction.
+
+    Appelé à l'exit + après save_draft + après chaque bg_speculation générée.
+    Purge à la lecture (_load_reply_cache) via safety net 4 semaines.
+    """
     try:
         with _reply_lock:
-            drafts = {k: v for k, v in _reply_cache.items()
-                      if v.get('source') == 'user_edit'}
+            # Persister toutes les entrées 'done' — user_edit ET bg_speculation.
+            # On exclut les 'running' (transitoires) et 'cancelled'.
+            entries = {k: v for k, v in _reply_cache.items()
+                       if v.get('status') == 'done'
+                       and v.get('source') in ('user_edit', 'bg_speculation', 'preemptive')}
         payload = {
             'saved_at': datetime.now().isoformat(timespec='seconds'),
-            'entries': drafts,
+            'entries': entries,
         }
         tmp = _DRAFTS_CACHE_PATH + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+            json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
         os.replace(tmp, _DRAFTS_CACHE_PATH)
-        logger.info(f"[draft] Persist {len(drafts)} brouillon(s) → drafts_v2.json")
+        # Log détaillé par type pour observabilité
+        by_source = {}
+        for v in entries.values():
+            s = v.get('source', '?')
+            by_source[s] = by_source.get(s, 0) + 1
+        breakdown = ', '.join(f'{k}={v}' for k, v in sorted(by_source.items()))
+        logger.info(f"[reply_cache] Persist {len(entries)} entrée(s) → drafts_v2.json ({breakdown})")
     except Exception as e:
-        logger.warning(f"[draft] Échec persist : {e}")
+        logger.warning(f"[reply_cache] Échec persist : {e}")
 
 
 def _load_reply_cache():
-    """Charge les brouillons user_edit depuis drafts_v2.json au démarrage."""
+    """Charge les entrées depuis drafts_v2.json au démarrage.
+
+    Fix 23/04 (T2) : charge maintenant AUSSI les bg_speculation (pas seulement
+    user_edit). Au restart V2, les pré-réponses Claude de la session
+    précédente sont disponibles immédiatement → clics BM cache HIT instant.
+    """
     try:
         if not os.path.exists(_DRAFTS_CACHE_PATH):
             return
@@ -1373,21 +1400,29 @@ def _load_reply_cache():
             payload = json.load(f)
         entries = payload.get('entries', {})
         now = time.time()
-        loaded = 0
+        loaded = {'user_edit': 0, 'bg_speculation': 0, 'preemptive': 0}
         with _reply_lock:
             for mid, entry in entries.items():
                 ts = entry.get('timestamp', 0)
-                # Safety net : ignorer les brouillons > 4 semaines
+                # Safety net : ignorer les entrées > 4 semaines
                 if now - ts > _REPLY_CACHE_SAFETY_NET:
                     continue
-                # Forcer source et status cohérents (fichier peut être corrompu)
-                entry['source'] = 'user_edit'
+                src = entry.get('source', 'user_edit')
+                # Filtre : n'accepter que les sources connues (robustesse)
+                if src not in ('user_edit', 'bg_speculation', 'preemptive'):
+                    continue
+                # Forcer status='done' (les 'running'/'cancelled' n'auraient
+                # pas dû être persistés, mais protection contre fichier corrompu)
                 entry['status'] = 'done'
                 _reply_cache[mid] = entry
-                loaded += 1
-        logger.info(f"[draft] {loaded} brouillon(s) restauré(s) depuis disque")
+                loaded[src] = loaded.get(src, 0) + 1
+        total = sum(loaded.values())
+        breakdown = ', '.join(f'{k}={v}' for k, v in loaded.items() if v > 0)
+        if total:
+            logger.info(f"[reply_cache] {total} entrée(s) restaurée(s) depuis disque "
+                        f"({breakdown})")
     except Exception as e:
-        logger.warning(f"[draft] Échec chargement : {e}")
+        logger.warning(f"[reply_cache] Échec chargement : {e}")
 
 
 def _reply_cache_safety_net_loop():
@@ -2842,7 +2877,6 @@ def _start_speculative(mail_data):
         if batch:
             chunks.append(' '.join(batch))
 
-        # Nettoyage du cache si trop plein (max 10 entrées)
         with _reply_lock:
             # ANOMALIE #9 fix : ne pas écraser un flag 'cancelled' posé par generate_reply()
             _existing_entry = _reply_cache.get(message_id, {})
@@ -2856,16 +2890,26 @@ def _start_speculative(mail_data):
                             f"{message_id[:20]}")
                 return
 
-            if len(_reply_cache) > 10:
-                # Trim : évict les 'done' sauf les brouillons user (source='user_edit')
+            # Fix 23/04 (T1) : limite hard-codée 10 entrées supprimée.
+            # Raison : pour un user avec 200 mails inbox, limiter à 10 préemptifs
+            # rendait le cache quasi inutile (90 % des clics BM = cache miss).
+            # La propreté du cache est assurée par 3 autres règles existantes :
+            #   - Purge événementielle (_event_purge_mail) : traitement du mail
+            #   - Cohésion refresh : orphelins (mail hors inbox) purgés
+            #   - Safety net 4 semaines (_reply_cache_safety_net_loop)
+            # Ces règles combinées suffisent ; le trim LRU était redondant.
+            # Taille typique attendue : 50-100 préemptifs × ~5 KB = 250-500 KB RAM.
+            # Safety net à haute taille : si > 500 entries (très anormal), trim
+            # les 50 plus anciennes non-user_edit pour éviter fuite mémoire.
+            if len(_reply_cache) > 500:
                 evictable = [(k, v) for k, v in _reply_cache.items()
-                             if v.get('source') != 'user_edit'  # jamais toucher aux drafts
-                             and (v.get('status') == 'done'
-                                  or (v.get('status') == 'running'
-                                      and time.time() - v.get('timestamp', 0) > 30))]
+                             if v.get('source') != 'user_edit'
+                             and v.get('status') == 'done']
                 evictable.sort(key=lambda x: x[1].get('timestamp', 0))
-                for k, _ in evictable[:5]:
+                for k, _ in evictable[:50]:
                     del _reply_cache[k]
+                logger.warning(f"[reply_cache] safety trim : 50 plus anciennes purgées "
+                               f"(cache exceptionnellement > 500)")
 
             _reply_cache[message_id] = {
                 'status': 'done',
@@ -2879,6 +2923,13 @@ def _start_speculative(mail_data):
 
         logger.info(f"Spéculation prête pour {message_id[:20]}... ({len(chunks)} chunks)")
         _broadcast_sse('speculative_ready', {'message_id': message_id})
+
+        # Fix 23/04 (T2) : persister dès qu'une nouvelle bg_speculation est prête.
+        # Sans ça, si V2 crash/restart avant l'atexit, la pré-réponse Claude
+        # (coût ~0.03 $) est perdue → gâchis API + cache vide au redémarrage.
+        # Persistance asynchrone pour ne pas bloquer le thread spéculatif.
+        threading.Thread(target=_persist_reply_cache, daemon=True,
+                         name='persist-bg-spec').start()
 
     except Exception as e:
         logger.warning(f"Spéculation échouée pour {message_id[:20]}: {e}")
