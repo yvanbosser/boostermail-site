@@ -1346,8 +1346,12 @@ var _lastTemplateMatch = null;
 function _tryInstantReply() {
     if (!_messageId) return;
     var editor = document.getElementById('editor');
-    // Ne pas écraser si l'user a déjà commencé à taper
-    if (editor.innerText && editor.innerText.trim()) return;
+    // Ne pas écraser si l'user a déjà commencé à taper.
+    // Fix 23/04 : ignorer notre propre placeholder "Recherche de l'historique..."
+    // qui, avant ce fix, bloquait tout le flow (pas d'instant_reply, pas
+    // d'auto_generate → réponse jamais rendue en mode standalone).
+    if (!_progressPlaceholderActive
+        && editor.innerText && editor.innerText.trim()) return;
 
     var payload = JSON.stringify({
         message_id: _messageId,
@@ -1408,14 +1412,22 @@ function _triggerAutoGenerate() {
     if (_isGenerating) return;               // Déjà en cours (via _checkSpeculativeCache)
     if (_mode === 'new') return;             // Brief obligatoire
     var editor = document.getElementById('editor');
-    if (editor && editor.innerText && editor.innerText.trim()) return;  // user a déjà tapé
+    // Fix 23/04 : le check "user a tapé" ne doit PAS matcher notre placeholder
+    // "🔍 Recherche de l'historique..." (sinon la génération est bloquée en
+    // standalone car _loadMailBodyStandalone active un placeholder AVANT que
+    // _triggerAutoGenerate ne soit appelé). On consulte la variable globale
+    // _progressPlaceholderActive qui indique si le texte vient de nous.
+    if (!_progressPlaceholderActive
+        && editor && editor.innerText && editor.innerText.trim()) return;
 
     _autoGeneratePending = true;
     var _t0 = Date.now();
     var _waitBodyAndGen = function() {
         // Si user a commencé à taper entre-temps → on abandonne
         var ed = document.getElementById('editor');
-        if (ed && ed.innerText && ed.innerText.trim()) {
+        // Même garde anti-placeholder dans la boucle d'attente
+        if (!_progressPlaceholderActive
+            && ed && ed.innerText && ed.innerText.trim()) {
             _autoGeneratePending = false;
             return;
         }
@@ -1477,8 +1489,10 @@ function _restoreDraft() {
         .then(function(res) {
             if (!res || !res.found) return;
             var editor = document.getElementById('editor');
-            // Ne pas écraser si l'user a déjà commencé à taper
-            if (editor.innerText && editor.innerText.trim()) return;
+            // Ne pas écraser si l'user a déjà commencé à taper (mais OK si
+            // c'est juste notre placeholder de progression).
+            if (!_progressPlaceholderActive
+                && editor.innerText && editor.innerText.trim()) return;
             // Fix XSS audit 21/04 : escape avant innerHTML (res.text = draft DB)
             editor.innerHTML = _escapeHtml(res.text || '').replace(/\n/g, '<br>');
             _showDraftBadge(res.timestamp);
