@@ -348,6 +348,106 @@ Check-Invariant "I-UX-02" "GET /api/status repond en <500ms" {
 }
 
 # ==========================================================================
+# Category 11 - Etat des donnees (ajout 23/04/2026)
+# ==========================================================================
+# Detecte les DB vides qui font passer les audits code mais cassent l'UX.
+# Helper : query un COUNT(*) sur la DB V2 et retourne le resultat.
+
+Write-Host ""
+Write-Host "=== Category 11 : Etat des donnees ===" -ForegroundColor Cyan
+
+function Invoke-SqliteCount {
+    param([string]$Table)
+    try {
+        $out = & python -c "import sqlite3; con=sqlite3.connect(r'C:\EasyMail\V2\boostermail.db'); cur=con.cursor(); cur.execute('SELECT COUNT(*) FROM $Table'); print(cur.fetchone()[0]); con.close()" 2>$null
+        return [int]$out
+    } catch { return -1 }
+}
+
+function Invoke-Sqlite {
+    param([string]$Query)
+    try {
+        $out = & python -c "import sqlite3; con=sqlite3.connect(r'C:\EasyMail\V2\boostermail.db'); cur=con.cursor(); cur.execute(r'''$Query'''); r=cur.fetchone(); print(r[0] if r else 0); con.close()" 2>$null
+        return [int]$out
+    } catch { return -1 }
+}
+
+Check-Invariant "I-DATA-01" "contact_profiles non vide (ou DB neuve <7j)" {
+    $n = Invoke-SqliteCount -Table 'contact_profiles'
+    if ($n -ge 1) { return $true }
+    # Tolere DB fraiche (moins de 7 jours)
+    $dbFile = Get-Item 'C:\EasyMail\V2\boostermail.db' -ErrorAction SilentlyContinue
+    if ($dbFile -and ((Get-Date) - $dbFile.CreationTime).TotalDays -lt 7) { return $true }
+    return $false
+}
+
+Check-Invariant "I-DATA-02" "threads non vide pour user actif (ou DB neuve)" {
+    $n = Invoke-SqliteCount -Table 'threads'
+    if ($n -ge 10) { return $true }
+    $dbFile = Get-Item 'C:\EasyMail\V2\boostermail.db' -ErrorAction SilentlyContinue
+    if ($dbFile -and ((Get-Date) - $dbFile.CreationTime).TotalDays -lt 7) { return $true }
+    return $false
+}
+
+Check-Invariant "I-DATA-03a" "config.json contient ANTHROPIC_API_KEY + fernet_key" {
+    $cfg = 'C:\EasyMail\config.json'
+    if (-not (Test-Path $cfg)) { return $false }
+    try {
+        $c = Get-Content $cfg -Raw | ConvertFrom-Json
+        return ($c.ANTHROPIC_API_KEY -and $c.fernet_key)
+    } catch { return $false }
+}
+
+Check-Invariant "I-DATA-03b" "settings DB contient user_name + writing_level" {
+    $n = Invoke-Sqlite -Query "SELECT COUNT(*) FROM settings WHERE key IN ('user_name','writing_level')"
+    return ($n -ge 2)
+}
+
+Check-Invariant "I-DATA-05" "DB V2 pas 'fraiche suspecte' (5 tables learning vides)" {
+    $sum = 0
+    foreach ($t in @('contact_profiles','threads','style_corrections','metrics','treated_emails')) {
+        $sum += Invoke-SqliteCount -Table $t
+    }
+    if ($sum -gt 10) { return $true }
+    # DB fraiche (<7j) tolere cette situation
+    $dbFile = Get-Item 'C:\EasyMail\V2\boostermail.db' -ErrorAction SilentlyContinue
+    if ($dbFile -and ((Get-Date) - $dbFile.CreationTime).TotalDays -lt 7) { return $true }
+    return $false
+}
+
+Check-Invariant "I-DATA-07" "Pas de doublons contact_profiles par email" {
+    $dupes = Invoke-Sqlite -Query "SELECT COUNT(*) FROM (SELECT email FROM contact_profiles GROUP BY email HAVING COUNT(*) > 1)"
+    return ($dupes -eq 0)
+}
+
+Check-Invariant "I-DATA-08" "mail_summaries non pollue par rows vides (<20%)" {
+    $total = Invoke-SqliteCount -Table 'mail_summaries'
+    if ($total -eq 0) { return $true }  # vide = OK, pas pollue
+    $empty = Invoke-Sqlite -Query "SELECT COUNT(*) FROM mail_summaries WHERE points='[]' AND actions='[]'"
+    $ratio = [double]$empty / [double]$total
+    return ($ratio -lt 0.20)
+}
+
+Check-Invariant "I-DATA-09" "prefetch_cache_v2.json present (si V2 tourne >5min)" {
+    # Skip si V2 not running
+    $v2Proc = Get-NetTCPConnection -LocalPort 3443 -State Listen -ErrorAction SilentlyContinue
+    if (-not $v2Proc) {
+        $script:Skipped += "I-DATA-09 : V2 not running"
+        return $true
+    }
+    # Tolere V2 demarre recemment (<5min) : le fichier est ecrit par atexit
+    # OU apres BG preload (5-30s). On lui laisse le temps.
+    $pid = $v2Proc[0].OwningProcess
+    $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+    if ($proc -and ((Get-Date) - $proc.StartTime).TotalMinutes -lt 5) {
+        $script:Skipped += "I-DATA-09 : V2 started <5min, cache not yet persisted"
+        return $true
+    }
+    $f = 'C:\EasyMail\V2\prefetch_cache_v2.json'
+    return (Test-Path $f)
+}
+
+# ==========================================================================
 # Resume
 # ==========================================================================
 

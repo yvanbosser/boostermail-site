@@ -207,9 +207,73 @@ En Mode Complet (Graph dispo), aucun appel COM → aucun popup OOM.
 
 ---
 
+## Catégorie 11 — État des données (ajout 23/04/2026)
+
+> **Origine** : découverte le 23/04/2026 qu'aucun des 10 audits code précédents n'avait détecté que la DB V2 était **vide de données d'apprentissage** depuis le 18/04 (3820 rows non migrées depuis proto). Cause racine "complétude mauvaise" pendant 5 jours, invisible aux tests code.
+
+### I-DATA-01 : contact_profiles non-vide si utilisation prolongée
+La table `V2/boostermail.db:contact_profiles` doit contenir des rows si l'user a au moins 1 mois d'utilisation (proto OU V2).
+- **Test** : `SELECT COUNT(*) FROM contact_profiles` ≥ 1 (seuil bas) ou ≥ 10 (seuil normal user établi)
+- **Pourquoi** : sans profils, tags vouvoiement/confiance (T6) jamais rendus → dialog 80% perçu "incomplet"
+- **Historique** : 103 profils dans proto, 0 en V2 pendant 5 jours (fix 23/04 via `V2/migrate_proto_to_v2.py`)
+- **Action si violé** : vérifier si migration depuis proto nécessaire
+
+### I-DATA-02 : threads non-vide si utilisation prolongée
+La table `threads` doit contenir l'historique des mails envoyés/reçus (contextes A/B/C). Vide = chaque génération Claude fait 3 searches Graph live (2-3s chacun).
+- **Test** : `SELECT COUNT(*) FROM threads` ≥ 100 pour un user actif
+- **Pourquoi** : alimente les blocs contexte du prompt Claude. Sans threads, chaque clic BM est lent.
+- **Action si violé** : vérifier que `save_to_thread` est appelé côté V2 après chaque envoi (hooks OK au 23/04)
+
+### I-DATA-03 : settings contient les clés essentielles
+- `anthropic_api_key` non vide
+- `fernet_key` non vide
+- `user_name` présent (peut être vide mais clé existe)
+- `writing_level` dans {N1..N10}
+- **Test** : 4 clés présentes dans la table settings
+- **Pourquoi** : sans clés crypto/API, V2 échoue silencieusement
+
+### I-DATA-04 : folder_cache alimenté (si Mode Complet)
+- **Test** : `SELECT COUNT(*) FROM folder_cache` > 0 si user connecté Graph depuis > 1h
+- **Pourquoi** : la liste des dossiers Outlook doit être cachée pour suggestion de classement. Vide = scan Graph live (lent).
+
+### I-DATA-05 : DB V2 ≠ "DB fraîche" suspecte
+Si toutes les tables d'apprentissage (`contact_profiles`, `threads`, `style_corrections`, `metrics`, `treated_emails`) sont **vides simultanément** et la DB existe depuis > 7 jours, alerte → probable défaut de migration/onboarding.
+- **Test** : somme des rows des 5 tables > 10 OU DB mtime < 7 jours (fraîche = tolérée)
+- **Pourquoi** : détecte exactement le bug "transfert proto → V2 jamais fait" qui nous a coûté 5 jours
+
+### I-DATA-06 : Modèles Claude utilisés sont valides (non deprecated)
+Les modèles mentionnés dans `claude_ai.py` doivent répondre HTTP 200 à un ping Anthropic.
+- **Test** : pour chaque modèle référencé dans V2, API call `max_tokens=5` réussit
+- **Pourquoi** : détecte les modèles EOL (retirés par Anthropic) qui causent des 404 silencieux
+- **Historique** : `claude-3-5-haiku-20241022` retiré le 19/02/2026 → 404 silencieux → 9 résumés `points=[]` en DB pendant 2 mois avant fix 23/04 (c5bf64b)
+
+### I-DATA-07 : Pas de doublons par clé métier dans DB
+- **Test** : `SELECT email, COUNT(*) FROM contact_profiles GROUP BY email HAVING COUNT(*) > 1` → 0 rows
+- **Pourquoi** : un doublon = corruption migration ou bug d'écriture sans INSERT OR REPLACE
+
+### I-DATA-08 : Pas d'assiettes vides en DB (résumés vides)
+Si un résumé a `points=[]` AND `actions=[]`, c'est probablement un échec Claude (EOL, rate limit, prompt injection). Ne devrait pas dominer la DB.
+- **Test** : ratio `points=[] AND actions=[]` sur total < 20%
+- **Action si violé** : bug Claude silencieux (cf. I-DATA-06) — purger les vides et investiguer
+
+### I-DATA-09 : Fichiers de cache persistants présents
+- `V2/prefetch_cache_v2.json` : doit exister si V2 tourne depuis > 1 min
+- `V2/addin_debug.log` : doit avoir des entries < 24h si Outlook up
+- **Pourquoi** : caches manquants = restart V2 ne retrouve pas son état
+
+### I-DATA-10 : Cohérence proto/V2 si les 2 coexistent
+Si `C:\EasyMail\boostermail.db` existe ET `V2\boostermail.db` existe :
+- Les settings critiques doivent matcher (API keys, user_name)
+- **Test** : diff settings proto vs V2 sur les clés métier → divergences loggées
+- **Pourquoi** : évite la désync silencieuse entre les 2 environnements
+
+---
+
 ## Mise à jour
 
 Ajouter un invariant ici **uniquement si** :
 1. Il est **testable mécaniquement** (sans jugement humain)
 2. Une violation a été détectée au moins une fois (ou est prouvée possible)
 3. Le test correspondant est ajouté à `smoke_test.ps1`
+
+**Leçon 23/04/2026** : les audits "code" sont insuffisants. **Toujours tester l'état des données** en plus de la cohérence du code. Un endpoint peut répondre 200 en servant du vide.

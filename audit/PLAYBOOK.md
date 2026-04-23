@@ -19,36 +19,45 @@ Identifier toutes les anomalies détectables dans le périmètre V2 + companion 
    - Si exit > 0 : noter chaque FAIL comme anomalie
    - Si exit = 0 : on continue, 0 anomalie invariant
 
-2. **Lecture contextuelle (5 min)**
-   - `audit/INVENTAIRE_V2.md` : rappel du périmètre
-   - `audit/ANOMALIES_RECURRENTES.md` : patterns déjà vus, à surveiller
+2. **État des données (5 min, NOUVEAU 23/04 — OBLIGATOIRE AVANT le code)**
+   - Lancer les 3 commandes de `checklists/etat_donnees.md §8` :
+     * Comptages de rows des tables d'apprentissage DB V2
+     * Test API pour chaque modèle Claude référencé
+     * Présence des fichiers cache persistants
+   - **Règle** : si une anomalie de données sort ici, la corriger AVANT de chercher dans le code
+   - **Historique** : 2 mois + 5 jours de bugs UX invisibles étaient des défauts de données, pas de code
 
-3. **Balayage par classes (15 min)**
+3. **Lecture contextuelle (5 min)**
+   - `audit/INVENTAIRE_V2.md` : rappel du périmètre
+   - `audit/ANOMALIES_RECURRENTES.md` : patterns déjà vus, en particulier **Pattern #13 (données vides servies OK)**
+
+4. **Balayage par classes (15 min)**
    - Parcourir `audit/checklists/classes_bugs.md`
    - Pour chaque classe (1→20) : exécuter les commandes proposées + inspection visuelle
    - Noter chaque anomalie au format `templates/anomalie.md`
 
-4. **Balayage par flux (15 min)**
+5. **Balayage par flux (15 min)**
    - Parcourir `audit/checklists/flux_end_to_end.md`
    - Pour chaque flux (A→J) : vérifier chaque étape avec les commandes indiquées
    - Tout flux avec ≥1 étape ❌ → anomalie(s) à consigner
 
-5. **Balayage par angles (10 min)**
+6. **Balayage par angles (10 min)**
    - Parcourir `audit/checklists/angles_attaque.md`
    - 10 angles, cocher chaque question
    - Questions sans réponse = anomalie potentielle à investiguer
 
-6. **Pièges Windows (5 min)**
+7. **Pièges Windows (5 min)**
    - Parcourir `audit/checklists/specificites_windows.md`
    - Vérifier les 14 pièges spécifiques
 
-7. **Rapport (10 min)**
+8. **Rapport (10 min)**
    - Remplir `audit/templates/rapport_audit.md`
+   - **Inclure obligatoirement la section "État des données"** (cf. `checklists/etat_donnees.md §10`)
    - Compte anomalies par sévérité
    - Attacher preuves factuelles
    - Sauver dans `audit/rapports/YYYY-MM-DD_HHMM_complet_iterN.md`
 
-8. **Mise à jour ANOMALIES_RECURRENTES (5 min)**
+9. **Mise à jour ANOMALIES_RECURRENTES (5 min)**
    - Toute anomalie détectée **immédiatement** ajoutée
    - Patterns déjà connus : noter "récidive de Pattern #X"
 

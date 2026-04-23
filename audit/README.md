@@ -1,6 +1,6 @@
 # Kit d'audit BoosterMail V2
 
-> **Dernière mise à jour** : 22/04/2026
+> **Dernière mise à jour** : 23/04/2026 (ajout Catégorie 11 "État des données")
 > **Rôle** : référentiel partagé pour tout audit du code V2 (+ companion, service, install). Zéro audit sans passer par ce kit.
 
 ---
@@ -11,8 +11,20 @@ Les audits précédents ont raté des anomalies critiques (IPv6 bind, cert obsol
 
 - `INVARIANTS.md` : les règles ABSOLUES — si elles sont violées, c'est une anomalie, pas négociable.
 - `tests/smoke_test.ps1` : vérifie les invariants mécaniquement en ~30 secondes.
-- `checklists/` : balayage exhaustif par classes de bugs, flux, angles.
+- `checklists/` : balayage exhaustif par classes de bugs, flux, angles, **état des données**.
 - `ANOMALIES_RECURRENTES.md` : mémoire des bugs déjà vus — évite la redécouverte.
+
+### Ajout 23/04/2026 — dimension "données"
+
+Les audits "code" sont insuffisants. On a vécu **2 mois + 5 jours** de bugs UX invisibles (modèle Claude EOL silencieux, DB V2 jamais migrée depuis proto) que les audits code n'ont pas détectés : **les endpoints répondaient 200 mais servaient du vide**.
+
+Le kit intègre désormais :
+- **Catégorie 11 `I-DATA-01..10`** dans `INVARIANTS.md`
+- **Checklist `checklists/etat_donnees.md`** dédiée
+- **Tests smoke automatisés** (comptages rows, ping modèles Claude, fichiers cache)
+- **Pattern #13** dans `ANOMALIES_RECURRENTES.md`
+
+**Règle d'or** : pour chaque cache / table / fichier référencé par le code, poser deux questions : *"Le code sait le lire ?"* (test classique) ET *"Y a-t-il quelque chose dedans à lire ?"* (test de données).
 
 ---
 

@@ -350,6 +350,42 @@ Incohérence entre le niveau de log utilisé (INFO) et le niveau minimum affich�
 
 ---
 
+## Pattern #13 — Données vides servies par endpoints OK (ajout 23/04/2026)
+
+**Contexte** : un endpoint peut répondre `200 OK` avec un body vide ou incomplet, sans qu'aucune erreur ne soit logguée. Les audits code (smoke test sur les routes, classes de bugs, cohérence imports…) passent au vert. L'utilisateur constate un comportement dégradé sans qu'on puisse le corréler à quoi que ce soit.
+
+**Historique** :
+- **19/02 → 23/04** (2 mois) : modèle `claude-3-5-haiku-20241022` retiré par Anthropic (EOL). Chaque appel `summarize_one_mail_stream` recevait un 404 capturé silencieusement par try/except. `save_mail_summary` stockait `points=[]` + `actions=[]` en DB. Au clic BM, la route `/api/mail_summary` retournait `HIT cache` avec les points vides. Les audits smoke passaient 29/29. Résultat utilisateur : "résumé vide" systématique.
+- **18/04 → 23/04** (5 jours) : la DB `V2/boostermail.db` n'avait reçu que 21 settings depuis le proto. Les tables `contact_profiles` (103 rows proto), `threads` (3042 rows), `style_corrections` (37 rows) étaient toutes **vides côté V2**. Les audits code passaient mais l'utilisateur constatait : tags absents, contextes A/B/C lents (3 searches Graph live à chaque génération), cache préemptif vide → T5 reply jamais instantané.
+
+**Symptôme générique** :
+- Endpoint répond HTTP 200
+- Logs V2 n'affichent aucune erreur
+- Fonctions ne throw pas d'exception
+- MAIS l'utilisateur rapporte "c'est vide / incomplet / plus lent qu'avant"
+
+**Cause racine** :
+L'audit valide la **cohérence du code** (les fonctions sont là, les routes répondent) mais **ne vérifie jamais l'état des données** que le code doit servir. Un cache vide ou un modèle Claude retiré sont des **défauts de données**, pas des bugs de code.
+
+**Fix canonique** :
+- **Invariants I-DATA-01 à I-DATA-10** dans `INVARIANTS.md` (nouvelle catégorie 11)
+- **Checklist dédiée** : `audit/checklists/etat_donnees.md`
+- **Tests smoke automatisés** : ajout des checks `Invoke-SqliteCount` dans `smoke_test.ps1` (catégorie 11)
+- Avant TOUT audit code : d'abord lancer le "3 commandes" de `etat_donnees.md §8` (comptage rows, modèles Claude OK, fichiers cache présents)
+
+**Test de non-régression** :
+- `smoke_test.ps1` contient au moins 6 invariants `I-DATA-*` (vérifié au 23/04 : 7 tests)
+- Aucun audit futur ne doit être clôturé "OK" sans mention explicite de "État des données"
+
+**Signaux d'alerte (réflexes à avoir)** :
+- User signale "plus lent qu'avant" → compter rows DB, ne pas chercher un bug code
+- User signale "tags absents / résumé vide / contact introuvable" → tables vides ?
+- User signale "ça répond mais c'est vide" → Pattern #13, cf. I-DATA
+- Modification récente d'un modèle Claude dans le code → tester API avant commit (I-DATA-06)
+- Nouvelle DB / migration / restauration → I-DATA-05 (DB "fraîche suspecte")
+
+---
+
 ## Patterns "rayés" (résolus définitivement)
 
 Aucun pour l'instant — tous les patterns ci-dessus sont "vivants" au sens où ils peuvent récidiver si on n'est pas vigilant.
