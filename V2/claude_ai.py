@@ -1474,7 +1474,7 @@ Retourne UNIQUEMENT un JSON array (pas de markdown, pas de texte autour) :
             # trop serrée — risque de JSON tronqué à batch=10).
             response = self._create_with_retry(
                 _label='summaries',
-                model="claude-3-5-haiku-20241022",
+                model="claude-haiku-4-5",
                 max_tokens=min(250 * len(mail_index_to_id) + 300, 3000),
                 temperature=0.1,
                 messages=[{"role": "user", "content": prompt}],
@@ -1513,7 +1513,7 @@ Retourne UNIQUEMENT un JSON array (pas de markdown, pas de texte autour) :
                 output[msg_id] = {
                     'points': pts,
                     'actions': acts,
-                    'model': 'claude-3-5-haiku-20241022',
+                    'model': 'claude-haiku-4-5',
                 }
             return output
         except Exception as e:
@@ -1613,7 +1613,7 @@ Contenu :
 
         try:
             with self.client.messages.stream(
-                model="claude-3-5-haiku-20241022",
+                model="claude-haiku-4-5",
                 max_tokens=600,
                 temperature=0.1,
                 messages=[{"role": "user", "content": prompt}],

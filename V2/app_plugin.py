@@ -3148,7 +3148,7 @@ def api_mail_summary_stream():
                     'from_email': mail_payload.get('from_email', ''),
                     'points': final_points,
                     'actions': final_actions,
-                    'model': 'claude-3-5-haiku-20241022',
+                    'model': 'claude-haiku-4-5',
                 })
                 logger.info(f"[mail_summary_stream] SAVED msg={message_id[:30]} "
                             f"points={len(final_points)} actions={len(final_actions)}")
