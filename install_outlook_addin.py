@@ -191,42 +191,99 @@ def install_cert_trusted_root(cert_path: Path) -> bool:
 def _warn_obsolete_certs(current_cert_path: Path) -> None:
     """
     Détecte la présence de certs BoosterMail obsolètes (CN=localhost,
-    O=EasyMail Dev) dans le Trusted Root user qui n'ont pas le thumbprint
-    du fichier cert courant. Logge un warning - ne supprime PAS (Windows
-    protège les certs Trusted Root avec popup de confirmation modal).
+    O=EasyMail Dev) dans le Trusted Root user/machine qui n'ont pas le
+    thumbprint du fichier cert courant. Logge un warning TRÈS VISIBLE
+    avec la commande EXACTE à copier-coller - ne supprime PAS (Windows
+    protège les certs Trusted Root avec popup de confirmation modal
+    impossible à bypasser en CLI silencieux).
 
-    Pour nettoyage manuel : PowerShell `Get-ChildItem Cert:\\CurrentUser\\Root |
-    Where-Object Subject -like '*EasyMail*' | Remove-Item` (acceptera les popups).
-
-    Fix audit 22/04 D1 : version non-invasive - juste alerter.
+    Fix audit 23/04 : auparavant l'alerte était noyée, le superviseur ne
+    remontait rien, et le doublon cassait silencieusement le bouton BM au
+    démarrage. Maintenant : bloc encadré, commande exacte, visibilité max.
     """
     try:
-        # Lister les certs BoosterMail via PowerShell (affiche thumbprints)
+        # Thumbprint du fichier cert courant (celui qu'on veut GARDER)
+        current_thumb = ''
+        try:
+            ps_get_thumb = (
+                f"$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2('{current_cert_path}'); "
+                "$cert.Thumbprint"
+            )
+            r = subprocess.run(
+                ['powershell', '-NoProfile', '-Command', ps_get_thumb],
+                capture_output=True, text=True, timeout=5,
+                creationflags=0x08000000,
+            )
+            current_thumb = (r.stdout or '').strip().upper()
+        except Exception:
+            pass
+
+        # Lister les certs BoosterMail dans CurrentUser\Root ET LocalMachine\Root
+        # (les 2 stores peuvent contenir des doublons).
         ps_script = (
-            "Get-ChildItem Cert:\\CurrentUser\\Root | "
+            "Get-ChildItem Cert:\\CurrentUser\\Root, Cert:\\LocalMachine\\Root "
+            "-ErrorAction SilentlyContinue | "
             "Where-Object { $_.Subject -like '*CN=localhost*' -and "
             "$_.Subject -like '*EasyMail Dev*' } | "
-            "ForEach-Object { $_.Thumbprint + '|' + $_.NotAfter.ToString('yyyy-MM-dd') }"
+            "ForEach-Object { $_.PSParentPath.Split(':')[-1] + '|' + "
+            "$_.Thumbprint + '|' + $_.NotAfter.ToString('yyyy-MM-dd') }"
         )
         result = subprocess.run(
             ['powershell', '-NoProfile', '-Command', ps_script],
             capture_output=True, text=True, timeout=10,
             creationflags=0x08000000,
         )
-        lines = [l.strip() for l in (result.stdout or '').splitlines() if l.strip()]
-        if len(lines) <= 1:
-            return  # 0 ou 1 cert -> propre
+        raw_lines = [l.strip() for l in (result.stdout or '').splitlines() if l.strip()]
 
-        # Plusieurs certs -> warning pour l'user.
-        # Fix A9 : pas d'emoji Unicode (console Windows cp1252 crashe sur U+26A0).
-        log(f"[!]  {len(lines)} certs BoosterMail détectés dans Trusted Root "
-            f"(1 seul nécessaire) - nettoyage manuel recommandé :", 'WARN')
-        for line in lines:
-            log(f"   {line}", 'WARN')
-        log("Pour nettoyer : Certificats MMC -> User -> Trusted Root -> "
-            "supprimer les plus anciens", 'WARN')
+        # Séparer current vs obsolètes
+        obsolete = []
+        for line in raw_lines:
+            parts = line.split('|')
+            if len(parts) >= 2 and parts[1].upper() != current_thumb:
+                obsolete.append(line)
+
+        if not obsolete:
+            return  # propre
+
+        # Bloc alerte très visible (repéré par boostermail_service superviseur)
+        log('', 'WARN')
+        log('================================================================', 'WARN')
+        log('!! CERT DOUBLON DETECTE - LE BOUTON BM RISQUE DE NE PAS APPARAITRE', 'WARN')
+        log('================================================================', 'WARN')
+        log(f'{len(obsolete)} cert(s) BoosterMail obsolete(s) dans Trusted Root :', 'WARN')
+        for line in obsolete:
+            log(f'   {line}', 'WARN')
+        log('Cert ACTUEL a conserver :', 'WARN')
+        log(f'   {current_thumb}' if current_thumb else '   (thumbprint non lu)', 'WARN')
+        log('', 'WARN')
+        log('ACTION REQUISE - commandes a executer dans PowerShell :', 'WARN')
+        # Regrouper par store pour commandes lisibles
+        user_thumbs = set()
+        machine_thumbs = set()
+        for line in obsolete:
+            parts = line.split('|')
+            if len(parts) >= 2:
+                thumb = parts[1]
+                if 'CurrentUser' in parts[0]:
+                    user_thumbs.add(thumb)
+                elif 'LocalMachine' in parts[0]:
+                    machine_thumbs.add(thumb)
+        if user_thumbs:
+            log('  --- Pour store UTILISATEUR (PowerShell normal) ---', 'WARN')
+            for t in sorted(user_thumbs):
+                log(f'     certutil -user -delstore Root {t}', 'WARN')
+            log('     --> cliquer "Oui" sur le popup Windows', 'WARN')
+        if machine_thumbs:
+            log('  --- Pour store MACHINE (PowerShell en ADMIN) ---', 'WARN')
+            log('     clic droit sur PowerShell -> "Executer en tant qu\'administrateur"', 'WARN')
+            for t in sorted(machine_thumbs):
+                log(f'     certutil -delstore Root {t}', 'WARN')
+        log('', 'WARN')
+        log('Apres nettoyage : redemarrer Outlook pour voir le bouton BM reapparaitre.', 'WARN')
+        log('================================================================', 'WARN')
+        log('', 'WARN')
     except Exception as e:
-        log(f"Détection certs obsolètes : {e}")
+        log(f"Detection certs obsoletes : {e}")
 
 
 def remove_cert_trusted_root() -> bool:

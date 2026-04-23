@@ -244,11 +244,30 @@ def _auto_sideload_outlook_addin():
             capture_output=True, text=True, timeout=30,
             creationflags=_NW,  # CREATE_NO_WINDOW
         )
+        # Fix audit 23/04 : remonter les lignes [WARN] du script sideload dans
+        # le log superviseur, même si rc=0. Sinon un doublon cert détecté par
+        # _warn_obsolete_certs() passait silencieusement → bouton BM cassé au
+        # démarrage suivant sans aucune trace.
+        stdout = (result.stdout or '').strip()
+        stderr = (result.stderr or '').strip()
+        warn_lines = []
+        for line in stdout.splitlines():
+            # Format de install_outlook_addin.log() : "[install-addin] [WARN] ..."
+            if '[WARN]' in line:
+                warn_lines.append(line)
+        if warn_lines:
+            logger.warning("Auto-sideload addin : alertes detectees (voir dessous) :")
+            for wl in warn_lines:
+                logger.warning(f"  {wl}")
+
         if result.returncode == 0:
-            logger.info("Auto-sideload addin : OK (bouton BM enregistré dans Outlook)")
+            if warn_lines:
+                logger.info("Auto-sideload addin : OK mais alertes presentes (cf. ci-dessus)")
+            else:
+                logger.info("Auto-sideload addin : OK (bouton BM enregistré dans Outlook)")
         else:
             logger.warning(f"Auto-sideload addin : échec (rc={result.returncode}) "
-                           f"stderr={result.stderr.strip()[:200]}")
+                           f"stderr={stderr[:200]}")
     except Exception as e:
         logger.warning(f"Auto-sideload addin : erreur exec : {e}")
 
