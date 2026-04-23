@@ -1444,6 +1444,15 @@ def main():
     except Exception as _e:
         logger.warning(f"Config cache Chromium persistent échouée : {_e}")
 
+    # Fix 23/04 CRITIQUE : déclaration global UNE SEULE FOIS au début de main()
+    # AVANT toute utilisation/assignation. Le commit 862712f avait introduit
+    # une SyntaxError "_ipc_bridge is used prior to global declaration" parce
+    # que `global _ipc_bridge` était dans le else mais `_ipc_bridge = ...`
+    # dans le if — Python détectait la déclaration global tardive et crashait
+    # au parse du fichier. Conséquence : popup_pyqt ne démarrait plus du tout
+    # → pas de bouton BM, pas d'overlay, pas de popup lancement.
+    global _ipc_bridge
+
     if args.direct_dialog:
         # Mode New Outlook : dialog direct, pas d'overlay
         direct_params = {
@@ -1512,7 +1521,7 @@ def main():
         QTimer.singleShot(50, _bring_to_front)
         logger.info(f"PyQt direct dialog visible — mode={args.mode}")
     else:
-        global _ipc_bridge
+        # global _ipc_bridge déjà déclaré en haut de main() (fix 23/04)
         # Audit 20/04 — ne pas quitter Qt quand toutes les fenêtres sont
         # fermées. Le process reste vivant pour servir l'IPC hot instance
         # (dialog au clic bouton BM) et pour réafficher la popup au prochain
