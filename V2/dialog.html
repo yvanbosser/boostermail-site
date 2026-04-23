@@ -5,12 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BoosterMail</title>
     <link rel="stylesheet" href="dialog.css">
-    <!-- Office.js avec 'defer' (21/04 audit cycle 1 #8) — le téléchargement
-         se fait en parallèle du parse HTML (gain 500 ms à 2 s sur le cold
-         start selon la latence CDN Microsoft), l'exécution reste ordonnée
-         après le parse et avant dialog.js. En standalone, Office.context
-         sera null — dialog.js gère via feature checks `typeof Office`. -->
-    <script defer src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <!-- Fix 23/04 : 'defer' → 'async' sur Office.js CDN.
+         Diagnostic via perf_log + popup_pyqt.log : il y avait un gap de ~2 s
+         entre "full-load DONE" côté QWebEngineView et "T0_script_start" côté
+         dialog.js. Cause : 'defer' bloquait l'exécution de dialog.js tant que
+         Office.js n'était pas téléchargé depuis le CDN Microsoft (500-2000 ms
+         selon latence réseau/cache Chromium).
+
+         En mode standalone (PyQt, 99% du temps), Office.js n'est JAMAIS utilisé
+         — dialog.js feature-check tous les accès via `typeof Office !==
+         'undefined'`. Donc 'async' (télécharge en // sans bloquer les autres
+         scripts) résout le problème sans risque.
+         Gain attendu : -500 à -2000 ms sur l'ouverture du dialog 80%. -->
+    <script async src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 
     <!-- Phase C audit 22/04 — EAGER FETCH bundle /api/dialog_init
          Déclenche le fetch AVANT que dialog.js parse (~100-300 ms gagnées).
