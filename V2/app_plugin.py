@@ -512,7 +512,10 @@ def _execute_warmup(graph):
                 'from_name': msg.get('from_name', ''),
                 'subject': msg.get('subject', ''),
                 'body': msg.get('body') or msg.get('body_preview', ''),
-                'message_id': msg.get('message_id') or msg.get('id', ''),
+                # I-DATA-11 : internet_message_id en priorité (matche Office.js)
+                'message_id': (msg.get('internet_message_id')
+                               or msg.get('message_id')
+                               or msg.get('id', '')),
                 'conversation_id': msg.get('conversation_id', ''),
                 'to': msg.get('to', ''),
                 'cc': msg.get('cc', ''),
@@ -537,7 +540,11 @@ def _execute_warmup(graph):
         with _warmup_lock:
             _warmup_progress["total"] = len(mails)
         for i, msg in enumerate(mails):
-            mid = msg.get('id', '')
+            # I-DATA-11 (fix 23/04 soir) : normaliser sur internet_message_id.
+            # Client Office.js envoie internetMessageId à /api/instant_reply
+            # etc. — la clé de cache doit matcher. Fallback sur Graph id si
+            # absent (rare : drafts locaux).
+            mid = msg.get('internet_message_id') or msg.get('id', '')
             subject = msg.get('subject', '(sans objet)')
             with _warmup_lock:
                 _warmup_progress["loaded"] = i + 1
@@ -567,7 +574,10 @@ def _execute_warmup(graph):
                 'from_name': msg.get('from_name', ''),
                 'subject': msg.get('subject', ''),
                 'body': msg.get('body') or msg.get('body_preview', ''),
-                'message_id': msg.get('id', ''),
+                # I-DATA-11 : internet_message_id en priorité (matche Office.js)
+                'message_id': (msg.get('internet_message_id')
+                               or msg.get('message_id')
+                               or msg.get('id', '')),
                 'conversation_id': msg.get('conversation_id', ''),
                 # Plan 2 Phase 2.B — propager to/cc/date pour les filtres Smart Speculative
                 'to': msg.get('to', ''),
@@ -843,7 +853,10 @@ def _continuous_speculation_loop():
                     'from_name': m.get('from_name', ''),
                     'subject': m.get('subject', ''),
                     'body': m.get('body') or m.get('body_preview', ''),
-                    'message_id': m.get('message_id') or m.get('id', ''),
+                    # I-DATA-11 : internet_message_id en priorité (matche Office.js)
+                    'message_id': (m.get('internet_message_id')
+                                   or m.get('message_id')
+                                   or m.get('id', '')),
                     'conversation_id': m.get('conversation_id', ''),
                     'to': m.get('to', ''),
                     'cc': m.get('cc', ''),
@@ -3041,7 +3054,10 @@ def _run_preemptive_bg(inbox_mails):
                 'from_name': mail.get('from_name', ''),
                 'subject': mail.get('subject', ''),
                 'body': mail.get('body') or mail.get('body_preview', ''),
-                'message_id': mail.get('message_id') or mail.get('id', ''),
+                # I-DATA-11 : internet_message_id en priorité (matche Office.js)
+                'message_id': (mail.get('internet_message_id')
+                               or mail.get('message_id')
+                               or mail.get('id', '')),
                 'conversation_id': mail.get('conversation_id', ''),
                 # Plan 2 Phase 2.B : propager to/cc/date pour les filtres Smart Speculative
                 'to': mail.get('to', ''),
