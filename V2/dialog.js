@@ -2854,11 +2854,30 @@ function _fetchTimeout(url, options, timeoutMs) {
 function _loadMailBodyStandalone() {
     _applyMailMeta();   // Immédiat : infos déjà en URL params
 
-    // Phase 1 progression : feedback immédiat dans l'éditeur (mode reply/forward)
-    if (_mode !== 'new') _showProgressPlaceholder('history');
+    // Fix 23/04 (orchestration) : placeholder "Recherche de l'historique…"
+    // DIFFÉRÉ de 500 ms. Si le body arrive avant (cache HIT = ~50 ms), le
+    // timer est annulé et aucun placeholder ne s'affiche → rendu 100% propre.
+    // Si body tarde (Graph fetch 1-3 s), le placeholder s'affiche à 500 ms
+    // pour rassurer l'user.
+    var _historyPlaceholderTimer = null;
+    if (_mode !== 'new') {
+        _historyPlaceholderTimer = setTimeout(function() {
+            _showProgressPlaceholder('history');
+            _historyPlaceholderTimer = null;
+        }, 500);
+    }
 
     var done = false;   // Garde course : premier résultat gagne
     var fetches = [];
+
+    // Helper : annule le placeholder en attente si body arrive rapidement.
+    // Utilisé par les deux paths (email_body + current_mail) au succès.
+    function _cancelHistoryPlaceholder() {
+        if (_historyPlaceholderTimer) {
+            clearTimeout(_historyPlaceholderTimer);
+            _historyPlaceholderTimer = null;
+        }
+    }
 
     // Path 1 — /api/email_body (direct si on a le messageId). Timeout 5s.
     if (_messageId) {
@@ -2871,6 +2890,7 @@ function _loadMailBodyStandalone() {
                     // Phase 3 : propager le flag cached (true = email_cache DB hit)
                     if (full && _setMailBody(full, !!(ebody && ebody.cached))) {
                         done = true;
+                        _cancelHistoryPlaceholder();  // body rapide → pas besoin de placeholder
                         // Fix 23/04 : PJ jamais rendues en standalone. La réponse
                         // /api/email_body contient déjà attachments, on les rend
                         // maintenant. Sinon l'onglet "PJ" reste vide même pour les
@@ -2897,13 +2917,17 @@ function _loadMailBodyStandalone() {
                 if (mail.subject) _subject = mail.subject;
                 if (mail.message_id) _messageId = mail.message_id;
                 _applyMailMeta();
-                if (mail.body && _setMailBody(mail.body)) done = true;
+                if (mail.body && _setMailBody(mail.body)) {
+                    done = true;
+                    _cancelHistoryPlaceholder();
+                }
             })
             .catch(function(){ /* other path or timeout */ })
     );
 
     // Quand tous les fetches sont terminés, si aucun n'a fourni de body → message d'erreur
     Promise.allSettled(fetches).then(function() {
+        _cancelHistoryPlaceholder();  // fin du flow body, plus besoin du placeholder timer
         if (done) return;
         var mb = document.getElementById('mailBody');
         if (mb) mb.innerHTML = _messageId
@@ -2913,22 +2937,14 @@ function _loadMailBodyStandalone() {
         if (bs) bs.classList.remove('active');
     });
 
-    // Fix 21/04 (user-reported "cache écrasé par nouvelle génération") :
-    //   _checkSpeculativeCache() était l'ANCIEN chemin : il POSTait
-    //   /api/prefetch_status, et si speculative_ready=true, appelait
-    //   generateReply() qui WIPE l'éditeur et lance une nouvelle Claude SSE
-    //   depuis zéro. C'est une RÉGÉNÉRATION, pas une lecture de cache.
-    //   Résultat : l'user voyait brièvement la cachée puis elle disparaissait
-    //   au profit d'une nouvelle.
-    //
-    //   _tryInstantReply() couvre déjà tout le pipeline (draft > préemptif >
-    //   template > fallback auto-generate) et affiche DIRECTEMENT le texte
-    //   caché via editor.innerHTML — pas d'appel Claude inutile.
-    //
-    //   On supprime donc _checkSpeculativeCache() et on garde _tryInstantReply
-    //   comme seul point d'entrée. Le 400ms d'attente laisse le body se
-    //   peupler pour que le payload /api/instant_reply soit complet.
-    setTimeout(_tryInstantReply, 400);
+    // Fix 23/04 (orchestration) : _tryInstantReply differé de 50 ms au lieu
+    // de 400 ms. Raison : instant_reply consulte des caches indexés par
+    // message_id (draft user, preemptive, template) — indépendants du body.
+    // Aucune raison d'attendre le body pour les interroger. Gain perçu ~350 ms
+    // sur le moment où la réponse cache apparaît dans l'éditeur.
+    // Si cache miss, _triggerAutoGenerate() attend toujours le body (timeout
+    // 3 s interne) avant de lancer generateReply() Claude — robuste.
+    setTimeout(_tryInstantReply, 50);
 
     // Résumé du mail (21/04) : fetch /api/mail_summary et peupler les
     // sections "Points principaux" + "Actions attendues" du panneau gauche.
