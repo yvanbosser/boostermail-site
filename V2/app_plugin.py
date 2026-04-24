@@ -2913,11 +2913,48 @@ def _start_speculative(mail_data):
         except Exception as e:
             logger.warning(f"Erreur detect_template speculative: {e}")
 
+        # P0.4 fix 24/04 : intégrer l'analyse des PJ dans la génération BG.
+        # Avant : _start_speculative construisait le prompt sur le body seul
+        # → Claude ignorait les PJ → qualité dégradée quand un mail référence
+        # un document (bilan, facture, contrat...). Le pré-extract existait
+        # mais n'était déclenché que par /api/event/message_read (clic user).
+        # Maintenant : si has_attachments, on lance _start_pj_pre_extract_v2
+        # et on attend jusqu'à 10s. Le texte extrait est concaténé au body
+        # passé à Claude. Les templates restent scannés sur le body seul
+        # (éviter faux positifs sur mots-clés PJ).
+        pj_text_context = ''
+        has_attachments = mail_data.get('has_attachments', False)
+        if has_attachments:
+            try:
+                _start_pj_pre_extract_v2(message_id)
+                _pj_wait_start = time.time()
+                while time.time() - _pj_wait_start < 10:
+                    with _pj_text_cache_lock:
+                        pj_entry = _pj_text_cache.get(message_id, {})
+                    if pj_entry.get('status') in ('done', 'error'):
+                        break
+                    time.sleep(0.3)
+                with _pj_text_cache_lock:
+                    pj_entry = _pj_text_cache.get(message_id, {})
+                if pj_entry.get('status') == 'done':
+                    results = pj_entry.get('results', [])
+                    if results:
+                        pj_parts = [
+                            f"--- Piece jointe : {r.get('name', '?')} ---\n"
+                            f"{r.get('text', '')[:5000]}"
+                            for r in results
+                        ]
+                        pj_text_context = '\n\n'.join(pj_parts)
+                        logger.info(f"[speculative] PJ intégrées pour {message_id[:20]} "
+                                    f"({len(results)} PJ, {len(pj_text_context)} chars)")
+            except Exception as _e:
+                logger.debug(f"[speculative] pj extract échec : {_e}")
+
         incoming_email = {
             'from': from_email,
             'from_name': from_name,
             'subject': subject,
-            'body': raw_body,
+            'body': raw_body + (('\n\n' + pj_text_context) if pj_text_context else ''),
             'body_preview': raw_body[:300],
         }
 
