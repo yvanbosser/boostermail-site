@@ -1685,6 +1685,15 @@ function _fetchGenerateReply(body) {
                                     _perfMonitor.mark('T5_reply_source', 'stream');
                                 }
                             }
+                            // Fix 24/04 (P1) — replace_body : le serveur a
+                            // détecté que Claude avait généré du HTML brut
+                            // (<p>...</p>) et envoie la version plain text
+                            // propre pour swap éditeur. Évite les balises
+                            // visibles comme texte dans l'éditeur.
+                            if (data.replace_body) {
+                                editor.innerText = data.replace_body;
+                                streamedText = data.replace_body;
+                            }
                             // data.done (événement applicatif) : on n'agit PAS ici.
                             // Le reformatage final se fait UNE fois dans result.done
                             // (vrai end-of-stream, après tous les chunks résiduels).

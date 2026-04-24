@@ -3051,7 +3051,11 @@ def _start_speculative(mail_data):
                 "NE PAS inclure de clôture (Cordialement, Bien à vous...), "
                 "NE PAS inclure de signature (nom). "
                 "Commence directement par le contenu. L'ouverture, la clôture et la signature "
-                "seront ajoutées automatiquement par le système."
+                "seront ajoutées automatiquement par le système.\n\n"
+                "FORMAT OBLIGATOIRE : texte brut uniquement. N'utilise AUCUNE "
+                "balise HTML (pas de <p>, <br>, <div>, <strong>, etc.). "
+                "Sépare les paragraphes par une ligne vide (double saut de ligne \\n\\n). "
+                "La mise en forme HTML est appliquée automatiquement côté affichage."
             )
         except Exception as e:
             logger.error(f"Speculative prompt error: {e}")
@@ -6335,13 +6339,21 @@ INSTRUCTIONS ECHEANCES :
                 )
 
             # 12l — Instruction : NE PAS générer greeting/closing/signature
+            # Fix 24/04 (P1) — ajouter interdiction stricte des balises HTML.
+            # Symptôme observé sur Ombeline/Vincent/Camille/Ronan : Claude
+            # générait <p>...</p><p>...</p> que le dialog affichait en texte
+            # brut ("<p>Bonjour Ombeline,</p>..." visible dans l'éditeur).
             user_prompt += (
                 "\n\nINSTRUCTION CRITIQUE : Génère UNIQUEMENT le corps du mail. "
                 "NE PAS inclure d'ouverture (Bonjour, Salut, Cher...), "
                 "NE PAS inclure de clôture (Cordialement, Bien à vous...), "
                 "NE PAS inclure de signature (nom). "
                 "Commence directement par le contenu. L'ouverture, la clôture et la signature "
-                "seront ajoutées automatiquement par le système."
+                "seront ajoutées automatiquement par le système.\n\n"
+                "FORMAT OBLIGATOIRE : texte brut uniquement. N'utilise AUCUNE "
+                "balise HTML (pas de <p>, <br>, <div>, <strong>, etc.). "
+                "Sépare les paragraphes par une ligne vide (double saut de ligne \\n\\n). "
+                "La mise en forme HTML est appliquée automatiquement côté affichage."
             )
         except Exception as e:
             logger.error(f"Erreur construction prompt: {e}")
@@ -6453,6 +6465,22 @@ INSTRUCTIONS ECHEANCES :
             _body_clean = re.sub(r'\*(.+?)\*', r'\1', _body_clean)
             _body_clean = re.sub(r'^#+\s*', '', _body_clean, flags=re.MULTILINE)
             _body_clean = re.sub(r'^\s*[-•]\s+', '', _body_clean, flags=re.MULTILINE)
+            # Fix 24/04 (P1) — filet de sécurité : strip balises HTML si Claude
+            # a malgré tout généré du HTML (< = balise ouvrante détectée).
+            # Le prompt interdit déjà ces balises mais Claude peut ignorer
+            # l'instruction sur ~5% des cas. On strip et on reformate en plain
+            # text avec \n\n entre paragraphes.
+            _had_html = '<' in _body_clean
+            if _had_html:
+                _body_clean = re.sub(r'<br\s*/?>', '\n', _body_clean, flags=re.IGNORECASE)
+                _body_clean = re.sub(r'</p>\s*<p[^>]*>', '\n\n', _body_clean, flags=re.IGNORECASE)
+                _body_clean = re.sub(r'<p[^>]*>', '', _body_clean, flags=re.IGNORECASE)
+                _body_clean = re.sub(r'</p>', '\n\n', _body_clean, flags=re.IGNORECASE)
+                _body_clean = re.sub(r'<[^>]+>', '', _body_clean)
+                import html as _html_mod_stream
+                _body_clean = _html_mod_stream.unescape(_body_clean)
+                _body_clean = re.sub(r'\n{3,}', '\n\n', _body_clean).strip()
+                logger.info(f"[generate_reply] balises HTML strippées (Claude a ignoré l'instruction plain)")
             if _body_clean != _body_text:
                 # Remplacer le corps dans full_text (garder greeting en [0])
                 full_text[1:] = [_body_clean]
@@ -6463,6 +6491,14 @@ INSTRUCTIONS ECHEANCES :
                 closing_html += f"\n{signature}"
             yield f"data: {json.dumps({'chunk': closing_html})}\n\n"
             full_text.append(closing_html)
+
+            # Fix 24/04 : si Claude a généré du HTML, émettre replace_body
+            # avec le texte FINAL complet (greeting + body clean + closing)
+            # pour que le dialog swap éditeur d'un coup. Évite que l'user voie
+            # les <p> bruts qui restent dans l'éditeur après le stream.
+            if _had_html:
+                _full_replace = ''.join(full_text)
+                yield f"data: {json.dumps({'replace_body': _full_replace})}\n\n"
 
             # -- GARDE POST-GÉNÉRATION (Python pur, <5ms) --
             _pg_warnings = []
