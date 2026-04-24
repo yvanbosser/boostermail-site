@@ -3064,9 +3064,23 @@ def _start_speculative(mail_data):
                                       max_tokens=max_tokens, temperature=0.3,
                                       stream=False)
 
-        # Découper en chunks (pour simuler le streaming depuis le cache)
+        # Fix 24/04 (régression P0.5) : Claude peut générer naturellement en
+        # HTML (<p>...</p>). Si on découpe directement full_text en chunks
+        # par mot, on obtient des fragments HTML cassés (`<p>Bonj`, `our,</p>`,
+        # etc.) qui s'affichent comme texte brut côté dialog au stream.
+        # Fix : extraire plain text pour chunks (stream safe) mais garder
+        # full_text pour la normalisation HTML finale du cache.
+        _full_plain = full_text
+        if '<' in _full_plain:
+            _full_plain = re.sub(r'<br\s*/?>', '\n', _full_plain, flags=re.IGNORECASE)
+            _full_plain = re.sub(r'</p>\s*<p[^>]*>', '\n\n', _full_plain, flags=re.IGNORECASE)
+            _full_plain = re.sub(r'<[^>]+>', '', _full_plain)
+            import html as _html_mod_spec
+            _full_plain = _html_mod_spec.unescape(_full_plain).strip()
+
+        # Découper en chunks (plain text, stream safe)
         chunks = []
-        words = full_text.split(' ')
+        words = _full_plain.split(' ')
         batch = []
         for word in words:
             batch.append(word)
@@ -5688,7 +5702,17 @@ def api_instant_reply():
             # en plus crée des doublons ("Bonjour,\n\nBonjour Jean, ...").
             # Détection simple : si le body commence/finit déjà par un
             # greeting/closing reconnu, on ne l'ajoute pas.
-            _body_stripped = body.strip()
+            #
+            # Fix 24/04 (régression P0.5) : le body peut maintenant être en
+            # HTML (`<p>Bonjour,</p>...`) depuis le fix mise-en-forme cache.
+            # `startswith('bonjour')` échouait car la 1ère lettre est `<`.
+            # → Extraire plain text avant détection (strip HTML + entités).
+            import html as _html_mod_check
+            _body_plain = re.sub(r'<br\s*/?>', '\n', body, flags=re.IGNORECASE)
+            _body_plain = re.sub(r'</p>\s*<p[^>]*>', '\n\n', _body_plain, flags=re.IGNORECASE)
+            _body_plain = re.sub(r'<[^>]+>', '', _body_plain)
+            _body_plain = _html_mod_check.unescape(_body_plain)
+            _body_stripped = _body_plain.strip()
             _body_lower = _body_stripped.lower()
             _greeting_patterns = ('bonjour', 'bonsoir', 'hello', 'salut',
                                   'cher ', 'chère ', 'chers ', 'chères ',
@@ -5700,11 +5724,17 @@ def api_instant_reply():
                                  'bien à vous', 'bien à toi', 'bien sincèrement',
                                  'sincèrement', 'amicalement', 'bonne journée',
                                  'bonne soirée', 'à bientôt', 'à très vite',
-                                 'merci', 'best regards', 'regards')
+                                 'merci', 'best regards', 'regards',
+                                 'cdlt', 'cdt', 'cordial')
             # Check si dernière ligne non-vide matche un closing
             _last_lines = [ln.strip() for ln in _body_stripped.split('\n') if ln.strip()]
             _last_line_lower = (_last_lines[-1] if _last_lines else '').lower()
             has_closing = any(_last_line_lower.startswith(p) for p in _closing_patterns)
+            # Fix 24/04 : aussi vérifier l'avant-dernière ligne (souvent le closing
+            # est suivi de la signature user_name, ex: "Cdlt\nyvan")
+            if not has_closing and len(_last_lines) >= 2:
+                _penult_lower = _last_lines[-2].lower()
+                has_closing = any(_penult_lower.startswith(p) for p in _closing_patterns)
 
             # P0.5 (24/04) : assembler la réponse en HTML prêt à afficher.
             # Le body du cache est HTML depuis P0.5 — on le garde tel quel.
