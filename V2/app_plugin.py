@@ -638,25 +638,12 @@ def _execute_warmup(graph):
         threading.Thread(target=_bulk_preload_contacts, daemon=True,
                          name='contacts-prewarm').start()
 
-        # 3. Pré-scan échéances sur les mails récents (heuristique regex, $0).
-        #    Pré-rempli `_echeance_pre_scan_cache` → le bandeau inbox échéances
-        #    est dispo instantanément quand le user arrive.
-        def _bulk_prescan_echeances():
-            try:
-                scanned = 0
-                for _m in mails[:10]:
-                    body = (_m.get('body') or _m.get('body_preview') or '')[:4000]
-                    subject = _m.get('subject', '')
-                    if body and _has_echeance_pattern(subject + ' ' + body):
-                        scanned += 1
-                        # Le vrai scan Claude se fera à la demande, ici on
-                        # se contente de marquer les candidats pour UI rapide.
-                if scanned:
-                    logger.info(f"[warmup] {scanned} candidat(s) échéance pré-identifié(s)")
-            except Exception as e:
-                logger.debug(f"[warmup] prescan échéances : {e}")
-        threading.Thread(target=_bulk_prescan_echeances, daemon=True,
-                         name='ech-prescan').start()
+        # 3. OBSOLÈTE (supprimé P4.1 — 24/04) : _bulk_prescan_echeances ne
+        # faisait que du log regex sans écrire en cache. Remplacé par la
+        # Phase 1 corrigée (_bulk_prewarm_mail_previews) qui fait le VRAI
+        # travail : pré-filtre heuristique → scan Claude → cache DB
+        # persistant (mail_echeance_cache). Pattern #2 évité (pas de patch-
+        # on-patch, l'ancienne fonction est juste retirée du flow).
 
         # 3ter. Phase 2.A (24/04) — Pré-chauffe mail_preview (échéance + classement)
         # pour les top 15 mails de l'inbox. Peuple `_mail_preview_cache` consulté

@@ -513,6 +513,168 @@ Check-Invariant "I-DATA-13" "Pas de mail_data construit sans priorite internet_m
     return $true
 }
 
+Check-Invariant "I-DATA-14" "Caches Phase 1+2 non vides apres uptime > 5 min" {
+    # Les 3 tables DB ajoutees par Phase 1+2 doivent contenir au moins 1 entree
+    # apres 5 min d'uptime V2 (si email_cache non vide).
+    # Skip si V2 pas up OR uptime < 5 min OR email_cache vide.
+    $v2Proc = Get-NetTCPConnection -LocalPort 3443 -State Listen -ErrorAction SilentlyContinue
+    if (-not $v2Proc) {
+        $script:Skipped += "I-DATA-14 : V2 not running"
+        return $true
+    }
+    $v2Pid = $v2Proc[0].OwningProcess
+    $proc = Get-Process -Id $v2Pid -ErrorAction SilentlyContinue
+    if ($proc -and ((Get-Date) - $proc.StartTime).TotalMinutes -lt 5) {
+        $script:Skipped += "I-DATA-14 : V2 uptime < 5 min (BG loop pas fini)"
+        return $true
+    }
+    $db = 'C:\EasyMail\V2\boostermail.db'
+    if (-not (Test-Path $db)) {
+        $script:Skipped += "I-DATA-14 : DB introuvable"
+        return $true
+    }
+    # Verifier inbox non vide
+    $inboxCount = & py -3 -X utf8 -c @"
+import sqlite3
+con = sqlite3.connect('$db')
+cur = con.cursor()
+cur.execute(`"SELECT COUNT(*) FROM email_cache WHERE entry_id LIKE '<%'`")
+print(cur.fetchone()[0])
+"@ 2>$null
+    $inboxCount = [int]($inboxCount | Select-Object -First 1)
+    if ($inboxCount -eq 0) {
+        $script:Skipped += "I-DATA-14 : email_cache canonique vide"
+        return $true
+    }
+    $empty_tables = @()
+    foreach ($table in 'mail_echeance_cache', 'mail_classement_cache', 'mail_pj_classement_cache') {
+        $count = & py -3 -X utf8 -c @"
+import sqlite3
+con = sqlite3.connect('$db')
+cur = con.cursor()
+try:
+    cur.execute('SELECT COUNT(*) FROM $table')
+    print(cur.fetchone()[0])
+except:
+    print(0)
+"@ 2>$null
+        $count = [int]($count | Select-Object -First 1)
+        if ($count -eq 0) {
+            $empty_tables += $table
+        }
+    }
+    if ($empty_tables.Count -gt 0) {
+        Write-Host ("    ($($empty_tables.Count) table(s) vide(s) : $($empty_tables -join ', '))") -ForegroundColor Yellow
+        return $false
+    }
+    return $true
+}
+
+Check-Invariant "I-CX-01" "Couverture _reply_cache canonique >= 50% apres 1h uptime" {
+    # Ratio entrees canoniques matchant inbox / taille inbox
+    $v2Proc = Get-NetTCPConnection -LocalPort 3443 -State Listen -ErrorAction SilentlyContinue
+    if (-not $v2Proc) {
+        $script:Skipped += "I-CX-01 : V2 not running"
+        return $true
+    }
+    $v2Pid = $v2Proc[0].OwningProcess
+    $proc = Get-Process -Id $v2Pid -ErrorAction SilentlyContinue
+    if ($proc -and ((Get-Date) - $proc.StartTime).TotalHours -lt 1) {
+        $script:Skipped += "I-CX-01 : V2 uptime < 1h (cible 50% pas garantie)"
+        return $true
+    }
+    $drafts = 'C:\EasyMail\drafts_v2.json'
+    $db = 'C:\EasyMail\V2\boostermail.db'
+    if (-not (Test-Path $drafts) -or -not (Test-Path $db)) {
+        $script:Skipped += "I-CX-01 : fichiers manquants"
+        return $true
+    }
+    $pct = & py -3 -X utf8 -c @"
+import sqlite3, json
+try:
+    with open(r'$drafts', 'r', encoding='utf-8') as f:
+        entries = json.load(f).get('entries', {})
+    con = sqlite3.connect(r'$db')
+    cur = con.cursor()
+    cur.execute(`"SELECT entry_id FROM email_cache WHERE entry_id LIKE '<%'`")
+    inbox = set(r[0] for r in cur.fetchall())
+    if not inbox: print(-1); exit()
+    match = sum(1 for k in entries if k in inbox)
+    print(int(100 * match / len(inbox)))
+except: print(-1)
+"@ 2>$null
+    $pct = [int]($pct | Select-Object -First 1)
+    if ($pct -lt 0) {
+        $script:Skipped += "I-CX-01 : calcul impossible"
+        return $true
+    }
+    if ($pct -lt 50) {
+        Write-Host ("    (couverture ${pct}% < cible 50%)") -ForegroundColor Yellow
+        return $false
+    }
+    return $true
+}
+
+Check-Invariant "I-CX-02" "Tables Phase 1+2 couverture inbox >= 70% apres 10 min uptime" {
+    $v2Proc = Get-NetTCPConnection -LocalPort 3443 -State Listen -ErrorAction SilentlyContinue
+    if (-not $v2Proc) {
+        $script:Skipped += "I-CX-02 : V2 not running"
+        return $true
+    }
+    $v2Pid = $v2Proc[0].OwningProcess
+    $proc = Get-Process -Id $v2Pid -ErrorAction SilentlyContinue
+    if ($proc -and ((Get-Date) - $proc.StartTime).TotalMinutes -lt 10) {
+        $script:Skipped += "I-CX-02 : V2 uptime < 10 min"
+        return $true
+    }
+    $db = 'C:\EasyMail\V2\boostermail.db'
+    if (-not (Test-Path $db)) {
+        $script:Skipped += "I-CX-02 : DB introuvable"
+        return $true
+    }
+    $pctsRaw = & py -3 -X utf8 -c @"
+import sqlite3
+con = sqlite3.connect(r'$db')
+cur = con.cursor()
+cur.execute(`"SELECT entry_id FROM email_cache WHERE entry_id LIKE '<%'`")
+inbox = [r[0] for r in cur.fetchall()]
+if not inbox:
+    print('-1,-1,-1')
+else:
+    ph = ','.join(['?']*len(inbox))
+    pcts = []
+    for t in ('mail_echeance_cache','mail_classement_cache','mail_pj_classement_cache'):
+        try:
+            cur.execute(f'SELECT COUNT(*) FROM {t} WHERE message_id IN ({ph})', inbox)
+            n = cur.fetchone()[0]
+            pcts.append(int(100*n/len(inbox)))
+        except:
+            pcts.append(0)
+    print(','.join(str(p) for p in pcts))
+"@ 2>$null
+    $pctsLine = ($pctsRaw | Where-Object { $_ -match '^[-]?\d+,' } | Select-Object -First 1)
+    if (-not $pctsLine) {
+        $script:Skipped += "I-CX-02 : calcul impossible"
+        return $true
+    }
+    $parts = $pctsLine.Split(',')
+    if ($parts.Count -lt 3 -or $parts[0] -eq '-1') {
+        $script:Skipped += "I-CX-02 : inbox vide"
+        return $true
+    }
+    $below = @()
+    $names = 'echeance', 'classement', 'pj_classement'
+    for ($i = 0; $i -lt 3; $i++) {
+        $p = [int]$parts[$i]
+        if ($p -lt 70) { $below += "$($names[$i])=${p}%" }
+    }
+    if ($below.Count -gt 0) {
+        Write-Host ("    ($($below -join ', ') < cible 70%)") -ForegroundColor Yellow
+        return $false
+    }
+    return $true
+}
+
 # ==========================================================================
 # Resume
 # ==========================================================================

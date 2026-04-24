@@ -286,6 +286,32 @@ Prévention Pattern #14 régression. Toute construction de dict `mail_data` dest
 - **Pourquoi** : quand `msg.get('message_id')` peut être vide mais `msg.get('id')` contient un Entry ID Graph, fallback sur `id` produit une clé incompatible avec les consommateurs dialog (Office.js → Internet Message-ID).
 - **Historique** : 24/04/2026 — audit 3 de connexions + Phase 3 P3.3 ajout smoke test.
 
+### I-DATA-12 : Tout correspondant actif doit avoir un profil
+Pour chaque contact ayant reçu ≥3 threads en DB (table `threads`), un profil DOIT exister dans `contact_profiles` après 24 h d'uptime V2.
+- **Test** : `SELECT correspondent FROM threads GROUP BY correspondent HAVING COUNT(*) >= 3` → tous ces correspondents doivent être dans `contact_profiles.email`.
+- **Pourquoi** : sans profil, BG loop TIER 1 skip le contact → aucune pré-réponse → streaming Claude à chaque clic. Cas Dufau observé 24/04 (27 threads mais 0 profil pendant des mois).
+- **Historique** : 24/04/2026 — commit `dedf759` (hook `_maybe_analyze_contact` dans continuous_spec) + `490d612` (seuil 3 mails pour première analyse).
+- **Action si violé** : forcer `_maybe_analyze_contact(email)` pour chaque correspondant `>= 3` threads sans profil.
+
+### I-DATA-14 : Caches Phase 1+2 non vides après uptime > 5 min
+Les 3 tables DB ajoutées par Phase 1+2 doivent contenir au moins une entrée après 5 min d'uptime V2 (si l'inbox contient au moins 1 mail).
+- **Tables** : `mail_echeance_cache`, `mail_classement_cache`, `mail_pj_classement_cache`
+- **Test** : `SELECT COUNT(*) FROM mail_echeance_cache` > 0 (idem autres) si uptime V2 > 5 min ET `email_cache` non vide.
+- **Pourquoi** : détecte régression du BG loop `_continuous_speculation_loop` qui ne pré-chauffe plus. Si ces 3 tables restent vides, le dialog 80% affiche "—" partout → UX dégradée.
+- **Historique** : 24/04/2026 — Phase 1 corrigée + Phase 2.
+
+### I-CX-01 : Couverture `_reply_cache` canonique ≥ 50% après 1 h uptime
+Après 1 h de fonctionnement V2 avec Outlook ouvert, le ratio `(entrées canoniques dans drafts_v2.json matchant un mail de l'inbox) / (taille inbox)` doit être ≥ 50%.
+- **Test** : script qui compte les intersections entre `drafts_v2.json` clés canoniques et `email_cache WHERE entry_id LIKE '<%'`.
+- **Pourquoi** : la cible business est 80-90% cache HIT instantané. 50% = seuil bas qui permet à au moins 1 mail sur 2 d'être instantané. En dessous, problème BG loop.
+- **Historique** : 24/04/2026 — audit 3 de connexions.
+
+### I-CX-02 : Tables Phase 1+2 couvrent inbox après 10 min uptime
+Après 10 min d'uptime V2, les 3 tables Phase 1+2 doivent couvrir au moins 70% des mails de l'inbox (match par `message_id`).
+- **Test** : `(SELECT COUNT(*) FROM mail_classement_cache WHERE message_id IN (SELECT entry_id FROM email_cache WHERE entry_id LIKE '<%'))` / `(SELECT COUNT(*) FROM email_cache WHERE entry_id LIKE '<%')` >= 0.70.
+- **Pourquoi** : détecte un BG loop qui tourne mais ne traite qu'un sous-ensemble de l'inbox (bug de filtre, throttle trop bas, etc.). Cible 70% = seuil bas.
+- **Historique** : 24/04/2026 — audit 3 de connexions + P4.4.
+
 ---
 
 ## Mise à jour
