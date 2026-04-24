@@ -1370,6 +1370,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--direct-dialog', action='store_true',
                         help='Ouvre directement le dialog (skip overlay+warmup)')
+    parser.add_argument('--pre-warm', action='store_true',
+                        help='Charge Qt+Chromium en hot instance mais ne montre pas '
+                             'la popup. Attend un /show_popup via IPC 5052. '
+                             'Usage : appelé par le superviseur au V2-ready pour '
+                             'éliminer le cold start QtWebEngine (~70s au boot Windows).')
     parser.add_argument('--mode', default='reply',
                         help='Mode du dialog : reply/reply_all/forward/new')
     parser.add_argument('--messageId', default='')
@@ -1528,9 +1533,18 @@ def main():
         # démarrage Outlook sans respawner tout Python + PyQt.
         app.setQuitOnLastWindowClosed(False)
 
-        # Mode overlay classique — vérifier anti-spam (audit 20/04 Q3)
+        # Mode overlay classique — vérifier activation
         status = _fetch_activation_full()
         show_popup = status.get('should_show_popup', True)
+
+        # Pre-warm 24/04 : démarrage hot-instance sans afficher la popup.
+        # Le superviseur déclenche /show_popup via IPC quand Outlook s'ouvre
+        # → popup visible en ~200ms au lieu de ~70s (cold start QtWebEngine
+        # au boot Windows sur disque froid).
+        if args.pre_warm:
+            show_popup = False
+            logger.info("[pre-warm] Qt + Chromium chargés, popup cachée, IPC 5052 prêt")
+
         popup = EasyMailPopup()
 
         # Fix B1 (21/04 audit race) : connecter les signaux IPC AVANT
@@ -1547,9 +1561,8 @@ def main():
             _mark_popup_shown()
             logger.info(f"Overlay PyQt visible — backend: {BACKEND_URL}")
         else:
-            logger.info(f"Popup déjà affichée aujourd'hui "
-                        f"(popup_shown_date={status.get('popup_shown_date')}) → cachée, "
-                        f"service hot instance prêt pour le dialog")
+            logger.info("Popup cachée (pre-warm ou show_popup=False), "
+                        "hot instance prêt pour IPC /show_popup et /open_dialog")
 
     sys.exit(app.exec())
 

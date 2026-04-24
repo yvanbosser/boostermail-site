@@ -7858,19 +7858,16 @@ def api_activation_status():
     else:
         mode = 'marketing_warmup'
 
-    # Audit 20/04 Q3 : popup affichée seulement si pas encore vue aujourd'hui
-    # (anti-spam). Si user_activated=False → TOUJOURS afficher (CTA marketing).
-    # Si user_activated=True → 1× par jour seulement.
-    # Exception dev : `.dev_mode` présent → popup TOUJOURS (override anti-spam)
+    # Décision 24/04/2026 : popup affichée À CHAQUE démarrage d'Outlook
+    # (plus de filtre "1× par jour"). Rationale user : la popup sert aussi
+    # de temporisateur pendant le warmup, et le mode flash (<500ms) est
+    # acceptable comme feedback minimal pour rassurer l'user.
+    # Note : la popup_shown_date reste loggée pour diagnostic mais n'est
+    # plus utilisée comme filtre.
     today = datetime.now().strftime('%Y-%m-%d')
     popup_shown_date = _db.get_setting('popup_shown_date', '') or ''
     dev_mode = os.path.exists(os.path.join(EASYMAIL_DIR, '.dev_mode'))
-    if dev_mode:
-        should_show_popup = True  # mode dev : toujours afficher
-    elif not user_activated:
-        should_show_popup = True   # CTA marketing bloquant toujours
-    else:
-        should_show_popup = (popup_shown_date != today)
+    should_show_popup = True  # toujours afficher (décision 24/04/2026)
 
     return jsonify({
         "user_activated": user_activated,

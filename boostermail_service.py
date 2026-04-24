@@ -621,6 +621,22 @@ def run_supervisor(first_launch=True):
         time.sleep(1)
     logger.info("Backends prêts — en veille jusqu'à ouverture Outlook")
 
+    # Pre-warm 24/04 : lance popup_pyqt --pre-warm dès que V2 est ready
+    # (même si Outlook pas encore ouvert). Charge Qt + QtWebEngine en
+    # hot-instance avec popup cachée. Quand Outlook s'ouvre ensuite,
+    # show_pyqt_popup() déclenche l'IPC /show_popup sur l'instance déjà
+    # chaude → popup visible en ~200ms au lieu de ~70s (cold start Qt au
+    # boot Windows sur disque froid).
+    if not is_outlook_running() and not _popup_is_alive():
+        try:
+            subprocess.Popen(
+                [pythonw, POPUP_SCRIPT, '--pre-warm'], cwd=EASYMAIL_DIR,
+                creationflags=_NW,
+            )
+            logger.info("Popup PyQt pre-warm lancé (Qt chargé, popup cachée, IPC 5052 prêt)")
+        except Exception as e:
+            logger.warning(f"Pre-warm popup_pyqt échoué : {e}")
+
     # Si Outlook est déjà ouvert (ex: logon pendant Outlook actif),
     # afficher la popup immédiatement
     if is_outlook_running():
