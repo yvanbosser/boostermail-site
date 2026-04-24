@@ -1440,20 +1440,43 @@ def _set_mail_preview(mid, kind, status, data):
 
 
 def _prewarm_echeance_for_mail(mid, mail_data):
-    """Scan heuristique + Claude pour échéance d'un mail. Stocke dans cache.
-    Filtre heuristique en premier (pattern regex) pour éviter Claude sur
-    les 45/50 mails qui n'ont aucun pattern (économie API massive)."""
+    """Scan heuristique + Claude pour échéance d'un mail. Stocke dans
+    cache DB persistant (mail_echeance_cache) + cache RAM.
+
+    Pattern idempotent aligné sur mail_summaries :
+    1. Check DB d'abord → skip si déjà scanné (économie API 100%)
+    2. Sinon : filtre heuristique (_has_echeance_pattern) — économie si pas de pattern
+    3. Sinon : scan Claude via scan_echeances_batch
+    4. Stocke résultat en DB + RAM
+    """
     try:
+        # [1] Cache DB : check idempotent (comme has_mail_summary)
+        try:
+            cached = _db.get_mail_echeance(mid)
+            if cached is not None:
+                ech = cached.get('echeances', [])
+                _set_mail_preview(mid, 'echeance', 'done', ech)
+                logger.debug(f"[prewarm-ech] cache DB HIT pour {mid[:30]} "
+                             f"({len(ech)} échéance(s))")
+                return
+        except Exception as _e:
+            logger.debug(f"[prewarm-ech] check DB erreur : {_e}")
+
+        # [2] Pré-filtre heuristique (0 API)
         body = (mail_data.get('body') or mail_data.get('body_preview') or '')[:4000]
         subject = mail_data.get('subject', '')
-        # Strip HTML pour la détection heuristique
         body_plain = re.sub(r'<[^>]+>', ' ', body)
         body_plain = re.sub(r'\s+', ' ', body_plain).strip()
         if not body_plain or not _has_echeance_pattern(subject + ' ' + body_plain):
-            # Pas de pattern → pas d'échéance détectée. On stocke [] = néant.
+            # Pas de pattern → [] = néant. Persister pour ne plus re-scanner.
+            try:
+                _db.save_mail_echeance(mid, [])
+            except Exception as _e:
+                logger.debug(f"[prewarm-ech] save DB [] : {_e}")
             _set_mail_preview(mid, 'echeance', 'done', [])
             return
-        # Heuristique a matché → scan Claude pour extraire la date/action
+
+        # [3] Scan Claude
         builder = _get_prompt_builder()
         if not builder:
             _set_mail_preview(mid, 'echeance', 'done', [])
@@ -1469,6 +1492,12 @@ def _prewarm_echeance_for_mail(mid, mail_data):
         except Exception as e:
             logger.debug(f"[prewarm-ech] scan Claude erreur : {e}")
             echeances = []
+
+        # [4] Persister en DB + RAM
+        try:
+            _db.save_mail_echeance(mid, echeances)
+        except Exception as _e:
+            logger.debug(f"[prewarm-ech] save DB : {_e}")
         _set_mail_preview(mid, 'echeance', 'done', echeances)
         if echeances:
             logger.info(f"[prewarm-ech] {len(echeances)} échéance(s) pré-détectée(s) "
@@ -1479,10 +1508,35 @@ def _prewarm_echeance_for_mail(mid, mail_data):
 
 
 def _prewarm_classement_for_mail(mid, mail_data):
-    """Suggestion classement pour un mail. Règle DB uniquement (pas d'IA au
-    pré-warm — trop cher × 50 mails). L'IA fallback reste dispo sur la
-    route post_send existante si la règle DB retourne rien."""
+    """Suggestion classement pour un mail. Stocke dans cache DB persistant
+    (mail_classement_cache) + cache RAM.
+
+    Pattern idempotent aligné sur mail_summaries :
+    1. Check DB d'abord → skip si déjà calculé (économie API 100%)
+    2. Sinon : pipeline règle DB (get_folder_suggestion) = Tier 1 + domaine
+    3. Persister résultat (suggestion OR null si pas de règle) en DB + RAM
+
+    Note : pas d'IA au pré-warm (coût × 50 mails trop élevé). Si règle DB
+    ne match pas, on stocke 'source=none' → dialog affichera "Néant".
+    L'IA fallback reste dispo sur /api/classification/post_send/<mid>
+    appelée au moment où l'user clique Envoyer.
+    """
     try:
+        # [1] Cache DB : check idempotent
+        try:
+            cached = _db.get_mail_classement(mid)
+            if cached is not None:
+                _set_mail_preview(mid, 'classement', 'done', {
+                    'suggestion': cached.get('suggestion'),
+                    'source': cached.get('source', 'none'),
+                })
+                logger.debug(f"[prewarm-cls] cache DB HIT pour {mid[:30]} "
+                             f"(source={cached.get('source')})")
+                return
+        except Exception as _e:
+            logger.debug(f"[prewarm-cls] check DB erreur : {_e}")
+
+        # [2] Pipeline règle DB (Tier 1 + domaine, cf. SPEC_CLASSIFICATION_MAIL)
         contact_email = (mail_data.get('from_email', '') or '').lower()
         subject = mail_data.get('subject', '')
         domain = contact_email.split('@')[-1] if '@' in contact_email else ''
@@ -1490,19 +1544,23 @@ def _prewarm_classement_for_mail(mid, mail_data):
             subject_kw = _extract_subject_keywords(subject)
         except Exception:
             subject_kw = subject
-        # Règle DB uniquement : si match → suggestion, sinon → None (néant)
         try:
             suggestion = _db.get_folder_suggestion(contact_email, domain, subject_kw)
         except Exception:
             suggestion = None
+
+        # [3] Persister (suggestion OR null pour marquer "déjà vérifié, pas de règle")
+        source = 'rule' if suggestion else 'none'
+        try:
+            _db.save_mail_classement(mid, suggestion, source)
+        except Exception as _e:
+            logger.debug(f"[prewarm-cls] save DB : {_e}")
+        _set_mail_preview(mid, 'classement', 'done', {
+            'suggestion': suggestion,
+            'source': source,
+        })
         if suggestion:
-            _set_mail_preview(mid, 'classement', 'done', {
-                'suggestion': suggestion,
-                'source': 'rule',
-            })
             logger.info(f"[prewarm-cls] règle DB matche pour {mid[:30]}")
-        else:
-            _set_mail_preview(mid, 'classement', 'done', None)
     except Exception as e:
         logger.debug(f"[prewarm-cls] {e}")
         _set_mail_preview(mid, 'classement', 'error', None)
@@ -3825,14 +3883,17 @@ def api_dialog_init():
             return None
 
     def _fetch_preview():
-        """Phase 2.A (24/04) : lookup du mail_preview pré-chauffé
-        (échéance + classement). Retourne instantanément depuis le cache RAM.
-        Si miss : déclenche scan BG pour le prochain clic."""
+        """Phase 1 corrigée (24/04) : lookup échéance + classement, 2 sources.
+        1. Cache RAM _mail_preview_cache (rapide, volatile)
+        2. Cache DB persistant (mail_echeance_cache + mail_classement_cache)
+        3. Miss total → déclenche scan BG + retourne miss
+        """
         if not message_id:
             return None
         try:
+            # [1] RAM cache
             with _mail_preview_lock:
-                entry = dict(_mail_preview_cache.get(message_id, {}))  # copy
+                entry = dict(_mail_preview_cache.get(message_id, {}))
             if entry:
                 return {
                     'echeance': {
@@ -3845,8 +3906,51 @@ def api_dialog_init():
                     },
                     'cache_hit': True,
                 }
-            # Cache miss : on déclenche un scan BG (sans attendre) pour la
-            # prochaine ouverture. Retour miss immédiat.
+            # [2] DB cache (persiste au restart V2)
+            ech_entry, cls_entry = None, None
+            try:
+                db_ech = _db.get_mail_echeance(message_id)
+                if db_ech is not None:
+                    ech_data = db_ech.get('echeances', [])
+                    _set_mail_preview(message_id, 'echeance', 'done', ech_data)
+                    ech_entry = {'status': 'done', 'data': ech_data}
+            except Exception:
+                pass
+            try:
+                db_cls = _db.get_mail_classement(message_id)
+                if db_cls is not None:
+                    cls_data = {
+                        'suggestion': db_cls.get('suggestion'),
+                        'source': db_cls.get('source', 'none'),
+                    }
+                    _set_mail_preview(message_id, 'classement', 'done', cls_data)
+                    cls_entry = {'status': 'done', 'data': cls_data}
+            except Exception:
+                pass
+            if ech_entry or cls_entry:
+                # Partiel : déclencher scan BG pour compléter la partie manquante
+                if not (ech_entry and cls_entry):
+                    try:
+                        cached_email = _db.get_cached_email(message_id)
+                        if cached_email:
+                            mail_data = {
+                                'internet_message_id': message_id,
+                                'from_email': cached_email.get('from_email', ''),
+                                'from_name': cached_email.get('from_name', ''),
+                                'subject': cached_email.get('subject', ''),
+                                'body': cached_email.get('body') or cached_email.get('html_body', ''),
+                                'body_preview': cached_email.get('body_preview', ''),
+                            }
+                            threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
+                                             daemon=True, name='preview-partial').start()
+                    except Exception:
+                        pass
+                return {
+                    'echeance': ech_entry or {'status': 'miss', 'data': None},
+                    'classement': cls_entry or {'status': 'miss', 'data': None},
+                    'cache_hit': True,
+                }
+            # [3] Total miss : déclencher scan BG + retourner miss
             try:
                 cached_email = _db.get_cached_email(message_id)
                 if cached_email:
@@ -5083,16 +5187,62 @@ def api_mail_preview(message_id):
         entry = _mail_preview_cache.get(message_id, {})
 
     if not entry:
-        # Pas en cache : déclencher un scan BG pour le prochain clic,
-        # en construisant un mail_data minimal depuis email_cache DB
-        # si disponible. Sinon, rien à faire — reste "miss".
+        # Phase 1 corrigée (24/04) : RAM miss → check DB persistant.
+        # Si DB HIT → retour instantané + peuple RAM pour prochains clics.
+        # Si DB miss aussi → déclenche scan BG + retourne "miss".
+        ech_entry = None
+        cls_entry = None
+        try:
+            db_ech = _db.get_mail_echeance(message_id)
+            if db_ech is not None:
+                ech_data = db_ech.get('echeances', [])
+                _set_mail_preview(message_id, 'echeance', 'done', ech_data)
+                ech_entry = {"status": "done", "data": ech_data}
+        except Exception as e:
+            logger.debug(f"[mail_preview] check DB ech : {e}")
+        try:
+            db_cls = _db.get_mail_classement(message_id)
+            if db_cls is not None:
+                cls_data = {
+                    'suggestion': db_cls.get('suggestion'),
+                    'source': db_cls.get('source', 'none'),
+                }
+                _set_mail_preview(message_id, 'classement', 'done', cls_data)
+                cls_entry = {"status": "done", "data": cls_data}
+        except Exception as e:
+            logger.debug(f"[mail_preview] check DB cls : {e}")
+
+        # Si au moins un bloc HIT DB, retourner ce qu'on a + miss pour l'autre
+        if ech_entry or cls_entry:
+            # Déclencher scan BG pour le bloc manquant
+            if not ech_entry or not cls_entry:
+                try:
+                    cached = _db.get_cached_email(message_id)
+                    if cached:
+                        mail_data = {
+                            'internet_message_id': message_id,
+                            'from_email': cached.get('from_email', ''),
+                            'from_name': cached.get('from_name', ''),
+                            'subject': cached.get('subject', ''),
+                            'body': cached.get('body') or cached.get('html_body', ''),
+                            'body_preview': cached.get('body_preview', ''),
+                        }
+                        threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
+                                         daemon=True, name='preview-ondemand').start()
+                except Exception:
+                    pass
+            return jsonify({
+                "echeance": ech_entry or {"status": "miss", "data": None},
+                "classement": cls_entry or {"status": "miss", "data": None},
+                "cache_hit": True,
+            })
+
+        # Total miss : déclencher scan BG, retourner miss
         try:
             cached = _db.get_cached_email(message_id)
             if cached:
                 mail_data = {
                     'internet_message_id': message_id,
-                    'message_id': cached.get('internet_message_id', ''),
-                    'id': cached.get('id', ''),
                     'from_email': cached.get('from_email', ''),
                     'from_name': cached.get('from_name', ''),
                     'subject': cached.get('subject', ''),
@@ -5100,7 +5250,7 @@ def api_mail_preview(message_id):
                     'body_preview': cached.get('body_preview', ''),
                 }
                 threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                                 daemon=True, name='mail-preview-ondemand').start()
+                                 daemon=True, name='preview-ondemand').start()
         except Exception as e:
             logger.debug(f"[mail_preview] on-demand trigger échec : {e}")
         return jsonify({

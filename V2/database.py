@@ -192,6 +192,32 @@ class Database:
             )
         """)
 
+        # -- Cache classement pré-calculé par mail (Phase 1 corrigée 24/04) --
+        # Pattern idempotent aligné sur mail_summaries : check avant calc
+        # → skip si déjà en cache. Évite les re-calculs et appels Claude
+        # redondants au restart V2. Clé = internet_message_id (I-DATA-11).
+        # Peuplé par _prewarm_classement_for_mail au warmup + continuous_spec.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS mail_classement_cache (
+                message_id TEXT PRIMARY KEY,
+                suggestion_json TEXT,   -- JSON : {folder_path, folder_id, count} ou null
+                source TEXT,            -- 'rule' | 'ai' | 'none'
+                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+
+        # -- Cache échéances pré-scannées par mail (Phase 1 corrigée 24/04) --
+        # Pattern idempotent : pré-filtre heuristique (_has_echeance_pattern)
+        # puis scan Claude si candidat. Résultat = liste d'échéances ou []
+        # (= Néant). Évite re-scan coûteux.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS mail_echeance_cache (
+                message_id TEXT PRIMARY KEY,
+                echeances_json TEXT,    -- JSON array : [{description, date_echeance, ...}] ou []
+                scanned_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+
         # -- Table classement mails dans dossiers Outlook --
         c.execute("""
             CREATE TABLE IF NOT EXISTS folder_classifications (
@@ -1384,6 +1410,105 @@ class Database:
             return False
         c = self._conn().cursor()
         c.execute("SELECT 1 FROM mail_summaries WHERE message_id = ? LIMIT 1",
+                  (message_id,))
+        return c.fetchone() is not None
+
+    # --- CACHE CLASSEMENT PAR MAIL (Phase 1 corrigée 24/04) ----------------
+    # Pattern idempotent calqué sur mail_summaries.
+
+    def save_mail_classement(self, message_id, suggestion, source='rule'):
+        """Sauvegarde la suggestion de classement pour un mail.
+        suggestion : dict {folder_path, folder_id, ...} ou None
+        source : 'rule' (DB) | 'ai' | 'none'"""
+        import json as _json
+        if not message_id:
+            return False
+        conn = self._conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT OR REPLACE INTO mail_classement_cache
+                (message_id, suggestion_json, source, updated_at)
+            VALUES (?, ?, ?, datetime('now', 'localtime'))
+        """, (
+            message_id,
+            _json.dumps(suggestion, ensure_ascii=False) if suggestion else None,
+            source,
+        ))
+        conn.commit()
+        return True
+
+    def get_mail_classement(self, message_id):
+        """Retourne {suggestion, source, updated_at} ou None si absent."""
+        import json as _json
+        if not message_id:
+            return None
+        c = self._conn().cursor()
+        c.execute("""SELECT suggestion_json, source, updated_at
+                     FROM mail_classement_cache WHERE message_id = ?""",
+                  (message_id,))
+        r = c.fetchone()
+        if not r:
+            return None
+        try:
+            sugg = _json.loads(r[0]) if r[0] else None
+        except Exception:
+            sugg = None
+        return {'suggestion': sugg, 'source': r[1], 'updated_at': r[2]}
+
+    def has_mail_classement(self, message_id):
+        """True si classement déjà calculé pour ce mail (guard idempotent)."""
+        if not message_id:
+            return False
+        c = self._conn().cursor()
+        c.execute("SELECT 1 FROM mail_classement_cache WHERE message_id = ? LIMIT 1",
+                  (message_id,))
+        return c.fetchone() is not None
+
+    # --- CACHE ÉCHÉANCES PAR MAIL (Phase 1 corrigée 24/04) -----------------
+
+    def save_mail_echeance(self, message_id, echeances):
+        """Sauvegarde la liste d'échéances (ou []) pour un mail.
+        echeances : list[dict] (échéances détectées) ou [] si néant"""
+        import json as _json
+        if not message_id:
+            return False
+        conn = self._conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT OR REPLACE INTO mail_echeance_cache
+                (message_id, echeances_json, scanned_at)
+            VALUES (?, ?, datetime('now', 'localtime'))
+        """, (
+            message_id,
+            _json.dumps(echeances or [], ensure_ascii=False),
+        ))
+        conn.commit()
+        return True
+
+    def get_mail_echeance(self, message_id):
+        """Retourne {echeances [list], scanned_at} ou None si pas encore scanné."""
+        import json as _json
+        if not message_id:
+            return None
+        c = self._conn().cursor()
+        c.execute("""SELECT echeances_json, scanned_at
+                     FROM mail_echeance_cache WHERE message_id = ?""",
+                  (message_id,))
+        r = c.fetchone()
+        if not r:
+            return None
+        try:
+            ech = _json.loads(r[0] or '[]')
+        except Exception:
+            ech = []
+        return {'echeances': ech, 'scanned_at': r[1]}
+
+    def has_mail_echeance(self, message_id):
+        """True si échéance scannée pour ce mail (guard idempotent)."""
+        if not message_id:
+            return False
+        c = self._conn().cursor()
+        c.execute("SELECT 1 FROM mail_echeance_cache WHERE message_id = ? LIMIT 1",
                   (message_id,))
         return c.fetchone() is not None
 
