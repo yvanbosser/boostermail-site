@@ -7672,7 +7672,15 @@ def _maybe_analyze_contact(contact_email):
             return
         logger.info(f"[learning] Re-analyse de {contact_email} (mail #{mail_count})")
     else:
-        if not _should_analyze_contact(mail_count):
+        # Fix 24/04 : pour la PREMIÈRE analyse d'un contact SANS profil, ne
+        # pas bloquer sur le schedule strict [1,2,3,4,5,7,9,13,17,25,50,...].
+        # Symptôme (Dufau) : 27 mails en DB mais hors schedule (prochain 50) →
+        # jamais analysé → reste UNKNOWN → BG loop skip TIER 1 → stream à
+        # chaque clic au lieu de cache HIT. Le schedule est pensé pour des
+        # RE-analyses incrémentales, pas pour bloquer la première.
+        # Règle : seuil minimal 3 mails pour lancer la 1ère analyse ; ensuite
+        # les re-analyses suivent le schedule normal (via branche `if existing`).
+        if mail_count < 3 and not _should_analyze_contact(mail_count):
             return
         logger.info(f"[learning] Premiere analyse de {contact_email} (mail #{mail_count})")
 
