@@ -374,6 +374,20 @@ def match_template_with_confidence(email_body, subject, brief, is_first_mail,
     return None
 
 
+def _skip_sig_if_in_closing(closing, user_name):
+    """Retourne True si user_name (prénom) est déjà dans closing → skip sig.
+    Fix 24/04 (Bug C) : évite doublon 'Cdlt yvan\\nYvan BOSSER (Groupe Bosser)'."""
+    if not user_name or not closing:
+        return False
+    parts = user_name.strip().split()
+    if not parts:
+        return False
+    prenom = parts[0].lower()
+    if len(prenom) < 2:
+        return False
+    return prenom in closing.lower()
+
+
 def assemble_learned_template(learned_template, contact_profile, user_name):
     """Assemble un mail à partir d'un template appris (plus simple : texte déjà complet)."""
     register = (contact_profile or {}).get('register', 'vouvoiement')
@@ -382,7 +396,8 @@ def assemble_learned_template(learned_template, contact_profile, user_name):
     body = learned_template.get('template_text', '')
     signature = user_name or ''
     parts = [greeting, '', body, '', closing]
-    if signature:
+    # Fix 24/04 (Bug C) : skip signature si closing contient déjà le prénom
+    if signature and not _skip_sig_if_in_closing(closing, signature):
         parts.append(signature)
     return '\n'.join(parts)
 
@@ -412,7 +427,8 @@ def assemble_template(template_dict, contact_profile, user_name):
 
     # Assembler
     parts = [greeting, '', body, '', closing]
-    if signature:
+    # Fix 24/04 (Bug C) : skip signature si closing contient déjà le prénom
+    if signature and not _skip_sig_if_in_closing(closing, signature):
         parts.append(signature)
 
     return '\n'.join(parts)

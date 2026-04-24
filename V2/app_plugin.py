@@ -1245,6 +1245,32 @@ def _is_user_modified(entry):
     return entry.get('source') == 'user_edit'
 
 
+def _should_append_signature(closing, user_name):
+    """Fix 24/04 — Évite la signature dupliquée en fin de mail.
+
+    Symptôme observé sur contacts tutoiement (Ronan `closing='Cdlt yvan'`)
+    ou contacts avec closing personnalisé contenant déjà le prénom :
+        Cdlt yvan                    ← closing du profile (contient "yvan")
+        Yvan BOSSER (Groupe Bosser)  ← user_name ajouté mécaniquement = DOUBLON
+
+    Règle : si le closing contient déjà le prénom (premier mot du user_name,
+    case-insensitive, ≥ 2 chars), on SKIP l'ajout de la signature user_name.
+    Le "yvan" du closing suffit ; ajouter "Yvan BOSSER..." fait doublon.
+
+    Pour les closings génériques (ex "Cordialement,") sans le prénom,
+    la signature est bien ajoutée comme avant.
+    """
+    if not user_name or not closing:
+        return bool(user_name)
+    parts = user_name.strip().split()
+    if not parts:
+        return False
+    prenom = parts[0].lower()
+    if len(prenom) < 2:
+        return True
+    return prenom not in closing.lower()
+
+
 def _normalize_reply_to_html(text):
     """P0.5 (24/04) : garantit que le texte stocké en cache est en HTML.
 
@@ -5753,7 +5779,9 @@ def api_instant_reply():
             html_parts.append(body_html)
             if not has_closing:
                 html_parts.append(f'<p>{_html_mod.escape(closing, quote=False)}</p>')
-                if user_name:
+                # Fix 24/04 (Bug C) : skip signature si closing contient déjà
+                # le prénom user (ex "Cdlt yvan" + "Yvan BOSSER" = doublon).
+                if _should_append_signature(closing, user_name):
                     html_parts.append(f'<p>{_html_mod.escape(user_name, quote=False)}</p>')
 
             logger.info(f"[instant_reply] HIT source=preemptive msg={message_id[:30]}")
@@ -6041,8 +6069,10 @@ def generate_reply():
                     yield f"data: {json.dumps({'chunk': chunk})}\n\n"
                     time.sleep(0.05)  # Délai progressif (perception)
                 # Closing + signature
+                # Fix 24/04 (Bug C) : skip signature si closing contient déjà
+                # le prénom user (évite doublon "Cdlt yvan\nYvan BOSSER...")
                 _closing_html = f"\n\n{_preemptive_closing}"
-                if _preemptive_sig:
+                if _preemptive_sig and _should_append_signature(_preemptive_closing, _preemptive_sig):
                     _closing_html += f"\n{_preemptive_sig}"
                 yield f"data: {json.dumps({'chunk': _closing_html})}\n\n"
                 if message_id:
@@ -6486,8 +6516,10 @@ INSTRUCTIONS ECHEANCES :
                 full_text[1:] = [_body_clean]
 
             # Envoyer closing + signature après le corps
+            # Fix 24/04 (Bug C) : skip signature si closing contient déjà
+            # le prénom user (évite doublon "Cdlt yvan\nYvan BOSSER...")
             closing_html = f"\n\n{closing}"
-            if signature:
+            if signature and _should_append_signature(closing, signature):
                 closing_html += f"\n{signature}"
             yield f"data: {json.dumps({'chunk': closing_html})}\n\n"
             full_text.append(closing_html)
