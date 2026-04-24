@@ -482,6 +482,37 @@ Check-Invariant "I-DATA-11" "Cles cache au format canonique (internet_message_id
     return $true
 }
 
+Check-Invariant "I-DATA-13" "Pas de mail_data construit sans priorite internet_message_id" {
+    # Prevention regression Pattern #14 : grep les patterns a risque dans V2/
+    # Violations :
+    #   'message_id': m.get('id')                  (sans fallback internet_message_id)
+    #   'message_id': m.get('message_id') or m.get('id')  (sans internet_message_id prior)
+    $plugin = 'C:\EasyMail\V2\app_plugin.py'
+    if (-not (Test-Path $plugin)) {
+        $script:Skipped += "I-DATA-13 : app_plugin.py introuvable"
+        return $true
+    }
+    $content = Get-Content $plugin -Raw
+    $violations = 0
+    # Pattern 1 : 'message_id': X.get('id') sans 'internet_message_id' dans la ligne
+    $matches1 = [regex]::Matches($content, "'message_id':\s*\w+\.get\('id'")
+    foreach ($m in $matches1) {
+        # Prendre la ligne complete autour du match pour inspection
+        $ln_start = $content.LastIndexOf("`n", $m.Index) + 1
+        $ln_end = $content.IndexOf("`n", $m.Index)
+        if ($ln_end -lt 0) { $ln_end = $content.Length }
+        $line = $content.Substring($ln_start, $ln_end - $ln_start)
+        if ($line -notmatch 'internet_message_id') {
+            $violations++
+        }
+    }
+    if ($violations -gt 0) {
+        Write-Host ("    ($violations site(s) sans internet_message_id priorite)") -ForegroundColor Yellow
+        return $false
+    }
+    return $true
+}
+
 # ==========================================================================
 # Resume
 # ==========================================================================

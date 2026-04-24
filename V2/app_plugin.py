@@ -818,8 +818,15 @@ def _continuous_speculation_loop():
     """
     time.sleep(20)  # Laisser le warmup initial + preemptive_bg finir
     CYCLE_INTERVAL = 45  # secondes entre deux scans complets
+    # P3.1 (24/04) — Boost initial : les 2 premiers cycles post-boot V2
+    # traitent 30 candidats (au lieu de 15) pour remonter rapidement la
+    # couverture _reply_cache après restart (22% → ~80% en ~2 min vs
+    # 5-10 min avant). Ensuite régime normal à 15/cycle.
+    _cycle_count = 0
     while True:
         try:
+            _cycle_count += 1
+            max_candidates = 30 if _cycle_count <= 2 else 15
             # Pause si user actif
             if _preload_pause.is_set():
                 time.sleep(5)
@@ -858,7 +865,7 @@ def _continuous_speculation_loop():
                 if entry.get('status') in ('running', 'done'):
                     continue
                 candidates.append(m)
-                if len(candidates) >= 15:  # Boost 21/04 : 5 → 15 par cycle
+                if len(candidates) >= max_candidates:
                     break
 
             for m in candidates:
@@ -6422,11 +6429,54 @@ def api_instant_reply():
             "template_source": m['source'],
         })
 
-    # 4) Rien
+    # 4) Rien — P3.2 (24/04) : logger la RAISON du MISS pour diagnostic.
+    # Permet d'identifier les patterns récurrents (contact UNKNOWN, filtre
+    # Smart Speculative, scan non fini, etc.) sans guess.
     if message_id:
         _reply_metric_inc('misses')
-    logger.info(f"[instant_reply] MISS source=none msg={message_id[:30] if message_id else 'no-id'}")
-    return jsonify({"source": "none"})
+    miss_reason = 'inconnu'
+    if message_id:
+        try:
+            # Contact UNKNOWN ?
+            if from_email:
+                _cp = _db.get_contact_profile(from_email)
+                if not _cp:
+                    miss_reason = 'contact UNKNOWN (pas de profil)'
+            # BG pas encore exécuté ?
+            with _reply_lock:
+                entry = _reply_cache.get(message_id, {})
+            if not entry:
+                # BG loop n'a jamais touché ce mail
+                if miss_reason == 'inconnu':
+                    miss_reason = 'BG non scanné (mail hors top 50 ou récent)'
+            elif entry.get('status') == 'cancelled':
+                miss_reason = 'spéculation cancelled'
+            elif entry.get('status') == 'error':
+                miss_reason = 'scan Claude erreur'
+            else:
+                # Mail a été filtré par Smart Speculative ? On check via
+                # reconstruction mail_data depuis email_cache (approximatif).
+                try:
+                    cached_email = _db.get_cached_email(message_id)
+                    if cached_email:
+                        _md = {
+                            'message_id': message_id,
+                            'from_email': from_email,
+                            'body': cached_email.get('body', '')[:2000],
+                            'date': cached_email.get('date', ''),
+                            'to': cached_email.get('to', ''),
+                            'cc': cached_email.get('cc', ''),
+                        }
+                        ok, reason = _should_speculate(_md)
+                        if not ok:
+                            miss_reason = f'filtre Smart Speculative : {reason}'
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    logger.info(f"[instant_reply] MISS reason='{miss_reason}' "
+                f"msg={message_id[:30] if message_id else 'no-id'}")
+    return jsonify({"source": "none", "miss_reason": miss_reason})
 
 
 @app.route('/api/match_template', methods=['POST'])

@@ -269,11 +269,22 @@ Si `C:\EasyMail\boostermail.db` existe ET `V2\boostermail.db` existe :
 
 ### I-DATA-11 : Clés de cache cohérentes entre producteur et consommateur
 Pour chaque cache (`_xxx_cache` en RAM, table SQLite, fichier `xxx.json`), le format de la **clé** utilisée à l'écriture DOIT être identique à celui utilisé à la lecture. Le format canonique V2 est **`internet_message_id`** (RFC 2822, `<...@domain>`), car c'est celui envoyé par Office.js côté client (`autorunshared.js`).
-- **Caches concernés** : `_reply_cache`, `_warmup_cache`, `_prefetch_cache`, `_pj_text_cache`, `_attachment_cache`, SQLite `email_cache`, `mail_summaries`, `drafts_v2.json`
+- **Caches concernés** : `_reply_cache`, `_warmup_cache`, `_prefetch_cache`, `_pj_text_cache`, `_attachment_cache`, SQLite `email_cache`, `mail_summaries`, `mail_classement_cache`, `mail_echeance_cache`, `mail_pj_classement_cache`, `drafts_v2.json`
 - **Test** : échantillon de clés du cache → toutes doivent matcher `^<.+@.+>$` (hors fallback documenté pour drafts locaux)
 - **Pourquoi** : sans cohérence, cache miss garanti même cache plein. Découvert 23/04/2026 session soir : `_reply_cache` rempli par BG loop avec Entry ID Graph, lookup user avec Internet Message-ID → 100% miss malgré 16 pré-réponses fraîches.
 - **Historique** : fix I-DATA-11 appliqué 23/04 (commit `d2d88a1`) sur 5 sites d'écriture — voir `audit/rapports/2026-04-23_audit_coherence_cles_cache.md`
 - **Action si violé** : appliquer le pattern canonique partout où `mail_data['message_id']` est construit : `m.get('internet_message_id') or m.get('message_id') or m.get('id', '')`
+
+### I-DATA-13 : Pas de construction de mail_data sans priorité `internet_message_id`
+Prévention Pattern #14 régression. Toute construction de dict `mail_data` destiné au BG (prefetch, spéculation, preview, post_send) DOIT utiliser l'ordre de priorité canonique pour le champ `message_id` :
+```
+'message_id': m.get('internet_message_id') or m.get('message_id') or m.get('id', '')
+```
+- **Test** : `grep` dans `V2/app_plugin.py` et `V2/*.py` des patterns suspects :
+  - `'message_id': m.get('id')` sans fallback → **VIOLATION**
+  - `'message_id': m.get('message_id') or m.get('id')` sans `internet_message_id` prior → **VIOLATION**
+- **Pourquoi** : quand `msg.get('message_id')` peut être vide mais `msg.get('id')` contient un Entry ID Graph, fallback sur `id` produit une clé incompatible avec les consommateurs dialog (Office.js → Internet Message-ID).
+- **Historique** : 24/04/2026 — audit 3 de connexions + Phase 3 P3.3 ajout smoke test.
 
 ---
 
