@@ -218,6 +218,21 @@ class Database:
             )
         """)
 
+        # -- Cache classement PJ pré-calculé par mail (Phase 2 - 24/04) --
+        # Pattern idempotent aligné sur mail_classement_cache. Applique le
+        # pipeline PJ (cohérence mail→PJ → Tier 1 → Tier 1 bis → règle
+        # domaine, cf. SPEC_CLASSIFICATION_PJ) et stocke la suggestion.
+        # Pour un mail SANS PJ, l'entrée est créée avec source='no_pj'
+        # → skip au prochain warmup (idempotent).
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS mail_pj_classement_cache (
+                message_id TEXT PRIMARY KEY,
+                suggestion_json TEXT,   -- JSON : {folder_path, ...} ou null
+                source TEXT,            -- 'rule' | 'ai' | 'none' | 'no_pj'
+                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+
         # -- Table classement mails dans dossiers Outlook --
         c.execute("""
             CREATE TABLE IF NOT EXISTS folder_classifications (
@@ -1509,6 +1524,57 @@ class Database:
             return False
         c = self._conn().cursor()
         c.execute("SELECT 1 FROM mail_echeance_cache WHERE message_id = ? LIMIT 1",
+                  (message_id,))
+        return c.fetchone() is not None
+
+    # --- CACHE CLASSEMENT PJ PAR MAIL (Phase 2 - 24/04) --------------------
+    # Pattern identique à mail_classement_cache. source='no_pj' si le mail
+    # n'a pas de PJ (évite re-check).
+
+    def save_mail_pj_classement(self, message_id, suggestion, source='rule'):
+        """Sauvegarde la suggestion de classement PJ pour un mail.
+        source ∈ ('rule', 'ai', 'none', 'no_pj')"""
+        import json as _json
+        if not message_id:
+            return False
+        conn = self._conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT OR REPLACE INTO mail_pj_classement_cache
+                (message_id, suggestion_json, source, updated_at)
+            VALUES (?, ?, ?, datetime('now', 'localtime'))
+        """, (
+            message_id,
+            _json.dumps(suggestion, ensure_ascii=False) if suggestion else None,
+            source,
+        ))
+        conn.commit()
+        return True
+
+    def get_mail_pj_classement(self, message_id):
+        """Retourne {suggestion, source, updated_at} ou None si absent."""
+        import json as _json
+        if not message_id:
+            return None
+        c = self._conn().cursor()
+        c.execute("""SELECT suggestion_json, source, updated_at
+                     FROM mail_pj_classement_cache WHERE message_id = ?""",
+                  (message_id,))
+        r = c.fetchone()
+        if not r:
+            return None
+        try:
+            sugg = _json.loads(r[0]) if r[0] else None
+        except Exception:
+            sugg = None
+        return {'suggestion': sugg, 'source': r[1], 'updated_at': r[2]}
+
+    def has_mail_pj_classement(self, message_id):
+        """True si classement PJ déjà calculé (guard idempotent)."""
+        if not message_id:
+            return False
+        c = self._conn().cursor()
+        c.execute("SELECT 1 FROM mail_pj_classement_cache WHERE message_id = ? LIMIT 1",
                   (message_id,))
         return c.fetchone() is not None
 

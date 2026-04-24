@@ -1566,6 +1566,82 @@ def _prewarm_classement_for_mail(mid, mail_data):
         _set_mail_preview(mid, 'classement', 'error', None)
 
 
+def _prewarm_pj_classement_for_mail(mid, mail_data):
+    """Suggestion classement PJ pour un mail. Stocke dans cache DB
+    (mail_pj_classement_cache) + cache RAM.
+
+    Pattern idempotent :
+    1. Check DB → skip si HIT
+    2. Si mail sans PJ → save source='no_pj' (idempotent, plus jamais re-scanné)
+    3. Si mail avec PJ → pipeline règle DB (get_pj_folder_suggestion + keywords)
+    4. Persist résultat en DB + RAM
+
+    Note : pas d'IA au pré-warm (cohérent avec classement mail). IA reste
+    dispo sur /api/pj_classification/post_send/<mid> au moment de l'envoi.
+    """
+    try:
+        # [1] Cache DB : check idempotent
+        try:
+            cached = _db.get_mail_pj_classement(mid)
+            if cached is not None:
+                _set_mail_preview(mid, 'pj_classement', 'done', {
+                    'suggestion': cached.get('suggestion'),
+                    'source': cached.get('source', 'none'),
+                })
+                return
+        except Exception as _e:
+            logger.debug(f"[prewarm-pj] check DB : {_e}")
+
+        # [2] Mail sans PJ → save no_pj (skip au prochain cycle)
+        has_attach = bool(mail_data.get('has_attachments'))
+        attachments = mail_data.get('attachments') or []
+        if not has_attach and not attachments:
+            try:
+                _db.save_mail_pj_classement(mid, None, 'no_pj')
+            except Exception as _e:
+                logger.debug(f"[prewarm-pj] save no_pj : {_e}")
+            _set_mail_preview(mid, 'pj_classement', 'done', {
+                'suggestion': None, 'source': 'no_pj',
+            })
+            return
+
+        # [3] Pipeline règle DB (Tier 1 contact + keywords + domaine)
+        contact_email = (mail_data.get('from_email', '') or '').lower()
+        subject = mail_data.get('subject', '')
+        domain = contact_email.split('@')[-1] if '@' in contact_email else ''
+        try:
+            subject_kw = _extract_subject_keywords(subject)
+        except Exception:
+            subject_kw = subject
+        try:
+            suggestion = _db.get_pj_folder_suggestion(
+                contact_email, domain, subject_keywords=subject_kw)
+        except Exception:
+            suggestion = None
+        # Fallback : matching par keywords (si pas de règle Tier 1)
+        if not suggestion:
+            try:
+                suggestion = _db.get_pj_folder_by_keywords(contact_email, subject_kw)
+            except Exception:
+                suggestion = None
+
+        # [4] Persister
+        source = 'rule' if suggestion else 'none'
+        try:
+            _db.save_mail_pj_classement(mid, suggestion, source)
+        except Exception as _e:
+            logger.debug(f"[prewarm-pj] save DB : {_e}")
+        _set_mail_preview(mid, 'pj_classement', 'done', {
+            'suggestion': suggestion,
+            'source': source,
+        })
+        if suggestion:
+            logger.info(f"[prewarm-pj] règle DB matche pour {mid[:30]}")
+    except Exception as e:
+        logger.debug(f"[prewarm-pj] {e}")
+        _set_mail_preview(mid, 'pj_classement', 'error', None)
+
+
 def _prewarm_mail_preview(mail_data):
     """Lance la pré-chauffe échéance + classement pour UN mail.
     Skip si déjà en cache récent (<TTL) avec status done/running.
@@ -1581,11 +1657,14 @@ def _prewarm_mail_preview(mail_data):
         entry = _mail_preview_cache.get(mid, {})
         ech = entry.get('echeance', {})
         cls = entry.get('classement', {})
+        pj = entry.get('pj_classement', {})
         skip_ech = (ech.get('status') in ('running', 'done')
                     and (now - ech.get('ts', 0) < _MAIL_PREVIEW_TTL))
         skip_cls = (cls.get('status') in ('running', 'done')
                     and (now - cls.get('ts', 0) < _MAIL_PREVIEW_TTL))
-        if skip_ech and skip_cls:
+        skip_pj = (pj.get('status') in ('running', 'done')
+                   and (now - pj.get('ts', 0) < _MAIL_PREVIEW_TTL))
+        if skip_ech and skip_cls and skip_pj:
             return
         # Trim si dépasse max : retirer les 20 plus anciennes
         if len(_mail_preview_cache) >= _MAIL_PREVIEW_MAX:
@@ -1593,6 +1672,7 @@ def _prewarm_mail_preview(mail_data):
                 return max(
                     v.get('echeance', {}).get('ts', 0),
                     v.get('classement', {}).get('ts', 0),
+                    v.get('pj_classement', {}).get('ts', 0),
                 )
             sorted_keys = sorted(_mail_preview_cache.keys(),
                                  key=lambda k: _max_ts(_mail_preview_cache[k]))
@@ -1607,6 +1687,10 @@ def _prewarm_mail_preview(mail_data):
             entry.setdefault('classement', {})
             entry['classement']['status'] = 'running'
             entry['classement']['ts'] = now
+        if not skip_pj:
+            entry.setdefault('pj_classement', {})
+            entry['pj_classement']['status'] = 'running'
+            entry['pj_classement']['ts'] = now
         _mail_preview_cache[mid] = entry
     # Threads daemon parallèles
     if not skip_ech:
@@ -1617,6 +1701,10 @@ def _prewarm_mail_preview(mail_data):
         threading.Thread(target=_prewarm_classement_for_mail,
                          args=(mid, mail_data), daemon=True,
                          name='prewarm-cls').start()
+    if not skip_pj:
+        threading.Thread(target=_prewarm_pj_classement_for_mail,
+                         args=(mid, mail_data), daemon=True,
+                         name='prewarm-pj').start()
 
 
 def _prewarm_mail_previews_batch(mails, max_scans=15):
@@ -3904,10 +3992,14 @@ def api_dialog_init():
                         'status': entry.get('classement', {}).get('status', 'miss'),
                         'data': entry.get('classement', {}).get('data'),
                     },
+                    'pj_classement': {
+                        'status': entry.get('pj_classement', {}).get('status', 'miss'),
+                        'data': entry.get('pj_classement', {}).get('data'),
+                    },
                     'cache_hit': True,
                 }
             # [2] DB cache (persiste au restart V2)
-            ech_entry, cls_entry = None, None
+            ech_entry, cls_entry, pj_entry = None, None, None
             try:
                 db_ech = _db.get_mail_echeance(message_id)
                 if db_ech is not None:
@@ -3927,9 +4019,20 @@ def api_dialog_init():
                     cls_entry = {'status': 'done', 'data': cls_data}
             except Exception:
                 pass
-            if ech_entry or cls_entry:
+            try:
+                db_pj = _db.get_mail_pj_classement(message_id)
+                if db_pj is not None:
+                    pj_data = {
+                        'suggestion': db_pj.get('suggestion'),
+                        'source': db_pj.get('source', 'none'),
+                    }
+                    _set_mail_preview(message_id, 'pj_classement', 'done', pj_data)
+                    pj_entry = {'status': 'done', 'data': pj_data}
+            except Exception:
+                pass
+            if ech_entry or cls_entry or pj_entry:
                 # Partiel : déclencher scan BG pour compléter la partie manquante
-                if not (ech_entry and cls_entry):
+                if not (ech_entry and cls_entry and pj_entry):
                     try:
                         cached_email = _db.get_cached_email(message_id)
                         if cached_email:
@@ -3940,6 +4043,8 @@ def api_dialog_init():
                                 'subject': cached_email.get('subject', ''),
                                 'body': cached_email.get('body') or cached_email.get('html_body', ''),
                                 'body_preview': cached_email.get('body_preview', ''),
+                                'has_attachments': cached_email.get('has_attachments', False),
+                                'attachments': cached_email.get('attachments') or [],
                             }
                             threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
                                              daemon=True, name='preview-partial').start()
@@ -3948,6 +4053,7 @@ def api_dialog_init():
                 return {
                     'echeance': ech_entry or {'status': 'miss', 'data': None},
                     'classement': cls_entry or {'status': 'miss', 'data': None},
+                    'pj_classement': pj_entry or {'status': 'miss', 'data': None},
                     'cache_hit': True,
                 }
             # [3] Total miss : déclencher scan BG + retourner miss
@@ -3969,6 +4075,7 @@ def api_dialog_init():
             return {
                 'echeance': {'status': 'miss', 'data': None},
                 'classement': {'status': 'miss', 'data': None},
+                'pj_classement': {'status': 'miss', 'data': None},
                 'cache_hit': False,
             }
         except Exception as e:
@@ -5192,6 +5299,7 @@ def api_mail_preview(message_id):
         # Si DB miss aussi → déclenche scan BG + retourne "miss".
         ech_entry = None
         cls_entry = None
+        pj_entry = None
         try:
             db_ech = _db.get_mail_echeance(message_id)
             if db_ech is not None:
@@ -5211,11 +5319,22 @@ def api_mail_preview(message_id):
                 cls_entry = {"status": "done", "data": cls_data}
         except Exception as e:
             logger.debug(f"[mail_preview] check DB cls : {e}")
+        try:
+            db_pj = _db.get_mail_pj_classement(message_id)
+            if db_pj is not None:
+                pj_data = {
+                    'suggestion': db_pj.get('suggestion'),
+                    'source': db_pj.get('source', 'none'),
+                }
+                _set_mail_preview(message_id, 'pj_classement', 'done', pj_data)
+                pj_entry = {"status": "done", "data": pj_data}
+        except Exception as e:
+            logger.debug(f"[mail_preview] check DB pj : {e}")
 
         # Si au moins un bloc HIT DB, retourner ce qu'on a + miss pour l'autre
-        if ech_entry or cls_entry:
+        if ech_entry or cls_entry or pj_entry:
             # Déclencher scan BG pour le bloc manquant
-            if not ech_entry or not cls_entry:
+            if not (ech_entry and cls_entry and pj_entry):
                 try:
                     cached = _db.get_cached_email(message_id)
                     if cached:
@@ -5226,6 +5345,8 @@ def api_mail_preview(message_id):
                             'subject': cached.get('subject', ''),
                             'body': cached.get('body') or cached.get('html_body', ''),
                             'body_preview': cached.get('body_preview', ''),
+                            'has_attachments': cached.get('has_attachments', False),
+                            'attachments': cached.get('attachments') or [],
                         }
                         threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
                                          daemon=True, name='preview-ondemand').start()
@@ -5234,6 +5355,7 @@ def api_mail_preview(message_id):
             return jsonify({
                 "echeance": ech_entry or {"status": "miss", "data": None},
                 "classement": cls_entry or {"status": "miss", "data": None},
+                "pj_classement": pj_entry or {"status": "miss", "data": None},
                 "cache_hit": True,
             })
 
@@ -5248,6 +5370,8 @@ def api_mail_preview(message_id):
                     'subject': cached.get('subject', ''),
                     'body': cached.get('body') or cached.get('html_body', ''),
                     'body_preview': cached.get('body_preview', ''),
+                    'has_attachments': cached.get('has_attachments', False),
+                    'attachments': cached.get('attachments') or [],
                 }
                 threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
                                  daemon=True, name='preview-ondemand').start()
@@ -5256,6 +5380,7 @@ def api_mail_preview(message_id):
         return jsonify({
             "echeance": {"status": "miss", "data": None},
             "classement": {"status": "miss", "data": None},
+            "pj_classement": {"status": "miss", "data": None},
             "cache_hit": False,
         })
 
@@ -5268,6 +5393,10 @@ def api_mail_preview(message_id):
         "classement": {
             "status": entry.get('classement', {}).get('status', 'miss'),
             "data": entry.get('classement', {}).get('data'),
+        },
+        "pj_classement": {
+            "status": entry.get('pj_classement', {}).get('status', 'miss'),
+            "data": entry.get('pj_classement', {}).get('data'),
         },
         "cache_hit": True,
     })

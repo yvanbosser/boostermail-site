@@ -1019,11 +1019,35 @@ function _applyMailPreview(preview) {
         }
     }
 
+    // Classement PJ (Phase 2 - 24/04)
+    var pjEl = document.getElementById('infoClassementPJContent');
+    if (pjEl) {
+        if (!preview || !preview.pj_classement) {
+            pjEl.textContent = 'Néant';
+        } else {
+            var pjStatus = preview.pj_classement.status;
+            var pjData = preview.pj_classement.data;
+            if (pjStatus === 'running' || pjStatus === 'miss') {
+                pjEl.textContent = 'Analyse en cours…';
+            } else if (pjData && pjData.source === 'no_pj') {
+                pjEl.textContent = 'Pas de PJ';
+            } else if (pjData && pjData.suggestion) {
+                var pjSugg = pjData.suggestion;
+                var pjPath = pjSugg.folder_path || pjSugg.dest_folder || pjSugg.folder_name || 'Dossier suggéré';
+                pjEl.textContent = pjPath;
+            } else {
+                pjEl.textContent = 'Néant';
+            }
+        }
+    }
+
     // Auto-poll si status running (pour éviter "Analyse en cours" figé)
     var needsPoll = preview && ((preview.echeance && preview.echeance.status === 'running')
                               || (preview.classement && preview.classement.status === 'running')
+                              || (preview.pj_classement && preview.pj_classement.status === 'running')
                               || (preview.echeance && preview.echeance.status === 'miss')
-                              || (preview.classement && preview.classement.status === 'miss'));
+                              || (preview.classement && preview.classement.status === 'miss')
+                              || (preview.pj_classement && preview.pj_classement.status === 'miss'));
     if (needsPoll && !window.__mailPreviewPolling && _messageId) {
         window.__mailPreviewPolling = true;
         var pollCount = 0;
@@ -1040,7 +1064,8 @@ function _applyMailPreview(preview) {
                     // Re-appliquer
                     _applyMailPreview(newPreview);
                     var stillRunning = (newPreview.echeance && newPreview.echeance.status === 'running')
-                                     || (newPreview.classement && newPreview.classement.status === 'running');
+                                     || (newPreview.classement && newPreview.classement.status === 'running')
+                                     || (newPreview.pj_classement && newPreview.pj_classement.status === 'running');
                     if (stillRunning) {
                         setTimeout(poll, 2000);
                     } else {
