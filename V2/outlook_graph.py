@@ -341,10 +341,15 @@ class GraphClient(EmailProvider):
         Utile après un move (le Graph id change, l'internetMessageId non).
         """
         try:
-            # Le filtre internetMessageId nécessite des guillemets encodés
+            # Fix 24/04 (Bug A) : URL-encoder la valeur du filter.
+            # Les messageIds Gmail contiennent souvent `+` et `=`. Sans encodage,
+            # requests passe ces chars littéraux à Graph, qui les parse comme
+            # espaces en OData → 404 Email introuvable. Avec quote(safe=''),
+            # `+` devient `%2B` et `=` devient `%3D` que Graph décode correctement.
             filter_val = internet_message_id.replace("'", "''")
+            filter_encoded = quote(filter_val, safe='')
             data = self._get(
-                f"/me/messages?$filter=internetMessageId eq '{filter_val}'"
+                f"/me/messages?$filter=internetMessageId eq '{filter_encoded}'"
                 f"&$select={_FULL_SELECT}"
                 f"&$expand=attachments"
                 f"&$top=1"
@@ -387,8 +392,10 @@ class GraphClient(EmailProvider):
         Utilisé quand Office.js n'a pas fourni le conversationId (Companion COM, extension).
         """
         try:
+            # Fix 24/04 (Bug A) : URL-encoder pour messageIds avec + ou =
             safe_id = internet_message_id.replace("'", "''")
-            url = f"/me/messages?$filter=internetMessageId eq '{safe_id}'&$select=conversationId&$top=1"
+            safe_encoded = quote(safe_id, safe='')
+            url = f"/me/messages?$filter=internetMessageId eq '{safe_encoded}'&$select=conversationId&$top=1"
             data = self._get(url)
             items = data.get('value', [])
             if items:
