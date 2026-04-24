@@ -1522,6 +1522,7 @@ def _load_reply_cache():
         now = time.time()
         loaded = {'user_edit': 0, 'bg_speculation': 0, 'preemptive': 0}
         legacy_fake_drafts_purged = 0
+        legacy_entry_id_keys_purged = 0
         with _reply_lock:
             for mid, entry in entries.items():
                 ts = entry.get('timestamp', 0)
@@ -1535,6 +1536,18 @@ def _load_reply_cache():
                 # Auto-clean faux brouillons legacy (bug pré-refactor 23/04)
                 if src == 'user_edit' and 'user_modified' not in entry:
                     legacy_fake_drafts_purged += 1
+                    continue
+                # P1.1 (24/04) — Auto-clean clés legacy Entry ID Graph.
+                # Avant le fix I-DATA-11 (d2d88a1 + a2e8275), les pré-
+                # réponses BG étaient écrites avec la clé `msg.get('id')`
+                # (Entry ID Graph AQMkAD...) alors que Office.js envoie
+                # internetMessageId au lookup. Ces entrées legacy ne
+                # matcheront JAMAIS au clic user → RAM gâchée. On les
+                # purge au load pour accélérer la convergence (vs safety
+                # net 4 semaines).
+                # Clé canonique = `<...@domain>` (RFC 2822).
+                if not (mid.startswith('<') and '@' in mid and mid.endswith('>')):
+                    legacy_entry_id_keys_purged += 1
                     continue
                 # Forcer status='done' (les 'running'/'cancelled' n'auraient
                 # pas dû être persistés, mais protection contre fichier corrompu)
@@ -1552,6 +1565,14 @@ def _load_reply_cache():
                 f"brouillon(s) legacy purgé(s) (source='user_edit' sans flag "
                 f"user_modified — zombies du bug pré-refactor 23/04)"
             )
+        if legacy_entry_id_keys_purged:
+            logger.info(
+                f"[reply_cache AUTO-CLEAN P1.1] {legacy_entry_id_keys_purged} "
+                f"clé(s) legacy Entry ID Graph purgée(s) (format non canonique "
+                f"AQMkAD... — jamais matchée par Office.js qui envoie "
+                f"internetMessageId, cf. I-DATA-11)"
+            )
+        if legacy_fake_drafts_purged or legacy_entry_id_keys_purged:
             # Re-persiste pour que les zombies ne reviennent pas au prochain load
             _persist_reply_cache()
     except Exception as e:
