@@ -272,6 +272,30 @@ def _auto_sideload_outlook_addin():
         logger.warning(f"Auto-sideload addin : erreur exec : {e}")
 
 
+def _popup_hide_all():
+    """Décision user 24/04 : à la fermeture d'Outlook, demander à popup_pyqt
+    de cacher overlay + dialog + child windows.
+
+    Le process popup_pyqt reste vivant (setQuitOnLastWindowClosed=False) pour
+    servir un /show_popup instantané au prochain démarrage d'Outlook. Les BG
+    loops côté V2 + Companion continuent de tourner (apprentissage, caches).
+
+    No-op si popup_pyqt pas alive (ex: V2 stoppé depuis > 30 min d'idle).
+    """
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            'http://127.0.0.1:5052/hide_all',
+            data=b'{}',
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        urllib.request.urlopen(req, timeout=1.5)
+        logger.info("Popup IPC /hide_all envoyé (Outlook fermé, overlay caché)")
+    except Exception as e:
+        logger.debug(f"Popup /hide_all ignoré (popup probablement pas alive) : {e}")
+
+
 def _popup_is_alive():
     """True si popup_pyqt répond à un ping HTTP sur 5052.
 
@@ -711,6 +735,11 @@ def run_supervisor(first_launch=True):
         if _was_running and not running:
             logger.info("Outlook fermé — décompte 30 min avant arrêt backends")
             _closed_since = time.time()
+            # Décision user 24/04 : cacher immédiatement overlay + dialog
+            # + child windows. Le process popup_pyqt reste vivant pour
+            # ré-affichage instantané au prochain démarrage d'Outlook.
+            # Les BG loops V2 + Companion continuent de tourner.
+            _popup_hide_all()
 
         # Transition : fermé → ouvert (y compris si backends stopped)
         if running and not _was_running:

@@ -1027,6 +1027,34 @@ class EasyMailPopup(QMainWindow):
         self._force_overlay_geometry()
         self._stack.setCurrentIndex(1)
 
+    def hide_all_windows(self):
+        """Décision user 24/04 : à la fermeture d'Outlook, BM doit :
+        - faire disparaître l'overlay + dialog 80% + child windows (Profil/Contacts/...)
+        - GARDER le process popup_pyqt vivant pour les tâches d'arrière-plan
+          (BG loops V2, caches, apprentissage) et un futur /show_popup rapide
+          au prochain démarrage Outlook.
+
+        Appelé via IPC POST /hide_all émis par le superviseur à la transition
+        Outlook ouvert → fermé.
+        """
+        logger.info('[popup] Hide all windows (IPC /hide_all — Outlook fermé)')
+        try:
+            # Fermer toutes les fenêtres top-level autres que la popup principale
+            # (child windows : dialog 80%, Profil, Contacts, Échéances)
+            for w in QApplication.topLevelWidgets():
+                if w is self:
+                    continue
+                try:
+                    if w.isVisible():
+                        w.close()
+                except Exception:
+                    pass
+            # Cacher la popup principale (overlay/marketing)
+            if self.isVisible():
+                self.hide()
+        except Exception as e:
+            logger.warning(f"hide_all_windows erreur: {e}")
+
     def reshow_launch_popup(self):
         """Audit 20/04 : re-affiche la popup de lancement (centrée) quand
         Outlook ré-ouvre. Évite de respawner Python+Qt → gain ~5 s."""
@@ -1274,6 +1302,7 @@ class _IPCBridge(QObject):
     """Bridge thread-safe HTTP→Qt. Émet un signal qui sera reçu sur le Qt thread."""
     open_dialog_requested = pyqtSignal(dict)
     show_popup_requested = pyqtSignal()   # Réaffiche la popup de lancement
+    hide_all_requested = pyqtSignal()     # Cache popup + dialog + child windows (Outlook fermé)
 
 
 _ipc_bridge = None  # Instance globale (setée au démarrage Qt)
@@ -1305,6 +1334,15 @@ class _IPCHandler(BaseHTTPRequestHandler):
             # Signale au Qt thread de réafficher la popup de lancement
             if _ipc_bridge:
                 _ipc_bridge.show_popup_requested.emit()
+                self._json_response({"ok": True})
+            else:
+                self._json_response({"error": "bridge not ready"}, 503)
+            return
+        if self.path == '/hide_all':
+            # Signale au Qt thread de cacher popup + dialog + child windows
+            # (appelé par le superviseur à la fermeture d'Outlook 24/04)
+            if _ipc_bridge:
+                _ipc_bridge.hide_all_requested.emit()
                 self._json_response({"ok": True})
             else:
                 self._json_response({"error": "bridge not ready"}, 503)
@@ -1491,6 +1529,7 @@ def main():
         _ipc_bridge = _IPCBridge()
         _ipc_bridge.open_dialog_requested.connect(popup.open_dialog_via_ipc)
         _ipc_bridge.show_popup_requested.connect(popup.reshow_launch_popup)
+        _ipc_bridge.hide_all_requested.connect(popup.hide_all_windows)
         threading.Thread(target=_start_ipc_server, daemon=True, name='ipc-server').start()
         logger.info("[hot-direct] IPC serveur démarré sur 5052 en mode --direct-dialog → clics suivants via reload URL")
 
@@ -1554,6 +1593,7 @@ def main():
         _ipc_bridge = _IPCBridge()
         _ipc_bridge.open_dialog_requested.connect(popup.open_dialog_via_ipc)
         _ipc_bridge.show_popup_requested.connect(popup.reshow_launch_popup)
+        _ipc_bridge.hide_all_requested.connect(popup.hide_all_windows)
         threading.Thread(target=_start_ipc_server, daemon=True, name='ipc-server').start()
 
         if show_popup:
