@@ -1419,10 +1419,16 @@ function _tryInstantReply() {
             return;
         }
         console.log('[dialog] instant_reply HIT', res.source, res.badge || '');
-        // Fix XSS audit 21/04 : escape. res.text = cache draft/preemptive/template
-        // qui peut contenir du HTML (draft user, Claude, template). Safe par design
-        // probablement, mais on applique la défense en profondeur.
-        editor.innerHTML = _escapeHtml(res.text || '').replace(/\n/g, '<br>');
+        // P0.5 (24/04) : si le serveur marque res.html === true, le texte est
+        // déjà en HTML propre (normalise côté backend _normalize_reply_to_html).
+        // Affichage direct via innerHTML, aucun travail de mise en forme ici.
+        // Sinon fallback legacy : escape + \n→<br> (cache pré-P0.5 ou draft
+        // user plain text).
+        if (res.html === true) {
+            editor.innerHTML = res.text || '';
+        } else {
+            editor.innerHTML = _escapeHtml(res.text || '').replace(/\n/g, '<br>');
+        }
         _showInstantReplyBadge(res);
         if (res.source === 'template') {
             _lastTemplateMatch = {

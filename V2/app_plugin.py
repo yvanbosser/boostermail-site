@@ -1243,6 +1243,41 @@ def _is_user_modified(entry):
     if 'user_modified' in entry:
         return bool(entry['user_modified'])
     return entry.get('source') == 'user_edit'
+
+
+def _normalize_reply_to_html(text):
+    """P0.5 (24/04) : garantit que le texte stocké en cache est en HTML.
+
+    Objectif : zéro travail de mise en forme à l'affichage (dialog
+    affiche `editor.innerHTML = res.text` directement). Avant : mix
+    de HTML (<p>...</p>) + plain text (\\n) selon Claude → rendu
+    incohérent côté dialog (balises échappées visibles).
+
+    Détection HTML : cherche des balises courantes. Si présentes,
+    garde tel quel (on suppose que c'est déjà du HTML contrôlé
+    — output Claude, template, etc.).
+
+    Sinon plain text : escape les caractères spéciaux HTML puis
+    wrap en <p>...</p>, convertit \\n\\n en séparateurs de paragraphe
+    et \\n en <br>.
+    """
+    if not text:
+        return text
+    import html as _html_mod
+    # Détection HTML — balises courantes (format canonique V2)
+    if re.search(r'<(p|br|div|span|h[1-6]|strong|em|ul|ol|li|a)\b',
+                 text, re.IGNORECASE):
+        return text
+    # Plain text → HTML (escape puis wrap)
+    escaped = _html_mod.escape(text, quote=False)
+    escaped = escaped.replace('\r\n', '\n').replace('\r', '\n').strip()
+    if not escaped:
+        return ''
+    paragraphs = [p.strip() for p in escaped.split('\n\n') if p.strip()]
+    if not paragraphs:
+        return f'<p>{escaped.replace(chr(10), "<br>")}</p>'
+    html_parts = [f'<p>{p.replace(chr(10), "<br>")}</p>' for p in paragraphs]
+    return '\n'.join(html_parts)
 _reply_lock = threading.Lock()
 _REPLY_CACHE_SAFETY_NET = 28 * 24 * 3600  # 4 semaines — safety net anti-fuite
 _DRAFTS_CACHE_PATH = os.path.join(EASYMAIL_DIR, 'drafts_v2.json')
@@ -2895,12 +2930,18 @@ def _start_speculative(mail_data):
             if template:
                 user_name = _db.get_setting('user_name', '')
                 text = assemble_template(template, contact_profile, user_name)
+                # Chunks pour streaming progressif : plain text (évite casser
+                # les balises HTML quand le dialog reçoit un chunk au milieu
+                # d'un <p> ou <br>)
                 words = text.split(' ')
                 chunks = [' '.join(words[i:i+3]) + ' ' for i in range(0, len(words), 3)]
+                # P0.5 (24/04) : stocker `text` en HTML pour affichage direct
+                # via instant_reply (zéro travail côté dialog).
+                text_html = _normalize_reply_to_html(text)
                 with _reply_lock:
                     _reply_cache[message_id] = {
                         'status': 'done',
-                        'text': text,
+                        'text': text_html,
                         'chunks': chunks,
                         'timestamp': time.time(),
                         'contact': from_email,
@@ -3050,11 +3091,14 @@ def _start_speculative(mail_data):
                 logger.warning(f"[reply_cache] safety trim : 50 plus anciennes purgées "
                                f"(cache exceptionnellement > 500)")
 
+            # P0.5 (24/04) : normaliser le texte en HTML avant stockage.
+            # `chunks` restent basés sur full_text (plain) pour streaming sûr.
+            text_html = _normalize_reply_to_html(full_text)
             _reply_cache[message_id] = {
                 'status': 'done',
                 'source': 'bg_speculation',      # pour badge UI "pré-généré"
                 'user_modified': False,          # refactor 23/04 : source de vérité
-                'text': full_text,
+                'text': text_html,
                 'chunks': chunks,
                 'timestamp': time.time(),
                 'contact': from_email,
@@ -5570,9 +5614,11 @@ def api_instant_reply():
         if _is_user_modified(entry) and entry.get('status') == 'done':
             _reply_metric_inc('hits')
             logger.info(f"[instant_reply] HIT source=draft msg={message_id[:30]}")
+            # P0.5 : garantir HTML propre pour affichage direct côté dialog
             return jsonify({
                 "source": "draft",
-                "text": entry.get('text', ''),
+                "text": _normalize_reply_to_html(entry.get('text', '')),
+                "html": True,
                 "badge": "Brouillon sauvegardé",
                 "timestamp": entry.get('timestamp', 0),
             })
@@ -5639,19 +5685,27 @@ def api_instant_reply():
             _last_line_lower = (_last_lines[-1] if _last_lines else '').lower()
             has_closing = any(_last_line_lower.startswith(p) for p in _closing_patterns)
 
-            parts = []
+            # P0.5 (24/04) : assembler la réponse en HTML prêt à afficher.
+            # Le body du cache est HTML depuis P0.5 — on le garde tel quel.
+            # Fallback : si cache legacy plain text, normalise.
+            import html as _html_mod
+            body_html = body if re.search(r'<(p|br|div)', body, re.IGNORECASE) \
+                             else _normalize_reply_to_html(body)
+
+            html_parts = []
             if not has_greeting:
-                parts.extend([greeting, ''])
-            parts.append(body)
+                html_parts.append(f'<p>{_html_mod.escape(greeting, quote=False)}</p>')
+            html_parts.append(body_html)
             if not has_closing:
-                parts.extend(['', closing])
+                html_parts.append(f'<p>{_html_mod.escape(closing, quote=False)}</p>')
                 if user_name:
-                    parts.append(user_name)
+                    html_parts.append(f'<p>{_html_mod.escape(user_name, quote=False)}</p>')
 
             logger.info(f"[instant_reply] HIT source=preemptive msg={message_id[:30]}")
             return jsonify({
                 "source": "preemptive",
-                "text": '\n'.join(parts),
+                "text": '\n'.join(html_parts),
+                "html": True,
                 "badge": "Pré-générée",
                 "timestamp": entry.get('timestamp', 0),
             })
@@ -5687,9 +5741,11 @@ def api_instant_reply():
             text = assemble_learned_template(m['learned'], contact_profile, user_name)
         logger.info(f"[instant_reply] HIT source=template conf={m.get('confidence'):.2f} "
                     f"name={m.get('template_name')} msg={message_id[:30]}")
+        # P0.5 : normaliser en HTML pour affichage direct côté dialog
         return jsonify({
             "source": "template",
-            "text": text,
+            "text": _normalize_reply_to_html(text),
+            "html": True,
             "badge": "Réponse apprise" if m['source'] == 'learned' else "Réponse rapide",
             "confidence": m['confidence'],
             "template_name": m['template_name'],
