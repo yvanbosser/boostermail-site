@@ -5551,7 +5551,11 @@ def api_instant_reply():
         # (le bg_speculation + le generateReply frontend).
         # Max 1,5 s d'attente (15 × 100 ms) — au-delà on fallback sur
         # template/none pour ne pas faire attendre l'utilisateur.
-        if (entry.get('source') == 'bg_speculation'
+        # P0.3 fix 24/04 : élargir aux 'template' aussi. Si le BG loop a
+        # stocké un template préemptif (source='template'), on doit le
+        # renvoyer ici sans recompute step 3. Avant : step 2 filtrait strict
+        # 'bg_speculation' → step 3 recomputait un template identique.
+        if (entry.get('source') in ('bg_speculation', 'template')
                 and entry.get('status') == 'running'):
             for _ in range(15):
                 time.sleep(0.1)
@@ -5559,7 +5563,7 @@ def api_instant_reply():
                     entry = _reply_cache.get(message_id, {})
                 if entry.get('status') in ('done', 'error', 'cancelled'):
                     break
-        if (entry.get('source') == 'bg_speculation'
+        if (entry.get('source') in ('bg_speculation', 'template')
                 and entry.get('status') == 'done'
                 and entry.get('text')):
             _reply_metric_inc('hits')

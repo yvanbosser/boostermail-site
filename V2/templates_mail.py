@@ -274,7 +274,12 @@ def detect_template(email_body, subject, brief, is_first_mail, reply_mode,
         return None, None
 
     # Garde 1 : mail trop long
-    if _word_count(body_clean) >= 15:
+    # Fix 24/04 (P0.3) : le seuil 15 mots était trop strict — la spec proto
+    # dit < 200 caractères (≈ 30 mots moyens). Symptôme observé : 0 HIT
+    # template dans drafts_v2.json sur 26 pré-réponses, alors que plusieurs
+    # mails courts (accusés réception, confirmations, etc.) auraient dû
+    # matcher. Cause racine de l'audit 24/04 §3 "0 template HIT".
+    if _word_count(body_clean) >= 30:
         return None, None
 
     # Garde 2 : question
