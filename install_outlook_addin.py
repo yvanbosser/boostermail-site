@@ -163,6 +163,25 @@ def install_cert_trusted_root(cert_path: Path) -> bool:
     # cert servi -> seul le cert matching est utilisé.
     _warn_obsolete_certs(cert_path)
 
+    # Fix 24/04 : calculer le thumbprint du cert AVANT tentative d'install
+    # pour pouvoir vérifier ENSUITE que l'ajout a vraiment eu lieu (Windows
+    # silent-fail sur Trusted Root en mode non-interactif : certutil dit
+    # "ok" mais le cert n'apparaît pas dans le store).
+    current_thumb = ''
+    try:
+        ps_get_thumb = (
+            f"$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2('{cert_path}'); "
+            "$cert.Thumbprint"
+        )
+        r = subprocess.run(
+            ['powershell', '-NoProfile', '-Command', ps_get_thumb],
+            capture_output=True, text=True, timeout=5,
+            creationflags=0x08000000,
+        )
+        current_thumb = (r.stdout or '').strip().upper()
+    except Exception:
+        pass
+
     try:
         # certutil -user -addstore : store user, pas de UAC
         # Root = "Trusted Root Certification Authorities"
@@ -171,11 +190,59 @@ def install_cert_trusted_root(cert_path: Path) -> bool:
             capture_output=True, text=True, timeout=15,
             creationflags=0x08000000,  # CREATE_NO_WINDOW : pas de flash console
         )
-        if result.returncode == 0:
-            log(f"Certificat installé dans Cert:\\CurrentUser\\Root")
+        certutil_ok = (result.returncode == 0)
+        if not certutil_ok:
+            log(f"certutil a échoué (code {result.returncode}) : {result.stderr.strip()}",
+                'ERROR')
+            return False
+
+        # Fix 24/04 : VÉRIFIER POST-INSTALL que le cert est bien présent.
+        # Windows peut silent-fail l'ajout en Trusted Root sans popup user
+        # (protection anti-malware) → certutil retourne 0 mais store vide.
+        # Symptôme observé : ERR_CERT_AUTHORITY_INVALID dans WebView2 au
+        # clic BM, alors que les logs disent "cert installé".
+        cert_present = False
+        if current_thumb:
+            try:
+                ps_verify = (
+                    f"if (Get-ChildItem Cert:\\CurrentUser\\Root -ErrorAction SilentlyContinue | "
+                    f"Where-Object {{ $_.Thumbprint -eq '{current_thumb}' }}) "
+                    f"{{ 'PRESENT' }} else {{ 'ABSENT' }}"
+                )
+                vr = subprocess.run(
+                    ['powershell', '-NoProfile', '-Command', ps_verify],
+                    capture_output=True, text=True, timeout=5,
+                    creationflags=0x08000000,
+                )
+                cert_present = 'PRESENT' in (vr.stdout or '')
+            except Exception:
+                pass
+
+        if cert_present:
+            log(f"Certificat installé dans Cert:\\CurrentUser\\Root (thumb={current_thumb[:16]}...)")
             return True
-        log(f"certutil a échoué (code {result.returncode}) : {result.stderr.strip()}",
-            'ERROR')
+
+        # Silent-fail détecté : certutil OK mais cert absent du store
+        log('', 'WARN')
+        log('=' * 64, 'WARN')
+        log('!! CERT V2 PAS INSTALLE DANS TRUSTED ROOT (silent-fail Windows)', 'WARN')
+        log('=' * 64, 'WARN')
+        log(f'certutil a retourné 0 mais le cert {current_thumb[:16]}... est absent du store.', 'WARN')
+        log('Cause : Windows exige une confirmation user interactive pour ajouter un cert', 'WARN')
+        log('dans Trusted Root (protection anti-malware). Le mode non-interactif du', 'WARN')
+        log('superviseur ne peut pas afficher ce popup.', 'WARN')
+        log('', 'WARN')
+        log('SYMPTOME : au clic BM, Chromium/WebView2 affiche', 'WARN')
+        log('   ERR_CERT_AUTHORITY_INVALID dans le dialog BoosterMail', 'WARN')
+        log('', 'WARN')
+        log('ACTION REQUISE - commande à exécuter dans PowerShell (popup visible) :', 'WARN')
+        log('', 'WARN')
+        log(f'   certutil -user -addstore Root "{cert_path}"', 'WARN')
+        log('   --> cliquer "Oui" sur le popup Windows qui apparait', 'WARN')
+        log('', 'WARN')
+        log('Puis redémarrer Outlook (popup_pyqt respawne avec cache WebView2 frais).', 'WARN')
+        log('=' * 64, 'WARN')
+        log('', 'WARN')
         return False
     except subprocess.TimeoutExpired:
         log("certutil timeout 15s", 'ERROR')
