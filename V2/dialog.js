@@ -901,6 +901,13 @@ function _loadDialogBundle() {
             if (profile) {
                 _applyContactProfile(profile);
             }
+            // --- Preview (échéance + classement) — Phase 2.A (24/04) ---
+            var preview = bundle.preview;
+            if (preview) {
+                _applyMailPreview(preview);
+            } else {
+                _applyMailPreview(null);  // affiche "—" / "Néant"
+            }
         })
         .catch(function(e) {
             console.warn('[dialog] dialog_init bundle échec, fallback:', e);
@@ -957,6 +964,92 @@ function _renderMailBody(data) {
         if (data.cc || _ccEmail) metaParts2.push('Cc : ' + (data.cc || _ccEmail));
         if (data.date) metaParts2.push(new Date(data.date).toLocaleString('fr-FR'));
         document.getElementById('mailMeta').textContent = metaParts2.join(' | ') || '—';
+    }
+}
+
+/** Phase 2.A (24/04) — Applique le preview mail pré-chauffé (échéance + classement)
+ * aux cards `infoEcheance` et `infoClassement` du dialog 80%.
+ * Si preview null ou données vides → "Néant" (demande user : ne pas laisser vide).
+ * Si status === 'running' → "Analyse en cours..." + auto-poll 2s.
+ */
+function _applyMailPreview(preview) {
+    var echEl = document.getElementById('infoEcheanceContent');
+    var clsEl = document.getElementById('infoClassementContent');
+
+    // Échéance
+    if (echEl) {
+        if (!preview || !preview.echeance) {
+            echEl.textContent = 'Néant';
+        } else {
+            var echStatus = preview.echeance.status;
+            var echData = preview.echeance.data;
+            if (echStatus === 'running' || echStatus === 'miss') {
+                echEl.textContent = 'Analyse en cours…';
+            } else if (echStatus === 'error') {
+                echEl.textContent = 'Néant';  // fallback en cas d'erreur scan
+            } else if (Array.isArray(echData) && echData.length > 0) {
+                // Afficher la première échéance (plus récente / plus importante)
+                var e = echData[0];
+                var txt = '';
+                if (e.description) txt += e.description;
+                if (e.date_echeance) txt += (txt ? ' — ' : '') + e.date_echeance;
+                echEl.textContent = txt || 'Échéance détectée';
+            } else {
+                echEl.textContent = 'Néant';
+            }
+        }
+    }
+
+    // Classement
+    if (clsEl) {
+        if (!preview || !preview.classement) {
+            clsEl.textContent = 'Néant';
+        } else {
+            var clsStatus = preview.classement.status;
+            var clsData = preview.classement.data;
+            if (clsStatus === 'running' || clsStatus === 'miss') {
+                clsEl.textContent = 'Analyse en cours…';
+            } else if (clsData && clsData.suggestion) {
+                var sugg = clsData.suggestion;
+                var folderPath = sugg.folder_path || sugg.folder_name || sugg.folder_id || 'Dossier suggéré';
+                clsEl.textContent = folderPath;
+            } else {
+                clsEl.textContent = 'Néant';
+            }
+        }
+    }
+
+    // Auto-poll si status running (pour éviter "Analyse en cours" figé)
+    var needsPoll = preview && ((preview.echeance && preview.echeance.status === 'running')
+                              || (preview.classement && preview.classement.status === 'running')
+                              || (preview.echeance && preview.echeance.status === 'miss')
+                              || (preview.classement && preview.classement.status === 'miss'));
+    if (needsPoll && !window.__mailPreviewPolling && _messageId) {
+        window.__mailPreviewPolling = true;
+        var pollCount = 0;
+        var poll = function() {
+            pollCount++;
+            if (pollCount > 10) {  // stop après 20s (10 × 2s)
+                window.__mailPreviewPolling = false;
+                return;
+            }
+            fetch(_backendUrl + '/api/mail_preview/' + encodeURIComponent(_messageId))
+                .then(function(r) { return r.ok ? r.json() : null; })
+                .then(function(newPreview) {
+                    if (!newPreview) { window.__mailPreviewPolling = false; return; }
+                    // Re-appliquer
+                    _applyMailPreview(newPreview);
+                    var stillRunning = (newPreview.echeance && newPreview.echeance.status === 'running')
+                                     || (newPreview.classement && newPreview.classement.status === 'running');
+                    if (stillRunning) {
+                        setTimeout(poll, 2000);
+                    } else {
+                        window.__mailPreviewPolling = false;
+                    }
+                })
+                .catch(function() { window.__mailPreviewPolling = false; });
+        };
+        setTimeout(poll, 2000);
     }
 }
 

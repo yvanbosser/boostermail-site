@@ -658,6 +658,20 @@ def _execute_warmup(graph):
         threading.Thread(target=_bulk_prescan_echeances, daemon=True,
                          name='ech-prescan').start()
 
+        # 3ter. Phase 2.A (24/04) — Pré-chauffe mail_preview (échéance + classement)
+        # pour les top 15 mails de l'inbox. Peuple `_mail_preview_cache` consulté
+        # par le dialog via `/api/mail_preview/<mid>` → cards infoEcheance et
+        # infoClassement remplies au clic BM (plus de "—" statique).
+        # Filtre heuristique pour échéances (évite 45/50 scans Claude inutiles).
+        # Classement = règle DB uniquement au pré-warm (IA fallback sur route post_send).
+        def _bulk_prewarm_mail_previews():
+            try:
+                _prewarm_mail_previews_batch(mails[:15], max_scans=15)
+            except Exception as e:
+                logger.debug(f"[warmup] mail_preview prewarm : {e}")
+        threading.Thread(target=_bulk_prewarm_mail_previews, daemon=True,
+                         name='mail-preview-warmup').start()
+
         # 3bis. Résumés IA (21/04) — Claude Haiku batch, pattern calqué sur
         #    échéances. Génère 3-5 points + actions attendues par mail, stocke
         #    en DB (table mail_summaries). Affiché dans le panneau gauche du
@@ -908,6 +922,15 @@ def _continuous_speculation_loop():
                                  daemon=True, name='cont-spec-contacts').start()
             except Exception as e:
                 logger.debug(f"[cont-spec] analyse contacts : {e}")
+
+            # Phase 2.A (24/04) — Pré-chauffe mail_preview en continu.
+            # À chaque cycle, compléter les entrées manquantes du cache pour
+            # les top 15 mails (nouveaux arrivés + slots expirés). Idempotent
+            # grâce au skip TTL dans _prewarm_mail_preview.
+            try:
+                _prewarm_mail_previews_batch(mails[:15], max_scans=15)
+            except Exception as e:
+                logger.debug(f"[cont-spec] mail_preview : {e}")
         except Exception as e:
             logger.warning(f"[cont-spec] erreur cycle : {e}")
         time.sleep(CYCLE_INTERVAL)
@@ -1359,6 +1382,24 @@ _MAX_POST_SEND_CACHE = 30
 _MAX_PJ_POST_SEND_CACHE = 30
 _POST_SEND_CACHE_TTL = 5 * 60  # 5 min (suggestion classement)
 
+# --- Phase 2.A (24/04 plan structurel) — Pré-chauffe BG preview dialog 80%
+# Alimente les cards `infoEcheance` + `infoClassement` du dialog 80% avec
+# des données pré-calculées au warmup + continuous_speculation_loop. Évite
+# que l'user voie "—" en dur et attende un scan Claude à chaque clic BM.
+#
+# Clé canonique : internet_message_id (I-DATA-11)
+# TTL : 1h. Max : 100 entrées (trim oldest au-delà).
+#
+# Structure d'une entrée :
+#   _mail_preview_cache[<mid>] = {
+#     'echeance':   {'status': 'running'|'done'|'error', 'data': list|None, 'ts': float},
+#     'classement': {'status': ..., 'data': {suggestion, source}|None, 'ts': float},
+#   }
+_mail_preview_cache = {}
+_mail_preview_lock = threading.Lock()
+_MAIL_PREVIEW_TTL = 3600  # 1h
+_MAIL_PREVIEW_MAX = 100
+
 
 def _trim_dict_cache(cache_dict, max_entries):
     """Trim un cache dict en gardant les entrées les plus récentes par 'ts'."""
@@ -1379,6 +1420,158 @@ def _get_post_send_entry(cache_dict, key, ttl=None):
     if ttl is not None and time.time() - entry.get('ts', 0) > ttl:
         return None
     return entry
+
+
+# =============================================================================
+# Phase 2.A — Pré-chauffe BG du preview dialog (échéance + classement)
+# =============================================================================
+
+def _set_mail_preview(mid, kind, status, data):
+    """Helper thread-safe pour update _mail_preview_cache.
+    kind ∈ ('echeance', 'classement'); status ∈ ('running','done','error').
+    """
+    with _mail_preview_lock:
+        entry = _mail_preview_cache.setdefault(mid, {})
+        entry[kind] = {
+            'status': status,
+            'data': data,
+            'ts': time.time(),
+        }
+
+
+def _prewarm_echeance_for_mail(mid, mail_data):
+    """Scan heuristique + Claude pour échéance d'un mail. Stocke dans cache.
+    Filtre heuristique en premier (pattern regex) pour éviter Claude sur
+    les 45/50 mails qui n'ont aucun pattern (économie API massive)."""
+    try:
+        body = (mail_data.get('body') or mail_data.get('body_preview') or '')[:4000]
+        subject = mail_data.get('subject', '')
+        # Strip HTML pour la détection heuristique
+        body_plain = re.sub(r'<[^>]+>', ' ', body)
+        body_plain = re.sub(r'\s+', ' ', body_plain).strip()
+        if not body_plain or not _has_echeance_pattern(subject + ' ' + body_plain):
+            # Pas de pattern → pas d'échéance détectée. On stocke [] = néant.
+            _set_mail_preview(mid, 'echeance', 'done', [])
+            return
+        # Heuristique a matché → scan Claude pour extraire la date/action
+        builder = _get_prompt_builder()
+        if not builder:
+            _set_mail_preview(mid, 'echeance', 'done', [])
+            return
+        mails_batch = [{
+            'subject': subject,
+            'body': body_plain[:2000],
+            'from': mail_data.get('from_email', ''),
+            'direction': 'received',
+        }]
+        try:
+            echeances = builder.scan_echeances_batch(mails_batch) or []
+        except Exception as e:
+            logger.debug(f"[prewarm-ech] scan Claude erreur : {e}")
+            echeances = []
+        _set_mail_preview(mid, 'echeance', 'done', echeances)
+        if echeances:
+            logger.info(f"[prewarm-ech] {len(echeances)} échéance(s) pré-détectée(s) "
+                        f"pour {mid[:30]}")
+    except Exception as e:
+        logger.debug(f"[prewarm-ech] {e}")
+        _set_mail_preview(mid, 'echeance', 'error', None)
+
+
+def _prewarm_classement_for_mail(mid, mail_data):
+    """Suggestion classement pour un mail. Règle DB uniquement (pas d'IA au
+    pré-warm — trop cher × 50 mails). L'IA fallback reste dispo sur la
+    route post_send existante si la règle DB retourne rien."""
+    try:
+        contact_email = (mail_data.get('from_email', '') or '').lower()
+        subject = mail_data.get('subject', '')
+        domain = contact_email.split('@')[-1] if '@' in contact_email else ''
+        try:
+            subject_kw = _extract_subject_keywords(subject)
+        except Exception:
+            subject_kw = subject
+        # Règle DB uniquement : si match → suggestion, sinon → None (néant)
+        try:
+            suggestion = _db.get_folder_suggestion(contact_email, domain, subject_kw)
+        except Exception:
+            suggestion = None
+        if suggestion:
+            _set_mail_preview(mid, 'classement', 'done', {
+                'suggestion': suggestion,
+                'source': 'rule',
+            })
+            logger.info(f"[prewarm-cls] règle DB matche pour {mid[:30]}")
+        else:
+            _set_mail_preview(mid, 'classement', 'done', None)
+    except Exception as e:
+        logger.debug(f"[prewarm-cls] {e}")
+        _set_mail_preview(mid, 'classement', 'error', None)
+
+
+def _prewarm_mail_preview(mail_data):
+    """Lance la pré-chauffe échéance + classement pour UN mail.
+    Skip si déjà en cache récent (<TTL) avec status done/running.
+    Non-bloquant : 2 threads daemon séparés pour parallélisme.
+    """
+    mid = (mail_data.get('internet_message_id')
+           or mail_data.get('message_id')
+           or mail_data.get('id', ''))
+    if not mid:
+        return
+    now = time.time()
+    with _mail_preview_lock:
+        entry = _mail_preview_cache.get(mid, {})
+        ech = entry.get('echeance', {})
+        cls = entry.get('classement', {})
+        skip_ech = (ech.get('status') in ('running', 'done')
+                    and (now - ech.get('ts', 0) < _MAIL_PREVIEW_TTL))
+        skip_cls = (cls.get('status') in ('running', 'done')
+                    and (now - cls.get('ts', 0) < _MAIL_PREVIEW_TTL))
+        if skip_ech and skip_cls:
+            return
+        # Trim si dépasse max : retirer les 20 plus anciennes
+        if len(_mail_preview_cache) >= _MAIL_PREVIEW_MAX:
+            def _max_ts(v):
+                return max(
+                    v.get('echeance', {}).get('ts', 0),
+                    v.get('classement', {}).get('ts', 0),
+                )
+            sorted_keys = sorted(_mail_preview_cache.keys(),
+                                 key=lambda k: _max_ts(_mail_preview_cache[k]))
+            for k in sorted_keys[:20]:
+                _mail_preview_cache.pop(k, None)
+        # Réserver les slots running
+        if not skip_ech:
+            entry.setdefault('echeance', {})
+            entry['echeance']['status'] = 'running'
+            entry['echeance']['ts'] = now
+        if not skip_cls:
+            entry.setdefault('classement', {})
+            entry['classement']['status'] = 'running'
+            entry['classement']['ts'] = now
+        _mail_preview_cache[mid] = entry
+    # Threads daemon parallèles
+    if not skip_ech:
+        threading.Thread(target=_prewarm_echeance_for_mail,
+                         args=(mid, mail_data), daemon=True,
+                         name='prewarm-ech').start()
+    if not skip_cls:
+        threading.Thread(target=_prewarm_classement_for_mail,
+                         args=(mid, mail_data), daemon=True,
+                         name='prewarm-cls').start()
+
+
+def _prewarm_mail_previews_batch(mails, max_scans=15):
+    """Lance pré-chauffe preview pour une liste de mails (top N).
+    Throttle à max_scans pour éviter rate limit Claude."""
+    count = 0
+    for m in mails:
+        if count >= max_scans:
+            break
+        _prewarm_mail_preview(m)
+        count += 1
+    if count:
+        logger.info(f"[mail-preview] pré-chauffe lancée pour {count} mail(s)")
 
 
 def _reply_cache_cohesion_refresh():
@@ -3520,7 +3713,7 @@ def api_dialog_init():
     import concurrent.futures as _cf
 
     result = {'status': status_block, 'email': None, 'summary': None,
-              'contact_profile': None}
+              'contact_profile': None, 'preview': None}
 
     def _fetch_email_body():
         """Réutilise la logique de /api/email_body sans passer par Flask."""
@@ -3631,12 +3824,60 @@ def api_dialog_init():
             logger.debug(f"[dialog_init] contact_profile échec : {e}")
             return None
 
-    # Exécute en parallèle (3 threads, attend tous)
-    with _cf.ThreadPoolExecutor(max_workers=3, thread_name_prefix='dialog_init') as ex:
+    def _fetch_preview():
+        """Phase 2.A (24/04) : lookup du mail_preview pré-chauffé
+        (échéance + classement). Retourne instantanément depuis le cache RAM.
+        Si miss : déclenche scan BG pour le prochain clic."""
+        if not message_id:
+            return None
+        try:
+            with _mail_preview_lock:
+                entry = dict(_mail_preview_cache.get(message_id, {}))  # copy
+            if entry:
+                return {
+                    'echeance': {
+                        'status': entry.get('echeance', {}).get('status', 'miss'),
+                        'data': entry.get('echeance', {}).get('data'),
+                    },
+                    'classement': {
+                        'status': entry.get('classement', {}).get('status', 'miss'),
+                        'data': entry.get('classement', {}).get('data'),
+                    },
+                    'cache_hit': True,
+                }
+            # Cache miss : on déclenche un scan BG (sans attendre) pour la
+            # prochaine ouverture. Retour miss immédiat.
+            try:
+                cached_email = _db.get_cached_email(message_id)
+                if cached_email:
+                    mail_data = {
+                        'internet_message_id': message_id,
+                        'from_email': cached_email.get('from_email', ''),
+                        'from_name': cached_email.get('from_name', ''),
+                        'subject': cached_email.get('subject', ''),
+                        'body': cached_email.get('body') or cached_email.get('html_body', ''),
+                        'body_preview': cached_email.get('body_preview', ''),
+                    }
+                    threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
+                                     daemon=True, name='preview-ondemand').start()
+            except Exception:
+                pass
+            return {
+                'echeance': {'status': 'miss', 'data': None},
+                'classement': {'status': 'miss', 'data': None},
+                'cache_hit': False,
+            }
+        except Exception as e:
+            logger.debug(f"[dialog_init] preview échec : {e}")
+            return None
+
+    # Exécute en parallèle (4 threads, attend tous)
+    with _cf.ThreadPoolExecutor(max_workers=4, thread_name_prefix='dialog_init') as ex:
         futs = {
             'email': ex.submit(_fetch_email_body),
             'summary': ex.submit(_fetch_summary),
             'contact_profile': ex.submit(_fetch_contact_profile),
+            'preview': ex.submit(_fetch_preview),
         }
         for name, fut in futs.items():
             try:
@@ -4815,6 +5056,71 @@ def api_update_echeance(echeance_id):
         return jsonify({"status": "ok"})
     except Exception as e:
         return jsonify({"error": _safe_err(e)}), 500
+
+
+@app.route('/api/mail_preview/<path:message_id>')
+def api_mail_preview(message_id):
+    """Phase 2.A (24/04) — Lookup du preview pré-chauffé pour un mail.
+
+    Retourne échéance + classement pré-calculés en BG (warmup + continuous_spec).
+    Consommé par le dialog 80% au chargement pour peupler les cards
+    infoEcheance et infoClassement instantanément.
+
+    Réponse :
+    {
+      "echeance": {"status": "done"|"running"|"miss", "data": [...] or null},
+      "classement": {"status": ..., "data": {suggestion, source} or null},
+      "cache_hit": bool,
+    }
+
+    Si status=miss (mail pas encore pré-chauffé), le client peut afficher
+    un placeholder en attendant — un scan BG sera déclenché à la demande.
+    """
+    if not message_id:
+        return jsonify({"error": "message_id requis"}), 400
+
+    with _mail_preview_lock:
+        entry = _mail_preview_cache.get(message_id, {})
+
+    if not entry:
+        # Pas en cache : déclencher un scan BG pour le prochain clic,
+        # en construisant un mail_data minimal depuis email_cache DB
+        # si disponible. Sinon, rien à faire — reste "miss".
+        try:
+            cached = _db.get_cached_email(message_id)
+            if cached:
+                mail_data = {
+                    'internet_message_id': message_id,
+                    'message_id': cached.get('internet_message_id', ''),
+                    'id': cached.get('id', ''),
+                    'from_email': cached.get('from_email', ''),
+                    'from_name': cached.get('from_name', ''),
+                    'subject': cached.get('subject', ''),
+                    'body': cached.get('body') or cached.get('html_body', ''),
+                    'body_preview': cached.get('body_preview', ''),
+                }
+                threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
+                                 daemon=True, name='mail-preview-ondemand').start()
+        except Exception as e:
+            logger.debug(f"[mail_preview] on-demand trigger échec : {e}")
+        return jsonify({
+            "echeance": {"status": "miss", "data": None},
+            "classement": {"status": "miss", "data": None},
+            "cache_hit": False,
+        })
+
+    # Entry présent : retourner l'état actuel
+    return jsonify({
+        "echeance": {
+            "status": entry.get('echeance', {}).get('status', 'miss'),
+            "data": entry.get('echeance', {}).get('data'),
+        },
+        "classement": {
+            "status": entry.get('classement', {}).get('status', 'miss'),
+            "data": entry.get('classement', {}).get('data'),
+        },
+        "cache_hit": True,
+    })
 
 
 @app.route('/api/echeances/pre_scan', methods=['POST'])
