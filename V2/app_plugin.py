@@ -882,6 +882,32 @@ def _continuous_speculation_loop():
                 summarize_mails_to_db(mails, chunk_size=10)
             except Exception as e:
                 logger.debug(f"[cont-spec] résumés : {e}")
+
+            # P0.2 fix 24/04 : apprentissage contact à la RÉCEPTION.
+            # Avant : _maybe_analyze_contact() n'était appelé que dans
+            # _post_send_learning (après ENVOI). Si user reçoit beaucoup
+            # mais répond peu, les contacts entrants n'étaient jamais
+            # analysés (cf. cas Dufau : 27 mails en threads, 0 profil).
+            # Maintenant : chaque cycle, scan des from_email uniques du
+            # warmup_cache et appel _maybe_analyze_contact dans un thread
+            # daemon. La fonction filtre elle-même sur _CONTACT_ANALYSIS_SCHEDULE
+            # donc l'appel est quasi-gratuit tant que le contact n'est pas
+            # à un point du schedule (juste un SQL count).
+            try:
+                unique_senders = list({m.get('from_email', '').strip().lower()
+                                        for m in mails
+                                        if m.get('from_email')})
+                def _analyze_batch(senders):
+                    for em in senders:
+                        try:
+                            _maybe_analyze_contact(em)
+                        except Exception as _e:
+                            logger.debug(f"[cont-spec] analyse contact {em[:30]} : {_e}")
+                        time.sleep(0.5)  # throttle léger (évite flood API)
+                threading.Thread(target=_analyze_batch, args=(unique_senders,),
+                                 daemon=True, name='cont-spec-contacts').start()
+            except Exception as e:
+                logger.debug(f"[cont-spec] analyse contacts : {e}")
         except Exception as e:
             logger.warning(f"[cont-spec] erreur cycle : {e}")
         time.sleep(CYCLE_INTERVAL)
