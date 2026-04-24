@@ -88,7 +88,15 @@ class _ChildPopupPage(QWebEnginePage):
     """
     _child_view = None
 
-    def certificateError(self, error):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Fix 24/04 : en Qt6.2+, certificateError est un SIGNAL, pas une
+        # méthode virtual à override. L'override Python ne fait rien → le
+        # cert auto-signé localhost est rejeté → ERR_CERT_AUTHORITY_INVALID.
+        # Solution : connecter un slot au signal.
+        self.certificateError.connect(self._on_certificate_error)
+
+    def _on_certificate_error(self, error):
         u = error.url()
         if u.host() in ('localhost', '127.0.0.1'):
             error.acceptCertificate()
@@ -118,7 +126,17 @@ class _ChildPopupPage(QWebEnginePage):
 class LocalhostPage(QWebEnginePage):
     easymail_action = None
 
-    def certificateError(self, error):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Fix 24/04 : Qt6.2+ — certificateError est un SIGNAL, pas un override.
+        # Sans cette connexion, le cert self-signed de localhost:3443 est
+        # rejeté et l'user voit "Ce site est inaccessible" /
+        # ERR_CERT_AUTHORITY_INVALID au clic BM. Cause racine de l'incident
+        # du 24/04 matin après les kills/respawns de popup_pyqt qui ont
+        # invalidé le cache Chromium (override user perdu).
+        self.certificateError.connect(self._on_certificate_error)
+
+    def _on_certificate_error(self, error):
         url = error.url()
         if url.host() in ('localhost', '127.0.0.1'):
             error.acceptCertificate()
