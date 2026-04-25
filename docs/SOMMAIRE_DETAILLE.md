@@ -47,7 +47,7 @@ En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux
 - TTL des caches de réponses → **SUPPRIMÉS** au profit d'une purge événementielle pure + safety net 4 semaines (18/04)
 - Smart Speculative « 6 filtres » de la spec → **CORRIGÉ** : 5 à porter + 1 à créer en V2 (filtre open_count absent du proto) (18/04)
 - Popup « à chaque démarrage Outlook » → **AFFINÉE** : matrice 4 modes user × cache, toujours affichée mais contenu adapté (18/04)
-- Installation locale (start.bat + V2 sur `C:\EasyMail\V2\` + companion COM) → **PIVOT SaaS** : V2 hébergé sur VPS OVH (`api.boostermail.fr`), accessible depuis Outlook Web sans installation. Companion supprimé, `boostermail_service.py` supprimé, manifest mis à jour. Voir `docs/plans/PLAN_SAAS.md` (25/04)
+- Installation locale (start.bat + V2 sur `C:\EasyMail\V2\` + companion COM) → **PIVOT SaaS** : V2 hébergé sur VPS OVH Gravelines (`api.boostermail.ai`), accessible depuis Outlook Web sans installation. Companion supprimé, `boostermail_service.py` supprimé, manifest mis à jour. Voir `docs/plans/PLAN_SAAS.md` (25/04)
 
 Les docs antérieurs à ces décisions peuvent décrire l'ancien état. **Ne pas les utiliser comme source pour le code actuel sans vérifier.**
 

@@ -16,7 +16,7 @@ L'architecture V2 est déjà compatible SaaS :
 
 ## À faire immédiatement (en parallèle de tout)
 
-- [ ] Acheter domaine `boostermail.fr` (~10€/an)
+- [x] Acheter domaine `boostermail.ai` (~80€/an) — **fait 25/04/2026**
 - [ ] Soumettre BoosterMail sur AppSource Microsoft (4-8 semaines de validation)
 
 ---
@@ -24,7 +24,7 @@ L'architecture V2 est déjà compatible SaaS :
 ## Phase 1 — Fondations
 *Durée réelle estimée : demi-journée*
 
-- [ ] Louer VPS OVH — 2 cœurs / 4 Go RAM / 80 Go SSD (12€/mois, datacenter France)
+- [ ] Louer VPS OVH — **4 vCores / 8 Go RAM / 160 Go SSD NVMe** (~22€/mois HT, datacenter **Gravelines**) — choix arrêté 25/04 pour tenir 50 users avec marge ×3
 - [ ] Configurer SSL/HTTPS avec Let's Encrypt (gratuit, 2 commandes)
 - [ ] Configurer nginx comme reverse proxy (port 443 → Flask)
 - [ ] Déployer V2 sur le serveur via SSH
@@ -37,9 +37,9 @@ L'architecture V2 est déjà compatible SaaS :
 *Durée réelle estimée : 2-3 heures*
 *(à faire juste après la Phase 1, pendant que le serveur est chaud)*
 
-- [ ] Mettre à jour `manifest.xml` : `localhost:3443` → `api.boostermail.fr`
+- [ ] Mettre à jour `manifest.xml` : `localhost:3443` → `api.boostermail.ai`
 - [ ] Changer `OnNewMessageCompose` → `OnMessageCompose` dans manifest.xml (1 mot — intercepte le bouton Répondre)
-- [ ] Créer page `install.boostermail.fr` avec guide visuel animé + lien `aka.ms/olksideload`
+- [ ] Créer page `install.boostermail.ai` avec guide visuel animé + lien `aka.ms/olksideload`
 
 ---
 
@@ -100,17 +100,17 @@ L'architecture V2 est déjà compatible SaaS :
 
 | Poste | Coût |
 |---|---|
-| VPS OVH | 12€/mois |
-| Domaine boostermail.fr | ~1€/mois (10€/an) |
+| VPS OVH (4 vCores / 8 Go / 160 Go) | ~22€/mois HT |
+| Domaine boostermail.ai | ~6,7€/mois (80€/an) |
 | SSL Let's Encrypt | 0€ |
 | Sentry monitoring | 0€ (free tier) |
 | Brevo emails | 0€ (free tier) |
 | Stripe | 0€ fixe + 1,5% + 0,25€/transaction |
 | Claude Sonnet (API) | ~8€/user/mois (47 mails/jour) |
 | Claude Haiku (API) | ~1,5€/user/mois |
-| **Total fixe mensuel** | **~13€/mois** |
+| **Total fixe mensuel** | **~29€/mois HT** |
 
-Rentable dès **2 clients à 19€/mois**.
+Rentable dès **2 clients à 19€/mois** (38€ > 29€).
 
 ---
 
