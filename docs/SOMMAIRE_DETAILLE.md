@@ -1,6 +1,6 @@
 # SOMMAIRE DÉTAILLÉ — Documentation BoosterMail/EasyMail
 
-> **Dernière mise à jour** : 18/04/2026 (session validation Plan 3)
+> **Dernière mise à jour** : 25/04/2026 (pivot SaaS — Phase 1 démarrée)
 
 > **Objectif** : index unique de TOUTE la documentation du projet.
 > À lire en début de session pour savoir **où trouver quoi** sans relire les docs entiers.
@@ -47,6 +47,7 @@ En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux
 - TTL des caches de réponses → **SUPPRIMÉS** au profit d'une purge événementielle pure + safety net 4 semaines (18/04)
 - Smart Speculative « 6 filtres » de la spec → **CORRIGÉ** : 5 à porter + 1 à créer en V2 (filtre open_count absent du proto) (18/04)
 - Popup « à chaque démarrage Outlook » → **AFFINÉE** : matrice 4 modes user × cache, toujours affichée mais contenu adapté (18/04)
+- Installation locale (start.bat + V2 sur `C:\EasyMail\V2\` + companion COM) → **PIVOT SaaS** : V2 hébergé sur VPS OVH (`api.boostermail.fr`), accessible depuis Outlook Web sans installation. Companion supprimé, `boostermail_service.py` supprimé, manifest mis à jour. Voir `docs/plans/PLAN_SAAS.md` (25/04)
 
 Les docs antérieurs à ces décisions peuvent décrire l'ancien état. **Ne pas les utiliser comme source pour le code actuel sans vérifier.**
 
@@ -230,6 +231,7 @@ docs/
 | Fichier | Sujet | Clés |
 |---|---|---|
 | `PLAN_ACTION_GLOBAL.md` | Vision produit + roadmap globale | `roadmap`, `vision`, `global` |
+| **`PLAN_SAAS.md`** | **Migration SaaS 25/04 — VPS OVH, nginx+SSL, multi-tenant, Stripe, beta gratuite** (Phase 1 en cours) | `SaaS`, `OVH`, `VPS`, `cloud`, `déploiement` |
 | `PLAN_1_APPLICATION_DOCUMENTATION.md` | Plan consolidation + datation + maintenance doc (5 phases, ~4h) | `plan1`, `doc`, `consolidation` |
 | `PLAN_2_OPTIMISATION_FLUX.md` | Plan flux optimal : templates + caches + smart spec (7 phases, ~9h15) — **plan d'exécution de référence** | `plan2`, `flux`, `templates`, `caches` |
 | `PLAN_3_INVENTAIRE_CACHES_ET_PORTAGE.md` | Inventaire technique caches V2 vs proto + plan baseline 5 phases (référence) | `plan3`, `inventaire`, `caches`, `portage` |
@@ -360,4 +362,4 @@ docs/
 
 ---
 
-*Dernière mise à jour : 18/04/2026 — Consolidation de toute la doc dans `docs/`.*
+*Dernière mise à jour : 25/04/2026 — Pivot SaaS : ajout de `PLAN_SAAS.md` et entrée historique 25/04.*
