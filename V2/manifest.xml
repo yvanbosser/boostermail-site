@@ -12,13 +12,13 @@
   <DefaultLocale>fr-FR</DefaultLocale>
   <DisplayName DefaultValue="EasyMail"/>
   <Description DefaultValue="Assistant email intelligent - Generez des reponses adaptees a votre style"/>
-  <IconUrl DefaultValue="https://localhost:3443/plugin/assets/icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="https://localhost:3443/plugin/assets/icon-80.png"/>
+  <IconUrl DefaultValue="https://api.boostermail.ai/plugin/assets/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://api.boostermail.ai/plugin/assets/icon-80.png"/>
 
-  <SupportUrl DefaultValue="https://localhost:3443"/>
+  <SupportUrl DefaultValue="https://api.boostermail.ai"/>
 
   <AppDomains>
-    <AppDomain>https://localhost:3443</AppDomain>
+    <AppDomain>https://api.boostermail.ai</AppDomain>
   </AppDomains>
 
   <Hosts>
@@ -34,7 +34,7 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://localhost:3443/plugin/taskpane.html"/>
+        <SourceLocation DefaultValue="https://api.boostermail.ai/plugin/taskpane.html"/>
         <RequestedHeight>250</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -87,13 +87,13 @@
 
     <Resources>
       <bt:Images>
-        <bt:Image id="icon16" DefaultValue="https://localhost:3443/plugin/assets/icon-16.png"/>
-        <bt:Image id="icon32" DefaultValue="https://localhost:3443/plugin/assets/icon-32.png"/>
-        <bt:Image id="icon80" DefaultValue="https://localhost:3443/plugin/assets/icon-80.png"/>
+        <bt:Image id="icon16" DefaultValue="https://api.boostermail.ai/plugin/assets/icon-16.png"/>
+        <bt:Image id="icon32" DefaultValue="https://api.boostermail.ai/plugin/assets/icon-32.png"/>
+        <bt:Image id="icon80" DefaultValue="https://api.boostermail.ai/plugin/assets/icon-80.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="functionFileUrl" DefaultValue="https://localhost:3443/plugin/commands.html"/>
-        <bt:Url id="taskpaneUrl" DefaultValue="https://localhost:3443/plugin/taskpane.html"/>
+        <bt:Url id="functionFileUrl" DefaultValue="https://api.boostermail.ai/plugin/commands.html"/>
+        <bt:Url id="taskpaneUrl" DefaultValue="https://api.boostermail.ai/plugin/taskpane.html"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="groupLabel" DefaultValue="EasyMail"/>
@@ -187,15 +187,15 @@
 
       <Resources>
         <bt:Images>
-          <bt:Image id="icon16" DefaultValue="https://localhost:3443/plugin/assets/icon-16.png"/>
-          <bt:Image id="icon32" DefaultValue="https://localhost:3443/plugin/assets/icon-32.png"/>
-          <bt:Image id="icon80" DefaultValue="https://localhost:3443/plugin/assets/icon-80.png"/>
+          <bt:Image id="icon16" DefaultValue="https://api.boostermail.ai/plugin/assets/icon-16.png"/>
+          <bt:Image id="icon32" DefaultValue="https://api.boostermail.ai/plugin/assets/icon-32.png"/>
+          <bt:Image id="icon80" DefaultValue="https://api.boostermail.ai/plugin/assets/icon-80.png"/>
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="autorunHtmlUrl" DefaultValue="https://localhost:3443/plugin/autorun.html"/>
-          <bt:Url id="autorunJsUrl" DefaultValue="https://localhost:3443/plugin/autorunshared.js"/>
-          <bt:Url id="functionFileUrl" DefaultValue="https://localhost:3443/plugin/commands.html"/>
-          <bt:Url id="taskpaneUrl" DefaultValue="https://localhost:3443/plugin/popup.html?container=taskpane"/>
+          <bt:Url id="autorunHtmlUrl" DefaultValue="https://api.boostermail.ai/plugin/autorun.html"/>
+          <bt:Url id="autorunJsUrl" DefaultValue="https://api.boostermail.ai/plugin/autorunshared.js"/>
+          <bt:Url id="functionFileUrl" DefaultValue="https://api.boostermail.ai/plugin/commands.html"/>
+          <bt:Url id="taskpaneUrl" DefaultValue="https://api.boostermail.ai/plugin/popup.html?container=taskpane"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="groupLabel" DefaultValue="EasyMail"/>

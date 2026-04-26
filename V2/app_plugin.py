@@ -58,6 +58,30 @@ try:
 except Exception:
     pass
 
+# --- Sentry monitoring (production SaaS) -------------------------------------
+# Déclenché uniquement si SENTRY_DSN présent dans config.json. Free tier : 5000
+# erreurs/mois. traces/profiles désactivés pour éviter de saturer le quota.
+# send_default_pii=False : RGPD safe (pas de capture auto IP/headers/body).
+try:
+    with open(CONFIG_PATH, encoding="utf-8") as _f:
+        _cfg = json.load(_f)
+    _sentry_dsn = (_cfg.get("SENTRY_DSN") or "").strip()
+    if _sentry_dsn:
+        import sentry_sdk
+        from sentry_sdk.integrations.flask import FlaskIntegration
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            integrations=[FlaskIntegration()],
+            traces_sample_rate=0,
+            profiles_sample_rate=0,
+            send_default_pii=False,
+            release="boostermail-saas-v1",
+            environment="production",
+        )
+        logger.info("Sentry monitoring activé")
+except Exception as _e:
+    print(f"WARNING: Sentry init failed: {_e}")
+
 # --- App Flask ---------------------------------------------------------------
 
 app = Flask(__name__)
@@ -413,6 +437,74 @@ _warmup_done = False
 _warmup_progress = {"status": "idle", "loaded": 0, "total": 0, "current_subject": ""}
 _warmup_lock = threading.Lock()  # #8 : protege _warmup_done et _warmup_progress
 
+
+# === Phase 1 (25/04 soir) — Étiquetage canonique unique ===
+# Règle stricte : un mail = UN seul numéro = internet_message_id (RFC 2822, format
+# `<...@domain>`). Pas de fallback. Si absent → mail "anonyme" (très rare, mail
+# malformé) → BG le saute, streaming à la commande.
+# Référence : audit/INVARIANTS.md I-DATA-11.
+
+def _canonical_mid(mail_data):
+    """Retourne l'internet_message_id canonique d'un mail, ou '' si absent/invalide.
+
+    Règle stricte : seule clé acceptée = `mail_data['internet_message_id']` au format
+    RFC 2822 (`<...@domain>`). Pas de fallback sur Graph entry id, message_id legacy, etc.
+
+    Si retourne '' → l'appelant doit logger l'anomalie et skipper le mail (pas
+    de cache à clé non-canonique → évite les pollutions de cache et les MISS au lookup).
+    """
+    if not isinstance(mail_data, dict):
+        return ''
+    mid = mail_data.get('internet_message_id', '') or ''
+    if not isinstance(mid, str):
+        return ''
+    mid = mid.strip()
+    if not (mid.startswith('<') and '@' in mid and mid.endswith('>')):
+        return ''
+    return mid
+
+
+# Phase 1.5 (25/04 soir) — Garde-fou anti-pollution drafts.
+# Détecte un draft "poubelle" : Claude a refusé de traiter le mail (parce que
+# le body fourni était factice/tronqué/vide). Si on stocke ce refus, le user
+# verra "Je ne peux pas traiter ce mail..." au lieu de sa vraie réponse.
+# → on N'ÉCRIT PAS le draft : le BG retentera plus tard avec un body correct.
+_GARBAGE_DRAFT_PATTERNS = (
+    'je ne peux pas traiter ce mail',
+    'le contenu reçu',
+    'le contenu re\xe7u',  # variante encoding
+    'test body',
+    'j\'ai besoin du véritable',
+    'j\'ai besoin du v\xe9ritable',
+    'ne contient aucune information',
+    'pourriez-vous me transmettre le mail complet',
+    '[placeholder',
+)
+
+
+def _is_garbage_draft(text):
+    """Retourne True si le draft est suspect (Claude a refusé de répondre).
+
+    Causes typiques : body factice ('test body pour speculation'), body vide,
+    mail contenant uniquement une signature, etc. Dans ce cas Claude retourne
+    une réponse meta ('Je ne peux pas traiter ce mail...') qu'il ne faut PAS
+    stocker comme draft (le user la verrait au clic).
+
+    Le BG retentera plus tard avec un body correct.
+    """
+    if not text or not isinstance(text, str):
+        return True
+    text_lower = text.lower()
+    for p in _GARBAGE_DRAFT_PATTERNS:
+        if p in text_lower:
+            return True
+    # Aussi : draft trop court (< 50 chars) après strip HTML = suspect
+    plain = re.sub(r'<[^>]+>', '', text).strip()
+    if len(plain) < 50:
+        return True
+    return False
+
+
 def _is_warmup_cache_warm():
     """
     Plan 2 Phase 3.3 — teste si le warmup peut être SKIPPED :
@@ -507,15 +599,15 @@ def _execute_warmup(graph):
         for msg in cached_mails_for_prefetch:
             if not msg.get('from_email'):
                 continue
+            # Phase 1 (25/04 soir) — toujours porter l'IMID canonique.
+            _imid = msg.get('internet_message_id', '') or ''
             mail_data = {
                 'from_email': msg.get('from_email', ''),
                 'from_name': msg.get('from_name', ''),
                 'subject': msg.get('subject', ''),
                 'body': msg.get('body') or msg.get('body_preview', ''),
-                # I-DATA-11 : internet_message_id en priorité (matche Office.js)
-                'message_id': (msg.get('internet_message_id')
-                               or msg.get('message_id')
-                               or msg.get('id', '')),
+                'message_id': _imid or msg.get('message_id') or msg.get('id', ''),
+                'internet_message_id': _imid,  # Canonique pour _canonical_mid()
                 'conversation_id': msg.get('conversation_id', ''),
                 'to': msg.get('to', ''),
                 'cc': msg.get('cc', ''),
@@ -540,11 +632,13 @@ def _execute_warmup(graph):
         with _warmup_lock:
             _warmup_progress["total"] = len(mails)
         for i, msg in enumerate(mails):
-            # I-DATA-11 (fix 23/04 soir) : normaliser sur internet_message_id.
-            # Client Office.js envoie internetMessageId à /api/instant_reply
-            # etc. — la clé de cache doit matcher. Fallback sur Graph id si
-            # absent (rare : drafts locaux).
-            mid = msg.get('internet_message_id') or msg.get('id', '')
+            # Phase 1 (25/04 soir) — Étiquetage canonique strict : IMID seul.
+            # Si absent → mail malformé/anonyme → skip BG (streaming au clic).
+            mid = _canonical_mid(msg)
+            if not mid:
+                logger.debug(f"[warmup] skip mail sans IMID canonique : "
+                             f"subject={msg.get('subject', '')[:40]}")
+                continue
             subject = msg.get('subject', '(sans objet)')
             with _warmup_lock:
                 _warmup_progress["loaded"] = i + 1
@@ -569,15 +663,15 @@ def _execute_warmup(graph):
             _warmup_progress["current_subject"] = "Préparation du contexte..."
         prefetch_threads = []
         for msg in mails[:5]:
+            # Phase 1 (25/04 soir) — toujours porter l'IMID canonique.
+            _imid = msg.get('internet_message_id', '') or ''
             mail_data = {
                 'from_email': msg.get('from_email', ''),
                 'from_name': msg.get('from_name', ''),
                 'subject': msg.get('subject', ''),
                 'body': msg.get('body') or msg.get('body_preview', ''),
-                # I-DATA-11 : internet_message_id en priorité (matche Office.js)
-                'message_id': (msg.get('internet_message_id')
-                               or msg.get('message_id')
-                               or msg.get('id', '')),
+                'message_id': _imid or msg.get('message_id') or msg.get('id', ''),
+                'internet_message_id': _imid,  # Canonique pour _canonical_mid()
                 'conversation_id': msg.get('conversation_id', ''),
                 # Plan 2 Phase 2.B — propager to/cc/date pour les filtres Smart Speculative
                 'to': msg.get('to', ''),
@@ -653,7 +747,19 @@ def _execute_warmup(graph):
         # Classement = règle DB uniquement au pré-warm (IA fallback sur route post_send).
         def _bulk_prewarm_mail_previews():
             try:
-                _prewarm_mail_previews_batch(mails[:15], max_scans=15)
+                # P1 (25/04) — preview uniquement pour les mails avec un draft généré.
+                # "Draft d'abord, preview ensuite" : évite Claude sur les mails filtrés.
+                # Phase 1 (25/04 soir) — IMID canonique seul.
+                _with_draft = []
+                with _reply_lock:
+                    for _m in mails:
+                        _mid = _canonical_mid(_m)
+                        if not _mid:
+                            continue
+                        _e = _reply_cache.get(_mid, {})
+                        if _e.get('status') == 'done' and _e.get('source') != 'filtered':
+                            _with_draft.append(_m)
+                _prewarm_mail_previews_batch(_with_draft)
             except Exception as e:
                 logger.debug(f"[warmup] mail_preview prewarm : {e}")
         threading.Thread(target=_bulk_prewarm_mail_previews, daemon=True,
@@ -732,6 +838,14 @@ _preload_activity_lock = threading.Lock() # Audit : protège _preload_last_activ
 _bodies_enriched = threading.Event()      # set par _run_prefetch après A+B
 _c_context_ready = threading.Event()      # set par _run_prefetch après C
 
+# Option A (24/04) — Sémaphore limitant la concurrence des appels LLM
+# spéculatifs (provider-agnostique : Claude aujourd'hui, potentiellement
+# ChatGPT / autre demain via core/ai_provider.py).
+# Avec 8 workers parallèles, on peut avoir 8 spéculations LLM en vol.
+# Ce sémaphore sérialise à max 4 pour respecter les rate-limits provider
+# tout en gardant du parallélisme utile.
+_ai_speculative_semaphore = threading.Semaphore(4)
+
 
 def _signal_user_activity():
     """Signale qu'une activité utilisateur interactive vient d'avoir lieu
@@ -769,8 +883,15 @@ def _preload_neighbors(message_id):
             if not (0 <= target_idx < len(mails_list)):
                 continue
             target = mails_list[target_idx]
-            target_id = target.get('id', '')
+            # I-DATA-13 : priorité internet_message_id (matche Office.js).
+            # Avant : target.get('id') → Entry ID Graph → entrée morte en cache.
+            target_id = (target.get('internet_message_id')
+                         or target.get('id', ''))
             if not target_id:
+                continue
+            # Skip mails sans MID canonique (cohérent avec _parallel_prefetch_batch)
+            if not (target_id.startswith('<') and '@' in target_id
+                    and target_id.endswith('>')):
                 continue
             with _prefetch_lock:
                 existing = _prefetch_cache.get(target_id)
@@ -788,6 +909,86 @@ def _preload_neighbors(message_id):
                 threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True).start()
     except Exception as e:
         logger.debug(f"[preload-neighbor] Erreur : {e}")
+
+
+def _parallel_prefetch_batch(mails, max_workers=8, tag='batch', check_pause=True):
+    """
+    Option A (24/04) — Lance _run_prefetch en parallèle (8 workers) au lieu
+    de la boucle série `for m: ... time.sleep(2)`. Gain ~8-15×.
+
+    I-DATA-13 : construit message_id avec internet_message_id en priorité.
+    Fix 2 (24/04) : rejette les mails sans MID canonique (<...@...>)
+    — ils ne peuvent pas être retrouvés par Office.js de toute façon.
+
+    Retourne : nombre de mails réellement soumis.
+    """
+    if not mails:
+        return 0
+
+    submissions = []
+    for m in mails:
+        # I-DATA-13 : priorité internet_message_id (matche Office.js)
+        mid = (m.get('internet_message_id')
+               or m.get('message_id')
+               or m.get('id', ''))
+        # Fix 2 : skip mails sans MID canonique RFC 2822 (<...@...>)
+        # Ces mails (Outlook internes sans internet_message_id) ne peuvent
+        # jamais être retrouvés par le consommateur (Office.js envoie
+        # internetMessageId). Les écrire en cache est une entrée morte.
+        if not (mid.startswith('<') and '@' in mid and mid.endswith('>')):
+            continue
+        from_email = m.get('from_email', '')
+        if not from_email:
+            continue
+        try:
+            if _db.is_treated(mid):
+                continue
+        except Exception:
+            pass
+        with _prefetch_lock:
+            pf_status = _prefetch_cache.get(mid, {}).get('status')
+        # Fix I-CX-01 (24/04 P6) : ne skiper que 'running' (en cours).
+        # 'done' = prefetch fait MAIS draft pas forcément générée.
+        # On laisse passer → _run_prefetch branche 'done' déclenche speculation.
+        if pf_status == 'running':
+            continue
+        submissions.append({
+            'from_email': from_email,
+            'from_name': m.get('from_name', ''),
+            'subject': m.get('subject', ''),
+            'body': m.get('body') or m.get('body_preview', ''),
+            'message_id': mid,
+            'conversation_id': m.get('conversation_id', ''),
+            'to': m.get('to', ''),
+            'cc': m.get('cc', ''),
+            'date': m.get('date', ''),
+        })
+
+    if not submissions:
+        return 0
+
+    submitted = 0
+    try:
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix=f'prefetch-{tag}') as pool:
+            for md in submissions:
+                if check_pause and _preload_pause.is_set():
+                    # Fix 24/04 (P7) : même logique que cont-spec — auto-clear 30s.
+                    with _preload_activity_lock:
+                        _bp_elapsed = time.time() - _preload_last_activity[0]
+                    if _bp_elapsed > 30:
+                        _preload_pause.clear()
+                        logger.info(f"[{tag}] Inactivité {_bp_elapsed:.0f}s → pause levée mid-batch")
+                    else:
+                        logger.info(f"[{tag}] Pause (user actif) après {submitted} soumissions")
+                        break
+                pool.submit(_run_prefetch, md)
+                submitted += 1
+    except Exception as e:
+        logger.warning(f"[{tag}] Erreur pool parallèle : {e}")
+
+    return submitted
 
 
 def _continuous_speculation_loop():
@@ -814,13 +1015,22 @@ def _continuous_speculation_loop():
         try:
             _cycle_count += 1
             max_candidates = 30 if _cycle_count <= 2 else 15
-            # Pause si user actif
+            # Pause si user actif — auto-clear après 30s d'inactivité.
+            # Fix 24/04 (P7) : _preload_pause.clear() était absent → une fois
+            # set() par _signal_user_activity(), le BG loop dormait 5s en
+            # boucle INDÉFINIMENT → 0 spéculations BG jusqu'au prochain restart.
             if _preload_pause.is_set():
-                time.sleep(5)
-                continue
+                with _preload_activity_lock:
+                    _elapsed_pause = time.time() - _preload_last_activity[0]
+                if _elapsed_pause > 30:
+                    _preload_pause.clear()
+                    logger.info(f"[cont-spec] Inactivité {_elapsed_pause:.0f}s → pause levée")
+                else:
+                    time.sleep(5)
+                    continue
 
             with _warmup_lock:
-                mails = list(_warmup_cache.values())[:50]  # Boost 21/04 : 20 → 50
+                mails = list(_warmup_cache.values())[:200]  # Fix B 25/04 : 50 → 200 (couvre inbox complète)
             if not mails:
                 time.sleep(CYCLE_INTERVAL)
                 continue
@@ -836,52 +1046,45 @@ def _continuous_speculation_loop():
                 else:
                     tier2.append(m)
 
+            # Compteurs H3 (diagnostic 24/04) — raison des skips pour comprendre
+            # pourquoi certains mails ne sont jamais spéculés.
+            _skip_noncanon = _skip_treated = _skip_done = 0
+
             # Candidats : mails sans entrée _reply_cache done/running
+            # Phase 1 (25/04 soir) — Étiquetage canonique strict via _canonical_mid.
+            # Plus de fallback. Les mails sans IMID canonique sont skippés (skip_noncanon).
             candidates = []
             for m in tier1 + tier2:
-                mid = m.get('message_id') or m.get('id', '')
+                mid = _canonical_mid(m)
                 if not mid:
+                    _skip_noncanon += 1
                     continue
                 try:
                     if _db.is_treated(mid):
+                        _skip_treated += 1
                         continue  # Purge événementielle (6.5)
                 except Exception:
                     pass
                 with _reply_lock:
                     entry = _reply_cache.get(mid, {})
                 if entry.get('status') in ('running', 'done'):
+                    _skip_done += 1
                     continue
                 candidates.append(m)
                 if len(candidates) >= max_candidates:
                     break
 
-            for m in candidates:
-                # Re-vérifier la pause entre chaque candidat (interruption 6.3)
-                if _preload_pause.is_set():
-                    break
-                mail_data = {
-                    'from_email': m.get('from_email', ''),
-                    'from_name': m.get('from_name', ''),
-                    'subject': m.get('subject', ''),
-                    'body': m.get('body') or m.get('body_preview', ''),
-                    # I-DATA-11 : internet_message_id en priorité (matche Office.js)
-                    'message_id': (m.get('internet_message_id')
-                                   or m.get('message_id')
-                                   or m.get('id', '')),
-                    'conversation_id': m.get('conversation_id', ''),
-                    'to': m.get('to', ''),
-                    'cc': m.get('cc', ''),
-                    'date': m.get('date', ''),
-                }
-                # Lance prefetch → les filtres Smart Speculative (6.2) s'appliquent
-                # automatiquement dans _run_prefetch avant le _start_speculative.
-                threading.Thread(target=_run_prefetch, args=(mail_data,),
-                                 daemon=True).start()
-                time.sleep(2)  # Throttle entre les lancements
+            # Option A (24/04) — 8 workers parallèles au lieu de boucle série 2s
+            submitted = _parallel_prefetch_batch(candidates, max_workers=8,
+                                                  tag='cont-spec', check_pause=True)
 
-            if candidates:
-                logger.info(f"[cont-spec] cycle : {len(candidates)} nouveau(x) candidat(s) "
-                            f"(tier1={len(tier1)}, tier2={len(tier2)})")
+            if submitted or _skip_noncanon or _skip_treated or _skip_done:
+                logger.info(
+                    f"[cont-spec] cycle#{_cycle_count} : {submitted} soumis "
+                    f"(tier1={len(tier1)}, tier2={len(tier2)}) | "
+                    f"skip: done={_skip_done} treated={_skip_treated} "
+                    f"noncanon={_skip_noncanon}"
+                )
 
             # Fix audit 22/04 (Phase 1.A.2) : bulk résumés sur les mails du
             # cycle qui ont un body. Rattrape les nouveaux mails arrivés depuis
@@ -917,12 +1120,21 @@ def _continuous_speculation_loop():
             except Exception as e:
                 logger.debug(f"[cont-spec] analyse contacts : {e}")
 
-            # Phase 2.A (24/04) — Pré-chauffe mail_preview en continu.
-            # À chaque cycle, compléter les entrées manquantes du cache pour
-            # les top 15 mails (nouveaux arrivés + slots expirés). Idempotent
-            # grâce au skip TTL dans _prewarm_mail_preview.
+            # P1 (25/04) — Pré-chauffe mail_preview uniquement pour les mails avec draft.
+            # "Draft d'abord, preview ensuite" — idempotent via TTL RAM + DB.
+            # Phase 1 (25/04 soir) — IMID canonique seul.
             try:
-                _prewarm_mail_previews_batch(mails[:15], max_scans=15)
+                _with_draft = []
+                with _reply_lock:
+                    for _m in mails:
+                        _mid = _canonical_mid(_m)
+                        if not _mid:
+                            continue
+                        _e = _reply_cache.get(_mid, {})
+                        if _e.get('status') == 'done' and _e.get('source') != 'filtered':
+                            _with_draft.append(_m)
+                if _with_draft:
+                    _prewarm_mail_previews_batch(_with_draft)
             except Exception as e:
                 logger.debug(f"[cont-spec] mail_preview : {e}")
         except Exception as e:
@@ -932,20 +1144,18 @@ def _continuous_speculation_loop():
 
 def _background_preload_loop():
     """
-    Phase 1.5 — Préchargement ONE-SHOT après warmup, élargit au-delà des
-    10 premiers mails : fetch 50 mails Graph + prefetch A/B/C.
+    Phase 1.5 — Préchargement ONE-SHOT après warmup.
+
+    Option C (24/04) — Élargi à 200 mails (avant : 50) pour pré-warmer
+    quasiment toute l'inbox au boot V2.
+    Option A (24/04) — Helper _parallel_prefetch_batch (8 workers) au lieu
+    de la boucle série `for msg ... time.sleep(2)`.
 
     Rôle distinct de `_continuous_speculation_loop` (Phase 6) :
-    - `_background_preload_loop` : UNE FOIS, 50 mails Graph ⇒ couvre la liste
-      réelle inbox au démarrage (au-delà de warmup_cache top 10).
-    - `_continuous_speculation_loop` : EN CONTINU (45s), scan `_warmup_cache` top 20
-      ⇒ re-spécule après purges événementielles (mails traités, user active).
-
-    Les deux sont complémentaires, pas redondants.
-
-    Se lance après le warmup. Interruptible : si _preload_pause est set
-    (activité utilisateur), pause 30s avant de reprendre.
-    Throttle 2s entre chaque mail pour ne pas saturer Graph.
+    - `_background_preload_loop` : UNE FOIS, 200 mails Graph ⇒ couverture
+      initiale large post-boot V2.
+    - `_continuous_speculation_loop` : EN CONTINU (45s), scan _warmup_cache
+      ⇒ re-spécule après purges événementielles.
     """
     try:
         time.sleep(8)  # Laisser le warmup + prefetch initiaux finir
@@ -953,69 +1163,52 @@ def _background_preload_loop():
         if not graph:
             return
         try:
-            # Fix 23/04 (T3) : include_body=True nécessaire pour que le
-            # prefetch A/B/C + _start_speculative reçoivent le body réel.
-            mails = graph.get_received_emails(limit=50, include_body=True)
+            # Option C : limit=200 (avant 50). include_body=True nécessaire
+            # pour prefetch A/B/C + _start_speculative.
+            mails = graph.get_received_emails(limit=200, include_body=True)
         except Exception as _e:
             logger.debug(f"[preload-ctx] Graph get_received_emails échoué : {_e}")
             return
-        preloaded = 0
-        for msg in mails:
-            # Interruption : attendre si l'utilisateur est actif
-            while _preload_pause.is_set():
-                # Lire le timestamp sous lock
-                with _preload_activity_lock:
-                    _elapsed = time.time() - _preload_last_activity[0]
-                # Reset automatique après 30s d'inactivité
-                if _elapsed > 30:
-                    _preload_pause.clear()
-                    break
-                time.sleep(2)
-            # I-DATA-11 : internet_message_id en priorité (matche Office.js)
-            mid = msg.get('internet_message_id') or msg.get('id', '')
-            if not mid:
-                continue
-            # Déjà traité ?
-            try:
-                if _db.is_treated(mid):
+
+        # Fix B (25/04) — Alimenter _warmup_cache pour que cont-spec couvre toute l'inbox.
+        # Avant : preload-ctx fetchait 200 mails mais ne les ajoutait pas à _warmup_cache
+        # → cont-spec voyait seulement 10 mails (cold-cache DB) → 39/49 mails invisibles
+        # → 32 drafts manquants non générés. Fix : injecter les 200 mails dans _warmup_cache
+        # AVANT le batch prefetch pour que cont-spec ait la couverture dès le 1er cycle.
+        # Phase 1 (25/04 soir) — Étiquetage canonique strict : IMID seul.
+        _skipped_no_imid = 0
+        with _warmup_lock:
+            for _m in mails:
+                _mid = _canonical_mid(_m)
+                if not _mid:
+                    _skipped_no_imid += 1
                     continue
-            except Exception:
-                pass
-            # Déjà dans le cache ?
-            with _prefetch_lock:
-                existing = _prefetch_cache.get(mid)
-                if existing and existing.get('status') in ('running', 'done'):
-                    continue
-            # Lancer le prefetch
-            mail_data = {
-                'from_email': msg.get('from_email', ''),
-                'from_name': msg.get('from_name', ''),
-                'subject': msg.get('subject', ''),
-                'body': msg.get('body') or msg.get('body_preview', ''),
-                'message_id': mid,
-                'conversation_id': msg.get('conversation_id', ''),
-            }
-            if not mail_data['from_email']:
-                continue
-            try:
-                _run_prefetch(mail_data)
-                preloaded += 1
-                if preloaded % 5 == 0:
-                    logger.info(f"[preload-ctx] {preloaded} mails pré-chargés...")
-                time.sleep(2)  # Throttle : 2s entre mails
-            except Exception:
-                pass
-        if preloaded:
-            logger.info(f"[preload-ctx] Terminé : {preloaded} mails avec contexte A/B/C prêt")
-            # I-DATA-11 : construire l'inbox_ids avec le format canonique
-            # pour matcher les clés de _prefetch_cache (Internet Message-ID).
-            inbox_ids = {(m.get('internet_message_id') or m.get('id', ''))
-                         for m in mails
-                         if (m.get('internet_message_id') or m.get('id'))}
+                _warmup_cache[_mid] = _m
+        if _skipped_no_imid:
+            logger.info(f"[preload-ctx] {_skipped_no_imid} mail(s) sans IMID canonique skippé(s)")
+        logger.info(f"[preload-ctx] Fix B : _warmup_cache étendu à {len(_warmup_cache)} mails")
+
+        logger.info(f"[preload-ctx] Option A+C : {len(mails)} mails récupérés, "
+                    f"lancement prefetch parallèle 8 workers…")
+        _t_start = time.time()
+
+        # Option A : helper parallèle remplace la boucle série.
+        submitted = _parallel_prefetch_batch(mails, max_workers=8,
+                                              tag='preload-ctx', check_pause=True)
+
+        _elapsed = time.time() - _t_start
+        if submitted:
+            logger.info(f"[preload-ctx] Terminé : {submitted}/{len(mails)} mails "
+                        f"soumis en {_elapsed:.1f}s")
+            # Phase 1 (25/04 soir) — IMID canonique seul.
+            inbox_ids = {_canonical_mid(m) for m in mails if _canonical_mid(m)}
             try:
                 _save_prefetch_cache(inbox_ids=inbox_ids)
             except Exception as _e:
                 logger.debug(f"[preload-ctx] Save cache échoué : {_e}")
+        else:
+            logger.info(f"[preload-ctx] Rien à soumettre ({len(mails)} mails "
+                        f"déjà en cache ou traités)")
     except Exception as e:
         logger.warning(f"[preload-ctx] Erreur loop : {e}")
 
@@ -1262,30 +1455,59 @@ def _is_user_modified(entry):
     return entry.get('source') == 'user_edit'
 
 
-def _should_append_signature(closing, user_name):
-    """Fix 24/04 — Évite la signature dupliquée en fin de mail.
+def _should_append_signature(closing, user_name, body=''):
+    """Fix 24/04 + 26/04 — Évite la signature dupliquée en fin de mail.
 
-    Symptôme observé sur contacts tutoiement (Ronan `closing='Cdlt yvan'`)
-    ou contacts avec closing personnalisé contenant déjà le prénom :
-        Cdlt yvan                    ← closing du profile (contient "yvan")
-        Yvan BOSSER (Groupe Bosser)  ← user_name ajouté mécaniquement = DOUBLON
+    Deux niveaux de détection anti-doublon :
 
-    Règle : si le closing contient déjà le prénom (premier mot du user_name,
-    case-insensitive, ≥ 2 chars), on SKIP l'ajout de la signature user_name.
-    Le "yvan" du closing suffit ; ajouter "Yvan BOSSER..." fait doublon.
+    Niveau 1 (24/04) — closing contient déjà le prénom :
+        Symptôme contacts tutoiement (Ronan `closing='Cdlt yvan'`) :
+            Cdlt yvan                    ← closing du profil (contient "yvan")
+            Yvan BOSSER (Groupe Bosser)  ← signature ajoutée = DOUBLON
+        Règle : si le closing contient déjà le prénom (premier mot du
+        user_name, case-insensitive, ≥ 2 chars), SKIP la signature.
 
-    Pour les closings génériques (ex "Cordialement,") sans le prénom,
-    la signature est bien ajoutée comme avant.
+    Niveau 2 (26/04) — body contient déjà signature inline :
+        Symptôme : Claude génère parfois un body avec "Yvan" ou
+        "Yvan BOSSER" sur les dernières lignes (signature inline). Si
+        on ajoute encore user_name après le closing → doublon.
+        Règle : si le prénom apparaît comme mot isolé dans les 3
+        dernières lignes non-vides du body OU si user_name complet y
+        figure → SKIP la signature.
+
+    Pour les closings génériques (ex "Cordialement,") sans le prénom
+    ET un body sans signature inline, la signature est bien ajoutée.
     """
-    if not user_name or not closing:
-        return bool(user_name)
+    if not user_name:
+        return False
     parts = user_name.strip().split()
     if not parts:
         return False
     prenom = parts[0].lower()
     if len(prenom) < 2:
         return True
-    return prenom not in closing.lower()
+
+    # Niveau 1 — closing contient déjà le prénom
+    if closing and prenom in closing.lower():
+        return False
+
+    # Niveau 2 — body contient déjà signature inline (prénom OU user_name complet)
+    if body:
+        # Strip HTML pour analyse plain text (cohérent avec instant_reply step 2)
+        body_plain = re.sub(r'<br\s*/?>', '\n', body, flags=re.IGNORECASE)
+        body_plain = re.sub(r'</p>\s*<p[^>]*>', '\n', body_plain, flags=re.IGNORECASE)
+        body_plain = re.sub(r'<[^>]+>', '', body_plain)
+        last_lines = [ln.strip().lower() for ln in body_plain.split('\n') if ln.strip()][-3:]
+        last_block = ' '.join(last_lines)
+        # Match prénom comme mot entier (évite faux positif sur "Yvanovich")
+        if re.search(r'\b' + re.escape(prenom) + r'\b', last_block):
+            return False
+        # Match aussi user_name complet (ex: "Yvan BOSSER")
+        user_name_lower = user_name.lower().strip()
+        if user_name_lower and user_name_lower in last_block:
+            return False
+
+    return True
 
 
 def _normalize_reply_to_html(text):
@@ -1394,6 +1616,13 @@ _mail_preview_lock = threading.Lock()
 _MAIL_PREVIEW_TTL = 3600  # 1h
 _MAIL_PREVIEW_MAX = 100
 
+# Cache partagé arborescence Outlook (évite les 429 quand 30+ threads prewarm
+# appellent get_all_folders() en parallèle — Fix 25/04)
+_outlook_folders_cache: list = []
+_outlook_folders_cache_ts: float = 0.0
+_outlook_folders_lock = threading.Lock()
+_OUTLOOK_FOLDERS_TTL = 300  # 5 minutes
+
 
 def _trim_dict_cache(cache_dict, max_entries):
     """Trim un cache dict en gardant les entrées les plus récentes par 'ts'."""
@@ -1501,27 +1730,57 @@ def _prewarm_echeance_for_mail(mid, mail_data):
         _set_mail_preview(mid, 'echeance', 'error', None)
 
 
+def _get_outlook_folders_cached() -> list:
+    """Retourne l'arborescence Outlook (cache session 5 min).
+
+    Évite que les 30+ threads prewarm appellent get_all_folders() simultanément
+    et déclenchent le rate-limiting Graph 429 (Fix — 25/04).
+    Pattern identique à _get_windows_folders_cached().
+    """
+    global _outlook_folders_cache, _outlook_folders_cache_ts
+    _now = time.time()
+    # Lecture rapide sans lock (double-check pattern)
+    if _outlook_folders_cache and (_now - _outlook_folders_cache_ts) < _OUTLOOK_FOLDERS_TTL:
+        return _outlook_folders_cache
+    with _outlook_folders_lock:
+        # Re-vérifier sous le lock (un autre thread a pu remplir entre les deux)
+        if _outlook_folders_cache and (_now - _outlook_folders_cache_ts) < _OUTLOOK_FOLDERS_TTL:
+            return _outlook_folders_cache
+        try:
+            _graph = get_graph()
+            _folders = _graph.get_all_folders() if _graph else []
+        except Exception as _e:
+            logger.debug(f"[outlook-folders] get_all_folders erreur : {_e}")
+            _folders = []
+        if _folders:
+            _outlook_folders_cache = _folders
+            _outlook_folders_cache_ts = _now
+            logger.info(f"[outlook-folders] cache rechargé ({len(_folders)} dossiers)")
+        return _outlook_folders_cache
+
+
 def _prewarm_classement_for_mail(mid, mail_data):
     """Suggestion classement pour un mail. Stocke dans cache DB persistant
     (mail_classement_cache) + cache RAM.
 
-    Pattern idempotent aligné sur mail_summaries :
-    1. Check DB d'abord → skip si déjà calculé (économie API 100%)
-    2. Sinon : pipeline règle DB (get_folder_suggestion) = Tier 1 + domaine
-    3. Persister résultat (suggestion OR null si pas de règle) en DB + RAM
-
-    Note : pas d'IA au pré-warm (coût × 50 mails trop élevé). Si règle DB
-    ne match pas, on stocke 'source=none' → dialog affichera "Néant".
-    L'IA fallback reste dispo sur /api/classification/post_send/<mid>
-    appelée au moment où l'user clique Envoyer.
+    Pipeline idempotent (P2+P3 — 25/04) :
+    1. Check DB → skip si déjà calculé (économie API 100%)
+    2. Règle DB (Tier 1 : contact + domaine + keywords)
+    3. Fallback Claude si aucune règle (Tier 6 — même pipeline que /api/classification/post_send)
+    4. Persist résultat (1-3 suggestions ou null) en DB + RAM
     """
     try:
         # [1] Cache DB : check idempotent
         try:
             cached = _db.get_mail_classement(mid)
             if cached is not None:
+                _sugg = cached.get('suggestion')
+                _slist = (_sugg.get('_suggestions', [_sugg])
+                          if isinstance(_sugg, dict) and '_suggestions' in _sugg
+                          else ([_sugg] if _sugg else []))
                 _set_mail_preview(mid, 'classement', 'done', {
-                    'suggestion': cached.get('suggestion'),
+                    'suggestion': _sugg,
+                    'suggestions': _slist,
                     'source': cached.get('source', 'none'),
                 })
                 logger.debug(f"[prewarm-cls] cache DB HIT pour {mid[:30]} "
@@ -1530,10 +1789,24 @@ def _prewarm_classement_for_mail(mid, mail_data):
         except Exception as _e:
             logger.debug(f"[prewarm-cls] check DB erreur : {_e}")
 
-        # [2] Pipeline règle DB (Tier 1 + domaine, cf. SPEC_CLASSIFICATION_MAIL)
+        # [2] Pipeline règle DB (Tier 1 + domaine)
         contact_email = (mail_data.get('from_email', '') or '').lower()
         subject = mail_data.get('subject', '')
         domain = contact_email.split('@')[-1] if '@' in contact_email else ''
+
+        # [2 bis] Skip si mail de l'utilisateur à lui-même (Fix 2 — 25/04)
+        # Classer un mail envoyé par soi-même n'a pas de sens.
+        _user_email = (_db.get_setting('auth_user_email') or '').strip().lower()
+        if _user_email and contact_email == _user_email:
+            try:
+                _db.save_mail_classement(mid, None, 'self')
+            except Exception:
+                pass
+            _set_mail_preview(mid, 'classement', 'done', {
+                'suggestion': None, 'suggestions': [], 'source': 'self',
+            })
+            return
+
         try:
             subject_kw = _extract_subject_keywords(subject)
         except Exception:
@@ -1543,18 +1816,65 @@ def _prewarm_classement_for_mail(mid, mail_data):
         except Exception:
             suggestion = None
 
-        # [3] Persister (suggestion OR null pour marquer "déjà vérifié, pas de règle")
-        source = 'rule' if suggestion else 'none'
-        try:
-            _db.save_mail_classement(mid, suggestion, source)
-        except Exception as _e:
-            logger.debug(f"[prewarm-cls] save DB : {_e}")
-        _set_mail_preview(mid, 'classement', 'done', {
-            'suggestion': suggestion,
-            'source': source,
-        })
         if suggestion:
+            try:
+                _db.save_mail_classement(mid, suggestion, 'rule')
+            except Exception as _e:
+                logger.debug(f"[prewarm-cls] save DB rule : {_e}")
+            _set_mail_preview(mid, 'classement', 'done', {
+                'suggestion': suggestion,
+                'suggestions': [suggestion],
+                'source': 'rule',
+            })
             logger.info(f"[prewarm-cls] règle DB matche pour {mid[:30]}")
+            return
+
+        # [3] Fallback Claude si aucune règle DB (P2 — 25/04)
+        # Même pipeline que route /api/classification/post_send, Tier 6 (IA)
+        # Utilise le cache partagé pour éviter les 429 Graph (Fix — 25/04)
+        builder = _get_prompt_builder()
+        if builder:
+            folders = _get_outlook_folders_cached()
+            if folders:
+                try:
+                    body_snippet = (mail_data.get('body_preview')
+                                    or (mail_data.get('body') or '')[:500])
+                    _contact_profile = _db.get_contact_profile(contact_email)
+                    _recent = _db.get_recent_classifications(
+                        contact_email, domain, limit=10)
+                    result = builder.suggest_folder(
+                        contact_email, subject, body_snippet, folders,
+                        recent_classifications=_recent,
+                        contact_profile=_contact_profile,
+                    )
+                    if result and result.get('folder_id'):
+                        suggestions = result.get('_suggestions', [result])
+                        try:
+                            _db.save_mail_classement(mid, result, 'ai')
+                        except Exception as _e:
+                            logger.debug(f"[prewarm-cls] save DB ai : {_e}")
+                        _set_mail_preview(mid, 'classement', 'done', {
+                            'suggestion': result,
+                            'suggestions': suggestions,
+                            'source': 'ai',
+                        })
+                        logger.info(
+                            f"[prewarm-cls] Claude → {result.get('folder_path')} "
+                            f"({len(suggestions)} suggestion(s)) pour {mid[:30]}")
+                        return
+                except Exception as _e:
+                    logger.debug(f"[prewarm-cls] Claude fallback : {_e}")
+
+        # [4] Aucune suggestion → save 'none' (idempotent, plus jamais re-scanné)
+        try:
+            _db.save_mail_classement(mid, None, 'none')
+        except Exception as _e:
+            logger.debug(f"[prewarm-cls] save none : {_e}")
+        _set_mail_preview(mid, 'classement', 'done', {
+            'suggestion': None,
+            'suggestions': [],
+            'source': 'none',
+        })
     except Exception as e:
         logger.debug(f"[prewarm-cls] {e}")
         _set_mail_preview(mid, 'classement', 'error', None)
@@ -1564,22 +1884,26 @@ def _prewarm_pj_classement_for_mail(mid, mail_data):
     """Suggestion classement PJ pour un mail. Stocke dans cache DB
     (mail_pj_classement_cache) + cache RAM.
 
-    Pattern idempotent :
+    Pipeline idempotent (P2+P3 — 25/04) :
     1. Check DB → skip si HIT
-    2. Si mail sans PJ → save source='no_pj' (idempotent, plus jamais re-scanné)
-    3. Si mail avec PJ → pipeline règle DB (get_pj_folder_suggestion + keywords)
-    4. Persist résultat en DB + RAM
-
-    Note : pas d'IA au pré-warm (cohérent avec classement mail). IA reste
-    dispo sur /api/pj_classification/post_send/<mid> au moment de l'envoi.
+    2. Mail sans PJ → save 'no_pj' (idempotent, plus jamais re-scanné)
+    3. Règle DB (Tier 1 contact + keywords)
+    4. Fallback Claude si aucune règle (Tier 3 — même pipeline que /api/suggest_pj_folder)
+    5. Persist résultat en DB + RAM
     """
     try:
         # [1] Cache DB : check idempotent
         try:
             cached = _db.get_mail_pj_classement(mid)
             if cached is not None:
+                _sugg = cached.get('suggestion')
+                # Fix 3 (25/04) : normaliser dest_folder → folder_path (ancienne structure DB rules)
+                if isinstance(_sugg, dict) and 'dest_folder' in _sugg and 'folder_path' not in _sugg:
+                    _sugg = dict(_sugg)
+                    _sugg['folder_path'] = _sugg['dest_folder']
                 _set_mail_preview(mid, 'pj_classement', 'done', {
-                    'suggestion': cached.get('suggestion'),
+                    'suggestion': _sugg,
+                    'suggestions': [_sugg] if _sugg else [],
                     'source': cached.get('source', 'none'),
                 })
                 return
@@ -1595,11 +1919,11 @@ def _prewarm_pj_classement_for_mail(mid, mail_data):
             except Exception as _e:
                 logger.debug(f"[prewarm-pj] save no_pj : {_e}")
             _set_mail_preview(mid, 'pj_classement', 'done', {
-                'suggestion': None, 'source': 'no_pj',
+                'suggestion': None, 'suggestions': [], 'source': 'no_pj',
             })
             return
 
-        # [3] Pipeline règle DB (Tier 1 contact + keywords + domaine)
+        # [3] Pipeline règle DB (Tier 1 contact + keywords)
         contact_email = (mail_data.get('from_email', '') or '').lower()
         subject = mail_data.get('subject', '')
         domain = contact_email.split('@')[-1] if '@' in contact_email else ''
@@ -1612,25 +1936,77 @@ def _prewarm_pj_classement_for_mail(mid, mail_data):
                 contact_email, domain, subject_keywords=subject_kw)
         except Exception:
             suggestion = None
-        # Fallback : matching par keywords (si pas de règle Tier 1)
         if not suggestion:
             try:
                 suggestion = _db.get_pj_folder_by_keywords(contact_email, subject_kw)
             except Exception:
                 suggestion = None
 
-        # [4] Persister
-        source = 'rule' if suggestion else 'none'
-        try:
-            _db.save_mail_pj_classement(mid, suggestion, source)
-        except Exception as _e:
-            logger.debug(f"[prewarm-pj] save DB : {_e}")
-        _set_mail_preview(mid, 'pj_classement', 'done', {
-            'suggestion': suggestion,
-            'source': source,
-        })
         if suggestion:
+            # Fix 3 (25/04) : normaliser dest_folder → folder_path avant sauvegarde
+            if isinstance(suggestion, dict) and 'dest_folder' in suggestion and 'folder_path' not in suggestion:
+                suggestion = dict(suggestion)
+                suggestion['folder_path'] = suggestion['dest_folder']
+            try:
+                _db.save_mail_pj_classement(mid, suggestion, 'rule')
+            except Exception as _e:
+                logger.debug(f"[prewarm-pj] save DB rule : {_e}")
+            _set_mail_preview(mid, 'pj_classement', 'done', {
+                'suggestion': suggestion,
+                'suggestions': [suggestion],
+                'source': 'rule',
+            })
             logger.info(f"[prewarm-pj] règle DB matche pour {mid[:30]}")
+            return
+
+        # [4] Fallback Claude si aucune règle DB et PJ présentes (P2 — 25/04)
+        # Même pipeline que route /api/suggest_pj_folder, Tier 3 (IA)
+        pj_names = [a.get('name', '') for a in attachments if a.get('name')]
+        if pj_names:
+            builder = _get_prompt_builder()
+            if builder:
+                try:
+                    folders = _get_windows_folders_cached()
+                    if folders:
+                        pj_history = _db.get_pj_classification_history(
+                            contact_email, limit=20)
+                        recent = _db.get_recent_pj_classifications(
+                            contact_email, domain, limit=10)
+                        cp = _db.get_contact_profile(contact_email)
+                        body_snippet = (mail_data.get('body_preview')
+                                        or (mail_data.get('body') or '')[:500])
+                        result = builder.suggest_pj_folder(
+                            contact_email, subject, pj_names, folders,
+                            recent_pj_classifications=recent,
+                            contact_profile=cp,
+                            pj_history=pj_history,
+                            body_snippet=body_snippet,
+                        )
+                        if result and result.get('folder_path'):
+                            try:
+                                _db.save_mail_pj_classement(mid, result, 'ai')
+                            except Exception as _e:
+                                logger.debug(f"[prewarm-pj] save DB ai : {_e}")
+                            _set_mail_preview(mid, 'pj_classement', 'done', {
+                                'suggestion': result,
+                                'suggestions': [result],
+                                'source': 'ai',
+                            })
+                            logger.info(
+                                f"[prewarm-pj] Claude → {result.get('folder_path')} "
+                                f"pour {mid[:30]}")
+                            return
+                except Exception as _e:
+                    logger.debug(f"[prewarm-pj] Claude fallback : {_e}")
+
+        # [5] Aucune suggestion → save 'none' (idempotent)
+        try:
+            _db.save_mail_pj_classement(mid, None, 'none')
+        except Exception as _e:
+            logger.debug(f"[prewarm-pj] save none : {_e}")
+        _set_mail_preview(mid, 'pj_classement', 'done', {
+            'suggestion': None, 'suggestions': [], 'source': 'none',
+        })
     except Exception as e:
         logger.debug(f"[prewarm-pj] {e}")
         _set_mail_preview(mid, 'pj_classement', 'error', None)
@@ -1640,11 +2016,26 @@ def _prewarm_mail_preview(mail_data):
     """Lance la pré-chauffe échéance + classement pour UN mail.
     Skip si déjà en cache récent (<TTL) avec status done/running.
     Non-bloquant : 2 threads daemon séparés pour parallélisme.
+
+    Phase 1 (25/04 soir) — Étiquetage canonique strict : IMID seul. Si absent,
+    le mail est "anonyme" → skip BG (streaming au clic).
+
+    Phase 2 (25/04 soir) — Filtre unifié Smart Speculative : 1 filtre = 5
+    décisions identiques. Si filtré → aucun plat préparé en BG (tout sera
+    généré à la commande au clic user, en parallèle, en streaming).
     """
-    mid = (mail_data.get('internet_message_id')
-           or mail_data.get('message_id')
-           or mail_data.get('id', ''))
+    mid = _canonical_mid(mail_data)
     if not mid:
+        logger.debug(f"[mail-preview] skip mail sans IMID canonique : "
+                     f"subject={mail_data.get('subject', '')[:40]}")
+        return
+    # Phase 2 — Filtre unifié : si non éligible, pas de preview BG
+    try:
+        ok_spec, skip_reason = _should_speculate(mail_data)
+    except Exception:
+        ok_spec, skip_reason = True, ''  # En cas d'erreur, on continue (fail-open)
+    if not ok_spec:
+        logger.debug(f"[mail-preview] skip filtré ({skip_reason}) mid={mid[:30]}")
         return
     now = time.time()
     with _mail_preview_lock:
@@ -1701,13 +2092,11 @@ def _prewarm_mail_preview(mail_data):
                          name='prewarm-pj').start()
 
 
-def _prewarm_mail_previews_batch(mails, max_scans=15):
-    """Lance pré-chauffe preview pour une liste de mails (top N).
-    Throttle à max_scans pour éviter rate limit Claude."""
+def _prewarm_mail_previews_batch(mails):
+    """Lance pré-chauffe preview pour les mails ayant un draft (P1 25/04).
+    Pas de limite max_scans — idempotence DB/RAM évite les appels redondants."""
     count = 0
     for m in mails:
-        if count >= max_scans:
-            break
         _prewarm_mail_preview(m)
         count += 1
     if count:
@@ -1736,20 +2125,21 @@ def _reply_cache_cohesion_refresh():
         # bloc, donc la fonction ne purgeait RIEN depuis son déploiement.
         inbox_ids = set()
         with _warmup_lock:
-            # _warmup_cache est un dict {message_id: email_dict} — on prend
-            # les clés ET les valeurs pour couvrir les 2 formats possibles
-            # (Graph id hex + internet_message_id quand disponible).
-            for mid, email in _warmup_cache.items():
+            # Phase 1 (25/04 soir) — _warmup_cache est désormais keyé sur IMID
+            # canonique uniquement. Plus besoin de fallback sur internet_message_id
+            # depuis la valeur (la clé EST déjà l'IMID canonique).
+            for mid in _warmup_cache.keys():
                 if mid:
                     inbox_ids.add(mid)
-                if isinstance(email, dict):
-                    im_id = email.get('internet_message_id') or email.get('message_id')
-                    if im_id:
-                        inbox_ids.add(im_id)
         try:
             for entry_id, _email_data in _db.get_recent_email_cache(limit=200):
                 if entry_id:
                     inbox_ids.add(entry_id)
+                # Aussi ajouter l'IMID extrait du payload si différent
+                if isinstance(_email_data, dict):
+                    _im = _email_data.get('internet_message_id', '') or ''
+                    if _im and _im.startswith('<') and _im.endswith('>'):
+                        inbox_ids.add(_im)
         except Exception as e:
             logger.debug(f"[reply_cache cohesion] DB read : {e}")
 
@@ -2008,11 +2398,15 @@ def _poll_companion_loop():
                         msg = recent[0]
                         to_str = ','.join([r.get('email', '') for r in msg.get('to', [])]) if isinstance(msg.get('to'), list) else str(msg.get('to', ''))
                         cc_str = ','.join([r.get('email', '') for r in msg.get('cc', [])]) if isinstance(msg.get('cc'), list) else str(msg.get('cc', ''))
+                        # Phase 1 (25/04 soir) — toujours porter l'IMID canonique.
+                        # Le champ message_id est gardé pour compat (legacy).
+                        _imid_canon = msg.get('internet_message_id', '') or ''
                         data = {
                             'subject': msg.get('subject', ''),
                             'from_email': msg.get('from_email', ''),
                             'from_name': msg.get('from_name', ''),
-                            'message_id': msg.get('internet_message_id', '') or msg.get('id', ''),
+                            'message_id': _imid_canon or msg.get('id', ''),
+                            'internet_message_id': _imid_canon,  # Canonique pour _canonical_mid()
                             'conversation_id': msg.get('conversation_id', ''),
                             'has_attachments': msg.get('has_attachments', False),
                             'attachments': msg.get('attachments', []),
@@ -2427,18 +2821,15 @@ def summarize_mails_to_db(mails, chunk_size=10):
         return (0, 0)
 
     # Filtre idempotence
-    # Fix A13 (audit 21/04) : utiliser internet_message_id en priorité.
-    # autorunshared.js (Office.js) envoie internetMessageId comme clé au
-    # frontend. Le warmup récupère des emails Graph avec DEUX IDs :
-    # 'id' (Graph hex) et 'internet_message_id' (RFC 2822). On DOIT stocker
-    # l'internet_message_id pour matcher les requêtes du dialog.
+    # Phase 1 (25/04 soir) — Étiquetage canonique strict via _canonical_mid.
+    # Phase 2 (25/04 soir) — Filtre Smart Speculative unifié : si filtré,
+    # pas de résumé BG (sera généré à la commande au clic).
     to_scan = []
     skipped = 0
     skipped_short_body = 0
+    skipped_filtered = 0
     for m in mails:
-        msg_id = (m.get('internet_message_id')
-                  or m.get('message_id')
-                  or m.get('id') or '')
+        msg_id = _canonical_mid(m)
         if not msg_id:
             continue
         try:
@@ -2447,6 +2838,14 @@ def summarize_mails_to_db(mails, chunk_size=10):
                 continue
         except Exception:
             pass
+        # Phase 2 — Filtre unifié
+        try:
+            ok_spec, _reason = _should_speculate(m)
+        except Exception:
+            ok_spec = True  # fail-open
+        if not ok_spec:
+            skipped_filtered += 1
+            continue
         # Fix audit 22/04 : skipper les mails sans body complet (body_preview
         # seul = 255 chars, trop court pour un résumé utile. Claude retourne
         # vide → bulk "0 généré" spam des logs). Le body complet arrivera :
@@ -2468,11 +2867,12 @@ def summarize_mails_to_db(mails, chunk_size=10):
         })
 
     if not to_scan:
+        _msg_parts = [f"skipped={skipped} already_db"]
         if skipped_short_body:
-            logger.info(f"[summaries] rien à résumer (skipped={skipped} "
-                        f"already_db, short_body={skipped_short_body})")
-        else:
-            logger.info(f"[summaries] rien à résumer (skipped={skipped})")
+            _msg_parts.append(f"short_body={skipped_short_body}")
+        if skipped_filtered:
+            _msg_parts.append(f"filtered={skipped_filtered}")
+        logger.info(f"[summaries] rien à résumer ({', '.join(_msg_parts)})")
         return (0, skipped)
 
     generated = 0
@@ -2530,11 +2930,16 @@ def _run_prefetch(mail_data):
     from_email = mail_data.get('from_email', '')
     conversation_id = mail_data.get('conversation_id', '')
     subject = mail_data.get('subject', '')
-    message_id = mail_data.get('message_id', '')
+    # Phase 1 (25/04 soir) — Étiquetage canonique strict : IMID seul.
+    # Si absent → mail anonyme → skip BG (streaming au clic).
+    message_id = _canonical_mid(mail_data)
+    if not message_id:
+        logger.debug(f"[prefetch] skip mail sans IMID canonique : "
+                     f"subject={subject[:40]}")
+        return
 
-    # Clé de cache pour éviter les doublons
-    # Si pas de message_id, utiliser from+subject (risque de collision si 2 mails identiques)
-    cache_key = message_id if message_id else f"{from_email}:{subject}"
+    # Clé de cache = IMID canonique (pas de fallback from+subject)
+    cache_key = message_id
     # Lecture du statut existant SOUS lock (court), décision prise HORS lock
     # (bonne pratique : ne jamais appeler .set() / .clear() / .wait() dans
     # un `with` d'un autre lock — évite les mauvais patterns même si ici
@@ -2554,6 +2959,52 @@ def _run_prefetch(mail_data):
     if existing_status == 'done':
         _bodies_enriched.set()
         _c_context_ready.set()
+        # Fix root-cause I-CX-01 (24/04 P5) : prefetch 'done' ≠ draft généré.
+        # La boucle BG envoie ces mails ici car _reply_cache ne les a pas,
+        # mais le `return` précédent skippait _start_speculative → 0 drafts.
+        # On déclenche la spéculation directement sans refaire le prefetch.
+        if message_id and from_email and _is_contact_known(from_email):
+            ok_spec, skip_reason = _should_speculate(mail_data)
+            if ok_spec:
+                def _speculate_ws_done(md):
+                    acq = _ai_speculative_semaphore.acquire(blocking=True, timeout=120)
+                    if not acq:
+                        return
+                    try:
+                        _start_speculative(md)
+                    finally:
+                        _ai_speculative_semaphore.release()
+                threading.Thread(target=_speculate_ws_done, args=(mail_data,),
+                                 daemon=True).start()
+            else:
+                logger.debug(f"[spec-done] Skip ({skip_reason}) {message_id[:20]}")
+                # Fix C (25/04) — Marquer 'filtered' pour éviter resoumission ∞.
+                # Sans ça : _reply_cache vide → candidat à chaque cycle 45s.
+                # FIX P14 (25/04 soir) : NE PAS écraser un draft valide existant.
+                with _reply_lock:
+                    _existing = _reply_cache.get(message_id, {})
+                    if not (_existing.get('status') == 'done'
+                            and _existing.get('source') in ('bg_speculation', 'template', 'user_edit', 'preemptive')
+                            and _existing.get('text')):
+                        _reply_cache[message_id] = {
+                            'status': 'done', 'source': 'filtered',
+                            'reason': skip_reason, 'timestamp': time.time(),
+                        }
+        elif message_id:
+            # Fix C bis (25/04) — Tier2 (contact inconnu) : prefetch déjà done
+            # mais speculation jamais lancée (guard _is_contact_known). Sans entrée
+            # _reply_cache, le mail est candidat à chaque cycle → resoumission ∞.
+            # FIX P14 (25/04 soir) : NE PAS écraser un draft valide existant.
+            logger.debug(f"[spec-done] Skip contact_unknown {message_id[:20]}")
+            with _reply_lock:
+                _existing = _reply_cache.get(message_id, {})
+                if not (_existing.get('status') == 'done'
+                        and _existing.get('source') in ('bg_speculation', 'template', 'user_edit', 'preemptive')
+                        and _existing.get('text')):
+                    _reply_cache[message_id] = {
+                        'status': 'done', 'source': 'filtered',
+                        'reason': 'contact_unknown', 'timestamp': time.time(),
+                    }
         return
     if existing_status == 'running':
         return
@@ -2678,9 +3129,11 @@ def _run_prefetch(mail_data):
 
         # Limiter la taille du cache (même pattern que le proto _trim_prefetch_cache)
         with _prefetch_lock:
-            if len(_prefetch_cache) > 50:
+            # 24/04 — Bumped 50→300 / 25→150 pour Option C (pré-warm 200 mails).
+            # L'ancien trim à 50 écrasait le travail du preload BG.
+            if len(_prefetch_cache) > 300:
                 oldest_keys = sorted(_prefetch_cache.keys(),
-                    key=lambda k: _prefetch_cache[k].get('timestamp', 0))[:25]
+                    key=lambda k: _prefetch_cache[k].get('timestamp', 0))[:150]
                 for k in oldest_keys:
                     del _prefetch_cache[k]
 
@@ -2703,13 +3156,54 @@ def _run_prefetch(mail_data):
         if message_id and from_email and _is_contact_known(from_email):
             ok_spec, skip_reason = _should_speculate(mail_data)
             if ok_spec:
+                # Option A (24/04) — Sémaphore LLM : max 4 spéculations
+                # parallèles. Bloquant timeout 120s (évite de perdre une
+                # spéculation quand prefetch déjà 'done' → pas retenté).
+                def _speculate_with_semaphore(md):
+                    acquired = _ai_speculative_semaphore.acquire(
+                        blocking=True, timeout=120)
+                    if not acquired:
+                        logger.warning(
+                            f"[speculative] Skip sémaphore saturé >120s "
+                            f"pour {md.get('message_id','')[:30]}")
+                        return
+                    try:
+                        _start_speculative(md)
+                    finally:
+                        _ai_speculative_semaphore.release()
                 threading.Thread(
-                    target=_start_speculative,
+                    target=_speculate_with_semaphore,
                     args=(mail_data,),
                     daemon=True
                 ).start()
             else:
                 logger.info(f"[speculative] Skip ({skip_reason}) pour {message_id[:20]}")
+                # Fix C (25/04) — Marquer 'filtered' pour éviter resoumission ∞.
+                # FIX P14 (25/04 soir) : NE PAS écraser un draft valide existant.
+                with _reply_lock:
+                    _existing = _reply_cache.get(message_id, {})
+                    if not (_existing.get('status') == 'done'
+                            and _existing.get('source') in ('bg_speculation', 'template', 'user_edit', 'preemptive')
+                            and _existing.get('text')):
+                        _reply_cache[message_id] = {
+                            'status': 'done', 'source': 'filtered',
+                            'reason': skip_reason, 'timestamp': time.time(),
+                        }
+        elif message_id:
+            # Fix C bis (25/04) — Tier2 (contact inconnu) : prefetch frais terminé
+            # mais speculation jamais lancée (guard _is_contact_known). Sans entrée
+            # _reply_cache, le mail est candidat à chaque cycle → resoumission ∞.
+            # FIX P14 (25/04 soir) : NE PAS écraser un draft valide existant.
+            logger.debug(f"[speculative] Skip contact_unknown {message_id[:20]}")
+            with _reply_lock:
+                _existing = _reply_cache.get(message_id, {})
+                if not (_existing.get('status') == 'done'
+                        and _existing.get('source') in ('bg_speculation', 'template', 'user_edit', 'preemptive')
+                        and _existing.get('text')):
+                    _reply_cache[message_id] = {
+                        'status': 'done', 'source': 'filtered',
+                        'reason': 'contact_unknown', 'timestamp': time.time(),
+                    }
 
     except Exception as e:
         logger.error(f"Prefetch error: {e}")
@@ -3039,48 +3533,99 @@ def _prefetch_context_c_with_table(keywords, graph=None, correspondent_email='',
     return normalized
 
 
-def _detect_importance(body, subject):
+# --- Importance R/S/H (porté du proto app.py:_detect_importance, gap #4) ----
+# R = Rapide (mail court, simple, accusé/relance/confirmation) → 600 tokens
+# S = Standard (par défaut) → 1000 tokens
+# H = Haute (juridique, sensible, contact à risque, mail long multi-questions) → 1500 tokens
+# Règle d'or : en cas de doute, on SURCLASSE (jamais sous-classer).
+_IMPORTANCE_SENSITIVE_KEYWORDS = {
+    'litige', 'bail', 'notaire', 'contentieux', 'tribunal',
+    'huissier', 'mise en demeure', 'assignation', 'résiliation', 'impayé',
+    'avocat', 'injonction', 'commandement', 'saisie',
+    'liquidation', 'redressement', 'caution', 'hypothèque',
+}
+_IMPORTANCE_SENSITIVE_CATEGORIES = {'banquier', 'avocat', 'notaire', 'institutionnel'}
+
+
+def _detect_importance(body, subject, contact_profile=None, mid=''):
     """
-    Détecte automatiquement l'importance d'un mail (R/S/H) par mots-clés.
+    Détecte automatiquement l'importance d'un mail (R/S/H).
 
-    Appliqué uniquement si le client n'a pas fourni d'importance explicite.
-    Conservateur : préfère S (Standard) en cas de doute.
-    Le body est strippé de ses balises HTML avant analyse.
+    Porté du proto `app.py:_detect_importance` (gap #4 V2 vs proto).
+    Signature étendue avec `contact_profile` optionnel (rétrocompatible :
+    les anciens appels à 2 arguments continuent de fonctionner).
 
-    R (Rapide)  : urgence forte et non ambiguë → fast path, 600 tokens
-    H (Haute)   : action / validation explicitement demandée → 1500 tokens
-    S (Standard): tout le reste (défaut) → 1000 tokens
+    Critères :
+        - H : mot sensible dans le sujet (litige, bail, notaire, ...)
+        - H : >=2 mots sensibles dans le body
+        - H : contact appartenant à _IMPORTANCE_SENSITIVE_CATEGORIES
+        - H : body long (>1500 chars) ET >=3 questions
+        - R : body court (<300 chars) ET <=1 question, sans montant ni date limite
+        - S : par défaut
+
+    Le `mid` est utilisé pour le log (`[importance] {mid} → R|S|H (raison)`).
+    En cas d'erreur la fonction retourne 'S' (rétrocompatibilité).
     """
-    # Strip HTML (le body peut contenir des balises)
-    body_text = re.sub(r'<[^>]+>', ' ', body)
-    text = (subject + ' ' + body_text).lower()
+    try:
+        # Strip HTML (le body peut contenir des balises)
+        body_text = re.sub(r'<[^>]+>', ' ', body or '')
+        subject_lower = (subject or '').lower()
+        body_lower_500 = body_text[:500].lower()
+        body_full_lower = body_text.lower()
+        body_len = len(body_text)
 
-    # R : uniquement les mots d'urgence forts et non ambigus
-    mots_r = [
-        'urgent', 'urgente', 'urgentes', 'urgents',
-        'asap',
-        'emergency',
-        'besoin urgent', 'réponse urgente', 'délai urgent',
-        'tout de suite',
-        'dès que possible',
-        'le plus tôt possible',
-    ]
-    # H : uniquement si une action / validation est explicitement demandée
-    mots_h = [
-        'action requise', 'action required',
-        'à valider', 'à confirmer',
-        'merci de confirmer', 'pouvez-vous confirmer', 'pouvez-vous valider',
-        'votre accord', 'votre validation', 'votre approbation',
-        "qu'en pensez-vous",
-    ]
+        # === H : mots sensibles dans le sujet (1 suffit) ===
+        for kw in _IMPORTANCE_SENSITIVE_KEYWORDS:
+            if kw in subject_lower:
+                _log_importance(mid, 'H', f"mot sensible sujet ({kw})")
+                return 'H'
 
-    for mot in mots_r:
-        if mot in text:
-            return 'R'
-    for mot in mots_h:
-        if mot in text:
+        # === H : mots sensibles dans le body (2 minimum requis) ===
+        body_kw_hits = [kw for kw in _IMPORTANCE_SENSITIVE_KEYWORDS if kw in body_lower_500]
+        if len(body_kw_hits) >= 2:
+            _log_importance(mid, 'H', f"mots sensibles body ({', '.join(body_kw_hits[:3])})")
             return 'H'
-    return 'S'
+
+        # === H : catégorie de contact sensible (banquier, avocat, notaire) ===
+        if contact_profile:
+            cat = (contact_profile.get('category', '') or '').lower()
+            if cat in _IMPORTANCE_SENSITIVE_CATEGORIES:
+                _log_importance(mid, 'H', f"contact sensible ({cat})")
+                return 'H'
+
+        # === H : mail long avec plusieurs questions ===
+        question_count = body_text.count('?')
+        if body_len > 1500 and question_count >= 3:
+            _log_importance(mid, 'H', f"mail long ({body_len} chars), {question_count} questions")
+            return 'H'
+
+        # === R : mail court et simple (sans montant ni date limite) ===
+        if body_len < 300 and question_count <= 1:
+            has_amount = bool(re.search(r'\d+[\s.,]?\d*\s*[€$]|\d+\s*euros?', body_full_lower))
+            has_deadline = bool(re.search(
+                r'avant le|d[ée]lai|date limite|sous \d+ jours?|urgentis',
+                body_full_lower
+            ))
+            if not has_amount and not has_deadline:
+                _log_importance(mid, 'R', f"court & simple ({body_len} chars)")
+                return 'R'
+
+        # === S : par défaut ===
+        _log_importance(mid, 'S', "standard")
+        return 'S'
+    except Exception as e:
+        # Rétrocompatibilité : en cas d'erreur, fallback S (= comportement actuel)
+        logger.warning(f"[importance] détection échouée → fallback S : {e}")
+        return 'S'
+
+
+def _log_importance(mid, level, reason):
+    """Log unifié pour la détection d'importance."""
+    try:
+        mid_short = (mid or 'no-id')[:30]
+        logger.info(f"[importance] {mid_short} → {level} (raison: {reason})")
+    except Exception:
+        pass
 
 
 def _extract_prefetch_keywords(subject):
@@ -3143,10 +3688,23 @@ def _should_speculate(mail_data):
     message_id = mail_data.get('message_id', '')
     from_email = (mail_data.get('from_email', '') or '').lower()
     body = mail_data.get('body', '') or ''
-    to_field = (mail_data.get('to', '') or '').lower()
-    cc_field = (mail_data.get('cc', '') or '').lower()
+    # Fix 24/04 (P8) : Graph retourne 'to'/'cc' comme list[dict] (normalize_email),
+    # pas comme str. Appeler .lower() sur une liste → AttributeError → crash silencieux
+    # dans Prefetch error → 0 spéculations BG. Fix : extraire les adresses email.
+    _to_raw = mail_data.get('to', '') or ''
+    if isinstance(_to_raw, list):
+        to_field = ' '.join((r.get('email', '') or r.get('address', ''))
+                            for r in _to_raw).lower()
+    else:
+        to_field = _to_raw.lower()
+    _cc_raw = mail_data.get('cc', '') or ''
+    if isinstance(_cc_raw, list):
+        cc_field = ' '.join((r.get('email', '') or r.get('address', ''))
+                            for r in _cc_raw).lower()
+    else:
+        cc_field = _cc_raw.lower()
 
-    # Filtre 1 : mail > 7 jours
+    # Filtre 1 : mail > 30 jours (modifié 25/04 — seuil 7j trop strict en phase de tests)
     mail_date = mail_data.get('date', '')
     if mail_date:
         try:
@@ -3155,8 +3713,8 @@ def _should_speculate(mail_data):
                 dt_naive = dt.replace(tzinfo=None)
             else:
                 dt_naive = datetime.strptime(mail_date, '%Y-%m-%d %H:%M:%S')
-            if (datetime.now() - dt_naive).days > 7:
-                return False, 'mail > 7 jours'
+            if (datetime.now() - dt_naive).days > 30:
+                return False, 'mail > 30 jours'
         except Exception:
             pass
 
@@ -3208,7 +3766,8 @@ def _start_speculative(mail_data):
     Appelé uniquement si _is_contact_known() → True (TIER 1/2).
     Le cache est nettoyé automatiquement après envoi / suppression / classement.
     """
-    message_id = mail_data.get('message_id', '')
+    # Phase 1 (25/04 soir) — Étiquetage canonique strict : IMID seul.
+    message_id = _canonical_mid(mail_data)
     if not message_id:
         return
 
@@ -3293,7 +3852,10 @@ def _start_speculative(mail_data):
         from_name = mail_data.get('from_name', '')
         raw_body = mail_data.get('body', '')[:10000]
         # ANOMALIE #5 fix : auto-détecter l'importance (cohérence avec generate_reply)
-        importance_letter = _detect_importance(raw_body, subject)
+        # Gap #4 : on passe contact_profile pour activer la règle "contact sensible → H"
+        importance_letter = _detect_importance(raw_body, subject,
+                                               contact_profile=contact_profile,
+                                               mid=message_id)
         importance_int = {'R': 1, 'S': 2, 'H': 3}[importance_letter]
         max_tokens = {'R': 600, 'S': 1000, 'H': 1500}[importance_letter]
 
@@ -3330,6 +3892,9 @@ def _start_speculative(mail_data):
                     }
                 logger.info(f"Template '{template_name}' preemptif pour {message_id[:20]}")
                 _broadcast_sse('speculative_ready', {'message_id': message_id, 'source': 'template'})
+                # Draft prêt → déclencher preview (échéance + classement + PJ) immédiatement (25/04)
+                threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
+                                 daemon=True, name='preview-post-draft').start()
                 return  # Pas d'appel IA nécessaire
         except Exception as e:
             logger.warning(f"Erreur detect_template speculative: {e}")
@@ -3492,6 +4057,12 @@ def _start_speculative(mail_data):
             # P0.5 (24/04) : normaliser le texte en HTML avant stockage.
             # `chunks` restent basés sur full_text (plain) pour streaming sûr.
             text_html = _normalize_reply_to_html(full_text)
+            # Phase 1.5 (25/04 soir) — Garde-fou anti-pollution : ne PAS stocker
+            # un refus de Claude (body factice/tronqué) qui pollue le cache.
+            if _is_garbage_draft(text_html):
+                logger.warning(f"[speculative] DRAFT POUBELLE détecté (probable body factice) "
+                               f"pour {message_id[:30]} — non stocké, retry au prochain cycle")
+                return
             _reply_cache[message_id] = {
                 'status': 'done',
                 'source': 'bg_speculation',      # pour badge UI "pré-généré"
@@ -3505,6 +4076,9 @@ def _start_speculative(mail_data):
 
         logger.info(f"Spéculation prête pour {message_id[:20]}... ({len(chunks)} chunks)")
         _broadcast_sse('speculative_ready', {'message_id': message_id})
+        # Draft prêt → déclencher preview (échéance + classement + PJ) immédiatement (25/04)
+        threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
+                         daemon=True, name='preview-post-draft').start()
 
         # Fix 23/04 (T2) : persister dès qu'une nouvelle bg_speculation est prête.
         # Sans ça, si V2 crash/restart avant l'atexit, la pré-réponse Claude
@@ -3534,10 +4108,10 @@ def _run_preemptive_bg(inbox_mails):
         return
 
     # Identifier les candidats TIER 1
+    # Phase 1 (25/04 soir) — IMID canonique seul.
     candidates = []
     for mail in inbox_mails[:50]:  # Scan étendu (10 → 50)
-        # ANOMALIE #6 fix : normaliser les clés (Graph liste utilise 'id', pas 'message_id')
-        msg_id = mail.get('message_id') or mail.get('id', '')
+        msg_id = _canonical_mid(mail)
         from_email = mail.get('from_email', '')
         if not msg_id or not from_email:
             continue
@@ -3562,15 +4136,15 @@ def _run_preemptive_bg(inbox_mails):
     def _run_preemptive_staggered():
         import time as _t
         for _i, mail in enumerate(candidates):
+            # Phase 1 (25/04 soir) — toujours porter l'IMID canonique.
+            _imid = mail.get('internet_message_id', '') or ''
             mail_data = {
                 'from_email': mail.get('from_email', ''),
                 'from_name': mail.get('from_name', ''),
                 'subject': mail.get('subject', ''),
                 'body': mail.get('body') or mail.get('body_preview', ''),
-                # I-DATA-11 : internet_message_id en priorité (matche Office.js)
-                'message_id': (mail.get('internet_message_id')
-                               or mail.get('message_id')
-                               or mail.get('id', '')),
+                'message_id': _imid or mail.get('message_id') or mail.get('id', ''),
+                'internet_message_id': _imid,  # Canonique pour _canonical_mid()
                 'conversation_id': mail.get('conversation_id', ''),
                 # Plan 2 Phase 2.B : propager to/cc/date pour les filtres Smart Speculative
                 'to': mail.get('to', ''),
@@ -4005,8 +4579,13 @@ def api_dialog_init():
             try:
                 db_cls = _db.get_mail_classement(message_id)
                 if db_cls is not None:
+                    _s = db_cls.get('suggestion')
+                    _sl = (_s.get('_suggestions', [_s])
+                           if isinstance(_s, dict) and '_suggestions' in _s
+                           else ([_s] if _s else []))
                     cls_data = {
-                        'suggestion': db_cls.get('suggestion'),
+                        'suggestion': _s,
+                        'suggestions': _sl,
                         'source': db_cls.get('source', 'none'),
                     }
                     _set_mail_preview(message_id, 'classement', 'done', cls_data)
@@ -4016,8 +4595,10 @@ def api_dialog_init():
             try:
                 db_pj = _db.get_mail_pj_classement(message_id)
                 if db_pj is not None:
+                    _sp = db_pj.get('suggestion')
                     pj_data = {
-                        'suggestion': db_pj.get('suggestion'),
+                        'suggestion': _sp,
+                        'suggestions': [_sp] if _sp else [],
                         'source': db_pj.get('source', 'none'),
                     }
                     _set_mail_preview(message_id, 'pj_classement', 'done', pj_data)
@@ -5004,8 +5585,29 @@ def api_extract_attachments(entry_id):
     if not graph:
         return jsonify({"ok": False, "error": "Mode Standard requis"}), 403
 
+    # Phase 1 (25/04) : le frontend envoie un IMID canonique <...@domain>.
+    # Graph API n'accepte que des Entry ID (AQMkAD...) — résoudre via le pattern
+    # canonique utilisé en 5 autres sites (lignes 2646, 4248, 4404, 4922, 8214).
+    # En cas d'introuvable côté Graph : 404 propre (cf. site 8214) — le frontend
+    # gère gracieusement (fallback generateReply sans contexte PJ, dialog.js:691).
+    real_entry_id = entry_id
+    if entry_id.startswith('<') and '@' in entry_id:
+        try:
+            email = graph.get_email_by_internet_id(entry_id)
+            if email and email.get('id'):
+                real_entry_id = email['id']
+            else:
+                logger.warning(f"[extract] IMID introuvable côté Graph : {entry_id[:60]}")
+                return jsonify({
+                    "ok": False,
+                    "error": "Mail introuvable (IMID non résolvable côté Graph)",
+                }), 404
+        except Exception as e:
+            logger.warning(f"[extract] résolution IMID {entry_id[:40]} : {e}")
+            return jsonify({"ok": False, "error": "Erreur résolution Graph"}), 502
+
     try:
-        attachments = graph.get_attachments(entry_id)
+        attachments = graph.get_attachments(real_entry_id)
         doc_atts = [a for a in attachments if not a.get('is_inline', False)]
         if indices is not None:
             doc_atts = [a for i, a in enumerate(doc_atts) if i in indices]
@@ -5017,7 +5619,7 @@ def api_extract_attachments(entry_id):
             att_id = att.get('id', '')
             ext = os.path.splitext(att_name)[1].lower()
             try:
-                content_bytes = graph.get_attachment_content(entry_id, att_id)
+                content_bytes = graph.get_attachment_content(real_entry_id, att_id)
             except Exception as e:
                 print(f"[extract] Erreur download {att_name}: {e}", flush=True)
                 continue
@@ -5305,8 +5907,13 @@ def api_mail_preview(message_id):
         try:
             db_cls = _db.get_mail_classement(message_id)
             if db_cls is not None:
+                _s = db_cls.get('suggestion')
+                _sl = (_s.get('_suggestions', [_s])
+                       if isinstance(_s, dict) and '_suggestions' in _s
+                       else ([_s] if _s else []))
                 cls_data = {
-                    'suggestion': db_cls.get('suggestion'),
+                    'suggestion': _s,
+                    'suggestions': _sl,
                     'source': db_cls.get('source', 'none'),
                 }
                 _set_mail_preview(message_id, 'classement', 'done', cls_data)
@@ -5316,8 +5923,10 @@ def api_mail_preview(message_id):
         try:
             db_pj = _db.get_mail_pj_classement(message_id)
             if db_pj is not None:
+                _sp = db_pj.get('suggestion')
                 pj_data = {
-                    'suggestion': db_pj.get('suggestion'),
+                    'suggestion': _sp,
+                    'suggestions': [_sp] if _sp else [],
                     'source': db_pj.get('source', 'none'),
                 }
                 _set_mail_preview(message_id, 'pj_classement', 'done', pj_data)
@@ -5394,6 +6003,118 @@ def api_mail_preview(message_id):
         },
         "cache_hit": True,
     })
+
+
+# === Phase 3 (25/04 soir) — 3 portes séparées par plat ===
+# Chaque plat a sa porte dédiée → service progressif (les rapides arrivent
+# avant les lents, plus d'attente du plus lent pour les autres).
+# Pattern identique à /api/mail_preview mais ne renvoie qu'1 plat.
+
+def _fetch_single_preview_plate(message_id, plate):
+    """Helper commun aux 3 portes Phase 3.
+
+    plate ∈ {'echeance', 'classement', 'pj_classement'}
+    Retourne dict {'status': ..., 'data': ...} prêt à jsonify.
+    Trigger BG generation si miss DB (idempotent via _prewarm_mail_preview).
+    """
+    if plate not in ('echeance', 'classement', 'pj_classement'):
+        return {'status': 'error', 'data': None, 'error': 'plate invalide'}
+
+    # 1) Check RAM cache
+    with _mail_preview_lock:
+        entry = _mail_preview_cache.get(message_id, {})
+        plate_entry = entry.get(plate, {}) or {}
+    if plate_entry.get('status') in ('done', 'running'):
+        return {
+            'status': plate_entry.get('status'),
+            'data': plate_entry.get('data'),
+        }
+
+    # 2) Check DB persistant
+    try:
+        if plate == 'echeance':
+            db_row = _db.get_mail_echeance(message_id)
+            if db_row is not None:
+                ech_data = db_row.get('echeances', [])
+                _set_mail_preview(message_id, 'echeance', 'done', ech_data)
+                return {'status': 'done', 'data': ech_data}
+        elif plate == 'classement':
+            db_row = _db.get_mail_classement(message_id)
+            if db_row is not None:
+                _s = db_row.get('suggestion')
+                _sl = (_s.get('_suggestions', [_s])
+                       if isinstance(_s, dict) and '_suggestions' in _s
+                       else ([_s] if _s else []))
+                cls_data = {
+                    'suggestion': _s,
+                    'suggestions': _sl,
+                    'source': db_row.get('source', 'none'),
+                }
+                _set_mail_preview(message_id, 'classement', 'done', cls_data)
+                return {'status': 'done', 'data': cls_data}
+        elif plate == 'pj_classement':
+            db_row = _db.get_mail_pj_classement(message_id)
+            if db_row is not None:
+                _sp = db_row.get('suggestion')
+                pj_data = {
+                    'suggestion': _sp,
+                    'suggestions': [_sp] if _sp else [],
+                    'source': db_row.get('source', 'none'),
+                }
+                _set_mail_preview(message_id, 'pj_classement', 'done', pj_data)
+                return {'status': 'done', 'data': pj_data}
+    except Exception as e:
+        logger.debug(f"[preview-{plate}] check DB : {e}")
+
+    # 3) Total miss : trigger BG generation, return 'miss' (frontend pollera)
+    try:
+        cached = _db.get_cached_email(message_id)
+        if cached:
+            mail_data = {
+                'internet_message_id': message_id,
+                'from_email': cached.get('from_email', ''),
+                'from_name': cached.get('from_name', ''),
+                'subject': cached.get('subject', ''),
+                'body': cached.get('body') or cached.get('html_body', ''),
+                'body_preview': cached.get('body_preview', ''),
+                'has_attachments': cached.get('has_attachments', False),
+                'attachments': cached.get('attachments') or [],
+                'date': cached.get('date', ''),
+                'to': cached.get('to', ''),
+                'cc': cached.get('cc', ''),
+            }
+            threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
+                             daemon=True, name=f'preview-{plate}-ondemand').start()
+    except Exception as e:
+        logger.debug(f"[preview-{plate}] on-demand trigger : {e}")
+    return {'status': 'miss', 'data': None}
+
+
+@app.route('/api/echeance/<path:message_id>')
+def api_echeance_single(message_id):
+    """Phase 3 (25/04 soir) — Porte dédiée échéance.
+    Retourne {status, data} pour ce mail. Trigger BG si miss."""
+    if not message_id:
+        return jsonify({"error": "message_id requis"}), 400
+    return jsonify(_fetch_single_preview_plate(message_id, 'echeance'))
+
+
+@app.route('/api/classement_mail/<path:message_id>')
+def api_classement_mail_single(message_id):
+    """Phase 3 (25/04 soir) — Porte dédiée classement mail.
+    Retourne {status, data} pour ce mail. Trigger BG si miss."""
+    if not message_id:
+        return jsonify({"error": "message_id requis"}), 400
+    return jsonify(_fetch_single_preview_plate(message_id, 'classement'))
+
+
+@app.route('/api/classement_pj/<path:message_id>')
+def api_classement_pj_single(message_id):
+    """Phase 3 (25/04 soir) — Porte dédiée classement PJ.
+    Retourne {status, data} pour ce mail. Trigger BG si miss."""
+    if not message_id:
+        return jsonify({"error": "message_id requis"}), 400
+    return jsonify(_fetch_single_preview_plate(message_id, 'pj_classement'))
 
 
 @app.route('/api/echeances/pre_scan', methods=['POST'])
@@ -6357,11 +7078,18 @@ def api_instant_reply():
                 html_parts.append(f'<p>{_html_mod.escape(greeting, quote=False)}</p>')
             html_parts.append(body_html)
             if not has_closing:
-                html_parts.append(f'<p>{_html_mod.escape(closing, quote=False)}</p>')
-                # Fix 24/04 (Bug C) : skip signature si closing contient déjà
-                # le prénom user (ex "Cdlt yvan" + "Yvan BOSSER" = doublon).
-                if _should_append_signature(closing, user_name):
-                    html_parts.append(f'<p>{_html_mod.escape(user_name, quote=False)}</p>')
+                # Fix 24/04 + 26/04 — closing + signature dans un SEUL <p>
+                # avec <br> entre les deux (convention email standard).
+                # Avant : <p>closing</p><p>sig</p> → margin browser ~1em entre
+                # les 2 <p> = interligne excessive visible côté dialog.
+                # Après : <p>closing<br>sig</p> = 2 lignes consécutives serrées.
+                # Niveau B : _should_append_signature scanne aussi le body
+                # (_body_plain) pour détecter signatures inline générées par
+                # Claude → évite doublon "...yvan</p><p>Yvan BOSSER...".
+                sig_block = _html_mod.escape(closing, quote=False)
+                if _should_append_signature(closing, user_name, body=_body_plain):
+                    sig_block += '<br>' + _html_mod.escape(user_name, quote=False)
+                html_parts.append(f'<p>{sig_block}</p>')
 
             logger.info(f"[instant_reply] HIT source=preemptive msg={message_id[:30]}")
             return jsonify({
@@ -6694,7 +7422,9 @@ def generate_reply():
                 # Fix 24/04 (Bug C) : skip signature si closing contient déjà
                 # le prénom user (évite doublon "Cdlt yvan\nYvan BOSSER...")
                 _closing_html = f"\n\n{_preemptive_closing}"
-                if _preemptive_sig and _should_append_signature(_preemptive_closing, _preemptive_sig):
+                # Niveau B (26/04) : passer body=cached_text à _should_append_signature
+                # pour détecter signatures inline déjà présentes dans le cache.
+                if _preemptive_sig and _should_append_signature(_preemptive_closing, _preemptive_sig, body=cached_text):
                     _closing_html += f"\n{_preemptive_sig}"
                 yield f"data: {json.dumps({'chunk': _closing_html})}\n\n"
                 if message_id:
@@ -6734,11 +7464,26 @@ def generate_reply():
     from_email = data.get('from_email', '')
 
     # Auto-détection importance si valeur par défaut (S) — jamais écrase un choix explicite
+    # Gap #4 : on charge le profil contact tôt pour permettre la règle
+    # "catégorie sensible (banquier/avocat/notaire/institutionnel) → H".
+    # Le profil est conservé dans _early_contact_profile et ré-utilisé plus bas
+    # (le bloc de chargement principal au ~ligne 7200 le complétera/écrasera
+    # avec les données du prefetch_cache si elles sont plus récentes).
+    _early_contact_profile = None
     if importance_letter == 'S':
-        detected = _detect_importance(data.get('body', ''), subject)
+        try:
+            _early_corr = to_email if reply_mode == 'forward' else from_email
+            if _early_corr:
+                _early_contact_profile = _db.get_contact_profile(_early_corr)
+        except Exception:
+            _early_contact_profile = None
+        detected = _detect_importance(
+            data.get('body', ''), subject,
+            contact_profile=_early_contact_profile,
+            mid=message_id,
+        )
         if detected != 'S':
             importance_letter = detected
-            logger.debug(f"Importance auto-détectée : {importance_letter} (sujet: {subject[:40]})")
 
     importance_int = {'R': 1, 'S': 2, 'H': 3}[importance_letter]  # Pour _build_prompt()
     max_tokens = {'R': 600, 'S': 1000, 'H': 1500}[importance_letter]  # Pour l'appel API
@@ -7140,8 +7885,10 @@ INSTRUCTIONS ECHEANCES :
             # Envoyer closing + signature après le corps
             # Fix 24/04 (Bug C) : skip signature si closing contient déjà
             # le prénom user (évite doublon "Cdlt yvan\nYvan BOSSER...")
+            # Fix 26/04 (Niveau B) : aussi scanner body via _body_clean pour
+            # détecter signatures inline (Claude génère parfois "Yvan" en bas).
             closing_html = f"\n\n{closing}"
-            if signature and _should_append_signature(closing, signature):
+            if signature and _should_append_signature(closing, signature, body=_body_clean):
                 closing_html += f"\n{signature}"
             yield f"data: {json.dumps({'chunk': closing_html})}\n\n"
             full_text.append(closing_html)

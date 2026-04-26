@@ -901,13 +901,19 @@ function _loadDialogBundle() {
             if (profile) {
                 _applyContactProfile(profile);
             }
-            // --- Preview (échéance + classement) — Phase 2.A (24/04) ---
+            // --- Preview (échéance + classement + PJ) — Phase 3 (25/04 soir) ---
+            // 3 portes séparées en parallèle au lieu d'1 porte commune.
+            // Chaque plat arrive dès qu'il est prêt → service progressif.
             var preview = bundle.preview;
             if (preview) {
+                // Bundle déjà fourni → applique immédiatement (cas warm).
                 _applyMailPreview(preview);
             } else {
-                _applyMailPreview(null);  // affiche "—" / "Néant"
+                _applyMailPreview(null);  // "—" en attendant
             }
+            // Toujours lancer les 3 portes en parallèle (refresh + couvre miss
+            // bundle). Si déjà cached → instant ; sinon le BG génère et on poll.
+            _fetchSinglePreviewPlates();
         })
         .catch(function(e) {
             console.warn('[dialog] dialog_init bundle échec, fallback:', e);
@@ -1030,7 +1036,7 @@ function _applyMailPreview(preview) {
             if (pjStatus === 'running' || pjStatus === 'miss') {
                 pjEl.textContent = 'Analyse en cours…';
             } else if (pjData && pjData.source === 'no_pj') {
-                pjEl.textContent = 'Pas de PJ';
+                pjEl.textContent = 'Néant';  // Fix Néant (25/04) — "Pas de PJ" → "Néant" (demande user)
             } else if (pjData && pjData.suggestion) {
                 var pjSugg = pjData.suggestion;
                 var pjPath = pjSugg.folder_path || pjSugg.dest_folder || pjSugg.folder_name || 'Dossier suggéré';
@@ -1075,6 +1081,90 @@ function _applyMailPreview(preview) {
                 .catch(function() { window.__mailPreviewPolling = false; });
         };
         setTimeout(poll, 2000);
+    }
+}
+
+/** Phase 3 (25/04 soir) — 3 portes séparées en parallèle.
+ * Chaque plat (échéance, classement mail, classement PJ) a sa porte dédiée.
+ * Service progressif : le rapide arrive avant le lent.
+ * Polling indépendant par plat — l'un peut continuer pendant que l'autre est fini.
+ */
+function _fetchSinglePreviewPlates() {
+    if (!_messageId) return;
+    // Lancer 3 fetches en parallèle
+    _fetchSinglePlate('echeance', '/api/echeance/');
+    _fetchSinglePlate('classement', '/api/classement_mail/');
+    _fetchSinglePlate('pj_classement', '/api/classement_pj/');
+}
+
+function _fetchSinglePlate(plateName, urlPrefix, attempt) {
+    attempt = attempt || 0;
+    var maxAttempts = 12;  // 24s max (12 × 2s)
+    fetch(_backendUrl + urlPrefix + encodeURIComponent(_messageId))
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(res) {
+            if (!res) return;
+            // Construire un objet preview partiel pour réutiliser _applyMailPreview
+            var partial = {};
+            partial[plateName] = { status: res.status, data: res.data };
+            // Appliquer SEULEMENT ce plat (les autres conservent leur valeur actuelle)
+            _applySinglePlate(plateName, res);
+            // Si still running/miss, repolll dans 2s (max 12 tentatives = 24s)
+            if ((res.status === 'running' || res.status === 'miss') && attempt < maxAttempts) {
+                setTimeout(function() {
+                    _fetchSinglePlate(plateName, urlPrefix, attempt + 1);
+                }, 2000);
+            }
+        })
+        .catch(function(e) {
+            console.warn('[dialog] _fetchSinglePlate ' + plateName + ' failed:', e);
+        });
+}
+
+function _applySinglePlate(plateName, res) {
+    // Appliquer 1 seul plat sans toucher aux 2 autres.
+    if (plateName === 'echeance') {
+        var echEl = document.getElementById('infoEcheanceContent');
+        if (!echEl) return;
+        if (res.status === 'running' || res.status === 'miss') {
+            echEl.textContent = 'Analyse en cours…';
+        } else if (res.status === 'error') {
+            echEl.textContent = 'Néant';
+        } else if (Array.isArray(res.data) && res.data.length > 0) {
+            var e = res.data[0];
+            var txt = '';
+            if (e.description) txt += e.description;
+            if (e.date_echeance) txt += (txt ? ' — ' : '') + e.date_echeance;
+            echEl.textContent = txt || 'Échéance détectée';
+        } else {
+            echEl.textContent = 'Néant';
+        }
+    } else if (plateName === 'classement') {
+        var clsEl = document.getElementById('infoClassementContent');
+        if (!clsEl) return;
+        if (res.status === 'running' || res.status === 'miss') {
+            clsEl.textContent = 'Analyse en cours…';
+        } else if (res.data && res.data.suggestion) {
+            var sugg = res.data.suggestion;
+            var folderPath = sugg.folder_path || sugg.folder_name || sugg.folder_id || 'Dossier suggéré';
+            clsEl.textContent = folderPath;
+        } else {
+            clsEl.textContent = 'Néant';
+        }
+    } else if (plateName === 'pj_classement') {
+        var pjEl = document.getElementById('infoClassementPJContent');
+        if (!pjEl) return;
+        if (res.status === 'running' || res.status === 'miss') {
+            pjEl.textContent = 'Analyse en cours…';
+        } else if (res.data && res.data.source === 'no_pj') {
+            pjEl.textContent = 'Néant';
+        } else if (res.data && res.data.suggestion) {
+            var pjSugg = res.data.suggestion;
+            var pjPath = pjSugg.folder_path || pjSugg.dest_folder || pjSugg.folder_name || 'Dossier suggéré';
+            pjEl.textContent = pjPath;
+        } else {
+            pjEl.textContent = 'Néant';
+        }
     }
 }
 
