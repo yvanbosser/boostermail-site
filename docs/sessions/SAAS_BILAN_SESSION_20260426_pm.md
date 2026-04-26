@@ -1,9 +1,9 @@
 # BILAN SESSION SaaS — 26/04/2026 (après-midi)
 
 > **Dernière mise à jour** : 26/04/2026
-> **Durée** : ~3h30 (deux blocs : install page puis Azure)
+> **Durée** : ~4h30 (trois blocs : install page, Azure, infra prod technique)
 > **Auteur** : Claude + Yvan
-> **Étapes couvertes** : Étape 1 (page install + OnMessageCompose) ✅ + Étape 2 (Azure setup) ✅
+> **Étapes couvertes** : Étape 1 (page install + OnMessageCompose) ✅ + Étape 2 (Azure setup) ✅ + Étape 5 partielle (backup DB + cap API) 🟡
 
 ---
 
@@ -23,6 +23,14 @@
 9. ✅ Ajout des 5 permissions Microsoft Graph + admin consent pour groupe-bosser
 10. ✅ MAJ `/opt/boostermail/config.json` (client_id, tenant_id, client_secret)
 11. ✅ Test OAuth flow end-to-end : login → callback → token → status retournent OK avec tenant `d66fac24-...`
+
+### Bloc 3 — Étape 5 partielle (Infra production technique)
+12. ✅ **5.A — Backup DB auto** : script `/opt/boostermail/scripts/backup_db.sh` (online via SQLite Python API, gère WAL), cron `/etc/cron.d/boostermail-backup` quotidien 3h UTC, rotation 30 jours, stockage `/var/backups/boostermail/`. Test manuel validé : 18 tables, 106 contacts, 3042 threads, 10 échéances backupés en 1.2 MB compressé (depuis 7.6 MB → ratio 6.3x).
+13. ✅ **5.B — Cap API par user/jour** : nouveau module `V2/quota_tracker.py` (table `api_quota` auto-créée, limites configurables via `config.json` clé `quota`). Hook minimal dans `core/claude_provider.py` et `core/openai_provider.py` (4 lignes ajoutées dans `generate()`). Limites par défaut : Claude 500/jour, OpenAI 200/jour. user_id depuis Flask session (`auth_user_id`). Fail-open si DB en erreur ou Flask context absent (jobs BG). Reset auto à minuit UTC.
+14. ⏳ **5.C — Uptime monitoring** : à faire (UptimeRobot ou BetterStack, ~30 min)
+15. ⏳ **5.D — Brand check** : à faire (~15 min)
+16. ⏳ **5.E — Page RGPD** : à faire (~1h)
+17. ⏳ **5.F — CGU draft** : à faire (~1h)
 
 ---
 
@@ -212,6 +220,8 @@ GET /plugin/dialog.html?auth_success=1 HTTP/1.0" 200
 ### À surveiller / cleanup ultérieur
 - Logs serveur : warnings `acquire_token_silent retourné None` toutes les 30s — user orphelin (`0f3827db-...`) lié à l'ancien client_id, à nettoyer lors de l'Étape 7 (DB cleanup multi-tenant)
 - Inscription MPN à faire avant Étape 6 (AppSource) — résout le warning "End users cannot grant consent without verified publishers"
+- **Cap API : retour HTTP 429 propre** : actuellement `QuotaExceeded` remonte en 500 standard. À améliorer : capture explicite dans les routes Flask `/api/generate_reply` etc. pour retour 429 + message UX clair. Petite tâche pour la session New Outlook ou prochaine SaaS.
+- **Première exécution cron backup DB** : 27/04 à 3h UTC. Vérifier le lendemain : `ssh ubuntu@51.178.162.208 "sudo ls -lt /var/backups/boostermail/*.db.gz | head -3 ; sudo cat /var/log/boostermail-backup.log"`.
 
 ---
 

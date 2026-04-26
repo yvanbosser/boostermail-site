@@ -64,6 +64,11 @@ Si l'un des deux échoue, **arrête et alerte Yvan** avant toute autre action.
 | `/opt/boostermail/V2/<file>.bak.YYYYMMDD_HHMMSS` | Backups manuels (à créer avant chaque modif) |
 | `/var/www/install.boostermail.ai/` | Page d'installation statique (sert `install.boostermail.ai` via nginx, www-data) |
 | `/etc/nginx/sites-available/install.boostermail.ai` | Conf nginx du sous-domaine install (HTTPS depuis 26/04, redirect 80→443, cert Let's Encrypt) |
+| `/opt/boostermail/scripts/backup_db.sh` | Script de sauvegarde quotidienne `V2/boostermail.db` (rotation 30 jours, gzip, online via SQLite Python API) |
+| `/etc/cron.d/boostermail-backup` | Cron daily 3h UTC qui lance le script de backup DB |
+| `/var/backups/boostermail/` | Stockage des backups DB compressés (`boostermail_AAAAMMJJ_HHMMSS.db.gz` + `backup.log`) |
+| `/var/log/boostermail-backup.log` | stdout/stderr du cron de backup (en plus de `backup.log` qui ne contient que les succès) |
+| `/opt/boostermail/V2/quota_tracker.py` | Module cap API (Claude 500/jour, OpenAI 200/jour par user — table SQLite `api_quota` auto-créée) |
 
 ### SSL
 - Certificat Let's Encrypt sur `api.boostermail.ai` (depuis 26/04 matin)
@@ -181,7 +186,7 @@ En cas de doute sur le scope : **demander à Yvan avant**.
 | **2** | **Azure setup** (tenant + multi-tenant + client_secret) | (sous-tâche bloquante) | ~1h | ~1h15 | ✅ 26/04 (nouvelle app `BoosterMail` sur tenant `groupe-bosser.fr`, OAuth end-to-end validé) |
 | **3** | **Outlook Web debug** (TIMEBOX 4h max) | (ex-Phase 6) | ~4h max | 0 | ⏳ |
 | **4** | **BG webhooks + pré-génération** | (ex-Phase 3) | ~1 jour | 0 | ⏳ |
-| **5** | **Infra production** (backup DB + cap API + uptime + RGPD + brand + CGU) | (nouveau, créé 26/04) | ~2-3h | 0 | ⏳ |
+| **5** | **Infra production** (backup DB + cap API + uptime + RGPD + brand + CGU) | (nouveau, créé 26/04) | ~2-3h | ~1h | 🟡 5.A backup DB ✅ + 5.B cap API ✅ — 5.C uptime, 5.D brand, 5.E RGPD, 5.F CGU à faire |
 | **6** | **Soumission AppSource Microsoft** (validation 4-8 sem en BG) | (immédiat parallèle) | ~30 min | 0 | ⏳ bloqué Azure + Étape 5 |
 | **7** | **Multi-tenant DB user_id + isolation routes** | (ex-Phase 2) | ~1.5 jour | 0 | ⏳ bloqué Azure |
 | **8** | 🎯 **Beta gratuite** (5-10 testeurs indé/TPE) | — | 1-2 sem | 0 | ⏳ |
@@ -310,11 +315,13 @@ curl -sI https://install.boostermail.ai/ | head -3
 
 **Étape 1 ✅ TERMINÉE** (26/04 PM) — https://install.boostermail.ai/ live avec HTTPS, redirect 80→443, cert Let's Encrypt valide 90j.
 
-**Étape 2 ✅ TERMINÉE** (26/04 PM) — nouvelle app Azure `BoosterMail` créée sur tenant `groupe-bosser.fr` (multi-tenant + comptes perso), client_secret généré 24 mois, 5 permissions Graph accordées, OAuth flow end-to-end validé (login → callback → token → status retournent OK avec le tenant `d66fac24-...`). Détails dans [`AZURE_CONFIG.md`](AZURE_CONFIG.md).
+**Étape 2 ✅ TERMINÉE** (26/04 PM) — nouvelle app Azure `BoosterMail` créée sur tenant `groupe-bosser.fr` (multi-tenant + comptes perso), client_secret généré 24 mois, 5 permissions Graph accordées, OAuth flow end-to-end validé. Détails dans [`AZURE_CONFIG.md`](AZURE_CONFIG.md).
+
+**Étape 5 🟡 PARTIELLE** (26/04 PM) — sous-tâches techniques 5.A (backup DB auto + cron quotidien 3h UTC + rotation 30j) et 5.B (cap API par user/jour, Claude 500, OpenAI 200, table `api_quota`) **TERMINÉES**. Restent : 5.C (uptime monitoring), 5.D (brand check), 5.E (page RGPD), 5.F (CGU draft).
 
 **Prochaine étape recommandée** :
-- **Étape 5** (Infra prod) — backup DB + cap API + uptime + RGPD + brand + CGU. Indépendant et bloquant pour Étape 6 (AppSource).
-- **OU Étape 7** (Multi-tenant DB user_id) — maintenant débloquée puisque Azure multi-tenant en place. Permet d'accueillir les premiers beta-testeurs autres que Yvan.
+- **Finir Étape 5** (5.C uptime ~30 min, 5.D brand ~15 min, 5.E RGPD ~1h, 5.F CGU ~1h) → débloque Étape 6 AppSource
+- **OU Étape 7** (Multi-tenant DB user_id, ~12h) — débloquée par Étape 2, permet beta avec testeurs autres que Yvan
 
 **En parallèle Yvan** : inscription MPN (Microsoft Cloud Partner Program, gratuit) — résout le warning "End users cannot grant consent" et débloque AppSource (24-48h d'attente). Procédure section D de [`AZURE_CONFIG.md`](AZURE_CONFIG.md).
 
@@ -359,11 +366,101 @@ ssh ubuntu@51.178.162.208 "sudo tail -30 /opt/boostermail/addin_debug.log"
 ### Niveau 6 — Sentry
 Ouvrir https://sentry.io → projet PYTHON-FLASK-1 → voir les nouvelles erreurs après le restart
 
+### Niveau 7 — Restore DB depuis backup quotidien
+
+**Si la DB V2/boostermail.db est corrompue ou supprimée** (perte de profils contacts, échéances, scoring) :
+
+```bash
+# 1. Lister les backups disponibles
+ssh ubuntu@51.178.162.208 "sudo ls -lt /var/backups/boostermail/boostermail_*.db.gz | head -10"
+
+# 2. Stopper le service
+ssh ubuntu@51.178.162.208 "sudo systemctl stop boostermail"
+
+# 3. Backup de l'état actuel (au cas où on veut revenir)
+ssh ubuntu@51.178.162.208 "sudo cp /opt/boostermail/V2/boostermail.db /opt/boostermail/V2/boostermail.db.before_restore_\$(date +%Y%m%d_%H%M%S) 2>/dev/null || true"
+
+# 4. Décompresser et restaurer (remplacer AAAAMMJJ_HHMMSS par le backup voulu)
+ssh ubuntu@51.178.162.208 "sudo gunzip -c /var/backups/boostermail/boostermail_AAAAMMJJ_HHMMSS.db.gz > /tmp/restore.db && sudo mv /tmp/restore.db /opt/boostermail/V2/boostermail.db && sudo chown ubuntu:ubuntu /opt/boostermail/V2/boostermail.db && sudo rm -f /opt/boostermail/V2/boostermail.db-wal /opt/boostermail/V2/boostermail.db-shm"
+
+# 5. Restart
+ssh ubuntu@51.178.162.208 "sudo systemctl start boostermail && sleep 3 && curl -sk https://api.boostermail.ai/api/warmup_status"
+```
+
+⚠️ Le restore **écrase la DB courante** — toutes les données après l'horodatage du backup sont perdues. Backup quotidien à 3h UTC, donc fenêtre de perte max = 24h (ou plus si on prend un backup ancien).
+
 ### Règle d'or
 **Toujours backup AVANT modif** :
 ```bash
 sudo cp /opt/boostermail/V2/<file> /opt/boostermail/V2/<file>.bak.$(date +%Y%m%d_%H%M%S)
 ```
+
+---
+
+## G-bis. Quota API (cap par user/jour)
+
+> **Mis en place 26/04 PM**. Évite qu'un user (ou un bug, ou un attaquant) explose la facture Anthropic/OpenAI.
+
+### G-bis.1 — Limites par défaut
+
+| Provider | Limite/jour/user | Source |
+|---|---|---|
+| Claude (Anthropic) | **500** appels | `V2/quota_tracker.py` constante `DEFAULT_LIMITS['claude']` |
+| OpenAI | **200** appels | `V2/quota_tracker.py` constante `DEFAULT_LIMITS['openai']` |
+
+Reset auto quotidien : la "day" est dérivée de `datetime.now(timezone.utc).strftime('%Y-%m-%d')`, donc passage à minuit UTC = compteur remis à 0.
+
+### G-bis.2 — Surcharger les limites (sans toucher au code)
+
+Ajouter une clé `quota` dans `/opt/boostermail/config.json` :
+
+```json
+{
+  "quota": {
+    "claude_daily": 1000,
+    "openai_daily": 500
+  }
+}
+```
+
+Puis `sudo systemctl restart boostermail`. Les nouvelles valeurs sont lues à chaque appel `_get_limit()` dans le module — pas de cache à invalider.
+
+### G-bis.3 — Inspection / debug
+
+```bash
+# Total appels aujourd'hui par user/provider
+ssh ubuntu@51.178.162.208 'cd /opt/boostermail/V2 && /opt/boostermail/V2/venv/bin/python3 -c "
+import sqlite3
+c = sqlite3.connect(\"boostermail.db\")
+for row in c.execute(\"SELECT user_id, provider, day, count FROM api_quota WHERE day = strftime(%cY-%m-%d%c, %cnow%c, %cutc%c) ORDER BY count DESC\"):
+    print(row)
+c.close()
+"'
+
+# Voir les warnings de quota dépassé dans les logs
+ssh ubuntu@51.178.162.208 "sudo journalctl -u boostermail --since today --no-pager | grep 'easymail.quota' | head -20"
+```
+
+### G-bis.4 — Reset manuel d'un user (en cas de besoin support)
+
+```bash
+ssh ubuntu@51.178.162.208 'cd /opt/boostermail/V2 && /opt/boostermail/V2/venv/bin/python3 -c "
+import sqlite3
+c = sqlite3.connect(\"boostermail.db\")
+c.execute(\"UPDATE api_quota SET count = 0 WHERE user_id = ? AND day = strftime(%cY-%m-%d%c, %cnow%c, %cutc%c)\", (\"USER_ID_ICI\",))
+c.commit()
+c.close()
+print(\"Reset OK\")
+"'
+```
+
+### G-bis.5 — Comportement en cas de dépassement
+
+Le module **lève `QuotaExceeded`** (sous-classe de `RuntimeError`) lors de l'appel Claude/OpenAI suivant. Pour l'instant, l'exception remonte jusqu'à la route Flask appelante qui retourne une 500 standard. **À améliorer plus tard** : capture explicite dans les routes pour retourner un 429 propre avec un message UI clair (« Vous avez atteint votre quota quotidien — réessayez demain »). Tâche notée pour la session New Outlook ou une session SaaS suivante.
+
+### G-bis.6 — Comportement si Flask context absent
+
+Si `quota_tracker.check_and_record()` est appelé hors contexte de requête Flask (jobs BG, scripts CLI, warmup) → no-op. **Les jobs internes ne sont pas comptabilisés** par design (ils tournent côté serveur, pas pour le compte d'un user).
 
 ---
 
@@ -455,6 +552,50 @@ scp ubuntu@51.178.162.208:/opt/boostermail/V2/<file> "C:\EasyMail\.claude\worktr
 ```bash
 scp "C:\EasyMail\.claude\worktrees\angry-ishizaka-26efe7\V2\<file>" ubuntu@51.178.162.208:/opt/boostermail/V2/<file>
 ```
+
+---
+
+## J-bis. ⚠️ Coordination avec la session "implémentation New Outlook"
+
+> **Contexte** : 2 sessions Claude tournent en parallèle sur ce projet :
+> - **Session SaaS** (cette doc) — infra OVH, Azure, install page, Stripe, multi-tenant DB
+> - **Session New Outlook** — UI/UX de la modale, dialog/popup/taskpane/companion, fixes Office.js
+>
+> **Règle absolue** : ne jamais mélanger les scopes (cf section E). Mais il existe un point de friction au moment du **déploiement sur OVH** : les 2 sessions modifient potentiellement les mêmes fichiers de la dir `V2/`.
+
+### J-bis.1 — État des fichiers V2 partagés (snapshot 26/04 PM)
+
+| Fichier V2 | Modifié par session SaaS le 26/04 PM | Ne pas écraser sans concilier |
+|---|---|---|
+| `manifest.xml` | ✅ ligne `<LaunchEvent Type="OnMessageCompose"...>` (avant : `OnNewMessageCompose`) + commentaire | OUI |
+| `autorunshared.js` | ✅ `_ADDIN_VERSION = 'v7-onmessagecompose-26-04'` (avant : `v6-iframe-26-04`) + commentaire d'en-tête | OUI |
+| Tous les autres (`dialog.js`, `popup.js`, `app_plugin.py`, etc.) | ❌ pas touchés par la session SaaS | (libre pour New Outlook) |
+
+### J-bis.2 — Procédure pour la session New Outlook avant de déployer sur OVH
+
+**Quand la session New Outlook décide de pousser ses fixes sur OVH** (probablement à la fin de son chantier UI/UX) :
+
+1. **Commiter d'abord son travail** dans `master` (figer ses modifs dans git, sinon perte de données possible)
+2. **Récupérer les 2 modifs SaaS** depuis la branche `claude/angry-ishizaka-26efe7` :
+   - Dans `V2/manifest.xml` : `<LaunchEvent Type="OnMessageCompose" FunctionName="onNewMessageComposeHandler"/>` (ligne ~180)
+   - Dans `V2/autorunshared.js` : `var _ADDIN_VERSION = 'v7-onmessagecompose-26-04';` (ligne 38)
+   - **Méthode propre** : `git merge claude/angry-ishizaka-26efe7` depuis master, ou `git cherry-pick 916d883 265f2bb` (les 2 commits SaaS)
+3. **Bumper à nouveau `_ADDIN_VERSION`** une fois le merge fait pour invalider le cache 304 Outlook après son déploiement (par exemple `v8-newoutlook-fixes-AAAAMMJJ`)
+4. **Déployer** : `scp` les fichiers modifiés (ou `rsync`) vers `/opt/boostermail/V2/` sur OVH, puis `sudo systemctl restart boostermail`
+5. **NE PAS toucher** aux fichiers strictement SaaS, qui n'ont aucune raison d'être dans `V2/` :
+   - `/opt/boostermail/config.json` (secrets serveur, jamais dans le repo)
+   - `/var/www/install.boostermail.ai/` (page d'installation, hors `V2/`)
+   - `/etc/nginx/sites-available/install.boostermail.ai` (config nginx, hors `V2/`)
+
+### J-bis.3 — Si conflit git lors du merge
+
+Les fichiers `manifest.xml` et `autorunshared.js` peuvent générer des conflits si la session New Outlook les a aussi modifiés. Résolution :
+- **Pour `manifest.xml`** : conserver `Type="OnMessageCompose"` (la version SaaS), garder le reste des modifs New Outlook si elle en a fait
+- **Pour `autorunshared.js`** : conserver le bump `_ADDIN_VERSION` (mais l'incrémenter post-merge selon point 3 ci-dessus), garder tout le reste des modifs New Outlook (handlers, fonctions, etc.)
+
+### J-bis.4 — Communication entre sessions
+
+**Avant tout déploiement V2 sur OVH** : la session qui déploie écrit un message dans le bilan de session correspondant indiquant **l'heure** du déploiement et **les fichiers** poussés. Ça évite que l'autre session déploie en même temps et écrase.
 
 ---
 
