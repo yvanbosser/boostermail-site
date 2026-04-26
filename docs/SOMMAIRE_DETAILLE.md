@@ -1,6 +1,6 @@
-# SOMMAIRE DÉTAILLÉ — Documentation BoosterMail/EasyMail
+# SOMMAIRE DÉTAILLÉ — Documentation BoosterMail (ex EasyMail)
 
-> **Dernière mise à jour** : 25/04/2026 (pivot SaaS — Phase 1 démarrée)
+> **Dernière mise à jour** : 26/04/2026 (Phase 1 SaaS terminée, rebrand UI BoosterMail)
 
 > **Objectif** : index unique de TOUTE la documentation du projet.
 > À lire en début de session pour savoir **où trouver quoi** sans relire les docs entiers.
@@ -48,6 +48,9 @@ En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux
 - Smart Speculative « 6 filtres » de la spec → **CORRIGÉ** : 5 à porter + 1 à créer en V2 (filtre open_count absent du proto) (18/04)
 - Popup « à chaque démarrage Outlook » → **AFFINÉE** : matrice 4 modes user × cache, toujours affichée mais contenu adapté (18/04)
 - Installation locale (start.bat + V2 sur `C:\EasyMail\V2\` + companion COM) → **PIVOT SaaS** : V2 hébergé sur VPS OVH Gravelines (`api.boostermail.ai`), accessible depuis Outlook Web sans installation. Companion supprimé, `boostermail_service.py` supprimé, manifest mis à jour. Voir `docs/plans/PLAN_SAAS.md` (25/04)
+- **Phase 1 SaaS terminée** (26/04) : VPS OVH `51.178.162.208` actif, SSL Let's Encrypt sur `api.boostermail.ai`, sécurité serveur (UFW + fail2ban + SSH key-only), Sentry monitoring (free tier EU, RGPD-safe), API keys régénérées (Anthropic + OpenAI). Voir `docs/sessions/BILAN_SESSION_20260426.md`
+- **Outlook Web différé en Phase 6 post-beta** (26/04) : code 12011 `displayDialogAsync` résolu via `displayInIframe: true` mais le contenu du dialog ne se charge pas dans l'iframe (erreur JS cross-origin masquée). Les beta-testeurs utiliseront New Outlook ou Outlook Classic
+- **Rebrand user-visible EasyMail → BoosterMail** (26/04) : 26 strings UI (manifest + HTML + JS). Le back garde `easymail` (IDs internes, URIs `easymail://`, logger Python) — pas visible utilisateur
 
 Les docs antérieurs à ces décisions peuvent décrire l'ancien état. **Ne pas les utiliser comme source pour le code actuel sans vérifier.**
 
@@ -265,7 +268,8 @@ docs/
 | `RAPPORT_AUDIT_SESSION_20260413.md` | 13/04/2026 | Audit complet session VF.1-VF.8 |
 | `BILAN_SESSION_V2_20260414.md` | 14/04/2026 | Bilan de session V2 (état travaux plugin) |
 | `BILAN_SESSION_20260416.md` | 16/04/2026 | Bilan de session 16/04 |
-| **`BILAN_SESSION_20260418.md`** | **18/04/2026** | **Consolidation doc + Plan 1 exécuté + règles M1-M4 + préparation Plans 2/3** |
+| `BILAN_SESSION_20260418.md` | 18/04/2026 | Consolidation doc + Plan 1 exécuté + règles M1-M4 + préparation Plans 2/3 |
+| **`BILAN_SESSION_20260426.md`** | **26/04/2026** | **Phase 1 SaaS terminée (VPS OVH + SSL + sécurité + Sentry) + rebrand UI BoosterMail + Outlook Web différé Phase 6** |
 
 ---
 
