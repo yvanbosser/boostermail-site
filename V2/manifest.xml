@@ -8,9 +8,9 @@
 
   <Id>a1b2c3d4-e5f6-7890-abcd-ef1234567890</Id>
   <Version>1.3.0.0</Version>
-  <ProviderName>EasyMail</ProviderName>
+  <ProviderName>BoosterMail</ProviderName>
   <DefaultLocale>fr-FR</DefaultLocale>
-  <DisplayName DefaultValue="EasyMail"/>
+  <DisplayName DefaultValue="BoosterMail"/>
   <Description DefaultValue="Assistant email intelligent - Generez des reponses adaptees a votre style"/>
   <IconUrl DefaultValue="https://api.boostermail.ai/plugin/assets/icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="https://api.boostermail.ai/plugin/assets/icon-80.png"/>
@@ -96,11 +96,11 @@
         <bt:Url id="taskpaneUrl" DefaultValue="https://api.boostermail.ai/plugin/taskpane.html"/>
       </bt:Urls>
       <bt:ShortStrings>
-        <bt:String id="groupLabel" DefaultValue="EasyMail"/>
-        <bt:String id="buttonLabel" DefaultValue="EasyMail"/>
+        <bt:String id="groupLabel" DefaultValue="BoosterMail"/>
+        <bt:String id="buttonLabel" DefaultValue="BoosterMail"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="buttonDesc" DefaultValue="Ouvrir le panneau EasyMail pour repondre intelligemment"/>
+        <bt:String id="buttonDesc" DefaultValue="Ouvrir le panneau BoosterMail pour repondre intelligemment"/>
       </bt:LongStrings>
     </Resources>
 
@@ -198,11 +198,11 @@
           <bt:Url id="taskpaneUrl" DefaultValue="https://api.boostermail.ai/plugin/popup.html?container=taskpane"/>
         </bt:Urls>
         <bt:ShortStrings>
-          <bt:String id="groupLabel" DefaultValue="EasyMail"/>
-          <bt:String id="buttonLabel" DefaultValue="EasyMail"/>
+          <bt:String id="groupLabel" DefaultValue="BoosterMail"/>
+          <bt:String id="buttonLabel" DefaultValue="BoosterMail"/>
         </bt:ShortStrings>
         <bt:LongStrings>
-          <bt:String id="buttonDesc" DefaultValue="Ouvrir le panneau EasyMail pour repondre intelligemment"/>
+          <bt:String id="buttonDesc" DefaultValue="Ouvrir le panneau BoosterMail pour repondre intelligemment"/>
         </bt:LongStrings>
       </Resources>
     </VersionOverrides>
