@@ -256,6 +256,15 @@ docs/
 
 ---
 
+### H-bis. SaaS infra (`docs/saas/` — depuis 26/04/2026)
+
+| Fichier | Sujet | Clés |
+|---|---|---|
+| **`ONBOARDING_SESSION_SAAS.md`** | **Référence vivante** pour toute session SaaS : infra OVH, accès SSH, conventions, interdits, planning Étapes 1-10, rollback, tests, profil Yvan | `saas`, `onboarding`, `infra`, `serveur`, `ovh`, `nginx`, `let's encrypt`, `sentry` |
+| **`AZURE_CONFIG.md`** | Config complète Azure / Microsoft Entra ID (tenant `groupe-bosser.fr`, app `BoosterMail` multi-tenant, permissions Graph, MPN/publisher verification, procédure régénération secret) | `azure`, `entra`, `tenant`, `client_id`, `client_secret`, `oauth`, `microsoft graph`, `permissions`, `mpn` |
+
+---
+
 ### I. Sessions de travail (`docs/sessions/`)
 
 **Bilans et rapports par date — ordre chronologique.**

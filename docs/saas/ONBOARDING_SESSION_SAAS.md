@@ -63,10 +63,11 @@ Si l'un des deux échoue, **arrête et alerte Yvan** avant toute autre action.
 | `/opt/boostermail/backup_rebrand_20260426_103118/` | Backup pré-rebrand 26/04 |
 | `/opt/boostermail/V2/<file>.bak.YYYYMMDD_HHMMSS` | Backups manuels (à créer avant chaque modif) |
 | `/var/www/install.boostermail.ai/` | Page d'installation statique (sert `install.boostermail.ai` via nginx, www-data) |
-| `/etc/nginx/sites-available/install.boostermail.ai` | Conf nginx du sous-domaine install (HTTP-only au 26/04, HTTPS post-DNS via certbot) |
+| `/etc/nginx/sites-available/install.boostermail.ai` | Conf nginx du sous-domaine install (HTTPS depuis 26/04, redirect 80→443, cert Let's Encrypt) |
 
 ### SSL
-- Certificat Let's Encrypt sur `api.boostermail.ai`
+- Certificat Let's Encrypt sur `api.boostermail.ai` (depuis 26/04 matin)
+- Certificat Let's Encrypt sur `install.boostermail.ai` (depuis 26/04 après-midi, valide jusqu'au 25/07/2026)
 - Renouvellement automatique (cron certbot)
 - Cert interne Flask auto-signé : `localhost.crt` / `localhost.key` (pour HTTPS 3443 → nginx)
 
@@ -89,12 +90,15 @@ Si l'un des deux échoue, **arrête et alerte Yvan** avant toute autre action.
 
 ⚠️ **Les valeurs des clés API ne sont JAMAIS dans le repo git.** Elles vivent uniquement dans `/opt/boostermail/config.json` sur le serveur.
 
+📘 **Pour Azure / Microsoft Entra ID** : voir [`AZURE_CONFIG.md`](AZURE_CONFIG.md) — référence unique tenant + app + permissions Graph + procédure régénération secret + publisher verification (MPN).
+
 | Clé | Localisation | État au 26/04/2026 |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | `/opt/boostermail/config.json` | ✅ Régénérée 26/04, nommée `BoosterMail SaaS Production` sur platform.claude.com. Anciennes (`EasyMail`, `EasyMail2`) supprimées. |
 | `OPENAI_API_KEY` | idem | ✅ Régénérée 26/04, nommée `BoosterMail SaaS Production` sur platform.openai.com. Ancienne `secret key` supprimée. |
-| `microsoft.client_id` | idem | OK : `209a9651-439f-43ae-adc5-46ed3351a085` |
-| `microsoft.client_secret` | idem | ❌ **NON régénérée au 26/04** — tenant Azure non retrouvé pendant la session. **Bloquant pour Phase 2 multi-tenant**. À faire avant tout travail Azure. |
+| `microsoft.client_id` | idem | ✅ **NOUVEAU 26/04 PM** : `42350beb-c0cb-41a0-b4cd-b869d4268206` (app `BoosterMail` multi-tenant sur tenant `groupe-bosser.fr`). Ancien `209a9651-...` orphelin. |
+| `microsoft.tenant_id` | idem | ✅ `d66fac24-3c0a-4f23-ad6c-699325af6ec0` (groupe bosser) |
+| `microsoft.client_secret` | idem | ✅ **NOUVEAU 26/04 PM** : généré sur la nouvelle app, expire 26/04/2028 (24 mois). Détails dans `AZURE_CONFIG.md`. |
 | `microsoft.redirect_uri` | idem | `https://api.boostermail.ai/auth/callback` |
 | `fernet_key` | idem | OK (chiffrement tokens DB) |
 | `flask_secret_key` | idem | OK (sessions Flask) |
@@ -173,8 +177,8 @@ En cas de doute sur le scope : **demander à Yvan avant**.
 | — | Préliminaires (domaine + décision pivot) | — | ~1h30 | ~1h30 | ✅ 25/04 |
 | — | Fondations infra (VPS + SSL + nginx + systemd + sécurité + Sentry) | (Phase 1) | ~4h | ~6h | ✅ 26/04 |
 | — | Migration manifest URLs + rebrand UI BoosterMail + cleanup docs | (Phase 5 partielle) | ~1h | ~2h | ✅ 26/04 |
-| **1** | **Page install + manifest OnMessageCompose** | (ex-Phase 5 reste) | ~2h | ~1h40 | 🟡 bloqué DNS Yvan |
-| **2** | **Azure setup** (tenant + multi-tenant + client_secret) | (sous-tâche bloquante) | ~1h | 0 | ⏳ Yvan |
+| **1** | **Page install + manifest OnMessageCompose** | (ex-Phase 5 reste) | ~2h | ~1h45 | ✅ 26/04 (HTTPS livré, https://install.boostermail.ai/) |
+| **2** | **Azure setup** (tenant + multi-tenant + client_secret) | (sous-tâche bloquante) | ~1h | ~1h15 | ✅ 26/04 (nouvelle app `BoosterMail` sur tenant `groupe-bosser.fr`, OAuth end-to-end validé) |
 | **3** | **Outlook Web debug** (TIMEBOX 4h max) | (ex-Phase 6) | ~4h max | 0 | ⏳ |
 | **4** | **BG webhooks + pré-génération** | (ex-Phase 3) | ~1 jour | 0 | ⏳ |
 | **5** | **Infra production** (backup DB + cap API + uptime + RGPD + brand + CGU) | (nouveau, créé 26/04) | ~2-3h | 0 | ⏳ |
@@ -227,10 +231,10 @@ En cas de doute sur le scope : **demander à Yvan avant**.
 | Cleanup docs post-Phase 1 | non prévu | 30 min | ✅ 26/04 | 5 docs majeurs + bilan |
 | Restructure doc SaaS dédiée | non prévu | 30 min | ✅ 26/04 | `docs/saas/` + mémoire cross-session |
 | `OnNewMessageCompose` → `OnMessageCompose` | 5 min | 10 min | ✅ 26/04 | manifest + bump `_ADDIN_VERSION` (couvre new + reply + reply-all + forward) |
-| Page `install.boostermail.ai` HTML + nginx | 2h | 1h30 | 🟡 | HTML déployé sur serveur (`/var/www/install.boostermail.ai/`), nginx HTTP-only en place — **bloqué par DNS Yvan** |
-| **DNS A record** `install.boostermail.ai` → `51.178.162.208` | — | — | ⏳ | **Action Yvan** chez registrar du domaine |
-| Activer HTTPS via certbot une fois DNS propagé | 5 min | — | ⏳ | `sudo certbot --nginx -d install.boostermail.ai` |
-| **Total Phase 5** | **2-3h** | **~3h30 fait** | **🟡** | DNS + certbot restent (15 min après action Yvan) |
+| Page `install.boostermail.ai` HTML + nginx | 2h | 1h30 | ✅ 26/04 | HTML déployé sur serveur (`/var/www/install.boostermail.ai/`), nginx HTTP-only puis HTTPS |
+| **DNS A record** `install.boostermail.ai` → `51.178.162.208` | — | 5 min | ✅ 26/04 | OVH zone DNS — propagation 1-3 min |
+| Activer HTTPS via certbot | 5 min | 5 min | ✅ 26/04 | `sudo certbot --nginx -d install.boostermail.ai` — cert valide jusqu'au 25/07/2026 |
+| **Total Phase 5** | **2-3h** | **~3h45 fait** | **✅** | https://install.boostermail.ai/ live, HTTP→HTTPS auto-redirect |
 
 #### F.3.1 Procédure d'activation HTTPS install.boostermail.ai (à lancer après DNS Yvan)
 
@@ -304,13 +308,17 @@ curl -sI https://install.boostermail.ai/ | head -3
 
 ### F.10 Recommandation prochaine étape
 
-**Action immédiate Yvan** : ajouter le DNS A record `install.boostermail.ai → 51.178.162.208` chez le registrar du domaine (TTL par défaut suffit). Une fois propagé (1-15 min en général), Claude lance certbot pour activer HTTPS (cf F.3.1).
+**Étape 1 ✅ TERMINÉE** (26/04 PM) — https://install.boostermail.ai/ live avec HTTPS, redirect 80→443, cert Let's Encrypt valide 90j.
 
-**Si Azure pas débloqué côté Yvan** → reste à finaliser HTTPS install (post-DNS), puis on est en attente.
+**Étape 2 ✅ TERMINÉE** (26/04 PM) — nouvelle app Azure `BoosterMail` créée sur tenant `groupe-bosser.fr` (multi-tenant + comptes perso), client_secret généré 24 mois, 5 permissions Graph accordées, OAuth flow end-to-end validé (login → callback → token → status retournent OK avec le tenant `d66fac24-...`). Détails dans [`AZURE_CONFIG.md`](AZURE_CONFIG.md).
 
-**Si Azure débloqué** → attaquer **Phase 2 multi-tenant** car c'est le bloquant principal pour la beta.
+**Prochaine étape recommandée** :
+- **Étape 5** (Infra prod) — backup DB + cap API + uptime + RGPD + brand + CGU. Indépendant et bloquant pour Étape 6 (AppSource).
+- **OU Étape 7** (Multi-tenant DB user_id) — maintenant débloquée puisque Azure multi-tenant en place. Permet d'accueillir les premiers beta-testeurs autres que Yvan.
 
-**En parallèle Yvan** : soumission AppSource (validation Microsoft 4-8 semaines, autant lancer tôt).
+**En parallèle Yvan** : inscription MPN (Microsoft Cloud Partner Program, gratuit) — résout le warning "End users cannot grant consent" et débloque AppSource (24-48h d'attente). Procédure section D de [`AZURE_CONFIG.md`](AZURE_CONFIG.md).
+
+**Cleanup à faire plus tard** : warnings `acquire_token_silent retourné None` toutes les 30s dans les logs serveur, dus à un user orphelin (ancien `0f3827db-...` lié à l'ancien client_id `209a9651-`). À nettoyer lors de l'Étape 7 (DB cleanup multi-tenant).
 
 ---
 
@@ -472,7 +480,7 @@ scp "C:\EasyMail\.claude\worktrees\angry-ishizaka-26efe7\V2\<file>" ubuntu@51.17
 | Date | Fichier | Sujet principal |
 |---|---|---|
 | **26/04/2026 (matin)** | [`SAAS_BILAN_SESSION_20260426.md`](../sessions/SAAS_BILAN_SESSION_20260426.md) | Phase 1 SaaS terminée (VPS OVH + SSL + sécurité + Sentry) + rebrand UI BoosterMail + Outlook Web différé Phase 6 |
-| **26/04/2026 (après-midi)** | [`SAAS_BILAN_SESSION_20260426_pm.md`](../sessions/SAAS_BILAN_SESSION_20260426_pm.md) | Étape 5 Phase 5 : `OnMessageCompose`, page `install.boostermail.ai` HTML + nginx déployés (HTTPS bloqué DNS Yvan) |
+| **26/04/2026 (après-midi)** | [`SAAS_BILAN_SESSION_20260426_pm.md`](../sessions/SAAS_BILAN_SESSION_20260426_pm.md) | **Étapes 1 & 2 terminées** : (1) `OnMessageCompose` + page `install.boostermail.ai` HTTPS live ; (2) nouvelle app Azure multi-tenant sur tenant `groupe-bosser.fr` + OAuth end-to-end validé |
 
 ---
 

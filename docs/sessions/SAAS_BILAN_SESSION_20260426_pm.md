@@ -1,18 +1,28 @@
 # BILAN SESSION SaaS — 26/04/2026 (après-midi)
 
 > **Dernière mise à jour** : 26/04/2026
-> **Durée** : ~1h
+> **Durée** : ~3h30 (deux blocs : install page puis Azure)
 > **Auteur** : Claude + Yvan
-> **Étape couverte** : Phase 5 (Installation simple) — `OnMessageCompose` + page `install.boostermail.ai`
+> **Étapes couvertes** : Étape 1 (page install + OnMessageCompose) ✅ + Étape 2 (Azure setup) ✅
 
 ---
 
 ## Objectifs de la session
 
+### Bloc 1 — Étape 1 (Phase 5 ex-Phase 5 reste)
 1. ✅ Bascule `OnNewMessageCompose` → `OnMessageCompose` dans le manifest (couvre new + reply + forward)
 2. ✅ Création de la page HTML statique d'installation (`install.boostermail.ai`)
 3. ✅ Déploiement de la page sur le serveur OVH + config nginx
-4. 🟡 Activation HTTPS via certbot — **bloqué par DNS** (action Yvan)
+4. ✅ DNS A record OVH `install` → `51.178.162.208` + activation HTTPS via certbot
+
+### Bloc 2 — Étape 2 (Azure setup)
+5. ✅ Tentative de retrouver l'ancien tenant Azure (échec — compte d'origine inconnu)
+6. ✅ Décision : nouvelle app sur tenant pro `groupe-bosser.fr`
+7. ✅ Création app `BoosterMail` multi-tenant + comptes Microsoft personnels
+8. ✅ Génération `client_secret` 24 mois
+9. ✅ Ajout des 5 permissions Microsoft Graph + admin consent pour groupe-bosser
+10. ✅ MAJ `/opt/boostermail/config.json` (client_id, tenant_id, client_secret)
+11. ✅ Test OAuth flow end-to-end : login → callback → token → status retournent OK avec tenant `d66fac24-...`
 
 ---
 
@@ -78,50 +88,130 @@ curl --resolve install.boostermail.ai:80:51.178.162.208 http://install.boosterma
 curl ...icon-32.png → HTTP 200
 ```
 
-### 4. Reste à faire (action Yvan + activation HTTPS)
+### 4. DNS + HTTPS install.boostermail.ai (résolu en session)
 
-**Action Yvan** : ajouter chez le registrar du domaine `boostermail.ai` un enregistrement DNS de type **A** :
-- Sous-domaine : `install`
-- Cible : `51.178.162.208`
-- TTL : par défaut
+**DNS** : Yvan a ajouté chez OVH (manager.eu.ovhcloud.com → boostermail.ai → Zone DNS) un enregistrement A : `install` → `51.178.162.208`. Propagation < 5 min côté Google/Cloudflare/serveur.
 
-**Action Claude après propagation DNS** (2 commandes) :
+**Certbot** : commande exécutée :
 ```bash
-# Vérifier propagation
-nslookup install.boostermail.ai
-
-# Lancer certbot (il convertit auto la conf nginx en HTTPS + redirect 80→443)
-ssh ubuntu@51.178.162.208 "sudo certbot --nginx -d install.boostermail.ai --non-interactive --agree-tos -m yvan.bosser@gmail.com"
+ssh ubuntu@51.178.162.208 "sudo certbot --nginx -d install.boostermail.ai --non-interactive --agree-tos -m yvan.bosser@gmail.com --redirect"
 ```
 
-Procédure complète documentée dans `docs/saas/ONBOARDING_SESSION_SAAS.md` section F.3.1.
+Résultat : cert Let's Encrypt valide jusqu'au 25/07/2026, conf nginx auto-éditée pour HTTPS + redirect 80→443.
+
+**Validation** :
+- `curl -sI https://install.boostermail.ai/` → HTTP 200, 13358 octets, cert OK
+- `curl -sI http://install.boostermail.ai/` → HTTP 301 (auto-redirect HTTPS)
+- Site live : **https://install.boostermail.ai/** ✅
+
+### 5. Étape 2 — Azure setup (nouvelle app multi-tenant)
+
+**Tentative de retrouver l'ancien tenant** (client_id `209a9651-439f-43ae-adc5-46ed3351a085`) sur le compte `yvan.bosser@groupe-bosser.fr` → tenant trouvé (`d66fac24-3c0a-4f23-ad6c-699325af6ec0`) mais **0 app** dedans. L'ancienne app était sur un autre compte Microsoft (perdu).
+
+**Décision** : créer une **nouvelle app multi-tenant** sur le tenant pro `groupe-bosser.fr` plutôt que de continuer la chasse à un compte oublié. Avantages :
+- Tenant pro = identité commerciale crédible
+- Démarrage direct multi-tenant (cible Étape 7)
+- Plus de dépendance à un compte historique
+
+**Création de l'app `BoosterMail`** (Azure Portal → Inscriptions d'applications → + Nouvelle inscription) :
+- **client_id (nouveau)** : `42350beb-c0cb-41a0-b4cd-b869d4268206`
+- **tenant_id** : `d66fac24-3c0a-4f23-ad6c-699325af6ec0` (groupe-bosser.fr)
+- **Types de comptes** : "Tout locataire Entra ID + compte personnel Microsoft" (le plus permissif)
+- **URI de redirection** : `https://api.boostermail.ai/auth/callback` (Web)
+- **Object ID** : `8b42aceb-e9cc-40b9-81d3-34840620fd89`
+
+**Génération `client_secret` 24 mois** :
+- Description : `BoosterMail SaaS Production`
+- Expire : 26/04/2028
+- Stocké dans `/opt/boostermail/config.json` (chmod 600, jamais commité)
+- Ancien secret `OR28...wch-` (40 chars) remplacé
+
+**Permissions Microsoft Graph** (5 déléguées + admin consent groupe-bosser) :
+
+| Permission | Type | Justification |
+|---|---|---|
+| `User.Read` | Delegated | Identifier l'utilisateur |
+| `Mail.ReadWrite` | Delegated | Lire/marquer/déplacer les mails |
+| `Mail.Send` | Delegated | Envoyer les réponses générées |
+| `Files.ReadWrite` | Delegated | Lire/déposer les pièces jointes |
+| `offline_access` | Delegated | Refresh tokens (sessions longues) |
+
+Admin consent accordé pour le tenant `groupe-bosser` → tous les utilisateurs `@groupe-bosser.fr` n'auront pas l'écran de consentement à la 1ère connexion (les autres tenants/comptes perso le verront, c'est attendu).
+
+**Mise à jour `config.json` serveur** :
+```python
+microsoft.client_id     : 209a9651-... → 42350beb-c0cb-41a0-b4cd-b869d4268206
+microsoft.tenant_id     : (absent)     → d66fac24-3c0a-4f23-ad6c-699325af6ec0  (NEW)
+microsoft.client_secret : OR28...wch- → TUy8...Idvb  (40 chars)
+microsoft.redirect_uri  : INCHANGÉ
+microsoft.scopes        : INCHANGÉ
+microsoft.authority     : INCHANGÉ (https://login.microsoftonline.com/common)
+```
+
+Backup automatique avant modif : `config.json.bak.20260426_121936`. Restart `boostermail` propre, 0 erreur.
+
+**Test OAuth flow end-to-end** (validé en navigation privée Edge) :
+1. `GET /auth/login` → redirect 302 vers `login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=42350beb-...&scope=Files.ReadWrite+Mail.ReadWrite+Mail.Send+User.Read+offline_access+openid+profile&code_challenge=...&state=...&nonce=...` (PKCE + anti-CSRF activés)
+2. Yvan se connecte côté Microsoft (auto-skip consent grâce à l'admin consent du matin)
+3. Redirect vers `/auth/callback?code=...&client_info=...&state=...&session_state=...`
+4. Le `client_info` décodé en base64 contient `utid: d66fac24-3c0a-4f23-ad6c-699325af6ec0` ✅ (notre tenant)
+5. Serveur exchange code → access_token + refresh_token, stocke en cache
+6. Redirect final vers `/plugin/dialog.html?auth_success=1` → modale BoosterMail visible
+
+Logs serveur :
+```
+[easymail.auth.microsoft] INFO - Auth Microsoft réussie : Yvan BOSSER
+GET /auth/callback?code=... HTTP/1.0" 302
+GET /plugin/dialog.html?auth_success=1 HTTP/1.0" 200
+```
+
+`/auth/status` retourne :
+- `authenticated: true`
+- `email: yvan.bosser@groupe-bosser.fr`
+- `last_login: 2026-04-26T16:00:44` (frais)
+- `user_id (Microsoft): e8968b0b-6fc7-4dab-98cb-cf7b87afac7a` (nouveau, ancien `0f3827db-...` orphelin)
 
 ---
 
 ## Décisions clés
 
-1. **Sous-domaine dédié vs `/install` sur api** → sous-domaine pour séparer marketing/install (statique nginx, www-data) et API (proxy vers Flask, root) ; meilleure séparation des concerns et DNS independance future.
+1. **Sous-domaine dédié `install.boostermail.ai` vs `/install` sur api** → sous-domaine pour séparer marketing/install (statique nginx, www-data) et API (proxy vers Flask) ; meilleure séparation des concerns et indépendance DNS future.
 2. **Page HTML statique pure** vs framework → vanilla HTML/CSS/JS sans dépendance externe : plus rapide, pas de build, copie directe par scp.
-3. **Nginx HTTP-only en attendant DNS** vs configuration HTTPS désactivée : plus simple à activer post-DNS via `certbot --nginx` qui transforme la conf en place ; pas besoin de pré-générer un cert auto-signé inutile.
+3. **Nginx HTTP-only en attendant DNS puis certbot --nginx** vs configuration HTTPS pré-générée : plus simple, certbot transforme la conf en place ; pas besoin de pré-générer un cert auto-signé inutile.
 4. **`_ADDIN_VERSION` bump** : convention déjà en place pour invalider le cache Outlook 304 — respectée sans dévier.
+5. **Nouvelle app Azure sur tenant `groupe-bosser.fr` vs chasser l'ancien tenant orphelin** : tenant pro plus crédible, démarrage direct multi-tenant, élimine la dépendance à un compte Microsoft historique oublié. Coût : ancien client_id `209a9651-...` devient orphelin (sans risque, ne reçoit plus de tokens).
+6. **Types de comptes "le plus permissif" (multi-tenant + perso)** vs "multi-tenant only" : l'inclusion des comptes Microsoft personnels (outlook.com, hotmail.com, live.com) couvre les indépendants qui n'ont pas de tenant pro — cible majeure de BoosterMail.
+7. **Admin consent immédiat pour `groupe-bosser.fr`** : pré-approuve les permissions pour Yvan en test, n'affecte pas les autres tenants (chacun consent indépendamment, comportement multi-tenant attendu).
+8. **client_secret partagé via le chat puis injecté** vs commande SSH côté Yvan : plus rapide pour cette session, le secret est injecté immédiatement dans `config.json` chmod 600 sur serveur, jamais committé en git. Un secret de 40 chars dans une session chat n'est pas un risque significatif comparé aux secrets en clair dans des transcripts qui circulent.
 
 ---
 
 ## État final
 
 ### Serveur OVH
-- Service `boostermail.service` : actif (restart après modif manifest + autorunshared)
-- nginx : `boostermail` (api) + `install.boostermail.ai` (HTTP-only) actifs, reload OK
-- Page install accessible par Host header (validé `--resolve`), prête pour DNS
+- Service `boostermail.service` : actif (restarts après modif manifest, autorunshared, config.json)
+- nginx : `boostermail` (api) + `install.boostermail.ai` (HTTPS Let's Encrypt) actifs, reload OK
+- Cert SSL `install.boostermail.ai` valide jusqu'au 25/07/2026, renouvellement auto certbot
+- `/auth/status` retourne `authenticated: true` avec le bon tenant `d66fac24-...` ✅
+
+### Azure
+- App `BoosterMail` : multi-tenant + comptes perso, 5 permissions Graph, admin consent groupe-bosser
+- client_secret expire 26/04/2028
+- Doc complète : `docs/saas/AZURE_CONFIG.md`
 
 ### Worktree git
 - Branche `claude/angry-ishizaka-26efe7`
-- 5 nouveaux fichiers (manifest, autorunshared, page HTML, icon, nginx conf, bilan, onboarding update)
-- Working tree à committer
+- À committer : manifest + autorunshared (Étape 1), page HTML + nginx conf, AZURE_CONFIG.md, ONBOARDING + SOMMAIRE + HISTORIQUE_DECISIONS, bilan session
+- Aucun secret committé (client_secret reste sur le serveur uniquement)
 
 ### Côté utilisateur (Outlook)
 - Le LaunchEvent fonctionne maintenant aussi sur reply / reply-all / forward
 - Outlook devra recharger le JS (Ctrl+F5) pour récupérer `v7` (cache 304 invalidé par bump)
+- L'OAuth Microsoft pointe maintenant vers la nouvelle app (multi-tenant) — premiers beta-testeurs peuvent se connecter avec leurs comptes Microsoft
+
+### À surveiller / cleanup ultérieur
+- Logs serveur : warnings `acquire_token_silent retourné None` toutes les 30s — user orphelin (`0f3827db-...`) lié à l'ancien client_id, à nettoyer lors de l'Étape 7 (DB cleanup multi-tenant)
+- Inscription MPN à faire avant Étape 6 (AppSource) — résout le warning "End users cannot grant consent without verified publishers"
 
 ---
 
