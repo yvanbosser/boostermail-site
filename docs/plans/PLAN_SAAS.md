@@ -161,16 +161,32 @@ Les deux environnements coexistent.
 
 ---
 
-## Ordre d'exécution recommandé (post-26/04)
+## Ordre d'exécution recommandé (validé Yvan 26/04)
 
-1. Cleanup docs (en cours, session 26/04)
-2. Retrouver/créer le tenant Azure multi-tenant (~1h, bloquant pour Phase 2)
-3. Soumission AppSource Microsoft (~30 min de soumission, **4-8 semaines de validation** — à lancer tôt)
-4. Page `install.boostermail.ai` (HTML statique, ~2h)
-5. Phase 2 multi-tenant (DB `user_id`, isolation routes — 1-2 jours)
-6. Test New Outlook complet en SaaS (quand migration mail OVH finie)
-7. Phase 4 paiement Stripe + RGPD (~1 jour, avant 1er payant)
-8. Phase 6 — Debug dialog Outlook Web (post-beta, optionnel)
+> **Convention** : "Étape N" = ordre chronologique. Les "Phase X" historiques (sections plus haut dans ce doc) sont conservées pour traçabilité, mais l'ordre d'exécution suit les Étapes.
+>
+> **Source de vérité opérationnelle vivante** : `docs/saas/ONBOARDING_SESSION_SAAS.md` section F (planning détaillé avec sous-tâches, estimation vs réel, statut au jour le jour).
+
+| Ordre | Étape | Référence historique | Estimation |
+|---|---|---|---|
+| **1** | Page install + manifest `OnMessageCompose` | (ex-Phase 5) | ~2h |
+| **2** | Azure setup (tenant + multi-tenant + `client_secret`) | sous-tâche bloquante | ~1h (Yvan) |
+| **3** | Outlook Web debug (TIMEBOX 4h) | (ex-Phase 6) | ~4h max |
+| **4** | BG webhooks + pré-génération | (ex-Phase 3) | ~1 jour |
+| **5** | Infra production (backup DB + cap API + uptime + RGPD + brand + CGU) | nouveau 26/04 | ~2-3h |
+| **6** | Soumission AppSource Microsoft (validation 4-8 sem en BG) | immédiat parallèle | ~30 min |
+| **7** | Multi-tenant DB `user_id` + isolation routes | (ex-Phase 2) | ~1.5 jour |
+| **8** | 🎯 Beta gratuite (5-10 testeurs indé/TPE) | — | 1-2 sem |
+| **9** | Paiement Stripe + Brevo | (ex-Phase 4) | ~1 jour |
+| **10** | Publication AppSource (quand validation Microsoft revient) | — | passif |
+
+**Logique de l'ordre** :
+- Étapes 1-4 : valeur immédiate pour Yvan (seul user actuel) + UX magique pré-générée
+- Étape 5 : tout ce qu'il faut "en dur" avant d'inviter qui que ce soit (backup, cap API, RGPD, brand)
+- Étape 6 : soumission AppSource lancée tôt (validation Microsoft 4-8 semaines en arrière-plan)
+- Étape 7 : multi-tenant juste avant la beta (sans ça, impossible d'inviter)
+- Étapes 8-9 : beta puis paiement
+- Étape 10 : publication AppSource quand validation Microsoft revient
 
 ---
 

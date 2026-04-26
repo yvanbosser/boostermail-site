@@ -163,22 +163,44 @@ En cas de doute sur le scope : **demander à Yvan avant**.
 ## F. Planning SaaS complet (estimation vs réel)
 
 > **Légende** : ✅ fait • 🟡 partiel • ⏳ à faire • ⏸️ différé
+>
+> **Convention de libellé (depuis 26/04)** : "Étape N" = ordre chronologique d'exécution validé par Yvan le 26/04. Les noms "Phase X" entre parenthèses sont les références historiques du `PLAN_SAAS.md` initial du 25/04, conservés pour traçabilité.
 
-### F.1 Vue synthétique par phase
+### F.1 Vue synthétique chronologique
 
-| Phase | Estimation initiale | Réel | Statut | Date |
-|---|---|---|---|---|
-| Préliminaires (domaine + décision pivot) | ~1h30 | ~1h30 | ✅ | 25/04 |
-| **Phase 1 — Fondations** | demi-journée (~4h) | ~6h | ✅ | 26/04 |
-| **Phase 5 — Installation simple** | 2-3h | ~2h fait / ~2h reste | 🟡 | 26/04 + suite |
-| Immédiat parallèle (Azure + AppSource) | ~1h30 + attente 4-8 sem | 0 | ⏳ | — |
-| **Phase 2 — Multi-tenant** | 1-2 jours (~12h) | 0 | ⏳ | bloqué Azure |
-| 🎯 **Beta gratuite** | variable (1-2 sem) | 0 | ⏳ | post Phase 2 |
-| **Phase 4 — Paiement Stripe** | 1 jour (~8h) | 0 | ⏳ | post beta |
-| **Phase 3 — BG webhooks** | 1 jour (~8h) | 0 | ⏳ | post beta |
-| **Phase 6 — Outlook Web** | quelques h | 0 | ⏸️ | post-beta optionnel |
-| **TOTAL effectué au 26/04** | — | **~9.5h** | — | — |
-| **TOTAL restant estimé** | **~5-6 jours** + attente AppSource 4-8 sem | — | — | — |
+| Ordre | Étape | Référence historique | Estimation | Réel | Statut |
+|---|---|---|---|---|---|
+| — | Préliminaires (domaine + décision pivot) | — | ~1h30 | ~1h30 | ✅ 25/04 |
+| — | Fondations infra (VPS + SSL + nginx + systemd + sécurité + Sentry) | (Phase 1) | ~4h | ~6h | ✅ 26/04 |
+| — | Migration manifest URLs + rebrand UI BoosterMail + cleanup docs | (Phase 5 partielle) | ~1h | ~2h | ✅ 26/04 |
+| **1** | **Page install + manifest OnMessageCompose** | (ex-Phase 5 reste) | ~2h | ~1h40 | 🟡 bloqué DNS Yvan |
+| **2** | **Azure setup** (tenant + multi-tenant + client_secret) | (sous-tâche bloquante) | ~1h | 0 | ⏳ Yvan |
+| **3** | **Outlook Web debug** (TIMEBOX 4h max) | (ex-Phase 6) | ~4h max | 0 | ⏳ |
+| **4** | **BG webhooks + pré-génération** | (ex-Phase 3) | ~1 jour | 0 | ⏳ |
+| **5** | **Infra production** (backup DB + cap API + uptime + RGPD + brand + CGU) | (nouveau, créé 26/04) | ~2-3h | 0 | ⏳ |
+| **6** | **Soumission AppSource Microsoft** (validation 4-8 sem en BG) | (immédiat parallèle) | ~30 min | 0 | ⏳ bloqué Azure + Étape 5 |
+| **7** | **Multi-tenant DB user_id + isolation routes** | (ex-Phase 2) | ~1.5 jour | 0 | ⏳ bloqué Azure |
+| **8** | 🎯 **Beta gratuite** (5-10 testeurs indé/TPE) | — | 1-2 sem | 0 | ⏳ |
+| **9** | **Paiement Stripe + Brevo** | (ex-Phase 4) | ~1 jour | 0 | ⏳ avant 1er payant |
+| **10** | **Publication AppSource** (quand validation Microsoft revient) | — | passif | 0 | ⏳ post Étape 6 |
+| **TOTAL effectué au 26/04** | — | — | — | **~11h** | — |
+| **TOTAL restant estimé** | — | — | **~5-6 jours** + attente AppSource 4-8 sem | — | — |
+
+### F.2 Mapping ancien → nouveau (pour lecture des docs antérieurs)
+
+| Ancien nom (PLAN_SAAS du 25/04) | Nouveau libellé planning (26/04) |
+|---|---|
+| Phase 1 — Fondations | ✅ Fait 26/04 (avant Étape 1) |
+| Phase 5 — Installation simple | Étape 1 (page install + OnMessageCompose) — partiellement fait 26/04 |
+| Phase 6 — Outlook Web | Étape 3 |
+| Phase 3 — Travail en arrière-plan (BG webhooks) | Étape 4 |
+| (nouveau, non listé initialement) | Étape 5 — Infra production (backup, cap API, uptime, RGPD, brand, CGU) |
+| Phase 2 — Multi-utilisateurs | Étape 7 |
+| 🎯 Beta gratuite | Étape 8 |
+| Phase 4 — Paiement | Étape 9 |
+| AppSource (immédiat parallèle) | Étape 6 (soumission) + Étape 10 (publication) |
+| Sécurité serveur (UFW + fail2ban + SSH key) | ✅ Fait 26/04 dans la Phase 1 (non listé initialement) |
+| Régénération API keys exposées | ✅ Fait 26/04 dans la Phase 1 (non listé initialement) |
 
 ### F.2 Détail Phase 1 — Fondations ✅ (terminée 26/04)
 
