@@ -12,6 +12,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["V1_plugin/app_plugin.py"],
       "port": 5060
+    },
+    {
+      "name": "install-landing",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8090", "--directory", "V2/install_landing"],
+      "port": 8090
     }
   ]
 }

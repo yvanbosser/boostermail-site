@@ -62,6 +62,8 @@ Si l'un des deux échoue, **arrête et alerte Yvan** avant toute autre action.
 | `/opt/boostermail/addin_debug.log` | Logs add-in (POST `/api/debug_addin_log`) |
 | `/opt/boostermail/backup_rebrand_20260426_103118/` | Backup pré-rebrand 26/04 |
 | `/opt/boostermail/V2/<file>.bak.YYYYMMDD_HHMMSS` | Backups manuels (à créer avant chaque modif) |
+| `/var/www/install.boostermail.ai/` | Page d'installation statique (sert `install.boostermail.ai` via nginx, www-data) |
+| `/etc/nginx/sites-available/install.boostermail.ai` | Conf nginx du sous-domaine install (HTTP-only au 26/04, HTTPS post-DNS via certbot) |
 
 ### SSL
 - Certificat Let's Encrypt sur `api.boostermail.ai`
@@ -202,9 +204,25 @@ En cas de doute sur le scope : **demander à Yvan avant**.
 | Rebrand UI `EasyMail` → `BoosterMail` | non prévu | 30 min | ✅ 26/04 | 26 strings user-visibles, 8 fichiers |
 | Cleanup docs post-Phase 1 | non prévu | 30 min | ✅ 26/04 | 5 docs majeurs + bilan |
 | Restructure doc SaaS dédiée | non prévu | 30 min | ✅ 26/04 | `docs/saas/` + mémoire cross-session |
-| `OnNewMessageCompose` → `OnMessageCompose` | 5 min | — | ⏳ | 1 mot dans manifest |
-| Page `install.boostermail.ai` | 2h | — | ⏳ | HTML statique + lien `aka.ms/olksideload` |
-| **Total Phase 5** | **2-3h** | **~2h fait** | **🟡** | ~2h restantes |
+| `OnNewMessageCompose` → `OnMessageCompose` | 5 min | 10 min | ✅ 26/04 | manifest + bump `_ADDIN_VERSION` (couvre new + reply + reply-all + forward) |
+| Page `install.boostermail.ai` HTML + nginx | 2h | 1h30 | 🟡 | HTML déployé sur serveur (`/var/www/install.boostermail.ai/`), nginx HTTP-only en place — **bloqué par DNS Yvan** |
+| **DNS A record** `install.boostermail.ai` → `51.178.162.208` | — | — | ⏳ | **Action Yvan** chez registrar du domaine |
+| Activer HTTPS via certbot une fois DNS propagé | 5 min | — | ⏳ | `sudo certbot --nginx -d install.boostermail.ai` |
+| **Total Phase 5** | **2-3h** | **~3h30 fait** | **🟡** | DNS + certbot restent (15 min après action Yvan) |
+
+#### F.3.1 Procédure d'activation HTTPS install.boostermail.ai (à lancer après DNS Yvan)
+
+```bash
+# 1. Vérifier que le DNS est propagé (doit retourner 51.178.162.208)
+nslookup install.boostermail.ai
+
+# 2. Lancer certbot (auto-converti la conf nginx en HTTPS + redirect 80→443)
+ssh ubuntu@51.178.162.208 "sudo certbot --nginx -d install.boostermail.ai --non-interactive --agree-tos -m yvan.bosser@gmail.com"
+
+# 3. Vérifier
+curl -sI https://install.boostermail.ai/ | head -3
+# ✅ Attendu : HTTP/2 200
+```
 
 ### F.4 Immédiat parallèle (à lancer tôt) ⏳
 
@@ -264,7 +282,9 @@ En cas de doute sur le scope : **demander à Yvan avant**.
 
 ### F.10 Recommandation prochaine étape
 
-**Si Azure pas débloqué côté Yvan** → attaquer **Phase 5** (page install + `OnMessageCompose`) qui est indépendante de tout.
+**Action immédiate Yvan** : ajouter le DNS A record `install.boostermail.ai → 51.178.162.208` chez le registrar du domaine (TTL par défaut suffit). Une fois propagé (1-15 min en général), Claude lance certbot pour activer HTTPS (cf F.3.1).
+
+**Si Azure pas débloqué côté Yvan** → reste à finaliser HTTPS install (post-DNS), puis on est en attente.
 
 **Si Azure débloqué** → attaquer **Phase 2 multi-tenant** car c'est le bloquant principal pour la beta.
 
@@ -429,7 +449,8 @@ scp "C:\EasyMail\.claude\worktrees\angry-ishizaka-26efe7\V2\<file>" ubuntu@51.17
 
 | Date | Fichier | Sujet principal |
 |---|---|---|
-| **26/04/2026** | [`SAAS_BILAN_SESSION_20260426.md`](../sessions/SAAS_BILAN_SESSION_20260426.md) | Phase 1 SaaS terminée (VPS OVH + SSL + sécurité + Sentry) + rebrand UI BoosterMail + Outlook Web différé Phase 6 |
+| **26/04/2026 (matin)** | [`SAAS_BILAN_SESSION_20260426.md`](../sessions/SAAS_BILAN_SESSION_20260426.md) | Phase 1 SaaS terminée (VPS OVH + SSL + sécurité + Sentry) + rebrand UI BoosterMail + Outlook Web différé Phase 6 |
+| **26/04/2026 (après-midi)** | [`SAAS_BILAN_SESSION_20260426_pm.md`](../sessions/SAAS_BILAN_SESSION_20260426_pm.md) | Étape 5 Phase 5 : `OnMessageCompose`, page `install.boostermail.ai` HTML + nginx déployés (HTTPS bloqué DNS Yvan) |
 
 ---
 

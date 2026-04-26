@@ -51,6 +51,7 @@ En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux
 - **Phase 1 SaaS terminée** (26/04) : VPS OVH `51.178.162.208` actif, SSL Let's Encrypt sur `api.boostermail.ai`, sécurité serveur (UFW + fail2ban + SSH key-only), Sentry monitoring (free tier EU, RGPD-safe), API keys régénérées (Anthropic + OpenAI). Voir `docs/sessions/SAAS_BILAN_SESSION_20260426.md` + `docs/saas/ONBOARDING_SESSION_SAAS.md` (référence vivante)
 - **Outlook Web différé en Phase 6 post-beta** (26/04) : code 12011 `displayDialogAsync` résolu via `displayInIframe: true` mais le contenu du dialog ne se charge pas dans l'iframe (erreur JS cross-origin masquée). Les beta-testeurs utiliseront New Outlook ou Outlook Classic
 - **Rebrand user-visible EasyMail → BoosterMail** (26/04) : 26 strings UI (manifest + HTML + JS). Le back garde `easymail` (IDs internes, URIs `easymail://`, logger Python) — pas visible utilisateur
+- **Phase 5 démarrée** (26/04 après-midi) : `OnNewMessageCompose` → `OnMessageCompose` (couvre new + reply + forward) + page `install.boostermail.ai` HTML + nginx HTTP-only déployée. Activation HTTPS attente DNS A record côté Yvan (procédure section F.3.1 onboarding). Voir `docs/sessions/SAAS_BILAN_SESSION_20260426_pm.md`
 
 Les docs antérieurs à ces décisions peuvent décrire l'ancien état. **Ne pas les utiliser comme source pour le code actuel sans vérifier.**
 
@@ -270,7 +271,8 @@ docs/
 | `BILAN_SESSION_V2_20260414.md` | 14/04/2026 | Bilan de session V2 (état travaux plugin) |
 | `BILAN_SESSION_20260416.md` | 16/04/2026 | Bilan de session 16/04 |
 | `BILAN_SESSION_20260418.md` | 18/04/2026 | Consolidation doc + Plan 1 exécuté + règles M1-M4 + préparation Plans 2/3 |
-| **`SAAS_BILAN_SESSION_20260426.md`** | **26/04/2026** | **[SaaS] Phase 1 SaaS terminée (VPS OVH + SSL + sécurité + Sentry) + rebrand UI BoosterMail + Outlook Web différé Phase 6** |
+| **`SAAS_BILAN_SESSION_20260426.md`** | **26/04/2026 (matin)** | **[SaaS] Phase 1 SaaS terminée (VPS OVH + SSL + sécurité + Sentry) + rebrand UI BoosterMail + Outlook Web différé Phase 6** |
+| **`SAAS_BILAN_SESSION_20260426_pm.md`** | **26/04/2026 (après-midi)** | **[SaaS] Étape 5 Phase 5 : `OnMessageCompose` + page `install.boostermail.ai` HTML + nginx déployés (HTTPS bloqué par DNS Yvan)** |
 
 **Convention de nommage des bilans** (depuis 26/04/2026) :
 - `SAAS_BILAN_SESSION_AAAAMMJJ.md` — sessions infra/déploiement SaaS

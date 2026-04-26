@@ -174,10 +174,10 @@
               </OfficeTab>
             </ExtensionPoint>
 
-            <!-- LaunchEvent : OnNewMessageCompose -->
+            <!-- LaunchEvent : OnMessageCompose (couvre new + reply + reply-all + forward, requiert Mailbox 1.10) -->
             <ExtensionPoint xsi:type="LaunchEvent">
               <LaunchEvents>
-                <LaunchEvent Type="OnNewMessageCompose" FunctionName="onNewMessageComposeHandler"/>
+                <LaunchEvent Type="OnMessageCompose" FunctionName="onNewMessageComposeHandler"/>
               </LaunchEvents>
               <SourceLocation resid="autorunHtmlUrl"/>
             </ExtensionPoint>
