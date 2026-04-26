@@ -369,7 +369,8 @@ Code 12011 `displayDialogAsync` resolu via `displayInIframe: true` mais le conte
 7. Phase 4 paiement Stripe + RGPD
 8. Phase 6 debug dialog Outlook Web (post-beta)
 
-→ Bilan complet : `docs/sessions/BILAN_SESSION_20260426.md`
+→ Bilan complet : `docs/sessions/SAAS_BILAN_SESSION_20260426.md`
+→ Onboarding vivant SaaS (à lire au début de toute session SaaS) : `docs/saas/ONBOARDING_SESSION_SAAS.md`
 → Plan SaaS detaille : `docs/plans/PLAN_SAAS.md`
 
 ---

@@ -48,7 +48,7 @@ En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux
 - Smart Speculative « 6 filtres » de la spec → **CORRIGÉ** : 5 à porter + 1 à créer en V2 (filtre open_count absent du proto) (18/04)
 - Popup « à chaque démarrage Outlook » → **AFFINÉE** : matrice 4 modes user × cache, toujours affichée mais contenu adapté (18/04)
 - Installation locale (start.bat + V2 sur `C:\EasyMail\V2\` + companion COM) → **PIVOT SaaS** : V2 hébergé sur VPS OVH Gravelines (`api.boostermail.ai`), accessible depuis Outlook Web sans installation. Companion supprimé, `boostermail_service.py` supprimé, manifest mis à jour. Voir `docs/plans/PLAN_SAAS.md` (25/04)
-- **Phase 1 SaaS terminée** (26/04) : VPS OVH `51.178.162.208` actif, SSL Let's Encrypt sur `api.boostermail.ai`, sécurité serveur (UFW + fail2ban + SSH key-only), Sentry monitoring (free tier EU, RGPD-safe), API keys régénérées (Anthropic + OpenAI). Voir `docs/sessions/BILAN_SESSION_20260426.md`
+- **Phase 1 SaaS terminée** (26/04) : VPS OVH `51.178.162.208` actif, SSL Let's Encrypt sur `api.boostermail.ai`, sécurité serveur (UFW + fail2ban + SSH key-only), Sentry monitoring (free tier EU, RGPD-safe), API keys régénérées (Anthropic + OpenAI). Voir `docs/sessions/SAAS_BILAN_SESSION_20260426.md` + `docs/saas/ONBOARDING_SESSION_SAAS.md` (référence vivante)
 - **Outlook Web différé en Phase 6 post-beta** (26/04) : code 12011 `displayDialogAsync` résolu via `displayInIframe: true` mais le contenu du dialog ne se charge pas dans l'iframe (erreur JS cross-origin masquée). Les beta-testeurs utiliseront New Outlook ou Outlook Classic
 - **Rebrand user-visible EasyMail → BoosterMail** (26/04) : 26 strings UI (manifest + HTML + JS). Le back garde `easymail` (IDs internes, URIs `easymail://`, logger Python) — pas visible utilisateur
 
@@ -88,6 +88,7 @@ docs/
 ├── v2_specs/          ← 11 specs Phase 2 V1/V2 (ex-V1_outlook/*.md)
 ├── analyses_proto_v2/         ← 16 analyses comparatives proto vs V2
 ├── plans/                     ← Plans d'action
+├── saas/                      ← Onboarding + état vivant infra SaaS (depuis 26/04)
 ├── installation/              ← Onboarding + chatbot + admin deploy
 ├── sessions/                  ← Bilans de sessions + rapports d'audit
 ├── audits/                    ← Rapports d'audit dédiés
@@ -269,7 +270,12 @@ docs/
 | `BILAN_SESSION_V2_20260414.md` | 14/04/2026 | Bilan de session V2 (état travaux plugin) |
 | `BILAN_SESSION_20260416.md` | 16/04/2026 | Bilan de session 16/04 |
 | `BILAN_SESSION_20260418.md` | 18/04/2026 | Consolidation doc + Plan 1 exécuté + règles M1-M4 + préparation Plans 2/3 |
-| **`BILAN_SESSION_20260426.md`** | **26/04/2026** | **Phase 1 SaaS terminée (VPS OVH + SSL + sécurité + Sentry) + rebrand UI BoosterMail + Outlook Web différé Phase 6** |
+| **`SAAS_BILAN_SESSION_20260426.md`** | **26/04/2026** | **[SaaS] Phase 1 SaaS terminée (VPS OVH + SSL + sécurité + Sentry) + rebrand UI BoosterMail + Outlook Web différé Phase 6** |
+
+**Convention de nommage des bilans** (depuis 26/04/2026) :
+- `SAAS_BILAN_SESSION_AAAAMMJJ.md` — sessions infra/déploiement SaaS
+- `OUTLOOK_BILAN_SESSION_AAAAMMJJ.md` — sessions optimisation New Outlook (à venir)
+- `BILAN_SESSION_AAAAMMJJ.md` (sans préfixe) — sessions mixtes ou autres sujets
 
 ---
 

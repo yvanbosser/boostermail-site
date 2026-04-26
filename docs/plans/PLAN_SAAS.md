@@ -177,6 +177,7 @@ Les deux environnements coexistent.
 ## Références
 
 - Décision stratégique initiale : `docs/specs_proto/HISTORIQUE_DECISIONS.md` (entrée 25/04/2026)
-- Bilan session déploiement : `docs/sessions/BILAN_SESSION_20260426.md`
+- Bilan session déploiement : `docs/sessions/SAAS_BILAN_SESSION_20260426.md`
+- Onboarding session SaaS (référence vivante) : `docs/saas/ONBOARDING_SESSION_SAAS.md`
 - Architecture V2 actuelle : `docs/analyses_proto_v2/V2_MASTER_SPEC.md`
 - Gaps V2 vs proto : `docs/analyses_proto_v2/V2_vs_PROTO_GAPS.md`
