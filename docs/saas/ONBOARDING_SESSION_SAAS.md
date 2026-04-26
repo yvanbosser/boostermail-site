@@ -158,21 +158,117 @@ En cas de doute sur le scope : **demander à Yvan avant**.
 
 ---
 
-## F. Ordre d'exécution restant (post-26/04)
+## F. Planning SaaS complet (estimation vs réel)
 
-| # | Tâche | Effort | Bloqué par | Statut |
+> **Légende** : ✅ fait • 🟡 partiel • ⏳ à faire • ⏸️ différé
+
+### F.1 Vue synthétique par phase
+
+| Phase | Estimation initiale | Réel | Statut | Date |
 |---|---|---|---|---|
-| 1 | Cleanup docs | 30 min | — | ✅ Fait 26/04 |
-| 2 | Retrouver/créer le tenant Azure multi-tenant | ~1h | (Yvan) | ⏳ À faire |
-| 3 | Régénérer Microsoft `client_secret` | 5 min | étape 2 | ⏳ |
-| 4 | Soumission AppSource Microsoft | 30 min + 4-8 sem validation | étape 2 | ⏳ |
-| 5 | Page `install.boostermail.ai` (HTML statique) | ~2h | — | ⏳ Indépendant |
-| 6 | Phase 2 multi-tenant (DB `user_id`, isolation routes) | 1-2 jours | étape 2 | ⏳ |
-| 7 | Test New Outlook complet en SaaS | ~1h | migration mail OVH (Yvan) | ⏳ |
-| 8 | Phase 4 paiement Stripe + RGPD | ~1 jour | beta validée | ⏳ |
-| 9 | Phase 6 — Debug dialog Outlook Web | quelques heures | post-beta | ⏳ Optionnel |
+| Préliminaires (domaine + décision pivot) | ~1h30 | ~1h30 | ✅ | 25/04 |
+| **Phase 1 — Fondations** | demi-journée (~4h) | ~6h | ✅ | 26/04 |
+| **Phase 5 — Installation simple** | 2-3h | ~2h fait / ~2h reste | 🟡 | 26/04 + suite |
+| Immédiat parallèle (Azure + AppSource) | ~1h30 + attente 4-8 sem | 0 | ⏳ | — |
+| **Phase 2 — Multi-tenant** | 1-2 jours (~12h) | 0 | ⏳ | bloqué Azure |
+| 🎯 **Beta gratuite** | variable (1-2 sem) | 0 | ⏳ | post Phase 2 |
+| **Phase 4 — Paiement Stripe** | 1 jour (~8h) | 0 | ⏳ | post beta |
+| **Phase 3 — BG webhooks** | 1 jour (~8h) | 0 | ⏳ | post beta |
+| **Phase 6 — Outlook Web** | quelques h | 0 | ⏸️ | post-beta optionnel |
+| **TOTAL effectué au 26/04** | — | **~9.5h** | — | — |
+| **TOTAL restant estimé** | **~5-6 jours** + attente AppSource 4-8 sem | — | — | — |
 
-**Indépendant de tout** : étape 5 (page install). Bon point de démarrage si Azure pas encore débloqué.
+### F.2 Détail Phase 1 — Fondations ✅ (terminée 26/04)
+
+| Tâche | Est. | Réel | Statut | Notes |
+|---|---|---|---|---|
+| Achat domaine `boostermail.ai` | 30 min | 30 min | ✅ 25/04 | 80€/an |
+| Louer VPS OVH | 30 min | 30 min | ✅ 26/04 | b3-8 Gravelines, 22€/mois HT |
+| SSL Let's Encrypt | 30 min | 30 min | ✅ 26/04 | sur `api.boostermail.ai` |
+| nginx reverse proxy | 30 min | 1h | ✅ 26/04 | Debug 502 (Flask en HTTPS interne) |
+| Déploiement V2 SSH + systemd | 1h | 1h | ✅ 26/04 | auto-restart configuré |
+| Tester que ça tourne (warmup) | 30 min | 30 min | ✅ 26/04 | OK |
+| **Sécurité serveur** (UFW + fail2ban + SSH key) | non prévu | 30 min | ✅ 26/04 | 1 IP bannie en 17ms |
+| Régénérer API keys exposées (Anthropic + OpenAI) | non prévu | 20 min | ✅ 26/04 | anciennes supprimées |
+| Installer Sentry | 15 min | 30 min | ✅ 26/04 | Free tier EU, RGPD-safe |
+| Diagnostic Outlook Web (code 12011 + iframe) | non prévu | 1h | ⏸️ → Phase 6 | content fail dans iframe |
+| **Total Phase 1** | **~4h** | **~6h** | **✅** | Dépassement = sécurité + Sentry non prévus |
+
+### F.3 Détail Phase 5 — Installation simple 🟡 (en cours)
+
+| Tâche | Est. | Réel | Statut | Notes |
+|---|---|---|---|---|
+| Manifest URL `localhost:3443` → `api.boostermail.ai` | 10 min | 10 min | ✅ 26/04 | sed 17 occurrences |
+| Rebrand UI `EasyMail` → `BoosterMail` | non prévu | 30 min | ✅ 26/04 | 26 strings user-visibles, 8 fichiers |
+| Cleanup docs post-Phase 1 | non prévu | 30 min | ✅ 26/04 | 5 docs majeurs + bilan |
+| Restructure doc SaaS dédiée | non prévu | 30 min | ✅ 26/04 | `docs/saas/` + mémoire cross-session |
+| `OnNewMessageCompose` → `OnMessageCompose` | 5 min | — | ⏳ | 1 mot dans manifest |
+| Page `install.boostermail.ai` | 2h | — | ⏳ | HTML statique + lien `aka.ms/olksideload` |
+| **Total Phase 5** | **2-3h** | **~2h fait** | **🟡** | ~2h restantes |
+
+### F.4 Immédiat parallèle (à lancer tôt) ⏳
+
+| Tâche | Est. | Statut | Bloqué par | Notes |
+|---|---|---|---|---|
+| Retrouver tenant Azure | 1h | ⏳ | Yvan | Compte Microsoft à explorer |
+| Régénérer Microsoft `client_secret` | 5 min | ⏳ | tenant Azure | Une fois tenant trouvé |
+| Soumettre BoosterMail sur AppSource | 30 min de soumission | ⏳ | tenant Azure | **Validation Microsoft 4-8 sem** → à lancer tôt en BG |
+
+### F.5 Détail Phase 2 — Multi-tenant ⏳ (bloqué par Azure)
+
+| Tâche | Est. | Notes |
+|---|---|---|
+| Enregistrer app Azure en mode **multi-tenant** | 30 min | Azure portal |
+| Adapter `TokenStore` par `user_id` dans `auth_base.py` | 2h | Multi-user OAuth |
+| Ajouter colonne `user_id` dans toutes tables `V2/database.py` | 2h | Migration schema |
+| Isoler les données par user dans toutes routes `app_plugin.py` | 4h | Decorator `@require_user` |
+| Test avec 2 comptes Microsoft simultanés | 1h | Yvan + compte test |
+| **Total Phase 2** | **~1.5 jour** | Critique avant beta |
+
+### F.6 🎯 Beta gratuite ⏳ (5 à 10 testeurs, indé/TPE)
+
+| Tâche | Notes |
+|---|---|
+| Inviter testeurs via page install + lien manifest | Lancer post Phase 2 |
+| Collecter retours | Email + appels |
+| Corriger bugs | Itératif |
+| Valider produit avant facturation | Critère go/no-go Phase 4 |
+
+### F.7 Détail Phase 4 — Paiement Stripe ⏳
+
+| Tâche | Est. | Notes |
+|---|---|---|
+| Créer compte Stripe | 30 min | Vérification identité bancaire |
+| Définir plans tarifaires | 30 min | 19€/mois, 149€/an proposés |
+| Intégrer Stripe Checkout | 3h | Lien hébergé Stripe (pas de PCI) |
+| Gérer accès : essai 14j / payant / expiré | 2h | Decorator `@require_subscription` |
+| Configurer Brevo emails transactionnels | 1h | Free tier 300/jour |
+| Rédiger politique confidentialité RGPD | 1h | Obligatoire avant 1er payant |
+| **Total Phase 4** | **~1 jour** | Pré-requis 1er client payant |
+
+### F.8 Détail Phase 3 — BG webhooks Graph ⏳ (post-beta)
+
+| Tâche | Est. | Notes |
+|---|---|---|
+| Inscrire serveur aux webhooks Graph API | 2h | Microsoft notifie chaque mail reçu |
+| Renouvellement automatique webhooks 72h | 1h | Cron de refresh |
+| Pré-générer réponses en BG (nuit + express 10 min) | 4h | Cache DB |
+| Stocker pré-générées en DB → instantané au clic | 1h | Récup < 100 ms |
+| **Total Phase 3** | **~1 jour** | Optimisation UX |
+
+### F.9 Détail Phase 6 — Outlook Web ⏸️ (post-beta optionnel)
+
+| Tâche | Est. | Notes |
+|---|---|---|
+| Debug dialog iframe (Outlook Web) | qq heures | `displayInIframe: true` ouvre le dialog mais content (résumé/échéance/classement) ne se charge pas. Causes probables : timing `messageChild` 1000ms insuffisant, X-Frame-Options sur fetches, fetches CORS dans iframe sandboxée |
+
+### F.10 Recommandation prochaine étape
+
+**Si Azure pas débloqué côté Yvan** → attaquer **Phase 5** (page install + `OnMessageCompose`) qui est indépendante de tout.
+
+**Si Azure débloqué** → attaquer **Phase 2 multi-tenant** car c'est le bloquant principal pour la beta.
+
+**En parallèle Yvan** : soumission AppSource (validation Microsoft 4-8 semaines, autant lancer tôt).
 
 ---
 
