@@ -1,6 +1,6 @@
 # SOMMAIRE DÉTAILLÉ — Documentation BoosterMail (ex EasyMail)
 
-> **Dernière mise à jour** : 27/04/2026 (consolidation merge SaaS + Outlook : Étapes 1+2+5 SaaS closes + 3 commits Outlook + pivot OVH source de vérité)
+> **Dernière mise à jour** : 27/04/2026 PM (pivot stratégique « OVH = source de vérité unique » + consolidation merge SaaS+Outlook + ouverture session « New Outlook via OVH »)
 
 > **Objectif** : index unique de TOUTE la documentation du projet.
 > À lire en début de session pour savoir **où trouver quoi** sans relire les docs entiers.
@@ -272,6 +272,17 @@ docs/
 |---|---|---|
 | **`ONBOARDING_SESSION_SAAS.md`** | **Référence vivante** pour toute session SaaS : infra OVH, accès SSH, conventions, interdits, planning Étapes 1-10, rollback, tests, profil Yvan | `saas`, `onboarding`, `infra`, `serveur`, `ovh`, `nginx`, `let's encrypt`, `sentry` |
 | **`AZURE_CONFIG.md`** | Config complète Azure / Microsoft Entra ID (tenant `groupe-bosser.fr`, app `BoosterMail` multi-tenant, permissions Graph, MPN/publisher verification, procédure régénération secret) | `azure`, `entra`, `tenant`, `client_id`, `client_secret`, `oauth`, `microsoft graph`, `permissions`, `mpn` |
+| **`AUDIT_OUTLOOK_TO_SAAS_20260427.md`** | Rapport des 10 audits préventifs livrés par la session Outlook le 27/04 matin (audit #3 SaaS readiness = inventaire 32 globals + 4 threading.Event + 6 BG threads à isoler ; plan en 5 phases A→E pour multi-tenant) | `audit`, `multi-tenant`, `globals`, `cross-user`, `phases A-E` |
+
+---
+
+### H-ter. New Outlook via OVH (`docs/outlook/` — depuis 27/04/2026 PM)
+
+> **Pivot stratégique 27/04 PM** : OVH = source de vérité unique. La session « New Outlook via OVH » prend le relais des sessions « implémentation Outlook » mais avec déploiement direct sur OVH (plus de WIP local persistant).
+
+| Fichier | Sujet | Clés |
+|---|---|---|
+| **`ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** | **Référence vivante** pour toute session « New Outlook via OVH » : scope (UX/UI dialog/popup/taskpane), workflow OVH-first, interdits (proto/SaaS/auth core), profil Yvan, tests post-déploiement, commandes utiles | `outlook`, `new outlook`, `dialog`, `popup`, `ovh-first`, `polish ux` |
 
 ---
 
@@ -300,6 +311,7 @@ docs/
 | **`SAAS_BILAN_SESSION_20260426.md`** | **26/04/2026 (matin)** | **[SaaS] Phase 1 SaaS terminée (VPS OVH + SSL + sécurité + Sentry) + rebrand UI BoosterMail + Outlook Web différé Phase 6** |
 | **`SAAS_BILAN_SESSION_20260426_pm.md`** | **26/04/2026 (après-midi)** | **[SaaS] Étapes 1+2+5.A/B** : `OnMessageCompose` + page `install.boostermail.ai` HTTPS live + nouvelle app Azure multi-tenant `groupe-bosser.fr` + OAuth validé + backup DB auto cron quotidien + cap API par user (Claude 500/jour, OpenAI 200/jour) |
 | **`SAAS_BILAN_SESSION_20260427.md`** | **27/04/2026 (matin)** | **[SaaS] Étape 5 close** : nettoyage user fantôme MSAL + 5.C UptimeRobot 2 monitors + 5.D brand check + 5.E privacy.html + 5.F terms.html. **MPN différé** (entité éditrice à trancher). Reste critique avant beta : Étape 7 multi-tenant DB. |
+| **`SAAS_BILAN_SESSION_20260427_pm.md`** | **27/04/2026 (après-midi)** | **[SaaS] Pivot stratégique « OVH = source de vérité unique »** + consolidation merge SaaS+Outlook (10 commits SaaS + 3 commits Outlook, 7 conflits résolus) + déploiement code & DB sur OVH + 3 grandes étapes définies (New Outlook nickel → Outlook Web → Multi-utilisateurs). Étape 7 multi-tenant repoussée jusqu'à validation mono-user. |
 
 **Convention de nommage des bilans** (depuis 26/04/2026) :
 - `SAAS_BILAN_SESSION_AAAAMMJJ.md` — sessions infra/déploiement SaaS

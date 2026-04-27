@@ -1,6 +1,6 @@
 # ONBOARDING — Sessions SaaS BoosterMail
 
-> **Dernière mise à jour** : 27/04/2026
+> **Dernière mise à jour** : 27/04/2026 PM (pivot stratégique « OVH = source de vérité unique » + consolidation merge SaaS+Outlook + déploiement code & DB)
 
 > **Rôle de ce doc** : référence vivante pour toute session Claude qui travaille sur l'infrastructure SaaS BoosterMail. À mettre à jour à la fin de chaque session SaaS pour refléter l'état réel.
 
@@ -332,15 +332,26 @@ curl -sI https://install.boostermail.ai/ | head -3
 
 **Étape 5 ✅ TERMINÉE** (27/04 matin) — toutes sous-tâches livrées : 5.A backup DB cron quotidien 3h UTC, 5.B cap API par user/jour (Claude 500, OpenAI 200), 5.C UptimeRobot 2 monitors UP avec alertes mail, 5.D brand check OK, 5.E page RGPD `/privacy.html`, 5.F CGU draft `/terms.html`. Le bandeau "draft revue juridique" + placeholder "entité éditrice à finaliser" sont en place pour ne pas tromper les utilisateurs avant validation officielle.
 
-**Prochaine étape recommandée** :
-- **Étape 7 — Multi-tenant DB user_id** (~12h, gros chantier) : maintenant la seule à attaquer pour ouvrir la beta. Débloquée depuis l'Étape 2.
-- **Étape 6** (AppSource) reste bloquée par MPN (différé — décision business sur entité éditrice, voir [`PLUS_TARD.md`](../PLUS_TARD.md)).
+### F.11 🔥 Pivot stratégique 27/04 PM — OVH = source de vérité unique
 
-**Pour la beta** : Étape 7 est le dernier verrou technique. Une fois 7 livrée, la beta peut s'ouvrir (5-10 testeurs indé/TPE).
+**Décision Yvan** (cf bilan `SAAS_BILAN_SESSION_20260427_pm.md`) : à partir du 27/04 PM, **OVH est la version officielle de BoosterMail**. Plus de WIP local persistant. Toutes les modifications (UX, optims, fixes) déployées sur OVH dès qu'elles sont commitées en git. Yvan utilise BoosterMail au quotidien depuis OVH (plus d'instance locale parallèle).
 
-**En parallèle Yvan** : inscription MPN (Microsoft Cloud Partner Program, gratuit) — résout le warning "End users cannot grant consent" et débloque AppSource (24-48h d'attente). Procédure section D de [`AZURE_CONFIG.md`](AZURE_CONFIG.md).
+**Conséquence sur l'ordre des étapes** : Étape 7 (multi-tenant DB) **repoussée** jusqu'à ce que la version mono-user soit nickel sur OVH. Yvan a (re)défini les 3 grandes étapes à venir :
 
-**Cleanup à faire plus tard** : warnings `acquire_token_silent retourné None` toutes les 30s dans les logs serveur, dus à un user orphelin (ancien `0f3827db-...` lié à l'ancien client_id `209a9651-`). À nettoyer lors de l'Étape 7 (DB cleanup multi-tenant).
+1. **Étape "New Outlook nickel sur OVH"** = polish UX/UI/data continu, pilotée par la session **"New Outlook via OVH"** (cf [`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`](../outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md)). Critère de fin : Yvan utilise BoosterMail au quotidien sans frustration.
+2. **Étape "Outlook Web nickel sur OVH"** = équivalent à É.3 du planning original (timebox 4h debug iframe content fail).
+3. **Étape "Multi-utilisateurs"** = É.7 du planning original (~12h-1.5j) — attend que les 2 précédentes soient OK.
+
+**En parallèle (en BG, sans bloquer)** :
+- Décision business entité éditrice (avec expert-comptable / juriste)
+- MPN inscription (24-48h post-décision entité)
+- Soumission AppSource (4-8 sem validation Microsoft)
+- Préparation Stripe (avant 1er payant)
+
+**Cleanup à faire plus tard** :
+- Warmup step tracker cosmétique (`/api/warmup_status` reste `Demarrage auto retry` même quand le warmup réel est fini) — `docs/PLUS_TARD.md`
+- Route `/api/companion/open_dialog_native` → 503 (companion local PyQt n'existe plus en SaaS) : à nettoyer côté JS dans une session "New Outlook via OVH"
+- DB anciens résidus : `boostermail.db.before_local_swap` à supprimer 7-15 jours après validation
 
 ---
 
@@ -588,13 +599,23 @@ scp "C:\EasyMail\.claude\worktrees\angry-ishizaka-26efe7\V2\<file>" ubuntu@51.17
 
 ---
 
-## J-bis. ⚠️ Coordination avec la session "implémentation New Outlook"
+## J-bis. ⚠️ Coordination avec la session "implémentation New Outlook" (HISTORIQUE — pivot OVH 27/04 PM)
 
-> **Contexte** : 2 sessions Claude tournent en parallèle sur ce projet :
+> 🔥 **Section conservée pour historique mais obsolète depuis le 27/04 PM.**
+>
+> **Pivot stratégique** : OVH est désormais la **source de vérité unique**. Les 2 sessions SaaS et "New Outlook via OVH" travaillent sur **la même base** (master), pushent sur OVH dès qu'un changement est validé. Plus de WIP local persistant, plus de divergence de branches.
+>
+> **Nouvelle session pilotant les fixes UX/UI** : voir [`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`](../outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md).
+>
+> **Si les 2 sessions doivent quand même bosser en parallèle un jour** sur des modifs proches, la coordination minimale reste : commiter régulièrement, signaler les zones chaudes, faire des merges fréquents (pas attendre 2 jours de WIP avant de reconcilier).
+>
+> ---
+>
+> **Contexte historique** : 2 sessions Claude tournaient en parallèle sur ce projet jusqu'au 27/04 PM :
 > - **Session SaaS** (cette doc) — infra OVH, Azure, install page, Stripe, multi-tenant DB
 > - **Session New Outlook** — UI/UX de la modale, dialog/popup/taskpane/companion, fixes Office.js
 >
-> **Règle absolue** : ne jamais mélanger les scopes (cf section E). Mais il existe un point de friction au moment du **déploiement sur OVH** : les 2 sessions modifient potentiellement les mêmes fichiers de la dir `V2/`.
+> **Règle absolue** : ne jamais mélanger les scopes (cf section E). Mais il existait un point de friction au moment du **déploiement sur OVH** : les 2 sessions modifiaient potentiellement les mêmes fichiers de la dir `V2/`.
 
 ### J-bis.1 — État des fichiers V2 partagés (snapshot 26/04 PM)
 
@@ -656,6 +677,7 @@ Les fichiers `manifest.xml` et `autorunshared.js` peuvent générer des conflits
 | **26/04/2026 (matin)** | [`SAAS_BILAN_SESSION_20260426.md`](../sessions/SAAS_BILAN_SESSION_20260426.md) | Phase 1 SaaS terminée (VPS OVH + SSL + sécurité + Sentry) + rebrand UI BoosterMail + Outlook Web différé Phase 6 |
 | **26/04/2026 (après-midi)** | [`SAAS_BILAN_SESSION_20260426_pm.md`](../sessions/SAAS_BILAN_SESSION_20260426_pm.md) | **Étapes 1, 2 et 5.A/5.B** : install.boostermail.ai HTTPS + Azure multi-tenant + backup DB cron + cap API |
 | **27/04/2026 (matin)** | [`SAAS_BILAN_SESSION_20260427.md`](../sessions/SAAS_BILAN_SESSION_20260427.md) | **Étape 5 close** : nettoyage user fantôme + 5.C UptimeRobot + 5.D brand check + 5.E privacy.html + 5.F terms.html. **MPN différé** (décision business entité éditrice). |
+| **27/04/2026 (après-midi)** | [`SAAS_BILAN_SESSION_20260427_pm.md`](../sessions/SAAS_BILAN_SESSION_20260427_pm.md) | **Pivot stratégique « OVH = source de vérité »** + consolidation merge SaaS+Outlook (10+3 commits, 7 conflits résolus) + déploiement code & DB sur OVH + 3 grandes étapes définies (New Outlook nickel → Outlook Web → Multi-utilisateurs) |
 
 ---
 

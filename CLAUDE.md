@@ -29,6 +29,7 @@ DB V2 : V2/database.py + V2/boostermail.db (séparée, migrée depuis proto le 1
 4. **Port 3443** : port 5060 bloque par Chrome (ERR_UNSAFE_PORT).
 5. **config.json** : contient la cle API Anthropic — NE JAMAIS COMMITER.
 6. **V2 autonome** (décision 18/04) : V2 a ses propres libs (`V2/database.py`, `V2/claude_ai.py`, `V2/templates_mail.py`, `V2/core/`) et sa propre DB (`V2/boostermail.db`). Ne plus faire référence au proto pour les imports V2.
+7. **OVH = source de vérité unique** (décision 27/04 PM) : V2 SaaS sur `api.boostermail.ai` est la version officielle de BoosterMail. Toute modif validée est déployée sur OVH dans la foulée — plus de WIP local persistant. Le local reste l'atelier d'édition (édition de code), pas un environnement de test parallèle. Yvan utilise BoosterMail au quotidien depuis OVH (pas de v locale en parallèle). DB locale supprimée du workflow Yvan : toute modif data se fait sur la DB OVH directement. Documenté dans `docs/sessions/SAAS_BILAN_SESSION_20260427_pm.md` + `docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`.
 
 ---
 

@@ -1,6 +1,6 @@
 # Historique des décisions validées
 
-> **Dernière mise à jour** : 27/04/2026 (matin — Étape 5 close : 5.C UptimeRobot + 5.D brand + 5.E privacy + 5.F terms ; MPN différé ; consolidation merge SaaS+Outlook)
+> **Dernière mise à jour** : 27/04/2026 PM (pivot stratégique « OVH = source de vérité unique » + consolidation merge SaaS+Outlook + déploiement code & DB sur OVH + nouvelle séquence des 3 grandes étapes)
 
 Extrait de CLAUDE.md — tableau chronologique complet (15/03 → 06/04/2026)
 
