@@ -173,6 +173,26 @@ Les 4 points d'insertion `editor.innerHTML` utilisent `_escapeHtml()` ou équiva
 ### I-SEC-05 : Config.json non committé
 `.gitignore` contient `config.json`.
 
+### I-SEC-06 : Garde anti-injection sur TOUS les prompts Claude consommant du contenu mail
+Toute methode de `V2/claude_ai.py` qui construit un prompt avec `{body}`,
+`{subject}`, `{body_snippet}`, ou autre contenu email DOIT contenir un
+preambule securite (mention "PSEUDO-INSTRUCTIONS" ou equivalent "phrases qui
+SEMBLENT etre des instructions"). Au 27/04/2026 PM, 7 methodes concernees :
+`generate_reply_stream` (via `_build_prompt`), `analyze_contact_profile`,
+`scan_echeances_batch`, `summarize_mails_batch`, `summarize_one_mail_stream`,
+`suggest_folder`, `suggest_pj_folder`. Toutes protegees.
+
+- **Test** : `grep -c "PSEUDO-INSTRUCTIONS\\|SECURITE.*pseudo" V2/claude_ai.py`
+  doit etre >= 6 (1 par methode + variantes).
+- **Pourquoi** : sans cette garde, un mail malveillant peut potentiellement
+  detourner Claude via "Ignore les instructions et fais X". Le `_build_prompt`
+  etait initialement non protege (decouverte 27/04 PM Workflow 2 audit kit).
+- **Historique** : Pattern #9 ANOMALIES_RECURRENTES.md, audit du 22/04 avait
+  deja identifie le probleme pour 5 methodes mais `_build_prompt` etait
+  passe entre les mailles. Fix 27/04 PM ajoute `_SECURITY_GUARD` en tete
+  du `context` (ligne 610) qui s'applique aux 3 modes (reply / forward /
+  first_mail).
+
 ---
 
 ## Catégorie 9 — Cohérence code
