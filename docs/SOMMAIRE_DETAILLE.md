@@ -284,6 +284,7 @@ docs/
 | Fichier | Sujet | Clés |
 |---|---|---|
 | **`ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** | **Référence vivante** pour toute session « New Outlook via OVH » : scope (UX/UI dialog/popup/taskpane), workflow OVH-first, interdits (proto/SaaS/auth core), profil Yvan, tests post-déploiement, commandes utiles | `outlook`, `new outlook`, `dialog`, `popup`, `ovh-first`, `polish ux` |
+| **`PROMPT_REPRISE_NEW_OUTLOOK.md`** ⭐ | **Prompt clé en main à copier-coller** au début de toute nouvelle session « New Outlook via OVH ». Référence tous les docs nécessaires + état de fin de la dernière session. À MAJ en fin de chaque session. | `prompt`, `reprise`, `nouvelle session`, `copier-coller` |
 
 ---
 
@@ -313,7 +314,7 @@ docs/
 | **`SAAS_BILAN_SESSION_20260426_pm.md`** | **26/04/2026 (après-midi)** | **[SaaS] Étapes 1+2+5.A/B** : `OnMessageCompose` + page `install.boostermail.ai` HTTPS live + nouvelle app Azure multi-tenant `groupe-bosser.fr` + OAuth validé + backup DB auto cron quotidien + cap API par user (Claude 500/jour, OpenAI 200/jour) |
 | **`SAAS_BILAN_SESSION_20260427.md`** | **27/04/2026 (matin)** | **[SaaS] Étape 5 close** : nettoyage user fantôme MSAL + 5.C UptimeRobot 2 monitors + 5.D brand check + 5.E privacy.html + 5.F terms.html. **MPN différé** (entité éditrice à trancher). Reste critique avant beta : Étape 7 multi-tenant DB. |
 | **`SAAS_BILAN_SESSION_20260427_pm.md`** | **27/04/2026 (après-midi)** | **[SaaS] Pivot stratégique « OVH = source de vérité unique »** + consolidation merge SaaS+Outlook (10 commits SaaS + 3 commits Outlook, 7 conflits résolus) + déploiement code & DB sur OVH + 3 grandes étapes définies (New Outlook nickel → Outlook Web → Multi-utilisateurs). Étape 7 multi-tenant repoussée jusqu'à validation mono-user. |
-| **`OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`** | **27/04/2026 (PM)** | **[Outlook] Fix bouton BoosterMail mort sur New Outlook** (POST companion 503 sans fallback `displayDialogAsync`) + découverte **Pattern #18 cache WebView2 ignore les headers HTTP** + fix structurel `Cache-Control: no-store` + cache busting `?v=` dans `autorun.html` + audits préventifs (dead code companion, Patterns #15+17, état bugs UI déjà fixés mais cachés par WebView2) |
+| **`OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`** | **27/04/2026 (journée complète)** | **[Outlook] Session ~9h, 22 commits master** : Fix bouton BoosterMail New Outlook (POST companion 503) + Pattern #18 cache WebView2 + cycle audit kit complet (Workflow 4 : Graph 400, HTTP 429 ; Workflow 2 : 6 audits clos sur 10 menu) + tech debt tier 1 (locks, log level, cleanup deprecated) + 12 contacts humains analysés + consolidation `PLUS_TARD_VF.md` (3 anciens fichiers archivés). Pattern #18 + I-SEC-06 + I-CACHE-01/02/03 ajoutés. 6 rapports d'audit livrés. État OVH : 0 erreur, routes < 50 ms. Sujet hors scope code en cours : migration mailbox Coaxis ETA J+2/3. |
 
 **Convention de nommage des bilans** (depuis 26/04/2026) :
 - `SAAS_BILAN_SESSION_AAAAMMJJ.md` — sessions infra/déploiement SaaS

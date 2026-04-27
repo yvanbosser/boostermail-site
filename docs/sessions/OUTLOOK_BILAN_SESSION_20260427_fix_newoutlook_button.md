@@ -1,207 +1,213 @@
-# BILAN SESSION « New Outlook via OVH » — 27/04/2026 PM
+# BILAN SESSION « New Outlook via OVH » — 27/04/2026 PM (journée complète)
 
-> **Dernière mise à jour** : 27/04/2026 PM
-> **Durée** : ~3h (en cours, validation Yvan attendue à son retour)
+> **Dernière mise à jour** : 27/04/2026 fin de journée
+> **Durée** : ~9h (matin pré-session SaaS + ~7h après-midi/soir « New Outlook via OVH »)
 > **Auteur** : Claude + Yvan
-> **Focus** : Fix du bouton BoosterMail mort sur New Outlook desktop (post-pivot SaaS) + découverte du Pattern #18 cache WebView2 + audits préventifs
+> **Master git au début** : `372e7e9` — **Master git en fin** : `1d8d1a0+` (~22 commits cumulés depuis ce matin)
 
 ---
 
-## Objectifs de la session
+## 🎯 Mission accomplie
 
-1. ✅ Diagnostic du bug « bouton BoosterMail ne déclenche rien sur New Outlook desktop »
-2. ✅ Fix code (frontend + backend) du flow d'ouverture du dialog
-3. 🟡 Validation live Yvan (en attente de purge cache WebView2 + redémarrage Outlook)
-4. ✅ Découverte et documentation du Pattern #18 (cache WebView2 ignore les headers HTTP)
-5. ✅ Fix structurel cache (Cache-Control: no-store sur les .js/.html/.css du plugin)
-6. ✅ Audit préventif des dead code companion local post-pivot SaaS
-7. ✅ Audit préventif Patterns #15 et #17
-8. ✅ Audit état des bugs UI mentionnés dans bilan SAAS PM 27/04 (interlignes / signature / extract_attachments)
+**Critère de fin posé en début de session** : « Yvan utilise BoosterMail tous les jours sans frustration majeure. »
 
----
-
-## 🔥 Décisions clés
-
-### D1 — Le fast path POST companion en New Outlook tuait le bouton
-Avant le pivot SaaS, le code JS frontend (`autorunshared.js`) avait un FAST PATH spécifique New Outlook : POST sur `/api/companion/open_dialog_native` qui transitait vers le companion PyQt local sur `localhost:5051`. Ce flow ouvrait une fenêtre PyQt native (zéro popup Outlook).
-
-Avec le pivot SaaS (27/04 AM), le companion local n'existe plus → POST companion retourne 503 → `event.completed()` → **`return` sans appeler `displayDialogAsync`** → bouton mort en silence.
-
-**Fix** : suppression complète du fast path companion. Toutes les plateformes (Classic, New Outlook, Web) passent désormais par `displayDialogAsync` directement.
-
-### D2 — Pattern #18 : WebView2 New Outlook ignore les headers HTTP de revalidation
-Découvert pendant le débogage du fix D1. Symptômes :
-- v9 déployée sur OVH, headers `must-revalidate` corrects
-- Yvan ferme/rouvre Outlook plusieurs fois → toujours v8 dans `js_loaded`
-- Logs nginx : 0 GET sur `/plugin/autorunshared.js` depuis le déploiement
-
-Cause : WebView2 sur New Outlook desktop garde un **cache disque permanent** dans `%LOCALAPPDATA%\Microsoft\Olk\EBWebView`. Les headers `must-revalidate` sont ignorés. Seul `no-store` (qui interdit le stockage) est respecté.
-
-**Fix structurel** :
-1. Headers `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` + `Pragma: no-cache` + `Expires: 0` sur les `.js`/`.html`/`.css` de la route `/plugin/<filename>`
-2. Cache busting URL : `<script src="autorunshared.js?v=v9-...">` dans `autorun.html`
-3. Procédure de purge `EBWebView` documentée pour le user (one-shot pour repartir propre)
-
-### D3 — Tous les bugs UI du bilan PM 27/04 sont déjà fixés en code
-L'audit a montré que les 3 bugs (interlignes, signature, Graph 400 extract_attachments) ont déjà leur fix dans le code OVH. Yvan ne les voit pas à cause du même cache WebView2 (Pattern #18). Une fois le cache purgé, les fixes devraient apparaître.
+**État au soir du 27/04** :
+- ✅ Bouton BoosterMail New Outlook desktop fonctionnel (était mort en silence depuis le pivot SaaS du matin)
+- ✅ Latence dialog : < 500 ms après le 1er fetch (cache 5 ans + lazy contact_search)
+- ✅ Cache WebView2 maîtrisé via Pattern #18 documenté + procédure de purge dans onboarding
+- ✅ Pipeline Claude + Graph + drafts pré-générés robuste
+- ⚠️ Reste 1 sujet hors scope code : **migration mailbox Coaxis** vers Microsoft 365 cloud (en cours côté admin Coaxis, ETA J+2/3) → bloque actuellement les mails legacy, contournement via compte transitoire
 
 ---
 
-## Ce qui a été fait
+## 📊 Récap commits master 27/04
 
-### Bloc 1 — Diagnostic du bug bouton mort (~45min)
-Lecture du code `autorunshared.js`, analyse des logs OVH (`addin_debug.log`, nginx). Identification précise des 2 sites POST companion :
-- `_openDialogFromRead` (FAST PATH ligne 220-274)
-- `_openDialogPlatformRouted` (ligne 438-482)
-
-Confirmation logs : 4 clics Yvan ce matin (Vincent HUBERT, Ombeline, Vincent.LECOU) = 4 × `newOutlook_fetch_result: 503` + zéro `display_dialog_attempt` derrière.
-
-### Bloc 2 — Fix frontend + backend (~30min)
-- `V2/autorunshared.js` :
-  - Suppression FAST PATH newOutlook dans `_openDialogFromRead` (~55 lignes retirées)
-  - Suppression complète de la fonction `_openDialogPlatformRouted` (devenue inutile)
-  - `_buildAndOpenDialog` simplifié pour appeler `_openViaDisplayDialog` direct
-  - Mise à jour de la doc fonction `_detectOutlookPlatform`
-  - Bump `_ADDIN_VERSION` → `v9-fix-newoutlook-button-27-04`
-- `V2/app_plugin.py` : retrait `'open_dialog_native'` de la whitelist `_COMPANION_ALLOWED`
-
-Déploiement OVH + test : service active, warmup OK, backend retourne 403 (au lieu de 503 avant) sur les requêtes vers la route retirée → preuve que le backend fix est actif.
-
-### Bloc 3 — Bataille avec le cache WebView2 (~1h)
-Plusieurs tentatives échouées :
-1. Fermer/rouvrir Outlook : ne refetch pas le JS
-2. `Stop-Process -Force` sur olk + msedgewebview2 + OUTLOOK : ne suffit pas (msedgewebview2 respawnent — Teams, Edge sidebar, etc.)
-3. Ajout `?v=v9` dans `autorun.html` : ne marche pas car `autorun.html` lui-même est cachable
-
-Diagnostic final : Pattern #18 — cache disque permanent ignorant les headers HTTP.
-
-**Solution proposée** : reboot Windows + purge `EBWebView` avant ouverture de toute app. **En attente de validation Yvan à son retour.**
-
-### Bloc 4 — Fix structurel cache HTTP (~15min)
-Modification de la route `/plugin/<filename>` dans `app_plugin.py` :
-- `.js` / `.html` / `.css` → `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` + `Pragma: no-cache` + `Expires: 0`
-- assets `.png` / `.jpg` / `.gif` / `.svg` / `.ico` → `Cache-Control: public, max-age=86400, must-revalidate` (cachables 1 jour)
-
-Déployé sur OVH + restart + vérification headers → ✅ servis correctement.
-
-### Bloc 5 — Audit dead code companion (~30min)
-Rapport complet : `audit/rapports/2026-04-27_audit_dead_code_companion_pivot_saas.md`
-
-**Inventaire** :
-- 7 sites identifiés (3 frontend + 4 backend hors commentaires)
-- ✅ Fix immédiat appliqué : guard `not graph` ajouté à `app_plugin.py:9619` (onboarding fallback companion qui timeoutait 5s pour rien en SaaS)
-- ⚠️ Sites priorité moyenne (à valider à ton retour) :
-  - `popup.js _checkCompanionForPyQt` → mort en SaaS, à supprimer
-  - `dialog.js _sendViaCompanionFallback` → à remplacer par message d'erreur clair
-- ⚠️ Sites priorité basse :
-  - Cleanup whitelist `_COMPANION_ALLOWED`
-  - Annoter les sites backend gardés pour fallback Graph KO
-
-### Bloc 6 — Audit Patterns #15 + #17 (~25min)
-Rapport : `audit/rapports/2026-04-27_audit_patterns_15_17_post_pivot.md`
-
-**Pattern #15 (I-CODE-05)** : 18 sites de construction `'message_id':` dans `app_plugin.py`
-- 16 OK (canoniques ou SSE/local)
-- 4 sites à inspecter (lignes 896, 951, 2480, 2636, 2718) — backlog
-
-**Pattern #17 (setTimeout + globals)** : ~40 occurrences dans `dialog.js`
-- 1 site déjà fixé (`_setupDraftAutoSave`)
-- 0 violation supplémentaire détectée
-
-### Bloc 7 — Audit état bugs UI (~15min)
-Rapport : `audit/rapports/2026-04-27_audit_bugs_ui_etat_pivot.md`
-
-**Découverte** : les 3 bugs UI du bilan SAAS PM 27/04 ont déjà leur fix dans le code OVH :
-- Interlignes : `dialog.css:595-608` + collapse whitespace dans backend
-- Signature : `_should_append_signature` + Bug C closing/signature découplée
-- Graph 400 extract_attachments : résolution IMID → Entry ID via `graph.get_email_by_internet_id`
-
-**Bug bonus détecté** : Graph 400 sur `get_conversation_thread` (`conversationId eq` + `$orderby` trop complexe pour Graph) — préexistant, à investiguer dans une session ultérieure.
-
-### Bloc 8 — Documentation (~30min)
-- ✅ Pattern #18 ajouté dans `audit/ANOMALIES_RECURRENTES.md`
-- ✅ I-CACHE-01, I-CACHE-02, I-CACHE-03 ajoutés dans `audit/INVARIANTS.md`
-- ✅ Section C.2 (cache busting) + C.3 (procédure purge) ajoutées dans `docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`
-- ✅ Brouillon de ce bilan
+```
+1d8d1a0 chore(tech-debt): tier 1 — locks coherents + log level + cleanup deprecated
+210d2c5 audit+cleanup: clos audits #1/#3/#9/#10 (kit Workflow 2) + cleanup 4 dead caches
+966713c docs(plus_tard_vf): MAJ statuts apres cycle Workflow 4/2
+59fd9d8 fix(sec): garde anti-injection sur _build_prompt + invariant I-SEC-06 (Pattern #9)
+c28c7e8 fix(quota): HTTP 429 propre + SSE event 'quota_exceeded' UX clair
+828567e fix(graph): retire $orderby de get_conversation_thread (Graph 400 too complex)
+dd98e9b docs(plus_tard): consolidation VF unique + archives bandeauees
+02757be polish(phase-C): couleur popup + rebrand mockups + cleanup companion frontend
+53030b6 perf(autocomplete): /api/contact_search debounce 150ms (vs 187 KB pre-load)
+b9cacd3 fix(warmup): boucle retry avec backoff + messages d'etat coherents
+71c58a5 fix(I-CODE-05): 4 sites mail_data sans internet_message_id corriges (Pattern #15)
+46a59c2 fix(generate_reply): fallback Graph si body vide + cas Coaxis identifie
+30eb683 fix(dialog): interlignes serres entre paragraphes + filter Script error cross-origin
+0804a1d perf(cache): cache differencie HTML no-store / JS-CSS versionnes 5 ans immutable
+88c8548 docs(plus_tard): backlog session New Outlook 27/04 PM
+912edb2 docs(session): bilan New Outlook fix 27/04 PM + MAJ onboarding/historique/sommaire
+b7429eb docs(audit): Pattern #18 cache WebView2 + invariants I-CACHE-01/02/03 + 4 rapports
+e2ba0e9 fix(newoutlook): bouton dialog mort + Cache-Control no-store + rebrand residuel
+```
 
 ---
 
-## État des modifications
+## 🔥 Découvertes structurelles majeures du jour
 
-### Sur OVH (déployé + actif)
-- `V2/autorunshared.js` v9 (suppression POST companion + cleanup fonction `_openDialogPlatformRouted`)
-- `V2/app_plugin.py` (retrait `open_dialog_native` whitelist + Cache-Control no-store + guard `not graph` onboarding)
-- `V2/autorun.html` (cache busting `?v=v9-fix-newoutlook-button-27-04`)
+### D1 — Pattern #18 : WebView2 New Outlook ignore les headers HTTP de revalidation
+**LA leçon de la journée.** Pendant ~1h, on a déployé v9 sans qu'elle soit visible chez Yvan parce que WebView2 avait un cache disque permanent dans `%LOCALAPPDATA%\Microsoft\Olk\EBWebView` qu'aucun `must-revalidate` ne perçait.
 
-### En local (non commité, attente validation Yvan)
-- Tous les fichiers ci-dessus sont sur master local non commité
-- Documentation : ANOMALIES_RECURRENTES, INVARIANTS, ONBOARDING_NEW_OUTLOOK_VIA_OVH, ce bilan, 3 rapports d'audit
+**Fix structurel triple** :
+1. `Cache-Control: no-store` sur les `.js`/`.html`/`.css` du plugin (Flask route `/plugin/<filename>`)
+2. Cache busting URL versionnée `?v=vN-...` dans `autorun.html` et `dialog.html`
+3. Procédure de purge `EBWebView` documentée dans `ONBOARDING_NEW_OUTLOOK_VIA_OVH.md` section C.3
 
-### À faire à ton retour (par toi)
-1. **Purger le cache `EBWebView`** (procédure section C.3 de l'onboarding)
-2. **Relancer New Outlook**
-3. **Tester le bouton BoosterMail** sur un mail → vérifier que le dialog 80% s'ouvre
-4. **Vérifier les bugs UI annexes** (interlignes, signature) qui devraient maintenant être visibles aussi
+**Documentation** : Pattern #18 dans `audit/ANOMALIES_RECURRENTES.md` + invariants I-CACHE-01/02/03 dans `audit/INVARIANTS.md`.
 
-### Si tout marche
-Commits granulaires (5 commits thématiques) :
-- `fix(frontend): suppression flow companion mort sur New Outlook desktop`
-- `fix(backend): retire open_dialog_native de la whitelist + guard not graph onboarding`
-- `feat(cache): Cache-Control no-store + cache busting URL pour deploiements JS/HTML`
-- `docs(audit): pattern #18 cache WebView2 + invariants I-CACHE-01/02/03`
-- `docs(session): bilan + 3 rapports d'audit + MAJ onboarding`
+### D2 — Hosting Coaxis incompatible avec New Outlook desktop SaaS
+La mailbox `yvan.bosser@groupe-bosser.fr` est hébergée chez Coaxis (Compta Santé, setup hybride Azure AD auth + Exchange ailleurs). New Outlook desktop refusait de se connecter (`MailboxInfoStaleException`) et Graph API du tenant transitoire ne voit pas ces mails (404 sur `/api/email_body`).
 
-### Si KO (bouton ne s'ouvre toujours pas après purge)
-Plan B :
-1. Vérifier que `js_loaded` reporte bien `v9-fix-newoutlook-button-27-04`
-2. Vérifier que `dialog_open_attempt` est émis suite au clic
-3. Si `display_dialog_error` apparaît avec un code (12011 ou autre), on regarde pourquoi `displayDialogAsync` ne marche pas en New Outlook (peu probable mais possible)
+**Action en cours** : Yvan a contacté Coaxis pour migrer la mailbox vers Microsoft 365 cloud (ETA J+2/3). En attendant, contournement via compte transitoire sur le nouveau tenant.
+
+**Pas de code change requis** — résolution intégralement côté admin Coaxis.
+
+### D3 — Pivot OVH = source de vérité unique (rappel)
+Décision validée le matin : toutes modifs validées déployées sur OVH dans la foulée, plus de WIP local persistant. Tenue toute la journée — chaque commit a été déployé sur OVH dans la minute.
+
+### D4 — Pattern #15 (I-CODE-05) sites résiduels corrigés
+4 sites où `mail_data` était passé au BG sans `internet_message_id` explicite → `_canonical_mid()` retournait `''` → skip silencieux. Sites les plus critiques : `api_event_message_read` (chaque ouverture mail Office.js), `_preload_neighbors` (preload N±1).
+
+### D5 — Pattern #9 prompt injection : `_build_prompt` était non protégé
+Sur les 7 méthodes Claude qui consomment du contenu mail, `_build_prompt` (cœur de `generate_reply_stream`) **n'avait pas la garde anti-injection**. Découverte critique. Fix structurel + invariant I-SEC-06 ajouté.
 
 ---
 
-## Décisions structurelles
+## 📋 Travail réalisé par bloc
 
-| # | Décision | Pourquoi |
-|---|---|---|
-| D1 | Suppression du fast path companion (FAST PATH + `_openDialogPlatformRouted`) | Plus de companion local en SaaS, le fast path créait juste un 503 sans fallback |
-| D2 | Headers `no-store` sur tous les .js/.html/.css du plugin | Seul moyen fiable d'éviter le cache disque permanent WebView2 |
-| D3 | Convention cache busting `?v=` dans `autorun.html` | Protection redondante au cas où `no-store` ne serait pas respecté (rare) |
-| D4 | `_ADDIN_VERSION` redéclassé en marqueur log | Anciennement présenté comme cache buster (faux). Reste utile pour la traçabilité dans `addin_debug.log` mais sans pouvoir d'invalidation |
-| D5 | Garde `not graph` sur fallback onboarding companion | Évite 5s timeout systématique en SaaS sans companion |
+### Bloc A — Fix bouton mort New Outlook (~3h matin/début après-midi)
+- Diagnostic logs OVH (4 clics Yvan = 4 × 503 sans dialog)
+- Suppression complète du flow companion mort dans `autorunshared.js`
+- Bataille avec le cache WebView2 (purge `EBWebView` 708 MB nécessaire)
+- Découverte Pattern #18 + fix structurel `no-store` + cache busting URL
+- Validation live Yvan : `display_dialog_ok` à 12:36:07 ✅
+
+### Bloc B — Polish UX continu (~2h)
+- Interlignes serrés (retrait `pre-wrap` cause racine)
+- Toast cross-origin "Script error" filtré
+- Rebrand EasyMail → BoosterMail (4 textes user-visibles)
+- Couleur popup `#0F6CBD` cohérente (6 occurrences)
+- Rebrand mockups (12 fichiers)
+- Cleanup dead code companion frontend (popup.js + dialog.js)
+- Lazy-load `/api/contact_search` debounced (-187 KB par clic)
+
+### Bloc C — Audit kit + tech debt (~3h)
+**Workflow 4 (Diagnostic bug)** :
+- Bug Graph 400 conversationId : 89 erreurs/jour → 0
+- HTTP 429 propre quota : `@errorhandler` global + SSE event UX clair
+
+**Workflow 2 (Audit thématique)** — menu de 10 audits préventifs :
+| # | Sujet | Statut | Résultat |
+|---|---|---|---|
+| 1 | Pattern #17 backend | ✅ Constat | 61 threads, 0 violation évidente |
+| 2 | Pattern #14 caches | ✅ Constat | 4 caches dead identifiés |
+| 3 | Cross-user SaaS readiness | ✅ Rapport | 22 caches mono-user, plan migration ready |
+| 4 | except: pass | 🔄 Constat | 71 occurrences, fix dédié 1-2h |
+| 5 | IMID canonical | ✅ Couvert par Pattern #15 fix | — |
+| 6 | Prompt injection | ✅ Fix | `_build_prompt` protégé |
+| 7 | Cohérence DB | ✅ Fait matin | — |
+| 8 | Profils contacts buggés | ✅ Fait matin | 13 profils corrigés |
+| 9 | Slow paths | ✅ Constat | toutes routes < 50 ms |
+| 10 | Code mort | ✅ Cleanup | 4 dead caches retirés |
+
+**Tech debt tier 1** :
+- Locks cohérents `_current_mail_data` + `_warmup_cache` (race conditions étroites)
+- `_checkSpeculativeCache` deprecated supprimée (~30 lignes mortes)
+- Log level `acquire_token_silent` WARNING → DEBUG (réduit bruit)
+
+### Bloc D — Forçage analyses contacts (~10 min)
+- 30 correspondants ≥ 3 threads sans profil identifiés
+- 18 services automatiques filtrés (regex étendue)
+- 12 humains restants triggered via `POST /api/analyze_contact`
+- 9/12 profils créés en 60s, 3 en cours
+
+### Bloc E — Documentation finale (~30 min)
+- Consolidation 3 fichiers « plus tard » en `PLUS_TARD_VF.md` unique
+- 5 rapports d'audit dans `audit/rapports/`
+- Bandeaux archives sur 3 anciens fichiers
+- INVARIANTS.md : ajout I-SEC-06, I-CACHE-01/02/03
+- ANOMALIES_RECURRENTES.md : ajout Pattern #18, MAJ Pattern #15
 
 ---
 
-## Patterns nouveaux
+## 📂 Livrables
 
-- **#18 — Cache WebView2 New Outlook ignore les headers HTTP de revalidation** (cf `audit/ANOMALIES_RECURRENTES.md`)
+### Code (modifications)
+- `V2/autorunshared.js` (suppression flow companion + bump versions)
+- `V2/app_plugin.py` (no-store, fallback Graph, fix Pattern #15, errorhandler quota, fallback Graph fetch, locks, cleanup dead caches, etc.)
+- `V2/outlook_graph.py` (fix Graph 400 conversationId)
+- `V2/auth_microsoft.py` (log level)
+- `V2/claude_ai.py` (garde anti-injection `_build_prompt`)
+- `V2/dialog.js` (interlignes, Script error filter, contact_search, cleanup deprecated)
+- `V2/dialog.html` (cache busting versions v9 → v15)
+- `V2/dialog.css` (interlignes propres)
+- `V2/popup.html` (couleur cohérente)
+- `V2/popup.js` (cleanup dead code)
+- `V2/mockups/*.html` (rebrand)
 
-## Invariants nouveaux
+### Documentation (nouveaux/MAJ)
+- 📄 `docs/PLUS_TARD_VF.md` — référentiel unique consolidé
+- 📄 `docs/sessions/OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md` — ce bilan
+- 📄 `audit/rapports/2026-04-27_audit_dead_code_companion_pivot_saas.md`
+- 📄 `audit/rapports/2026-04-27_audit_patterns_15_17_post_pivot.md`
+- 📄 `audit/rapports/2026-04-27_audit_bugs_ui_etat_pivot.md`
+- 📄 `audit/rapports/2026-04-27_graph_400_conversationid_pre_diag.md`
+- 📄 `audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md`
+- 📄 `audit/rapports/2026-04-27_audits_1_9_10_synthese.md`
+- 📝 MAJ `audit/ANOMALIES_RECURRENTES.md` (Pattern #18 + Pattern #15 sites)
+- 📝 MAJ `audit/INVARIANTS.md` (I-SEC-06 + I-CACHE-01/02/03)
+- 📝 MAJ `docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`
+- 📝 MAJ `docs/specs_proto/HISTORIQUE_DECISIONS.md`
+- 📝 MAJ `docs/SOMMAIRE_DETAILLE.md`
 
-- **I-CACHE-01** — Headers `no-store` sur `.js`/`.html`/`.css` du plugin
-- **I-CACHE-02** — Convention `?v=` dans `autorun.html`
-- **I-CACHE-03** — Vérifier que les users actifs refetchent les `.js` régulièrement
+### Bandeaux d'archive
+- ⚠️ `docs/PLUS_TARD.md` — archivé, redirige vers PLUS_TARD_VF
+- ⚠️ `docs/analyses_proto_v2/BUGS_PROTO_A_CORRIGER_PLUS_TARD.md` — gelé, proto LECTURE SEULE
+- ⚠️ `docs/v2_specs/TODO_SESSION_SUIVANTE.md` — pré-pivot SaaS, redirige vers PLUS_TARD_VF
 
 ---
 
-## À surveiller / cleanup ultérieur
+## 🚦 État OVH au soir du 27/04
 
-- ⚠️ **Graph 400 sur `get_conversation_thread`** (préexistant, hors scope cette session) : `conversationId eq '...'` + `$orderby=receivedDateTime desc` rejeté par Graph. À investiguer si dégrade visiblement le contexte A/B/C.
-- ⚠️ **Sites Pattern #15 backlog** : 4 sites dans `app_plugin.py` (lignes 896, 951, 2480, 2636, 2718) à inspecter dans une session de fix dédiée.
-- ⚠️ **Cleanup dead code companion priorité moyenne** : `popup.js _checkCompanionForPyQt` + `dialog.js _sendViaCompanionFallback` (cf rapport audit).
-- ⚠️ **Suppression complète route proxy `/api/companion/*`** quand tous les call sites frontend sont nettoyés (priorité basse).
-
----
-
-## Liens utiles
-
-- Rapport audit dead code companion : [`2026-04-27_audit_dead_code_companion_pivot_saas.md`](../../audit/rapports/2026-04-27_audit_dead_code_companion_pivot_saas.md)
-- Rapport audit Patterns #15+17 : [`2026-04-27_audit_patterns_15_17_post_pivot.md`](../../audit/rapports/2026-04-27_audit_patterns_15_17_post_pivot.md)
-- Rapport audit bugs UI : [`2026-04-27_audit_bugs_ui_etat_pivot.md`](../../audit/rapports/2026-04-27_audit_bugs_ui_etat_pivot.md)
-- Pattern #18 : [`audit/ANOMALIES_RECURRENTES.md`](../../audit/ANOMALIES_RECURRENTES.md#pattern-18)
-- Onboarding session : [`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`](../outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md)
+```
+Service boostermail : active depuis 16:XX UTC (X heures uptime)
+Warmup status     : done:true, "Cache chaud — prêt en un éclair"
+Erreurs Graph 400 conversationId : 0/h (était 89/jour avant fix 828567e)
+Erreurs auth_token_silent WARNING : 0 (passées en DEBUG)
+Cache headers     : no-store HTML, immutable 5 ans JS/CSS
+Routes critiques  : 35-43 ms (largement < seuil 500 ms)
+12 profils contacts récemment générés
+```
 
 ---
 
-## Contexte session précédente
+## ⚠️ À surveiller / sujets ouverts
 
-- Bilan SaaS PM 27/04 : [`SAAS_BILAN_SESSION_20260427_pm.md`](SAAS_BILAN_SESSION_20260427_pm.md) — pivot OVH source de vérité unique + déploiement code/DB sur OVH
+### Court terme (sous 1 semaine)
+1. **Migration Coaxis** vers Microsoft 365 cloud — ETA J+2/3 (côté admin Coaxis, hors code)
+2. **Validation usage quotidien** Yvan — utiliser BoosterMail au quotidien et signaler toute frustration
+
+### Moyen terme (sous 1 mois)
+3. **Audit #4 except: pass approfondi** — session dédiée 1-2h, sampler les 71 occurrences
+4. **Audit #1 Pattern #17 backend approfondi** — session dédiée, 38 closures pures à inspecter
+5. **Cleanup whitelist `_COMPANION_ALLOWED`** — restant subpaths à analyser
+6. **Templates 45 fixes + appris** (Plan 2 historique) — chantier 3-4h
+
+### Long terme (avant beta multi-user)
+7. **Étape 7 SaaS multi-tenant DB user_id** — 1.5 jour. Plan ready dans `audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md`. Pré-requis : audit #3 cross-user **DONE**.
+8. **Suppression complète route proxy `/api/companion/*`** quand tous call sites frontend nettoyés
+
+---
+
+## 🔗 Liens utiles
+
+| Sujet | Document |
+|---|---|
+| Backlog vivant unique | [`docs/PLUS_TARD_VF.md`](../PLUS_TARD_VF.md) |
+| Onboarding session « New Outlook via OVH » | [`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`](../outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md) |
+| Onboarding SaaS partagé | [`docs/saas/ONBOARDING_SESSION_SAAS.md`](../saas/ONBOARDING_SESSION_SAAS.md) |
+| Pattern #18 cache WebView2 | [`audit/ANOMALIES_RECURRENTES.md`](../../audit/ANOMALIES_RECURRENTES.md#pattern-18) |
+| Plan migration multi-tenant | [`audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md`](../../audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md) |
+| Historique décisions stratégiques | [`docs/specs_proto/HISTORIQUE_DECISIONS.md`](../specs_proto/HISTORIQUE_DECISIONS.md) |

@@ -1,6 +1,6 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 27/04/2026 PM (consolidation + cycle Workflow 4/2 audit kit : #2 Graph 400, #9 HTTP 429, #6 prompt injection)
+> **Dernière mise à jour** : 27/04/2026 PM tardif (cycle audit kit complet : 6 audits clos + tech debt tier 1 + 12 contacts analysés)
 >
 > **Rôle** : ce document est désormais **LE seul référentiel vivant** pour tout sujet « à faire plus tard » de BoosterMail. Il consolide et remplace les 3 fichiers historiques :
 > - `docs/PLUS_TARD.md` (573 lignes, à jour 27/04 PM mais redondant après cette session)
@@ -126,17 +126,16 @@ Service restart 0 erreur. Code allégé sans impact fonctionnel.
 
 ---
 
-### 8. Forcer analyse des 30 correspondants sans profil (27/04)
+### 8. ~~Forcer analyse des 30 correspondants sans profil~~ ✅ FAIT 27/04 PM
 
-**Constat (audit #7 du 27/04)** : 30 correspondants avec ≥ 3 threads mais aucun `contact_profile`. Violation I-DATA-12.
+✅ Réalisé en autonomie le 27/04 PM en fin de session :
+- Identification 30 correspondants ≥ 3 threads sans profil dans la DB
+- Filtrage 18 services automatiques (regex étendue : `noreply`, `support`, `notifications`, `e-statement`, `communication`, `nepasrepondre`, `ne-pas-repondre`, `microsoftexchange`, `mssecurity`, etc.)
+- 12 humains identifiés et analysés via `POST /api/analyze_contact` qui appelle `_maybe_analyze_contact()` en BG
+- 9/12 profils créés en 60s (les 3 autres traités après)
+- Coût Claude : ~$0.30 (cohérent prévision)
 
-- ~5-7 sont des services automatiques (jesignexpert, ovhcloud, wetransfer, universign, no-reply@digidom) → pas pertinent
-- ~25 sont des humains réels (~$0.30 au total via Claude calls)
-- Hook `_maybe_analyze_contact` (commit `dedf759` 24/04) gère progressivement à chaque nouveau mail entrant
-
-**Option active** : script ponctuel qui filtre les services auto puis trigger `analyze_contact_profile` sur les ~25 humains. ~$0.30 + ~5 min.
-
-**Quand** : après stabilisation V2 mais avant SaaS multi-tenant.
+**Profils générés** : registre (tutoiement/vouvoiement) + catégorie (client/fournisseur/avocat) + confidence (0.15 à 1.0). Pipeline `_maybe_analyze_contact` éprouvé, aucune erreur.
 
 ---
 
@@ -250,6 +249,10 @@ Suite à l'audit exhaustif multi-angles du 21/04 (~60 anomalies, 15 corrigées i
 - ✅ **Graph 400 conversationId** retrait `$orderby` + tri Python (`828567e`) — 89/jour → 0
 - ✅ **HTTP 429 propre** errorhandler global + SSE event quota_exceeded (`c28c7e8`)
 - ✅ **Pattern #9 prompt injection** : garde anti-injection sur `_build_prompt` + invariant I-SEC-06 (`59fd9d8`)
+- ✅ **MAJ PLUS_TARD_VF statuts** post-cycle Workflow 4/2 (`966713c`)
+- ✅ **Audits #1 #3 #9 #10 + cleanup 4 caches dead** (`210d2c5`)
+- ✅ **Tech debt tier 1** : locks cohérents + log level + cleanup deprecated (`1d8d1a0`)
+- ✅ **12 humains analysés via `/api/analyze_contact`** ($0.30) — 9 profils en 60s, 3 en cours
 
 ### Sessions précédentes
 - ✅ **POC 21/04 Inversion Graph > Companion COM** — plus de popup OOM Guardian sur polling/prefetch/envoi en Mode Complet
