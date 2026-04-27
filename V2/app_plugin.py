@@ -62,6 +62,37 @@ except Exception:
 
 app = Flask(__name__)
 
+# Fix 27/04 PM (Workflow 4 audit kit, sujet #9 du plan) — Quota tracker
+# import + Flask error handler global pour QuotaExceeded.
+# Pour les routes JSON synchrones : retour HTTP 429 propre + JSON clair.
+# Pour les routes streaming SSE : catch ciblé dans les generateurs (cf
+# `generate_sse` ligne 8078+ pour /generate_reply).
+try:
+    from quota_tracker import QuotaExceeded as _QuotaExceeded
+except ImportError:
+    _QuotaExceeded = None
+
+
+if _QuotaExceeded is not None:
+    @app.errorhandler(_QuotaExceeded)
+    def _handle_quota_exceeded(e):
+        """Retourne HTTP 429 propre quand un user atteint sa limite quotidienne.
+
+        Utile pour les routes synchrones JSON (ex: /api/refine_reply non-stream).
+        Pour les routes streaming SSE, le catch est fait dans le generateur.
+        """
+        logger.warning(f"Quota {e.provider} dépassé pour user {e.user_id[:8]}... "
+                       f"({e.used}/{e.limit})")
+        return jsonify({
+            'error': 'quota_exceeded',
+            'provider': e.provider,
+            'used': e.used,
+            'limit': e.limit,
+            'message': (f"Vous avez atteint votre quota quotidien BoosterMail "
+                        f"({e.used}/{e.limit} appels {e.provider}). "
+                        f"Réessayez demain.")
+        }), 429
+
 # --- CORS (audit majeur) — autoriser les origines locales ----
 @app.after_request
 def _add_cors_headers(response):
@@ -8210,8 +8241,16 @@ INSTRUCTIONS ECHEANCES :
             logger.warning(f"Token expiré pendant generate_reply stream: {e}")
             yield f"data: {json.dumps({'error': 'Session expirée — reconnectez-vous via Profil > Mode Complet', 'auth_required': True})}\n\n"
         except Exception as e:
-            logger.error(f"Erreur generate_reply stream: {e}")
-            yield f"data: {json.dumps({'error': _safe_err(e)})}\n\n"
+            # Fix 27/04 PM — QuotaExceeded specifique avant Exception generique.
+            # _QuotaExceeded peut etre None si import a echoue au boot, donc
+            # check defensif sur le type avant cast.
+            if _QuotaExceeded is not None and isinstance(e, _QuotaExceeded):
+                logger.warning(f"Quota {e.provider} depasse pendant generate_reply stream "
+                               f"pour user {e.user_id[:8]}... ({e.used}/{e.limit})")
+                yield f"data: {json.dumps({'error': 'quota_exceeded', 'provider': e.provider, 'used': e.used, 'limit': e.limit, 'message': f'Vous avez atteint votre quota quotidien BoosterMail ({e.used}/{e.limit} appels {e.provider}). Reessayez demain.'})}\n\n"
+            else:
+                logger.error(f"Erreur generate_reply stream: {e}")
+                yield f"data: {json.dumps({'error': _safe_err(e)})}\n\n"
 
     return Response(
         stream_with_context(generate_sse()),

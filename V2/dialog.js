@@ -1970,9 +1970,15 @@ function _fetchGenerateReply(body) {
                             if (data.error) {
                                 if (_progressPlaceholderActive) _clearProgressPlaceholder();
                                 spinner.classList.remove('active');
-                                editor.innerHTML = '<p style="color:#c00;">' + _escapeHtml(data.error) + '</p>';
+                                // Fix 27/04 PM (Workflow 4 #9) — message specifique
+                                // pour quota_exceeded (data.message), sinon data.error brut.
+                                var _errMsg = (data.error === 'quota_exceeded' && data.message)
+                                    ? data.message : data.error;
+                                editor.innerHTML = '<p style="color:#c00;">' + _escapeHtml(_errMsg) + '</p>';
                                 if (data.auth_required) {
                                     document.getElementById('headerStatus').textContent = 'Session expiree — reconnectez-vous';
+                                } else if (data.error === 'quota_exceeded') {
+                                    document.getElementById('headerStatus').textContent = 'Quota quotidien atteint';
                                 }
                                 _onGenerationDone();
                                 return;
@@ -2122,7 +2128,13 @@ function refineReply() {
                             if (data.error) {
                                 if (_progressPlaceholderActive) _clearProgressPlaceholder();
                                 document.getElementById('genSpinner').classList.remove('active');
-                                editor.innerHTML = '<p style="color:#c00;">' + _escapeHtml(data.error) + '</p>';
+                                // Fix 27/04 PM (Workflow 4 #9) — message clair quota_exceeded
+                                var _errMsg2 = (data.error === 'quota_exceeded' && data.message)
+                                    ? data.message : data.error;
+                                editor.innerHTML = '<p style="color:#c00;">' + _escapeHtml(_errMsg2) + '</p>';
+                                if (data.error === 'quota_exceeded') {
+                                    document.getElementById('headerStatus').textContent = 'Quota quotidien atteint';
+                                }
                                 _onGenerationDone();
                                 return;
                             }
