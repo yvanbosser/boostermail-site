@@ -410,6 +410,18 @@ class GraphClient(EmailProvider):
         Contexte A : tous les mails du même thread via conversationId (O2).
         Retourne les mails reçus ET envoyés du thread, avec bodies.
         Plus précis que la recherche par sujet du proto.
+
+        Fix 27/04 PM (Workflow 4 audit kit) — retrait de $orderby cote Graph.
+        Cause : la combinaison $filter=conversationId eq + $orderby=receivedDateTime
+        + $select={_FULL_SELECT} 13 champs etait rejetee par Graph avec
+        "restriction or sort order too complex" sur certaines mailboxes
+        (limitation E5/Business documentee). 89 erreurs/jour observees le
+        27/04. Sans fallback, contexte A vide pour ces mails -> reponses
+        Claude moins ancrees dans le thread.
+        Solution : tri cote Python apres fetch. On recupere $top mails par
+        ordre Graph natif (potentiellement non trie), puis on trie par
+        receivedDateTime desc avant [:max_results]. Surcoute negligeable
+        (max 50 items en memoire).
         """
         try:
             safe_id = conversation_id.replace("'", "''")
@@ -417,11 +429,13 @@ class GraphClient(EmailProvider):
                 f"/me/messages"
                 f"?$filter=conversationId eq '{safe_id}'"
                 f"&$select={_FULL_SELECT}"
-                f"&$orderby=receivedDateTime desc"
                 f"&$top={min(max_results, 50)}"
             )
             data = self._get(url)
             items = data.get('value', [])
+            # Tri cote Python (desc par receivedDateTime, fallback chaine vide)
+            items.sort(key=lambda m: m.get('receivedDateTime', '') or '',
+                       reverse=True)
             return [self._normalize_email(item) for item in items[:max_results]]
         except Exception as e:
             logger.error(f"Erreur get_conversation_thread: {e}")
