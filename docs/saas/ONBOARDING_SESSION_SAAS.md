@@ -1,6 +1,6 @@
 # ONBOARDING — Sessions SaaS BoosterMail
 
-> **Dernière mise à jour** : 26/04/2026
+> **Dernière mise à jour** : 27/04/2026
 
 > **Rôle de ce doc** : référence vivante pour toute session Claude qui travaille sur l'infrastructure SaaS BoosterMail. À mettre à jour à la fin de chaque session SaaS pour refléter l'état réel.
 
@@ -69,6 +69,8 @@ Si l'un des deux échoue, **arrête et alerte Yvan** avant toute autre action.
 | `/var/backups/boostermail/` | Stockage des backups DB compressés (`boostermail_AAAAMMJJ_HHMMSS.db.gz` + `backup.log`) |
 | `/var/log/boostermail-backup.log` | stdout/stderr du cron de backup (en plus de `backup.log` qui ne contient que les succès) |
 | `/opt/boostermail/V2/quota_tracker.py` | Module cap API (Claude 500/jour, OpenAI 200/jour par user — table SQLite `api_quota` auto-créée) |
+| `/var/www/install.boostermail.ai/privacy.html` | Page Politique de confidentialité (draft revue juridique) |
+| `/var/www/install.boostermail.ai/terms.html` | Page CGU draft (à reviewer juriste) |
 
 ### SSL
 - Certificat Let's Encrypt sur `api.boostermail.ai` (depuis 26/04 matin)
@@ -76,7 +78,7 @@ Si l'un des deux échoue, **arrête et alerte Yvan** avant toute autre action.
 - Renouvellement automatique (cron certbot)
 - Cert interne Flask auto-signé : `localhost.crt` / `localhost.key` (pour HTTPS 3443 → nginx)
 
-### Monitoring Sentry
+### Monitoring Sentry (erreurs applicatives)
 | Item | Valeur |
 |---|---|
 | DSN (public, OK à partager) | `https://e93405e321d9257d6709894a4a0a5827@o4511285743910912.ingest.de.sentry.io/4511285752758352` |
@@ -88,6 +90,17 @@ Si l'un des deux échoue, **arrête et alerte Yvan** avant toute autre action.
 | Datacenter | EU (Allemagne) |
 | Notifications | email actives par défaut → `yvan.bosser@gmail.com` |
 | Config Python | `traces_sample_rate=0`, `profiles_sample_rate=0`, `send_default_pii=False` (RGPD) |
+
+### Monitoring UptimeRobot (uptime serveur)
+| Item | Valeur |
+|---|---|
+| Compte | `yvan.bosser@gmail.com` (Free tier) |
+| Dashboard | https://uptimerobot.com/dashboard |
+| Plan | Free (50 monitors max, ping toutes les 5 min, alertes mail illimitées) |
+| Monitor 1 — `BoosterMail API` | `https://api.boostermail.ai/api/warmup_status` (HTTPS, 5 min) |
+| Monitor 2 — `BoosterMail Install` | `https://install.boostermail.ai/` (HTTPS, 5 min) |
+| Alertes | mail vers `yvan.bosser@gmail.com` après 2 ticks DOWN consécutifs |
+| Mis en place | 27/04/2026 (Étape 5.C) |
 
 ---
 
@@ -186,8 +199,8 @@ En cas de doute sur le scope : **demander à Yvan avant**.
 | **2** | **Azure setup** (tenant + multi-tenant + client_secret) | (sous-tâche bloquante) | ~1h | ~1h15 | ✅ 26/04 (nouvelle app `BoosterMail` sur tenant `groupe-bosser.fr`, OAuth end-to-end validé) |
 | **3** | **Outlook Web debug** (TIMEBOX 4h max) | (ex-Phase 6) | ~4h max | 0 | ⏳ |
 | **4** | **BG webhooks + pré-génération** | (ex-Phase 3) | ~1 jour | 0 | ⏳ |
-| **5** | **Infra production** (backup DB + cap API + uptime + RGPD + brand + CGU) | (nouveau, créé 26/04) | ~2-3h | ~1h | 🟡 5.A backup DB ✅ + 5.B cap API ✅ — 5.C uptime, 5.D brand, 5.E RGPD, 5.F CGU à faire |
-| **6** | **Soumission AppSource Microsoft** (validation 4-8 sem en BG) | (immédiat parallèle) | ~30 min | 0 | ⏳ bloqué Azure + Étape 5 |
+| **5** | **Infra production** (backup DB + cap API + uptime + RGPD + brand + CGU) | (nouveau, créé 26/04) | ~2-3h | ~3h | ✅ 27/04 (5.A + 5.B + 5.C + 5.D + 5.E + 5.F tous done) |
+| **6** | **Soumission AppSource Microsoft** (validation 4-8 sem en BG) | (immédiat parallèle) | ~30 min | 0 | ⏳ bloqué MPN (différé — voir PLUS_TARD) + finalisation entité éditrice |
 | **7** | **Multi-tenant DB user_id + isolation routes** | (ex-Phase 2) | ~1.5 jour | 0 | ⏳ bloqué Azure |
 | **8** | 🎯 **Beta gratuite** (5-10 testeurs indé/TPE) | — | 1-2 sem | 0 | ⏳ |
 | **9** | **Paiement Stripe + Brevo** | (ex-Phase 4) | ~1 jour | 0 | ⏳ avant 1er payant |
@@ -315,13 +328,15 @@ curl -sI https://install.boostermail.ai/ | head -3
 
 **Étape 1 ✅ TERMINÉE** (26/04 PM) — https://install.boostermail.ai/ live avec HTTPS, redirect 80→443, cert Let's Encrypt valide 90j.
 
-**Étape 2 ✅ TERMINÉE** (26/04 PM) — nouvelle app Azure `BoosterMail` créée sur tenant `groupe-bosser.fr` (multi-tenant + comptes perso), client_secret généré 24 mois, 5 permissions Graph accordées, OAuth flow end-to-end validé. Détails dans [`AZURE_CONFIG.md`](AZURE_CONFIG.md).
+**Étape 2 ✅ TERMINÉE** (26/04 PM) — nouvelle app Azure `BoosterMail` sur tenant `groupe-bosser.fr` (multi-tenant + comptes perso), client_secret 24 mois, 5 permissions Graph, OAuth flow end-to-end validé. Détails dans [`AZURE_CONFIG.md`](AZURE_CONFIG.md).
 
-**Étape 5 🟡 PARTIELLE** (26/04 PM) — sous-tâches techniques 5.A (backup DB auto + cron quotidien 3h UTC + rotation 30j) et 5.B (cap API par user/jour, Claude 500, OpenAI 200, table `api_quota`) **TERMINÉES**. Restent : 5.C (uptime monitoring), 5.D (brand check), 5.E (page RGPD), 5.F (CGU draft).
+**Étape 5 ✅ TERMINÉE** (27/04 matin) — toutes sous-tâches livrées : 5.A backup DB cron quotidien 3h UTC, 5.B cap API par user/jour (Claude 500, OpenAI 200), 5.C UptimeRobot 2 monitors UP avec alertes mail, 5.D brand check OK, 5.E page RGPD `/privacy.html`, 5.F CGU draft `/terms.html`. Le bandeau "draft revue juridique" + placeholder "entité éditrice à finaliser" sont en place pour ne pas tromper les utilisateurs avant validation officielle.
 
 **Prochaine étape recommandée** :
-- **Finir Étape 5** (5.C uptime ~30 min, 5.D brand ~15 min, 5.E RGPD ~1h, 5.F CGU ~1h) → débloque Étape 6 AppSource
-- **OU Étape 7** (Multi-tenant DB user_id, ~12h) — débloquée par Étape 2, permet beta avec testeurs autres que Yvan
+- **Étape 7 — Multi-tenant DB user_id** (~12h, gros chantier) : maintenant la seule à attaquer pour ouvrir la beta. Débloquée depuis l'Étape 2.
+- **Étape 6** (AppSource) reste bloquée par MPN (différé — décision business sur entité éditrice, voir [`PLUS_TARD.md`](../PLUS_TARD.md)).
+
+**Pour la beta** : Étape 7 est le dernier verrou technique. Une fois 7 livrée, la beta peut s'ouvrir (5-10 testeurs indé/TPE).
 
 **En parallèle Yvan** : inscription MPN (Microsoft Cloud Partner Program, gratuit) — résout le warning "End users cannot grant consent" et débloque AppSource (24-48h d'attente). Procédure section D de [`AZURE_CONFIG.md`](AZURE_CONFIG.md).
 
@@ -621,7 +636,8 @@ Les fichiers `manifest.xml` et `autorunshared.js` peuvent générer des conflits
 | Date | Fichier | Sujet principal |
 |---|---|---|
 | **26/04/2026 (matin)** | [`SAAS_BILAN_SESSION_20260426.md`](../sessions/SAAS_BILAN_SESSION_20260426.md) | Phase 1 SaaS terminée (VPS OVH + SSL + sécurité + Sentry) + rebrand UI BoosterMail + Outlook Web différé Phase 6 |
-| **26/04/2026 (après-midi)** | [`SAAS_BILAN_SESSION_20260426_pm.md`](../sessions/SAAS_BILAN_SESSION_20260426_pm.md) | **Étapes 1 & 2 terminées** : (1) `OnMessageCompose` + page `install.boostermail.ai` HTTPS live ; (2) nouvelle app Azure multi-tenant sur tenant `groupe-bosser.fr` + OAuth end-to-end validé |
+| **26/04/2026 (après-midi)** | [`SAAS_BILAN_SESSION_20260426_pm.md`](../sessions/SAAS_BILAN_SESSION_20260426_pm.md) | **Étapes 1, 2 et 5.A/5.B** : install.boostermail.ai HTTPS + Azure multi-tenant + backup DB cron + cap API |
+| **27/04/2026 (matin)** | [`SAAS_BILAN_SESSION_20260427.md`](../sessions/SAAS_BILAN_SESSION_20260427.md) | **Étape 5 close** : nettoyage user fantôme + 5.C UptimeRobot + 5.D brand check + 5.E privacy.html + 5.F terms.html. **MPN différé** (décision business entité éditrice). |
 
 ---
 
