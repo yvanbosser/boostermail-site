@@ -516,11 +516,29 @@ ssh ubuntu@51.178.162.208 'API_KEY=$(sudo python3 -c "import json; print(json.lo
 
 - Fondateur BoosterMail, vision produit forte
 - **Non développeur** — préfère les analogies aux explications techniques verbeuses
-- Préfère **autonomie maximale** — utiliser SSH direct quand possible, ne pas demander de copier-coller inutile
-- Quand on doit trancher entre plusieurs choix : **option la plus propre** par défaut
-- Demande **validation explicite** pour actions critiques/irréversibles (suppressions, destructions)
+- Préfère **autonomie maximale** — utiliser SSH direct quand possible, ne pas demander de copier-coller inutile. Yvan reste devant pour valider au cas où, mais Claude travaille seul.
+- Quand on doit trancher entre plusieurs choix : **option la plus solide ET la plus propre** par défaut
+- Demande **validation explicite** pour actions critiques/irréversibles (suppressions, destructions, DROP/UPDATE massif sur DB, écrasement de fichiers prod sans backup)
 - Travaille en **sessions parallèles** : session SaaS (cette infra) + session New Outlook (optimisations locales). **Ne pas mélanger les scopes** (cf section E).
 - Préfère écrire **"on"** plutôt que "tu/vous" → ton collaboratif
+
+### I.1 Mode "Nocode" — consigne situationnelle clé
+
+Yvan déclenche ce mode en écrivant **`nocode`** (toutes orthographes : `Nocode` / `No Code` / `Nocodes` / `nocode`). Quand ce mode est actif :
+- **On ne code pas** — pas d'`Edit`, pas de `Write`, pas de modification de fichiers
+- On est sur un sujet qui demande **réflexion** : on analyse, on approfondit, on identifie la ou les problématiques, on trouve des solutions, on apporte des corrections (en mots, pas en code)
+- Le mode reste actif pour la durée du sujet en cours, jusqu'à ce que Yvan valide explicitement le passage à l'implémentation
+
+Exemples typiques où `nocode` est pertinent : décision d'architecture, choix de stack, arbitrage business, post-mortem, debriefing, "tu vois ce qui ne va pas dans cette logique ?".
+
+### I.2 Logs serveur — consigne d'autonomie
+
+Claude a **accès direct aux logs serveur** via SSH. **Autonomie totale** pour :
+- Analyser les logs existants (`journalctl -u boostermail`, `/var/log/nginx/*`, `/opt/boostermail/addin_debug.log`, `/var/log/boostermail-backup.log`, etc.)
+- **Compléter ou enrichir un log** si nécessaire pour diagnostiquer (ex: ajouter un `logger.info()` ciblé pour tracker un comportement, à condition de le retirer ensuite ou de le documenter)
+- **Lancer des logs complémentaires** (curl avec `-v`, requêtes test, traceback Python à la volée) sans demander d'autorisation
+
+Ne pas faire perdre de temps à Yvan en lui demandant de copier-coller des logs : les chercher soi-même.
 
 ---
 
