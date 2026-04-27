@@ -1,6 +1,6 @@
 # Prompt de reprise — Session « New Outlook via OVH »
 
-> **Dernière mise à jour** : 27/04/2026 fin de journée (post audit cohérence — ~~30 commits master)
+> **Dernière mise à jour** : 27/04/2026 fin de journée (post test kit fin de session — ~32 commits master, Workflow 7 validé en conditions réelles)
 >
 > **Mode d'emploi** : à chaque démarrage d'une nouvelle session Claude sur le sujet « New Outlook via OVH », **copier-coller le bloc ci-dessous en intégralité**. Il référence tous les docs nécessaires et donne le contexte de la session précédente.
 >
@@ -20,7 +20,7 @@ Test rapide :
 Si ton worktree est différent (auto-créé style `claude/happy-XXXX`), exécute en début de session :
   git fetch && git merge master --no-edit
 puis :
-  git log --oneline -5    # doit afficher au minimum `0dc1763 docs(plus_tard_vf): corrections incoherences post-cloture session 1`
+  git log --oneline -5    # doit afficher au minimum `f8473e8 feat(kit-fin-session): kit fin de session opposable + script cloture_check`
 
 ---
 
@@ -32,7 +32,7 @@ CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
 - Yvan utilise BoosterMail au quotidien depuis https://api.boostermail.ai/
 
 ÉTAT DE FIN DE LA DERNIÈRE SESSION (27/04/2026 fin de journée)
-- **~~30 commits master cumulés** sur la journée du 27/04
+- **~32 commits master cumulés** sur la journée du 27/04 (top : `f8473e8`)
 - Bouton BoosterMail New Outlook : **fonctionnel** (était mort en silence)
 - Pattern #18 (cache WebView2 ignore les headers HTTP) découvert + fix structurel : `no-store` HTML + cache busting URL versionnée
 - Cycle audit kit complet (Workflow 4 + 2) : **8 audits clos sur 10**, 2 partiels avec constat livré (#1 Pattern #17 backend profond reporté, #4 except: pass approfondi reporté)
@@ -42,6 +42,7 @@ CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
 - Garde anti-injection sur `_build_prompt` (Pattern #9 / I-SEC-06)
 - Tech debt tier 1 : locks cohérents + log level + cleanup deprecated + 4 caches dead retirés
 - Audit cohérence final : PLUS_TARD_VF nettoyé, 6 incohérences corrigées (items déjà faits encore listés comme à faire)
+- **Kit fin de session opposable** créé en fin de journée : Workflow 7 (clôture) + Workflow 8 (ouverture) dans `audit/PLAYBOOK.md`, invariants I-SESS-01 à 04 dans `audit/INVARIANTS.md`, script auto `audit/tests/cloture_check.sh`. Validé en conditions réelles : 1er run a détecté 3 anomalies réelles toutes corrigées avant validation.
 - État OVH : service active, 0 erreur, routes < 50 ms
 
 ⚠️ SUJET HORS SCOPE CODE EN COURS : migration mailbox `yvan.bosser@groupe-bosser.fr` Coaxis → Microsoft 365 cloud (ETA J+2/3, côté admin Coaxis). En attendant, contournement via compte transitoire. Une fois migration faite : tous les mails Coaxis deviennent éligibles BoosterMail.
@@ -50,7 +51,7 @@ AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 
 1. **`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** ⭐ — référence vivante de cette session (workflow OVH-first, scope, interdits, procédure déploiement, profil Yvan, tests, procédure purge cache WebView2)
 2. **`docs/PLUS_TARD_VF.md`** ⭐ — référentiel UNIQUE des sujets « plus tard ». **Lis le TL;DR en haut du document** : il liste les 23 items vivants par catégorie (admin, actif, SaaS, audits, tech debt, différé, long terme). Remplace les 3 anciens fichiers PLUS_TARD/TODO/BUGS_PROTO archivés.
-3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`** — bilan complet de la session précédente (~9h, ~30 commits, découvertes, livrables)
+3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`** — bilan complet de la session précédente (~9h, ~32 commits, découvertes, livrables)
 4. **`docs/saas/ONBOARDING_SESSION_SAAS.md`** — référence infra OVH partagée (sections B paths serveur, J commandes, G rollback)
 5. **`audit/INVARIANTS.md`** + **`audit/ANOMALIES_RECURRENTES.md`** — invariants techniques + Patterns identifiés (notamment Pattern #18 cache WebView2 + I-CACHE-01/02/03 + I-SEC-06)
 

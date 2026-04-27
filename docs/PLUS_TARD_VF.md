@@ -1,6 +1,6 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 27/04/2026 fin journée (audit cohérence post-clôture session 1 — incohérences corrigées)
+> **Dernière mise à jour** : 27/04/2026 fin journée (post test kit fin de session — Workflow 7 validé en conditions réelles)
 
 ---
 
@@ -300,6 +300,8 @@ Suite à l'audit exhaustif multi-angles du 21/04 (~60 anomalies, 15 corrigées i
 - ✅ **Audits #1 #3 #9 #10 + cleanup 4 caches dead** (`210d2c5`)
 - ✅ **Tech debt tier 1** : locks cohérents + log level + cleanup deprecated (`1d8d1a0`)
 - ✅ **12 humains analysés via `/api/analyze_contact`** ($0.30) — 9 profils en 60s, 3 en cours
+- ✅ **Audit cohérence final 6 docs vivants** (`6160611`) — chiffres + refs obsolètes corrigés
+- ✅ **Kit fin de session opposable** (`f8473e8`) — Workflow 7/8 PLAYBOOK + I-SESS-01 à I-SESS-04 + script `audit/tests/cloture_check.sh` (validé sur 1er run réel : 3 anomalies détectées + corrigées)
 
 ### Sessions précédentes
 - ✅ **POC 21/04 Inversion Graph > Companion COM** — plus de popup OOM Guardian sur polling/prefetch/envoi en Mode Complet

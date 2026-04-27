@@ -1,9 +1,9 @@
 # BILAN SESSION « New Outlook via OVH » — 27/04/2026 PM (journée complète)
 
-> **Dernière mise à jour** : 27/04/2026 fin de journée
-> **Durée** : ~9h (matin pré-session SaaS + ~7h après-midi/soir « New Outlook via OVH »)
+> **Dernière mise à jour** : 27/04/2026 fin de journée (post test kit fin de session)
+> **Durée** : ~9h (matin pré-session SaaS + ~7h après-midi/soir « New Outlook via OVH » + ~30 min extension kit fin de session)
 > **Auteur** : Claude + Yvan
-> **Master git au début** : `372e7e9` — **Master git en fin** : `89e6524+` (**~30 commits cumulés sur la journée**)
+> **Master git au début** : `372e7e9` — **Master git en fin** : `f8473e8+` (**~32 commits cumulés sur la journée**)
 
 ---
 
@@ -41,7 +41,35 @@ b9cacd3 fix(warmup): boucle retry avec backoff + messages d'etat coherents
 912edb2 docs(session): bilan New Outlook fix 27/04 PM + MAJ onboarding/historique/sommaire
 b7429eb docs(audit): Pattern #18 cache WebView2 + invariants I-CACHE-01/02/03 + 4 rapports
 e2ba0e9 fix(newoutlook): bouton dialog mort + Cache-Control no-store + rebrand residuel
+
+# Extension post-bilan (kit fin de session)
+6160611 docs(coherence): audit final 6 docs vivants — chiffres & references obsoletes corriges
+f8473e8 feat(kit-fin-session): kit fin de session opposable + script cloture_check
 ```
+
+### Extension post-bilan — Kit fin de session opposable (~30 min)
+
+Demande d'Yvan en fin de journée : **« créer une procédure complète de fin de session et d'ouverture d'une nouvelle session, comme le kit audit »**.
+
+Approche minimale (3 fichiers étendus + 1 script créé) :
+
+1. **`audit/PLAYBOOK.md`** : Workflow 7 (clôture) + Workflow 8 (ouverture), engagement Claude opposable, étapes strictes, anomalies récurrentes à éviter (incluant le paradoxe d'auto-référence des chiffres de commits constaté en fin de journée).
+
+2. **`audit/INVARIANTS.md`** : Catégorie 13 « État de session / cohérence documentaire » avec **I-SESS-01 à I-SESS-04** :
+   - I-SESS-01 : `git status --short` vide en clôture
+   - I-SESS-02 : aucune ref obsolète vers `PLUS_TARD.md` (sans `_VF`) ou `TODO_SESSION_SUIVANTE.md` qualifiée « état courant » dans docs vivants
+   - I-SESS-03 : top commit hash dans PROMPT_REPRISE matche `git log --oneline -1`
+   - I-SESS-04 : chiffre « N commits » cohérent entre tous les docs vivants
+
+3. **`audit/tests/cloture_check.sh`** : script bash de vérification automatique des 4 invariants. Exit 0 obligatoire avant déclaration session close. Validé sur le 1er run réel — détecté 3 anomalies réelles (modifs non commitées + ref `TODO_SESSION_SUIVANTE` qualifiée « état courant » dans `PLAN_ACTION_PHASE_2.md` + chiffres « 29 » vs « 30 » incohérents). Toutes corrigées.
+
+4. **`docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md`** : sections OUVERTURE/FIN reformulées en références vers Workflow 7/8 + ajout étape `cloture_check.sh`.
+
+**Workflow utilisateur final** :
+- Yvan tape `kit fin de session` → Claude exécute Workflow 7 (bilan + MAJ docs cascade + commit + cloture_check + sync master)
+- Nouvelle session : Yvan colle `PROMPT_REPRISE` → Claude exécute Workflow 8 (worktree + lecture docs + tests SSH/warmup)
+
+**Test grandeur nature** : ce bilan lui-même est produit en exécutant le Workflow 7 (déclencheur Yvan : `"kit fin de session"`). Méta-validation du kit en conditions réelles.
 
 ---
 
