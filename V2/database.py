@@ -337,6 +337,17 @@ class Database:
             if "duplicate column" not in str(e).lower():
                 raise
 
+        # Migration v3 (25/04) — email_cache : ajouter internet_message_id
+        # I-DATA-11 (Pattern #14) : entry_id de email_cache est mixte
+        # (Graph hex IDs hérités + Internet IDs depuis le fix 23/04).
+        # Les autres caches (reply_cache, mail_summaries, mail_classement_cache,
+        # echeances_scan_cache) sont tous indexés sur internet_message_id.
+        # On ajoute une colonne secondaire indexée pour pouvoir croiser sans
+        # cache miss, sans casser la PK actuelle (compat ascendante).
+        # Idempotent : ALTER ignoré si déjà présent, UPDATE ignoré si déjà
+        # populé.
+        self._migrate_email_cache_v3(conn)
+
         # -- Table historique des scores (convergence Phase 4) --
         c.execute("""
             CREATE TABLE IF NOT EXISTS score_history (
@@ -1035,7 +1046,11 @@ class Database:
 
     def get_contact_profile(self, email):
         c = self._conn().cursor()
-        c.execute("SELECT * FROM contact_profiles WHERE email = ?", (email,))
+        # LOWER() : Graph retourne parfois Prénom.Nom@domain (casse mixte)
+        # alors que les profils sont stockés en minuscules. Comparaison
+        # insensible à la casse pour éviter les miss silencieux.
+        c.execute("SELECT * FROM contact_profiles WHERE LOWER(email) = LOWER(?)",
+                  (email.strip(),))
         row = c.fetchone()
         return dict(row) if row else None
 
@@ -1148,10 +1163,116 @@ class Database:
 
     # --- CACHE EMAILS (affichage instantané) --------------------------------
 
+    def _migrate_email_cache_v3(self, conn):
+        """
+        Migration idempotente : ajoute la colonne `internet_message_id` à
+        email_cache et populate à partir de la charge JSON existante.
+
+        Stratégie zero-downtime :
+          1. ALTER ADD COLUMN (no-op si déjà présent → catch OperationalError).
+          2. CREATE INDEX IF NOT EXISTS sur la nouvelle colonne.
+          3. UPDATE des lignes où internet_message_id IS NULL en lisant
+             json_extract(email_json, '$.internet_message_id'). SQLite 3.38+
+             expose json_extract en core ; sinon fallback Python.
+          4. Idempotent : ré-exécution = no-op (rien à mettre à jour).
+
+        La PK (entry_id) reste intacte → rétrocompatibilité totale.
+        """
+        c = conn.cursor()
+        # Étape 1 — ajouter la colonne (no-op si déjà présente)
+        try:
+            c.execute("ALTER TABLE email_cache ADD COLUMN internet_message_id TEXT")
+            conn.commit()
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
+        # Étape 2 — index secondaire (lookup rapide par Internet ID)
+        try:
+            c.execute(
+                "CREATE INDEX IF NOT EXISTS idx_email_cache_internet_id "
+                "ON email_cache(internet_message_id)"
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        # Étape 3 — populer depuis email_json (uniquement les NULL)
+        try:
+            c.execute(
+                "UPDATE email_cache "
+                "SET internet_message_id = json_extract(email_json, '$.internet_message_id') "
+                "WHERE internet_message_id IS NULL "
+                "  AND json_extract(email_json, '$.internet_message_id') IS NOT NULL"
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            # Fallback Python si json_extract indisponible
+            c.execute(
+                "SELECT entry_id, email_json FROM email_cache "
+                "WHERE internet_message_id IS NULL"
+            )
+            rows = c.fetchall()
+            for eid, ej in rows:
+                try:
+                    d = json.loads(ej)
+                    imid = d.get('internet_message_id')
+                    if imid:
+                        c.execute(
+                            "UPDATE email_cache SET internet_message_id = ? "
+                            "WHERE entry_id = ?", (imid, eid)
+                        )
+                except Exception:
+                    pass
+            conn.commit()
+
     def get_cached_email(self, entry_id):
-        """Récupère un email du cache DB. Retourne dict ou None."""
+        """
+        Récupère un email du cache DB.
+
+        I-DATA-11 (Pattern #14) : lookup hybride pour absorber la mixité
+        historique (entry_id = Graph hex héritage / internet_message_id depuis
+        le fix 23/04). On essaie la PK d'abord (path rapide indexé), puis
+        l'index secondaire `internet_message_id` en fallback. Retourne dict
+        ou None.
+        """
         c = self._conn().cursor()
         c.execute("SELECT email_json FROM email_cache WHERE entry_id = ?", (entry_id,))
+        row = c.fetchone()
+        if row:
+            return json.loads(row[0])
+        # Fallback : lookup par internet_message_id (cas où l'appelant passe
+        # un internet_id alors que la ligne est encore stockée par Graph ID)
+        c.execute(
+            "SELECT email_json FROM email_cache WHERE internet_message_id = ? "
+            "LIMIT 1", (entry_id,)
+        )
+        row = c.fetchone()
+        if row:
+            return json.loads(row[0])
+        return None
+
+    def get_email_by_internet_id(self, internet_message_id):
+        """
+        Lookup explicite par Internet Message-ID (clé canonique I-DATA-11).
+        Préfère l'index dédié ; fallback sur la PK pour les rares cas où
+        un entry_id contient lui-même un internet_id.
+        Retourne dict ou None.
+        """
+        if not internet_message_id:
+            return None
+        c = self._conn().cursor()
+        c.execute(
+            "SELECT email_json FROM email_cache WHERE internet_message_id = ? "
+            "LIMIT 1", (internet_message_id,)
+        )
+        row = c.fetchone()
+        if row:
+            return json.loads(row[0])
+        # Fallback PK : certaines lignes (depuis le fix 23/04) sont déjà
+        # indexées par internet_id côté entry_id.
+        c.execute(
+            "SELECT email_json FROM email_cache WHERE entry_id = ?",
+            (internet_message_id,)
+        )
         row = c.fetchone()
         if row:
             return json.loads(row[0])
@@ -1173,12 +1294,26 @@ class Database:
         return results
 
     def save_email_cache(self, entry_id, email_data):
-        """Sauvegarde un email dans le cache DB."""
+        """
+        Sauvegarde un email dans le cache DB.
+
+        I-DATA-11 : on populate aussi la colonne `internet_message_id` quand
+        connue (extraite du payload ou égale à `entry_id` s'il est lui-même
+        un Internet ID format <local@domain>). Permet le lookup croisé par
+        get_email_by_internet_id() sans cache miss.
+        """
         conn = self._conn()
+        # Extraire l'internet_message_id depuis le payload, ou détecter
+        # automatiquement si entry_id ressemble à un Internet ID RFC 2822.
+        imid = None
+        if isinstance(email_data, dict):
+            imid = email_data.get('internet_message_id') or None
+        if not imid and isinstance(entry_id, str) and entry_id.startswith('<') and '@' in entry_id:
+            imid = entry_id
         conn.execute("""
-            INSERT OR REPLACE INTO email_cache (entry_id, email_json, cached_at)
-            VALUES (?, ?, datetime('now', 'localtime'))
-        """, (entry_id, json.dumps(email_data, ensure_ascii=False, default=str)))
+            INSERT OR REPLACE INTO email_cache (entry_id, email_json, internet_message_id, cached_at)
+            VALUES (?, ?, ?, datetime('now', 'localtime'))
+        """, (entry_id, json.dumps(email_data, ensure_ascii=False, default=str), imid))
         conn.commit()
 
     # --- CACHE DOSSIERS OUTLOOK ------------------------------------------------
@@ -1205,9 +1340,17 @@ class Database:
         print(f"[db] Cache dossiers: {len(folders)} dossiers sauvegardes", flush=True)
 
     def purge_email_cache_for(self, entry_id):
-        """Supprime un email du cache (quand il est classe ou supprime)."""
+        """
+        Supprime un email du cache (quand il est classé ou supprimé).
+        I-DATA-11 : purge sur les DEUX colonnes (entry_id PK + index
+        internet_message_id) pour absorber la mixité Graph ID / Internet ID.
+        """
         conn = self._conn()
-        conn.execute("DELETE FROM email_cache WHERE entry_id = ?", (entry_id,))
+        conn.execute(
+            "DELETE FROM email_cache "
+            "WHERE entry_id = ? OR internet_message_id = ?",
+            (entry_id, entry_id)
+        )
         conn.commit()
 
     def purge_learning_data(self):

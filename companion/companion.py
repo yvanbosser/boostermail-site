@@ -31,6 +31,21 @@ VERSION = '1.0.0'
 
 # --- Logging ---
 
+# Fix audit 25/04 (Pattern #5 cp1252 récidive — cf V2/app_plugin.py:49-59) :
+# forcer utf-8 sur stdout/stderr pour que l'em-dash U+2014 (—) du format string
+# ci-dessous, et plus généralement tout caractère non-ASCII dans les messages,
+# ne soit pas encodé en cp1252 (Windows par défaut) → '�' à la relecture UTF-8.
+# DOIT précéder basicConfig() : StreamHandler capture la référence stream à la
+# création, un reconfigure ultérieur n'affecte plus le handler déjà installé.
+# Idempotent (Python 3.7+).
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [companion] %(levelname)s — %(message)s')
 logger = logging.getLogger('companion')
 

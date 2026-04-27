@@ -1820,7 +1820,9 @@ Choisis parmi les DOSSIERS OUTLOOK DISPONIBLES fournis dans le system prompt."""
                     if not resolved:
                         return None
                     # Retourner la première suggestion (rétrocompatible) + la liste complète
-                    first = resolved[0]
+                    # Fix circular ref (25/04) : on copie first sinon resolved[0] === first
+                    # → first['_suggestions'][0] pointe sur first lui-même → JSON cycle.
+                    first = dict(resolved[0])
                     first['_suggestions'] = resolved
                     return first
         except Exception as e:

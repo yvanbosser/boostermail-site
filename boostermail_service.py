@@ -94,28 +94,137 @@ except Exception:
 # DETECTION OUTLOOK (Windows API, instantane, zero console)
 # =============================================================================
 
+# Fix 24/04 soir (Pattern #15, iteration 2) : identification d'un process
+# proprietaire de fenetre Windows.
+#
+# Premiere tentative : GetModuleBaseNameW (psapi.dll).
+# ECHEC : cette API necessite la permission PROCESS_VM_READ (0x0010) en
+# plus de PROCESS_QUERY_LIMITED_INFORMATION (0x1000). Sur Windows 11,
+# les policies refusent PROCESS_VM_READ pour les process protected
+# (comme Outlook). Resultat observe : GetLastError = 5 (ACCESS_DENIED),
+# la fonction retournait "" pour toutes les fenetres => is_outlook_running
+# toujours None => popup jamais declenchee.
+#
+# Solution retenue : QueryFullProcessImageNameW (kernel32, Win Vista+).
+# Cette API ne demande que PROCESS_QUERY_LIMITED_INFORMATION qui est
+# accorde meme pour les process protected. Elle retourne le chemin
+# complet de l'exe ; on extrait le basename via os.path.basename.
+#
+# Bonus : declaration explicite argtypes/restypes (HANDLE = 64 bits sur
+# Win64, sinon le handle est tronque a 32 bits => invalide).
+from ctypes import wintypes as _wt
+
+def _declare_win32_types():
+    """Declare les argtypes/restypes corrects pour les APIs Win32
+    utilisees dans _get_window_process_name. Idempotente."""
+    _u32 = ctypes.windll.user32
+    _k32 = ctypes.windll.kernel32
+
+    _u32.GetWindowThreadProcessId.argtypes = [_wt.HWND, ctypes.POINTER(_wt.DWORD)]
+    _u32.GetWindowThreadProcessId.restype = _wt.DWORD
+
+    _k32.OpenProcess.argtypes = [_wt.DWORD, _wt.BOOL, _wt.DWORD]
+    _k32.OpenProcess.restype = _wt.HANDLE  # CRITIQUE : 64 bits sur Win64
+
+    _k32.CloseHandle.argtypes = [_wt.HANDLE]
+    _k32.CloseHandle.restype = _wt.BOOL
+
+    _k32.QueryFullProcessImageNameW.argtypes = [
+        _wt.HANDLE, _wt.DWORD, _wt.LPWSTR, ctypes.POINTER(_wt.DWORD)
+    ]
+    _k32.QueryFullProcessImageNameW.restype = _wt.BOOL
+
+_declare_win32_types()  # Applique des le chargement du module
+
+
+def _get_window_process_name(hwnd, user32, kernel32, psapi=None):
+    """Retourne le nom de l'exe proprietaire d'une fenetre HWND (lowercase).
+    Chaine vide si erreur ou process introuvable.
+
+    Utilise GetWindowThreadProcessId + OpenProcess +
+    QueryFullProcessImageNameW. Le parametre `psapi` est conserve pour
+    compatibilite avec les anciens appels mais n'est plus utilise
+    (GetModuleBaseNameW necessitait PROCESS_VM_READ refuse sur Win11).
+    """
+    try:
+        pid = _wt.DWORD(0)
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value == 0:
+            return ''
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+        if not handle:
+            return ''
+        try:
+            buf = ctypes.create_unicode_buffer(512)
+            size = _wt.DWORD(512)
+            ok = kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size))
+            if not ok or not buf.value:
+                return ''
+            import os as _os
+            return _os.path.basename(buf.value).lower()
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return ''
+
+
 def is_outlook_running():
-    """Detecte Outlook via la FENETRE visible (pas le processus en arriere-plan).
-    Outlook laisse un processus resident meme quand il est ferme — on ne peut pas
-    se fier au processus. La fenetre visible = l'utilisateur a vraiment ouvert Outlook."""
+    """Detecte Outlook via la FENETRE visible + PROCESS proprietaire.
+
+    Historique 24/04/2026 (Pattern #15) : la version precedente detectait
+    Outlook en cherchant "outlook" / "boite de reception" / "inbox" dans
+    le titre de n'importe quelle fenetre visible. Consequence : un onglet
+    Outlook Web dans Microsoft Edge, ou une fenetre Teams avec "Outlook"
+    dans le titre, etait compte comme "Outlook ouvert". Superviseur
+    aveugle aux vraies ouvertures/fermetures du client desktop => popup
+    jamais redeclenchee, 37+ min de silence observees le 24/04.
+
+    Fix : pour chaque fenetre candidate, on verifie que le process
+    proprietaire est bien olk.exe (New Outlook / Monarch) ou
+    outlook.exe (Classic Outlook). Titre seul ne suffit plus.
+
+    Cas particuliers :
+    - Classic Outlook : on verifie egalement la classe de fenetre
+      'rctrl_renwnd32' (plus fiable que le titre) ; process attendu
+      = outlook.exe.
+    - Outlook Web (PWA / onglet Edge) : process = msedge.exe,
+      explicitement ignore (pas un client BoosterMail valide).
+    """
     user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    psapi = ctypes.windll.psapi
+
+    OUTLOOK_EXES = {'olk.exe', 'outlook.exe'}
+
     EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int))
     found = [None]
 
     def callback(hwnd, lParam):
-        if user32.IsWindowVisible(hwnd):
-            length = user32.GetWindowTextLengthW(hwnd)
-            if length > 0:
-                buf = ctypes.create_unicode_buffer(length + 1)
-                user32.GetWindowTextW(hwnd, buf, length + 1)
-                title = buf.value.lower()
-                # New Outlook : titre contient "outlook" ou "boite de reception" / "inbox"
-                if 'outlook' in title:
-                    found[0] = 'new_outlook'
-                    return False  # Stop enumeration
-                if 'boite de reception' in title or 'inbox' in title:
-                    found[0] = 'new_outlook'
-                    return False
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        title = buf.value.lower()
+        # Heuristique rapide d'elimination avant GetWindowThreadProcessId :
+        # seulement les fenetres dont le titre evoque Outlook passent le check
+        # process (pour ne pas iterer toutes les fenetres du desktop).
+        if not ('outlook' in title or 'boite de reception' in title or 'inbox' in title):
+            return True
+        # Verification du process proprietaire
+        exe_name = _get_window_process_name(hwnd, user32, kernel32, psapi)
+        if exe_name in OUTLOOK_EXES:
+            if exe_name == 'olk.exe':
+                found[0] = 'new_outlook'
+            else:
+                found[0] = 'classic_outlook'
+            return False  # Stop enumeration
+        # Sinon : titre contenait "outlook" mais process non Outlook
+        # (Edge avec Outlook Web, Teams, etc.) -> on ignore cette fenetre
+        # et on continue l'enumeration.
         return True
 
     _cb = EnumWindowsProc(callback)  # Garder la reference (evite GC pendant l'enumeration)
@@ -124,10 +233,14 @@ def is_outlook_running():
     if found[0]:
         return found[0]
 
-    # Fallback : verifier aussi la classe de fenetre Classic Outlook
+    # Fallback Classic Outlook : la classe de fenetre 'rctrl_renwnd32'
+    # est unique a Outlook Classic. Mais on verifie quand meme le process
+    # proprietaire pour coherence avec le fix Pattern #15.
     hwnd = user32.FindWindowW('rctrl_renwnd32', None)
     if hwnd and user32.IsWindowVisible(hwnd):
-        return 'classic_outlook'
+        exe_name = _get_window_process_name(hwnd, user32, kernel32, psapi)
+        if exe_name in OUTLOOK_EXES:
+            return 'classic_outlook'
 
     return None
 
@@ -317,6 +430,41 @@ def _popup_is_alive():
         return False
 
 
+def _wait_for_popup_alive(timeout=15.0, interval=0.5):
+    """Attend que popup_pyqt réponde sur 5052 pendant au plus `timeout` s,
+    en pollant toutes les `interval` s. Retourne True si alive, False sinon.
+
+    Fix 24/04 soir (Bug 3, race condition pre-warm vs trigger immédiat) :
+    quand le superviseur lance popup_pyqt en pre-warm au boot Windows,
+    Qt + QtWebEngine mettent **15-20 secondes** à initialiser le hot
+    serveur IPC sur 5052. Si l'utilisateur ouvre Outlook dans cet
+    intervalle (cas nominal : user ouvre Outlook immédiatement au logon),
+    `show_pyqt_popup()` voit `_popup_is_alive() = False` → tombe en
+    fallback subprocess → nouveau process popup_pyqt spawné → entre en
+    collision avec le pre-warm qui finit son init (conflit port 5052)
+    → le nouveau se suicide → le pre-warm reste vivant mais personne ne
+    lui envoie jamais `/show_popup` → popup de lancement jamais affichée.
+
+    Ce helper élimine la race en attendant activement que le pre-warm
+    finisse son init (ping success). Dans le cas nominal (popup déjà
+    prête), le premier ping retourne True en <50ms donc coût négligeable.
+    Pire cas (popup morte ou jamais lancée) : 15 s avant de fallback
+    subprocess — acceptable au boot (user attend déjà que BM se charge).
+    """
+    import urllib.request
+    deadline = time.time() + timeout
+    while True:
+        try:
+            with urllib.request.urlopen('http://127.0.0.1:5052/ping', timeout=0.5) as resp:
+                if resp.status == 200:
+                    return True
+        except Exception:
+            pass
+        if time.time() >= deadline:
+            return False
+        time.sleep(interval)
+
+
 # Fix 20/04 — mutex anti-concurrence sur show_pyqt_popup.
 # Sans ce lock, 2 appels parallèles (ex: superviseur détecte Outlook + autre
 # trigger) pouvaient tous deux passer _popup_is_alive() avant que le premier
@@ -372,7 +520,11 @@ def show_pyqt_popup():
     # show_pyqt_popup peut décider de spawner à la fois → plus de doublons
     # quand le superviseur détecte plusieurs triggers rapprochés.
     with _show_popup_lock:
-        if _popup_is_alive():
+        # Fix 24/04 soir (Bug 3) : au lieu d'un unique ping rapide qui échoue
+        # si popup_pyqt est en cours de pre-warm (Qt init 15-20s), on retry
+        # activement pendant 15 s. Résout la race condition popup pré-warmée
+        # pas encore prête ↔ trigger show_popup au boot.
+        if _wait_for_popup_alive(timeout=15.0, interval=0.5):
             # Voie 1 : IPC show_popup (rapide)
             try:
                 import urllib.request
@@ -429,9 +581,24 @@ class ProcessManager:
             kill_port(self.port)
             time.sleep(0.5)
         try:
+            # Audit 25/04 (race condition 2 handles 'w' sur même log) :
+            # log séparé par backend pour éviter truncate mutuel + NUL padding.
+            # Quand un backend respawnait, son open('w') tronquait V2_stderr.log
+            # à 0 bytes, mais l'autre backend continuait d'écrire à son offset
+            # mémorisé → Windows comblait l'intervalle avec des bytes \x00 →
+            # fichier devenait binaire (12 570 NULs comptés en prod le 25/04).
+            # Effet collatéral : les logs du backend "victime" étaient perdus.
+            # Convention : V2 garde V2_stderr.log (référencé doc) ;
+            # les autres backends prennent <slug>_stderr.log.
+            if self.name == 'Backend V2':
+                _log_filename = 'V2_stderr.log'
+            else:
+                _log_filename = f"{self.name.lower().replace(' ', '_')}_stderr.log"
+            _log_path = os.path.join(EASYMAIL_DIR, _log_filename)
+            _log_f = open(_log_path, 'w', encoding='utf-8', errors='replace')
             self.process = subprocess.Popen(
                 [self.pythonw, self.script], cwd=EASYMAIL_DIR,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=_log_f,
                 creationflags=_NW,
             )
             logger.info(f"{self.name}: lance (PID {self.process.pid}, port {self.port})")
