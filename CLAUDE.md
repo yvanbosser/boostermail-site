@@ -336,6 +336,36 @@ dialog V1 connecte au proto (~10h). Detail dans `docs/analyses_proto_v2/COMPARAT
 Gaps répartis en P0/P1/P2/P3. Principaux P0 : Smart Speculative (6 filtres), Templates (45 fixes + appris), Pipeline contexte A/B/C optimisé, Contexte C keywords.
 → détail dans `docs/analyses_proto_v2/V2_vs_PROTO_GAPS.md`
 
+## Session du 25/04/2026 — Phase 1+2+3 + garde-fou drafts
+
+Journée dense (15 commits) centrée sur la fiabilisation du flux BG → click utilisateur. Voir `docs/sessions/BILAN_SESSION_20260425.md` pour le détail.
+
+### Phase 1 — Étiquetage canonique strict via `_canonical_mid()`
+Helper `_canonical_mid(mail_data)` : retourne IMID RFC 2822 (`<...@domain>`) ou `''` si absent. **Pas de fallback**. Suppression de tous les `internet_message_id or message_id or id` aux 8+ sites critiques (warmup, preload, prewarm, run_prefetch, start_speculative, cont-spec, mail_data construction).
+**Règle** : un mail sans IMID = mail anonyme = BG le saute, streaming au clic.
+
+### Phase 2 — Filtre unifié Smart Speculative
+Avant : Smart Speculative filtrait UNIQUEMENT la réponse. Après : 1 filtre = 5 décisions. `_should_speculate()` ajouté en gate dans `_prewarm_mail_preview` et `summarize_mails_to_db`.
+Mail filtré → 0 plat préparé → tout cuisiné à la commande au clic (streaming résumé+réponse en parallèle priorité 1, échéance/classement/PJ priorité 2).
+
+### Phase 3 — 3 portes API séparées
+Avant : `/api/mail_preview/<id>` retournait les 3 plats ensemble. Après : `/api/echeance/<id>`, `/api/classement_mail/<id>`, `/api/classement_pj/<id>`. Chaque plat polling indépendant côté frontend (`_fetchSinglePlate`). Service progressif.
+
+### Garde-fou anti-pollution drafts
+`_is_garbage_draft(text)` détecte 9 patterns de refus Claude (« Je ne peux pas traiter ce mail », « test body », etc.) + drafts < 50 chars. Intégré dans `_start_speculative` avant l'écriture cache. Le BG retentera plus tard avec un body propre.
+
+### Autres fixes du jour
+- **Cache partagé Outlook folders** (`_get_outlook_folders_cached`, TTL 5min) — évite Graph 429 sur 36 threads parallèles
+- **Circular reference dans `suggest_folder()`** — `first = dict(resolved[0])` au lieu de `first = resolved[0]`
+- **Migration v3 email_cache** — colonne `internet_message_id` indexée, helper `get_email_by_internet_id()`
+- **R/S/H importance** porté du proto avec critères enrichis (mots sensibles juridiques, contact category)
+- **Fix P14** — guard contre l'écrasement de drafts BG valides par `source='filtered'`
+
+### Bugs UI persistants (à traiter prochaine session)
+- Interlignes apparaissent puis disparaissent dans le dialog
+- Signature dupliquée ou mal placée
+- Graph 400 sur `extract_attachments` (frontend envoie IMID, Graph veut Entry ID)
+
 ---
 
 ## Historique des decisions

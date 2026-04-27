@@ -424,7 +424,158 @@ Deux formats d'ID possibles pour le même objet métier (mail, ticket, user). Pr
 | `email_cache` SQLite | ✅ fix d2d88a1 |
 | `mail_summaries` SQLite | ✅ déjà cohérent (fix A13 du 21/04) |
 | `_prefetch_cache` | ✅ se corrige via propagation en amont |
-| `_pj_text_cache`, `_attachment_cache` | 🟡 à re-vérifier si symptômes |
+| `_pj_text_cache` | ✅ fix 26/04 — site 690 passe IMID + résolution interne IMID→EntryID |
+| `_attachment_cache` | 🟡 à re-vérifier si symptômes |
+
+---
+
+## Pattern #15 — Submission dict perd `internet_message_id` après Phase 1 strict
+
+**Contexte** : variante du Pattern #14 spécifique à la transition entre
+`_continuous_speculation_loop` (qui sélectionne des candidates via
+`_canonical_mid(m)`) et `_run_prefetch` (qui re-vérifie via
+`_canonical_mid(mail_data)`). Si le dict `mail_data` construit entre les deux
+n'inclut pas `internet_message_id`, le mail est skip silencieusement.
+
+**Historique** :
+- 26/04/2026 : MISS persistant sur Ombeline cliqué + Vincent Hubert cliqué.
+  Le cont-spec cycle les sélectionne CANDIDATE (`_canonical_mid` retrouve
+  l'IMID dans `_warmup_cache[m]`), puis `_parallel_prefetch_batch:931`
+  construit un submission qui inclut `'message_id': mid` mais oublie
+  `'internet_message_id': mid`. `_run_prefetch:2911` re-appelle
+  `_canonical_mid(mail_data)` qui regarde **uniquement**
+  `mail_data['internet_message_id']` (Phase 1 strict, 25/04 soir) → vide → ''.
+  Ligne 2913 `if not message_id: return` → skip silencieux. Pas de log,
+  pas d'exception, pas de compteur incrémenté.
+
+**Symptôme générique** :
+- Le compteur `cont-spec cycle` montre des candidates soumis qui ne
+  deviennent jamais done (re-soumis chaque cycle)
+- `_should_speculate` n'est jamais appelée pour ces mails
+- `instant_reply` retourne MISS reason='BG non scanné'
+- L'user constate un streaming au lieu d'un cache HIT
+
+**Cause racine** :
+Phase 1 (25/04) a strictifié `_canonical_mid()` à `mail_data['internet_message_id']`
+SEUL, sans fallback. Mais certains constructeurs de `mail_data` ne respectent
+pas l'invariant et omettent ce champ canonique.
+
+**Fix canonique** :
+Tout dict `mail_data` destiné au BG DOIT inclure `'internet_message_id': mid`
+en plus de `'message_id': mid`. Audit grep nécessaire à chaque session :
+```bash
+grep -n "'message_id':" V2/app_plugin.py | grep -B5 "submissions.append\|mail_data ="
+```
+
+**Test de non-régression** :
+- I-CODE-05 (ajouté 26/04) : grep mécanique des constructeurs de submission
+- Ajouter au smoke_test.ps1 : count des entrées `_reply_cache` après 2
+  cycles cont-spec ≥ 70% de l'inbox
+
+**Sites corrigés au 26/04** :
+- `_parallel_prefetch_batch:931` ✅ (commit 26/04)
+
+**Sites à auditer** : tous les autres constructeurs de `mail_data` ou
+`submissions` dans `app_plugin.py` (audit à faire en suivant l'invariant
+I-CODE-05).
+
+---
+
+## Pattern #16 — Doublons IMID dans `email_cache`
+
+**Contexte** : la table `email_cache` (DB) contient parfois plusieurs rows
+avec le même `internet_message_id` mais des `email_json` différents (ex:
+une avec body complet, une avec body_preview tronqué à 255 chars).
+
+**Historique** :
+- 26/04/2026 : observé dans la DB V2 — 56 IMID canoniques rapportés par
+  une query SELECT, mais l'inbox réelle ne contient que 49 mails.
+  Doublons confirmés : `<AS8P189MB20969F91CE84BC03C814DD64E72C2@...>`
+  apparaît 2 fois (full body + preview only). 15 mails Stéphane Dufau
+  pour ~12 IMIDs uniques.
+
+**Symptôme générique** :
+- `SELECT COUNT(DISTINCT internet_message_id) FROM email_cache` >
+  `SELECT COUNT(*) FROM email_cache` (à vérifier en SQL)
+- Lookups peuvent retourner une version stale (preview tronqué)
+- Coût mémoire/disque accru
+- Pas de bug fonctionnel direct mais pollution
+
+**Cause racine probable** :
+Plusieurs paths d'écriture dans `email_cache` (warmup, message_read,
+prefetch, post_send) avec INSERT au lieu de INSERT OR REPLACE, ou des
+key constraints incohérents.
+
+**Fix canonique (proposé, non-appliqué) :**
+1. Ajouter contrainte UNIQUE(internet_message_id) sur `email_cache`
+2. Migrer les rows existantes (garder la plus récente / plus complète)
+3. Auditer tous les `_db.save_email_cache()` pour cohérence INSERT OR REPLACE
+
+**Status au 26/04** : DOCUMENTÉ, NON BLOQUANT (pas de regression UX
+observée). À traiter quand on creuse la propreté DB.
+
+---
+
+## Pattern #17 — Race condition variable globale capturée par timer debounce
+
+**Contexte** : un timer JavaScript (`setTimeout`) qui lit une variable globale
+mutable (ex: `_messageId`) au moment du fire et non au moment du schedule.
+Si la variable change entre temps, le callback opère sur la nouvelle valeur.
+
+**Historique** :
+- 26/04/2026 21:11 : draft Ombeline sauvegardé sous l'IMID Vincent Hubert.
+  Symptôme observé le 27/04 matin : clic Vincent Hubert → instant_reply
+  step 1 (priorité absolue draft user_edit) retourne le texte Ombeline.
+  Cause racine : `_setupDraftAutoSave` capturait `_messageId` au moment du
+  fire (2s après la frappe). Si l'user navigue vers un autre mail entre
+  la frappe et le fire, le timer save sous le mauvais IMID.
+
+**Symptôme générique** :
+- Draft d'un mail X affiché quand l'user clique mail Y
+- Données mélangées entre mails / contacts
+- Bug visible seulement après navigation rapide entre mails
+
+**Cause racine** :
+JavaScript closure capture **par référence** les variables globales.
+Le callback du `setTimeout` re-lit la valeur au moment du fire, pas au
+moment du schedule. Si `_messageId` change entre les deux, mauvais ID.
+
+**Fix canonique** :
+**Snapshot** des variables critiques au moment du schedule, passées en
+argument au callback :
+
+```javascript
+// MAUVAIS (race condition)
+var schedule = function() {
+    setTimeout(function() {
+        save(_messageId, _content);  // _messageId peut avoir changé
+    }, 2000);
+};
+
+// BON (snapshot)
+var schedule = function() {
+    var capturedMid = _messageId;
+    var capturedContent = _content;
+    setTimeout(function() {
+        save(capturedMid, capturedContent);  // valeur figée
+    }, 2000);
+};
+```
+
+**Test de non-régression** :
+- Audit grep dialog.js : tout `setTimeout` avec un callback qui lit
+  `_messageId` ou autre variable globale doit utiliser un snapshot
+- Test scénario : ouvrir mail A, taper, cliquer mail B avant 2s, vérifier
+  que A.draft contient bien le texte tapé sur A (pas sur B)
+
+**Sites corrigés au 27/04** :
+- `dialog.js:_setupDraftAutoSave` (snapshot _messageId, _fromEmail, _importance)
+
+**Sites à auditer** : autres setTimeout dans dialog.js qui pourraient
+capturer des variables globales mutables.
+
+**Note pour SaaS** : ce pattern est typiquement front-end. En SaaS l'archi
+peut continuer à avoir ce risque côté JS — l'invariant reste valide.
 
 ---
 

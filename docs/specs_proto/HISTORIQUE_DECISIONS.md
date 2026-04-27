@@ -1,6 +1,6 @@
 # Historique des décisions validées
 
-> **Dernière mise à jour** : 18/04/2026 (git)
+> **Dernière mise à jour** : 25/04/2026
 
 Extrait de CLAUDE.md — tableau chronologique complet (15/03 → 06/04/2026)
 
@@ -133,3 +133,8 @@ Extrait de CLAUDE.md — tableau chronologique complet (15/03 → 06/04/2026)
 | 18/04 | **Popup 4 modes (user × cache)** | Raffine la décision du 10/04 "popup à chaque démarrage". Matrice 2×2 : user activé/pas activé × cache chaud/froid. Popup toujours affichée (sert aussi de temporisateur pendant warmup). Définition "activé" = OAuth Microsoft + style_profile.txt + flag `user_activated=1`. |
 | 18/04 | **Corrections Plan 3 (audit code)** | 2 divergences vs Plan 3 initial : `_windows_folders_cache` faux positif (absent V2, présent proto seulement — à porter maintenant pour classement auto PJ) et `_c_keyword_cache` faux négatif (présent V2 depuis 14/04 à [V2/app_plugin.py:391](../../V2/app_plugin.py#L391)). |
 | 18/04 | **Régression brouillons perdue** | Code brouillon documenté 14/04 (routes `/api/save_draft`, `/api/get_draft`, persistance `drafts_v2.json`) disparu de V2 entre 17/04 (dernière écriture disque) et 18/04 (consolidation). Fichier `drafts_v2.json` toujours présent avec données. À restaurer depuis commit `25d4629` OU ré-implémenter dans cache unifié lors du Plan 2. |
+| 25/04 | **Décision SaaS** | Installation locale (start.bat + ZIP) abandonnée. BoosterMail migre en SaaS : serveur OVH VPS France (12€/mois), OAuth2 Microsoft multi-tenant (déjà à 80% dans `auth_base.py`), plugin Outlook via AppSource, webhooks Graph API pour traitement nocturne, Stripe pour abonnements. Plan 5 phases dans l'ordre : 1→5→2→beta→4→3. Durée estimée : 4-5 jours de travail. Pas de dev externe nécessaire. SQLite conservé (PostgreSQL repoussé à +200 users). Companion et boostermail_service.py supprimés du plan. Doc : `docs/plans/PLAN_SAAS.md`. |
+| 25/04 | **Développement V2 en parallèle du SaaS** | V2 continue d'évoluer en local (C:\EasyMail\V2\). Pas besoin de "finir V2" avant de migrer. Workflow : développement local → déploiement sur OVH au fil de l'eau. Les deux environnements coexistent. |
+| 25/04 | **Architecture multi-provider confirmée** | `ai_provider.py` (Claude/GPT/demain Mistral), `email_provider.py` (Graph/demain Gmail), `auth_base.py` (Microsoft/demain Google) — les trois abstractions sont déjà en place. Gmail et IA open source s'intègreront sans réécriture. |
+| 25/04 | **AppSource — soumission immédiate** | Soumettre BoosterMail sur AppSource Microsoft dès maintenant (validation 4-8 semaines). En parallèle de tout le reste. Cible : 2 clics pour installer, disponible dans le store Outlook intégré. |
+| 25/04 | **LaunchEvent OnMessageCompose** | Changer `OnNewMessageCompose` → `OnMessageCompose` dans manifest.xml (1 mot). Intercepte automatiquement le clic "Répondre" → popup BoosterMail s'ouvre sans action de l'utilisateur. Combiné au traitement nocturne : réponse déjà prête à l'ouverture du mail. |

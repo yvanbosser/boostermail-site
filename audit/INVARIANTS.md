@@ -189,6 +189,25 @@ Les `.js` sous V2/ chargent dans un moteur JS (test via node ou parsing basique)
 ### I-CODE-04 : Imports résolvables
 Les imports relatifs dans V2/ pointent sur des fichiers existants.
 
+### I-CODE-05 : Tout dict mail_data destiné au BG inclut `internet_message_id`
+Tout dict `mail_data` construit pour transmission au BG (prefetch, spéculation,
+preview, post_send) DOIT inclure le champ `internet_message_id` peuplé avec l'IMID
+canonique. Sans ce champ, `_canonical_mid()` (Phase 1 strict, 25/04) retourne ''
+et `_run_prefetch` skippe silencieusement le mail.
+- **Test** : grep dans `V2/app_plugin.py` les sites qui construisent `submissions`
+  ou `mail_data` :
+  - `'message_id': mid,` doit toujours être accompagné de
+    `'internet_message_id': mid,` (ou équivalent qui garantit la présence).
+  - `_parallel_prefetch_batch:931` ✅ (corrigé 26/04)
+- **Pourquoi** : le BG cycle peut sélectionner un mail comme CANDIDATE puis
+  le perdre silencieusement à `_run_prefetch` ligne 2913 si `internet_message_id`
+  manque. Symptôme : MISS persistant au clic user (ex: Ombeline cliqué 26/04).
+- **Historique** : 26/04/2026 — root cause identifiée par diag log dans
+  `_should_speculate` : 3 candidates sur 14 perdus entre cont-spec cycle et
+  appel à `_should_speculate`. Cause = submission dict construit sans
+  `internet_message_id` → `_canonical_mid` retourne '' → return ligne 2913.
+- **Action si violé** : ajouter `'internet_message_id': mid` dans le dict.
+
 ---
 
 ## Catégorie 10 — UX / Latence (seuils mesurables)

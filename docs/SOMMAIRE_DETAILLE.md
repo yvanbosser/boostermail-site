@@ -1,6 +1,6 @@
 # SOMMAIRE DÉTAILLÉ — Documentation BoosterMail/EasyMail
 
-> **Dernière mise à jour** : 18/04/2026 (session validation Plan 3)
+> **Dernière mise à jour** : 25/04/2026 (session Phase 1+2+3 + garde-fou drafts + V3 doc)
 
 > **Objectif** : index unique de TOUTE la documentation du projet.
 > À lire en début de session pour savoir **où trouver quoi** sans relire les docs entiers.
@@ -29,7 +29,8 @@
 En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux docs ont la même date ou pas de date) :
 
 - `CLAUDE.md` (source de vérité actuelle)
-- `NOUVELLE_SESSION_V2.md` → section « DÉCISIONS STRATÉGIQUES »
+- `NOUVELLE_SESSION_V3.md` → section « DÉCISIONS STRATÉGIQUES » (V3 succède à V2 depuis 25/04)
+- `audit/INVARIANTS.md` (pour les questions techniques — invariants P1-P14)
 - `docs/v2_specs/TODO_SESSION_SUIVANTE.md` (état courant)
 - `docs/sessions/` les plus récents (bilans datés)
 - `docs/specs_proto/HISTORIQUE_DECISIONS.md` (timeline décisions)
@@ -47,6 +48,11 @@ En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux
 - TTL des caches de réponses → **SUPPRIMÉS** au profit d'une purge événementielle pure + safety net 4 semaines (18/04)
 - Smart Speculative « 6 filtres » de la spec → **CORRIGÉ** : 5 à porter + 1 à créer en V2 (filtre open_count absent du proto) (18/04)
 - Popup « à chaque démarrage Outlook » → **AFFINÉE** : matrice 4 modes user × cache, toujours affichée mais contenu adapté (18/04)
+- Installation locale (start.bat + ZIP) → **REMPLACÉE** par architecture SaaS (serveur OVH + plugin AppSource) (25/04)
+- `NOUVELLE_SESSION_V2.md` → **REMPLACÉ** par `NOUVELLE_SESSION_V3.md` (25/04, ajoute règle nocode élargie + consultation kit audit en réflexe + sections Phase 1+2+3)
+- Étiquetage cache mixte (IMID/message_id/Graph id) → **UNIFIÉ** sur IMID strict via `_canonical_mid()` (25/04, Phase 1)
+- Smart Speculative filtrait juste la réponse → **UNIFIÉ** : 1 filtre = 5 plats (résumé/réponse/échéance/classement/PJ) (25/04, Phase 2)
+- `/api/mail_preview/<id>` retournait les 3 plats ensemble → **SPLITTÉ** en 3 portes dédiées (`/api/echeance/<id>`, `/api/classement_mail/<id>`, `/api/classement_pj/<id>`) (25/04, Phase 3)
 
 Les docs antérieurs à ces décisions peuvent décrire l'ancien état. **Ne pas les utiliser comme source pour le code actuel sans vérifier.**
 
@@ -114,6 +120,7 @@ docs/
 | **Plan de portage proto → V2** | `docs/analyses_proto_v2/PLAN_PORTAGE_PROTO_V2.md` |
 | **Installation côté utilisateur** | `docs/installation/SPEC_ONBOARDING_COMPLET.md` |
 | **Bugs connus à corriger plus tard** | `docs/analyses_proto_v2/BUGS_PROTO_A_CORRIGER_PLUS_TARD.md` |
+| **Plan migration SaaS** | `docs/plans/PLAN_SAAS.md` |
 
 ---
 
@@ -197,6 +204,7 @@ docs/
 | `SPEC_PHASE2_DIALOG.md` | Dialog split-screen, Office.js vs standalone | `dialog`, `split`, `office.js` |
 | `SPEC_PHASE2_GRAPH.md` | Graph API (routes, $batch, tokens) | `graph`, `API`, `batch` |
 | `SPEC_UI_ETAT1_LECTURE.md` | Décisions UI État 1 (lecture) | `UI`, `état1`, `lecture` |
+| **`SPEC_PJ_BG_V2.md`** | **Pièces jointes V2 : pré-traitement BG + popup marketing (DRAFT 26/04)** | `PJ`, `BG`, `popup`, `pré-traitement` |
 
 ---
 
@@ -230,10 +238,12 @@ docs/
 | Fichier | Sujet | Clés |
 |---|---|---|
 | `PLAN_ACTION_GLOBAL.md` | Vision produit + roadmap globale | `roadmap`, `vision`, `global` |
+| `PLAN_ACTION_GLOBAL.md` | Vision produit + roadmap globale | `roadmap`, `vision`, `global` |
 | `PLAN_1_APPLICATION_DOCUMENTATION.md` | Plan consolidation + datation + maintenance doc (5 phases, ~4h) | `plan1`, `doc`, `consolidation` |
 | `PLAN_2_OPTIMISATION_FLUX.md` | Plan flux optimal : templates + caches + smart spec (7 phases, ~9h15) — **plan d'exécution de référence** | `plan2`, `flux`, `templates`, `caches` |
 | `PLAN_3_INVENTAIRE_CACHES_ET_PORTAGE.md` | Inventaire technique caches V2 vs proto + plan baseline 5 phases (référence) | `plan3`, `inventaire`, `caches`, `portage` |
 | `PLAN_SQUELETTE_INGREDIENTS_100.md` | Plan "squelette + ingrédients 100%" — parité structurelle V2 vs proto | `squelette`, `parité`, `ingrédients` |
+| **`PLAN_SAAS.md`** | **Plan de migration SaaS — 5 phases, 4-5 jours — décision 25/04/2026** | `SaaS`, `migration`, `OVH`, `cloud` |
 
 ---
 
@@ -263,7 +273,14 @@ docs/
 | `RAPPORT_AUDIT_SESSION_20260413.md` | 13/04/2026 | Audit complet session VF.1-VF.8 |
 | `BILAN_SESSION_V2_20260414.md` | 14/04/2026 | Bilan de session V2 (état travaux plugin) |
 | `BILAN_SESSION_20260416.md` | 16/04/2026 | Bilan de session 16/04 |
-| **`BILAN_SESSION_20260418.md`** | **18/04/2026** | **Consolidation doc + Plan 1 exécuté + règles M1-M4 + préparation Plans 2/3** |
+| `BILAN_SESSION_20260418.md` | 18/04/2026 | Consolidation doc + Plan 1 exécuté + règles M1-M4 + préparation Plans 2/3 |
+| `BILAN_SESSION_21-04.md` | 21/04/2026 | Audits cohérence cache, dialog 80% |
+| `BILAN_SESSION_20260422_DIALOG80_AUDIT.md` | 22/04/2026 | Audit dialog 80% (8 colonnes) |
+| `BILAN_SESSION_20260423_VITESSE_COMPLETUDE.md` | 23/04/2026 | Vitesse + complétude pipeline BG |
+| `BILAN_SESSION_20260423_APRES_MIDI_MIGRATION.md` | 23/04/2026 | Migration cache AM (Pattern #14) |
+| **`BILAN_SESSION_20260425.md`** | **25/04/2026** | **Phase 1 (étiquetage IMID canonique) + Phase 2 (filtre unifié) + Phase 3 (3 portes API) + garde-fou drafts (15 commits)** |
+| **`BILAN_SESSION_20260426.md`** | **26/04/2026** | **Bug D (submission dict sans `internet_message_id`) + Bug #2 signature N-B + Bug #3 Graph 400 PJ + clé Anthropic + invariant I-CODE-05 + Patterns #15-#16** |
+| **`BILAN_SESSION_20260427_MATIN.md`** | **27/04/2026** | **Bug critique race condition `_messageId` global (draft Ombeline sauvé sous IMID Vincent Hubert) — Pattern #17** |
 
 ---
 
@@ -360,4 +377,4 @@ docs/
 
 ---
 
-*Dernière mise à jour : 18/04/2026 — Consolidation de toute la doc dans `docs/`.*
+*Dernière mise à jour : 25/04/2026 — Ajout PLAN_SAAS.md + décision migration SaaS.*

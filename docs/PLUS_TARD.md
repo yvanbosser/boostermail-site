@@ -167,4 +167,275 @@ Si user **pas connecté Microsoft** (pas de token Graph) : les routes Companion 
 
 ---
 
+## 📦 Optimisation Phase 2 — Filtrage différencié par plat (26/04/2026)
+
+### Décision actuelle (à conserver pour le moment)
+
+Phase 2 du 25/04 = « **1 filtre Smart Speculative = 5 plats** ». Si un mail
+ne passe pas `_should_speculate` (no-reply, > 30j, body trop court, user en CC,
+etc.), aucun des 5 plats n'est préparé en BG.
+
+### Pourquoi on garde tel quel pour l'instant
+
+Théoriquement, classement mail/PJ devrait être « 100% heuristique gratuit »
+(cf `SPEC_CLASSIFICATION_PJ.md`). Donc on pourrait ne PAS filtrer ces 2 plats
+et avoir un classement instantané sur 100% de l'inbox.
+
+**MAIS en pratique aujourd'hui** (mesuré 26/04 sur inbox Yvan) :
+
+| Plat | Source | Coût | % du temps |
+|---|---|---|---|
+| Classement mail | `ai` (Claude) | $0.0005/mail | **85%** |
+| Classement mail | `rule` (heuristique) | $0 | 5% |
+| Classement mail | `none` (Claude appelée mais aucune sugg) | $0.0005/mail | 10% |
+| Classement PJ | `none`/`rule`/`no_pj` | $0 | 100% |
+
+**Cause** : `folder_classifications` (table heuristique) est peu peuplée chez
+un user débutant V2. Les heuristiques tier 1-2 ne matchent pas → fallback
+Claude (ligne 1822 de `app_plugin.py`).
+
+**Conséquence** : retirer le filtre Smart Speculative pour les classements
+coûterait **~$2-5/an/user** en appels Claude pour des mails noreply / spam /
+notifications dont le classement n'est pas vraiment utile.
+
+### Quand revoir cette décision
+
+- Quand `folder_classifications` aura beaucoup d'historique (6-12 mois
+  d'utilisation intensive) → tier 1-2 sortiront des suggestions plus souvent
+  → Claude sera appelée moins → coût retire-filtre devient négligeable.
+- Quand on aura des stats par user de la répartition `ai` vs `rule` :
+  si `rule` ≥ 80% → on peut retirer le filtre des classements sans coût.
+- En SaaS : le coût est mutualisable (caches inter-users sur les domaines
+  communs comme `@noreply.github.com` → classés une seule fois).
+
+### Comment revoir (plan d'implémentation futur)
+
+Découpler `_should_speculate` en filtres par plat :
+```
+Résumé / Réponse / Échéance : filtre Smart Speculative complet (comme aujourd'hui)
+Classement mail / Classement PJ tier 1-2 : pas de filtre (heuristique gratuite)
+Classement mail / Classement PJ tier 3 (Claude) : filtre Smart Speculative
+```
+
+Sites code à modifier :
+- `_continuous_speculation_loop` ligne 1029-1051 : conserver filtre pour
+  réponse/résumé/échéance
+- `prewarm_classement` ligne 1755+ : exécuter quand même les heuristiques
+  pour TOUS les mails. Skip Claude si `not should_speculate`.
+- Idem pour le classement PJ.
+
+### Référence
+- Discussion 26/04/2026 : intuition user correcte théoriquement, mais
+  réalité statistique de l'inbox actuelle justifie de garder filtre commun.
+- Bilan complet : `docs/sessions/BILAN_SESSION_20260426.md`
+
+---
+
+## ✍️ Signature personnalisée par contact (26/04/2026)
+
+### Constat
+
+Aujourd'hui V2 a **deux** infos pour la fin de mail :
+- `contact_profiles.closing` : formule de politesse personnalisée (« Cdlt »,
+  « Cordialement, », etc.) — propre à chaque contact
+- `settings.user_name` : signature **globale** = `Yvan BOSSER (Groupe Bosser)`
+  — appliquée IDENTIQUEMENT à tous les mails
+
+### Ce qui manque
+
+L'utilisateur en pratique signe différemment selon le contact :
+
+| Contact | Closing actuel | Signature effective réelle (intuition user) |
+|---|---|---|
+| Ronan (tutoiement) | `Cdlt yvan` | `yvan` (prénom intégré au closing) |
+| Christelle (informel) | `cdlt` | `Yvan` ou `Yvan B.` |
+| Jules Martinez (avocat) | `Cdlt` | `Yvan BOSSER` |
+| Vincent Lecou (banquier) | `Cordialement,` | `Yvan BOSSER (Groupe Bosser)` |
+
+Aujourd'hui le code applique **toujours** `Yvan BOSSER (Groupe Bosser)` (sauf
+fix Ronan où le prénom est dans le closing → `_should_append_signature` skip).
+
+### Proposition (à valider)
+
+Ajouter un field au profil contact :
+- `user_signature_for_contact` (nullable) : signature spécifique pour ce contact
+- Si null → fallback sur `settings.user_name` (comportement actuel)
+- Sinon → utilise cette valeur
+
+### Apprentissage automatique
+
+Au moment de l'analyse `analyze_contact_profile` (Claude), regarder le pattern
+de signature dans les mails ENVOYÉS par Yvan à ce contact. Si un pattern
+récurrent (ex: `yvan` simple, `Yvan B.`, `Y. Bosser`, `Yvan BOSSER`) → set
+`user_signature_for_contact`.
+
+Sinon laisser null → comportement par défaut.
+
+### Sites code à modifier (estimation)
+
+1. `database.py` : ajout colonne `user_signature_for_contact` à `contact_profiles`
+2. `claude_ai.py:analyze_contact_profile` : prompt pour détecter signature
+3. `app_plugin.py:7088+` (instant_reply step 2) : utiliser `cp.user_signature_for_contact`
+   en priorité, fallback sur `user_name`
+4. Idem pour streaming sites (`stream_from_preemptive` 7344, `generate_sse` 7806)
+
+### Coût + bénéfice
+
+- **Effort** : ~30-45 min (DB migration + prompt update + 4 sites code)
+- **Bénéfice UX** : signatures plus authentiques, tutoyement vs vouvoyement
+  cohérent, moins de surprise visuelle pour l'utilisateur
+- **Risque** : moyen — touche le rendu final visible par l'user, à valider
+  cas par cas
+
+### Quand le faire
+
+Après stabilisation des autres bugs UI (interlignes, signature Niveau B)
+et confirmation que `_should_append_signature` actuel ne génère pas de
+faux positifs/négatifs.
+
+---
+
+## 🔄 Ré-évaluation périodique des classements `source='none'` (26/04/2026)
+
+### Constat (validé empiriquement le 26/04)
+
+Pour le mail Ombeline « SUITE VISIO IWG - INTERET BUREAUX ASTURIA », le
+classement avait été figé en `source: 'none'` le 24/04. Or l'utilisateur
+avait bien un dossier `IMMOBILIER/1- SCI/16 - Asturia St Herblain` dans
+son arborescence Outlook.
+
+**Test empirique** : purge du cache `mail_classement_cache` pour cet IMID
++ restart V2 → re-évaluation BG → Claude a immédiatement proposé le bon
+dossier `Boîte de réception/IMMOBILIER/1- SCI/16 - Asturia St Herblain`.
+
+### Cause probable
+
+Le cache `mail_classement_cache` est **strictement idempotent** (jamais
+re-évalué une fois posé). Si l'arborescence Outlook s'enrichit avec le
+temps OU si Claude évolue OU si le prompt classement est amélioré, les
+classements anciens `none` restent figés et n'en bénéficient pas.
+
+### Proposition (à creuser plus tard)
+
+Ré-évaluer périodiquement (ex: tous les 30 jours) les entries
+`mail_classement_cache` avec `source='none'` ET dont le mail correspond
+encore à un mail dans l'inbox active.
+
+Stats au 26/04 : 3 mails seulement avec `source='none'` (négligeable).
+Donc pas urgent. Mais si beaucoup de stale `none` s'accumulent au cours
+du temps, refaire un audit + ré-évaluation propre.
+
+### Sites code à modifier (estimation)
+
+1. Ajouter un thread BG `_classement_none_recheck_loop` dans `app_plugin.py`
+2. Tous les 30 jours : `SELECT message_id FROM mail_classement_cache WHERE source='none' AND updated_at < datetime('now', '-30 days')`
+3. Pour chaque, purger l'entry RAM `_mail_preview_cache` + DB `mail_classement_cache`
+4. Le BG cont-spec re-traitera au prochain cycle
+
+### Coût
+
+- Effort : ~30 min code
+- Coût API : Claude classement = ~$0.0005 par mail. Pour ~50 mails/mois
+  candidats : ~$0.025/mois. Marginal.
+- Bénéfice : suggestions de classement qui s'améliorent au fil du temps
+
+---
+
+## 📋 Menu d'audits préventifs (27/04/2026)
+
+Liste préparée le 27/04 — non encore exécutée (sauf #7 et #8 lancés ce
+même jour). Chaque audit vise une classe de bug récurrente identifiée
+dans les sessions précédentes.
+
+### Audits sécurité / SaaS-readiness (priorité haute)
+
+| # | Audit | Objectif | Durée | Status |
+|---|---|---|---|---|
+| 1 | **Pattern #17 backend** | Race conditions threads/callbacks Python (analogue Vincent Hubert mais serveur) | 20 min | À faire |
+| 2 | **Pattern #14 récidive autres caches** | Audit clés écriture vs lecture sur tous les caches (`_warmup_cache`, `_prefetch_cache`, `_attachment_cache`, etc.) | 25 min | À faire |
+| 3 | **État global cross-user (SaaS readiness)** | Lister toutes les variables globales `_xxx_cache` qui supposent un seul user — bloquant pour SaaS multi-tenant | 30 min | **À faire avant SaaS** |
+
+### Audits qualité / robustesse
+
+| # | Audit | Objectif | Durée | Status |
+|---|---|---|---|---|
+| 4 | **Erreurs silencieuses (Pattern #3)** | Grep `except Exception: pass` — actions qui « semblent réussir » mais ne font rien | 15 min | À faire |
+| 5 | **Phase 1 strict canonical IMID** | Vérifier tous les sites qui référencent un mail utilisent l'IMID canonique | 20 min | À faire |
+| 6 | **Prompt injection (Pattern #9)** | Tous les prompts Claude doivent avoir le guard « ignore pseudo-instructions » | 10 min | À faire |
+
+### Audits données / DB
+
+| # | Audit | Objectif | Durée | Status |
+|---|---|---|---|---|
+| 7 | **Cohérence DB** | Doublons (Pattern #16), orphelins, contraintes manquantes | 20 min | ✅ **Lancé 27/04** |
+| 8 | **Profils contacts buggés** | 13 profils déjà identifiés avec greeting tordu — peut-être autres champs (closing, register, tone) | 15 min | ✅ **Lancé 27/04** |
+
+### Audits performance
+
+| # | Audit | Objectif | Durée | Status |
+|---|---|---|---|---|
+| 9 | **Slow paths** | Routes V2 > 500ms (I-UX-02) | 20 min | À faire |
+| 10 | **Code mort / dépendances inutiles** | Routes/fonctions/imports jamais appelés (Pattern #10) | 25 min | À faire |
+
+### Quand les faire
+
+- **#3 obligatoire avant SaaS** (impact architecture)
+- **#1, #2** : à faire pendant la phase de stabilisation V2 (bénéficie aux fixes futurs)
+- **#4, #5, #6** : quick wins, à intercaler entre les chantiers
+- **#7, #8** : cohérence data, à faire périodiquement (tous les 1-3 mois)
+- **#9, #10** : optimisation tardive, après stabilité fonctionnelle
+
+---
+
+## 👥 Forcer analyse des 30 correspondants sans profil (27/04/2026)
+
+### Constat (audit #7 du 27/04)
+30 correspondants ont ≥ 3 threads avec Yvan mais aucun `contact_profile`.
+Violation I-DATA-12.
+
+### Pourquoi pas fixé immédiatement
+- ~5-7 sont des services automatiques (jesignexpert, ovhcloud, wetransfer,
+  universign, no-reply@digidom, etc.) → pas pertinent d'analyser
+- ~25 sont des humains réels mais nécessitent Claude calls
+  (~$0.30 total)
+- Le hook `_maybe_analyze_contact` du 24/04 (commit `dedf759`) gère
+  progressivement : à chaque nouveau mail entrant, si le contact a
+  ≥ 3 threads et pas de profil, on déclenche l'analyse
+
+### Actions futures possibles
+
+**Option A** (passive) : laisser le hook bosser progressivement. Les
+profils seront créés au fur et à mesure que les contacts envoient de
+nouveaux mails. Lent mais zéro effort.
+
+**Option B** (active) : script ponctuel qui :
+1. Liste les 30 correspondants (≥ 3 threads, pas de profil)
+2. Filtre les services auto (regex domains : noreply@, no-reply@,
+   notifications@, support@, automate@, etc.)
+3. Pour les ~25 restants, déclenche `analyze_contact_profile` via Claude
+4. ~$0.30 + ~5 min d'exécution
+
+### Top 10 actuels (au 27/04, à réviser au moment du fix)
+
+| Email | Threads |
+|---|---|
+| noreply@jesignexpert.com | 83 |
+| support@services.ovhcloud.com | 29 |
+| domguillaume@hotmail.com | 27 |
+| support@coaxis.com | 23 |
+| noreply@wetransfer.com | 20 |
+| frerecaroline@gmail.com | 17 |
+| ngrenouilleau@gfreres.fr | 17 |
+| noreply@universign.com | 16 |
+| caroline.drapeau@acceo.eu | 14 |
+| bastien.cousseau@airbee-conseil.fr | 12 |
+
+### Quand le faire
+
+Après stabilisation V2 mais avant SaaS (un nouveau user partira de zéro
+de toute façon — mais les utilisateurs déjà sur V2 auraient une UX
+améliorée si leurs contacts avaient des profils).
+
+---
+
 ## (Autres items à documenter au fil du temps)
