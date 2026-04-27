@@ -35,7 +35,7 @@ function _debugLog(eventName, details) {
 
 // Marqueur de version : s'écrit dès le chargement du JS → permet de vérifier
 // en lisant addin_debug.log que Outlook a bien rechargé le nouveau fichier.
-var _ADDIN_VERSION = 'v8-merge-saas-outlook-27-04';
+var _ADDIN_VERSION = 'v9-fix-newoutlook-button-27-04';
 _debugLog('js_loaded', { version: _ADDIN_VERSION });
 
 // Safety net global (21/04 P3) : toute exception non catchée → log backend
@@ -188,14 +188,11 @@ function openEasyMailDialog(event) {
  * Ouvre le dialog depuis le mode LECTURE (propriétés synchrones).
  * C'est le cas le plus courant : l'utilisateur lit un mail et clique le bouton EasyMail.
  *
- * Fix Levier 2 (20/04) — POST open_dialog_native en PREMIER pour New Outlook.
- * Avant : _notifyBackend + body.getAsync + _buildAndOpenDialog (qui détecte la
- *   plateforme et fait le fetch) partaient dans cet ordre → fetch open_dialog
- *   en dernier, ~2-2.5 s après le clic.
- * Après : on détecte la plateforme tout de suite. Si newOutlook, on tire le
- *   fetch /api/companion/open_dialog_native AVANT tout le reste. _notifyBackend
- *   et body.getAsync partent en parallèle (non bloquants).
- * Gain attendu : 500-800 ms sur le temps clic → fenêtre visible.
+ * Pivot SaaS 27/04/2026 — fast path newOutlook (POST companion local) supprimé.
+ * Toutes les plateformes (Classic, New Outlook, Web) passent désormais par
+ * displayDialogAsync via _buildAndOpenDialog. Plus de companion PyQt local
+ * en SaaS → POST /api/companion/open_dialog_native retournait 503 et le
+ * dialog ne s'ouvrait pas du tout sur New Outlook desktop.
  */
 function _openDialogFromRead(item, event) {
     var subject = item.subject || '';
@@ -217,63 +214,6 @@ function _openDialogFromRead(item, event) {
         cc = item.cc.map(function(r) { return r.emailAddress; }).join(',');
     }
 
-    // === FAST PATH : New Outlook → POST open_dialog_native EN PREMIER ===
-    // Tout ce qui n'est pas strictement nécessaire à l'ouverture de la fenêtre
-    // part APRÈS ce fetch critique, en parallèle (non bloquant).
-    var platform = _detectOutlookPlatform();
-    if (platform === 'newOutlook') {
-        var payload = {
-            mode: 'reply',
-            messageId: internetMessageId,
-            subject: subject,
-            fromName: fromName,
-            fromEmail: from,
-            from: from,
-            to: to,
-            cc: cc,
-            hasAttachments: hasAttachments ? '1' : '0'
-        };
-        // FETCH CRITIQUE — part en tête de queue
-        try {
-            fetch(_backendUrl + '/api/companion/open_dialog_native', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            }).then(function(r) {
-                _debugLog('newOutlook_fetch_result', { status: r.status, ok: r.ok });
-                event.completed();
-            }).catch(function(err) {
-                _debugLog('newOutlook_fetch_error', { error: String(err) });
-                event.completed();
-            });
-        } catch(e) {
-            _debugLog('newOutlook_fetch_exception', { error: String(e) });
-            event.completed();
-        }
-        _debugLog('newOutlook_click', { platform: platform, payload: payload });
-
-        // Fix 20/04 — /api/event/message_read DIFFÉRÉ de 1.5 s.
-        // Non critique pour l'ouverture du dialog (PyQt a déjà les params via
-        // l'URL). Le différer évite de saturer V2 avec une requête pendant
-        // que le dialog se charge.
-        setTimeout(function() {
-            _notifyBackend('/api/event/message_read', {
-                subject: subject,
-                from_email: from,
-                from_name: fromName,
-                message_id: internetMessageId,
-                conversation_id: conversationId,
-                has_attachments: hasAttachments,
-                to: to,
-                cc: cc
-            });
-        }, 1500);
-        // body.getAsync n'a aucune utilité en mode newOutlook (standalone PyQt
-        // lit le body via /api/email_body). Skipped.
-        return;
-    }
-
-    // === CLASSIC / AUTRE PLATEFORME : flow original préservé ===
     // Notifier le backend (turbo : alimentation + auto-prefetch O8)
     _notifyBackend('/api/event/message_read', {
         subject: subject,
@@ -393,18 +333,13 @@ function _openDialogFromCompose(item, event) {
 }
 
 /**
- * Construit l'URL du dialog et l'ouvre via displayDialogAsync.
- * Partagé entre _openDialogFromRead et _openDialogFromCompose.
- */
-/**
  * Détecte la plateforme Outlook en cours.
  * Retourne : 'classic' | 'newOutlook' | 'web' | 'mac' | 'mobile' | 'unknown'
  *
- * Stratégie d'ouverture du dialog par plateforme :
- *  - classic    → displayDialogAsync + promptBeforeOpen:false (overlay natif, aucune popup)
- *  - newOutlook → POST localhost:5051/open_dialog_native → PyQt native (zéro popup)
- *  - web        → postMessage vers extension BoosterMail (zéro popup)
- *  - mac/mobile → fallback displayDialogAsync (meilleur effort)
+ * Pivot SaaS 27/04/2026 — toutes les plateformes ouvrent désormais le dialog
+ * via displayDialogAsync (plus de companion PyQt local en SaaS). La détection
+ * reste utile pour télémétrie et adaptations UX futures (ex: gestion code 12011
+ * spécifique Outlook Web — Phase 6).
  */
 var _cachedPlatform = null;
 function _detectOutlookPlatform() {
@@ -431,56 +366,12 @@ function _detectOutlookPlatform() {
 }
 
 /**
- * Ouvre le dialog en routant vers la stratégie adaptée à la plateforme.
- * Retourne true si la stratégie plateforme-spécifique a été utilisée (New/Web),
- * false si on doit tomber sur displayDialogAsync (Classic/fallback).
+ * Construit l'URL du dialog et l'ouvre via displayDialogAsync.
+ * Partagé entre _openDialogFromRead et _openDialogFromCompose.
+ *
+ * Pivot SaaS 27/04/2026 — _openDialogPlatformRouted (companion local newOutlook)
+ * supprimé. Toutes les plateformes passent par _openViaDisplayDialog directement.
  */
-function _openDialogPlatformRouted(dialogUrl, data, getMailBody, fromName, fromEmail, event) {
-    var platform = _detectOutlookPlatform();
-
-    // --- New Outlook : Companion local + PyQt native ---
-    // IMPORTANT : on passe par le proxy HTTPS /api/companion/open_dialog_native
-    // Pas de fetch direct vers http://localhost:5051 (bloqué mixed-content HTTPS→HTTP)
-    if (platform === 'newOutlook') {
-        var payload = {
-            mode: data.mode,
-            messageId: data.messageId,
-            subject: data.subject,
-            fromName: data.fromName,
-            fromEmail: data.from,
-            from: data.from,
-            to: data.to,
-            cc: data.cc,
-            hasAttachments: data.hasAttachments ? '1' : '0'
-        };
-        _debugLog('newOutlook_click', { platform: platform, payload: payload });
-        // IMPORTANT : appeler event.completed() APRÈS la réponse du fetch,
-        // pas avant (sinon le runtime ExecuteFunction se libère et annule
-        // le fetch → "TypeError: Failed to fetch"). Le fetch localhost est
-        // rapide (<100ms), bien en dessous du timeout de popup Outlook.
-        try {
-            fetch(_backendUrl + '/api/companion/open_dialog_native', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            }).then(function(r) {
-                _debugLog('newOutlook_fetch_result', { status: r.status, ok: r.ok });
-                event.completed();
-            }).catch(function(err) {
-                _debugLog('newOutlook_fetch_error', { error: String(err) });
-                event.completed();
-            });
-        } catch(e) {
-            _debugLog('newOutlook_fetch_exception', { error: String(e) });
-            event.completed();
-        }
-        return true;
-    }
-
-    // --- Classic / Web : displayDialogAsync ---
-    return false;
-}
-
 function _buildAndOpenDialog(item, event, data, getMailBody, fromName, fromEmail, onDialogOpen) {
     var params = [
         'subject=' + encodeURIComponent(data.subject),
@@ -495,12 +386,7 @@ function _buildAndOpenDialog(item, event, data, getMailBody, fromName, fromEmail
     ];
     var dialogUrl = _backendUrl + '/plugin/dialog.html?' + params.join('&');
 
-    // Routing plateforme : New Outlook → Companion PyQt, Web → extension, Classic → dialog
-    if (_openDialogPlatformRouted(dialogUrl, data, getMailBody, fromName, fromEmail, event)) {
-        return;
-    }
-
-    // Classic / fallback : dialog Office.js natif
+    _debugLog('dialog_open_attempt', { platform: _detectOutlookPlatform() });
     _openViaDisplayDialog(item, dialogUrl, data, getMailBody, fromName, fromEmail, event, onDialogOpen);
 }
 

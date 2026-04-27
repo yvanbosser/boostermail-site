@@ -341,21 +341,30 @@ def is_standard_mode() -> bool:
 def serve_plugin_file(filename):
     """Sert les fichiers du plugin (manifest, dialog, commands, assets).
 
-    Fix 20/04 — Cache ETag (avant : no-cache, no-store brutal) :
-      - send_from_directory pose déjà un ETag basé sur (mtime, taille) du fichier.
-      - Cache-Control: public, max-age=0, must-revalidate → Chromium stocke le
-        fichier mais demande au serveur à chaque requête "a-t-il changé ?".
-      - Flask répond automatiquement 304 Not Modified (5 ms, payload vide) si
-        l'ETag correspond, ou 200 avec le nouveau contenu sinon.
-      - Bénéfice dev : modifier un fichier change sa mtime → ETag change →
-        Chromium reçoit la nouvelle version immédiatement. Comportement
-        identique à l'ancien no-cache pour le workflow dev.
-      - Bénéfice users : 200-500 ms économisés par fichier (Chromium ne re-
-        télécharge plus dialog.html/.css/.js à chaque clic, juste un 304).
+    Pivot SaaS 27/04/2026 — Cache-Control: no-store sur .js/.html.
+    Le fix ETag (20/04) supposait que le client (WebView2) respecte
+    must-revalidate et fait un If-None-Match a chaque session. Constate
+    le 27/04 : New Outlook desktop (WebView2 hosted) ignore les headers
+    de revalidation et garde un cache disque permanent dans EBWebView.
+    Consequence : un deploiement JS n'est jamais pris en compte sans
+    purge manuelle du cache disque cote user.
+    Fix : Cache-Control: no-store force le client a NE PAS stocker le
+    fichier. Chaque session = fetch frais.
+    Trade-off : +200-500ms par fichier vs comportement deterministe et
+    deploiements JS pris en compte automatiquement. Acceptable pour un
+    add-in qui charge ~5 fichiers par session.
+    Les assets (icones .png) restent cachables (max-age=86400 = 1 jour).
     """
     resp = send_from_directory(PLUGIN_DIR, filename)
-    if filename.endswith(('.js', '.css', '.html')):
-        resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
+    if filename.endswith(('.js', '.html', '.css')):
+        # Force WebView2 a refetch a chaque session (cache disque permanent
+        # ignore must-revalidate sur New Outlook desktop)
+        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        resp.headers['Pragma'] = 'no-cache'
+        resp.headers['Expires'] = '0'
+    elif filename.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')):
+        # Assets statiques : cachables 1 jour (mtime change = ETag invalide)
+        resp.headers['Cache-Control'] = 'public, max-age=86400, must-revalidate'
     return resp
 
 
@@ -4750,11 +4759,12 @@ def api_selected_mail():
 # --- Proxy Companion (P43, B15) ----------------------------------------------
 
 # Whitelist des subpaths autorises pour le proxy Companion (#7 audit)
+# Pivot SaaS 27/04/2026 — 'open_dialog_native' retire (companion PyQt local
+# n'existe plus en SaaS, le dialog s'ouvre via displayDialogAsync cote JS).
 _COMPANION_ALLOWED = {
     'current_selection', 'inject_reply', 'detect_compose', 'folders',
     'copy', 'status', 'prefetch_sender', 'prefetch_subject',
     'search', 'scan_folders', 'outlook_folders',
-    'open_dialog_native',   # Ouverture dialog PyQt natif (New Outlook)
 }
 
 @app.route('/api/companion/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE'])
@@ -6801,7 +6811,7 @@ def _check_git_updates():
                 elif _last.startswith('[NEW]'):
                     _msg = 'Yvan vient d\'ajouter une fonctionnalite'
                 else:
-                    _msg = 'Yvan vient d\'ameliorer EasyMail'
+                    _msg = 'Yvan vient d\'ameliorer BoosterMail'
                 with _update_lock:
                     _update_available = True
                     _update_message = _msg
@@ -8321,7 +8331,7 @@ def send_reply():
     raw_attachments = data.get('attachments') or []
 
     # Ajouter la signature marketing (côté backend, JAMAIS côté dialog)
-    _SIG = '<br><br><span style="color:#999;font-size:11px;">\u2014 G\u00e9n\u00e9r\u00e9 avec EasyMail</span>'
+    _SIG = '<br><br><span style="color:#999;font-size:11px;">\u2014 G\u00e9n\u00e9r\u00e9 avec BoosterMail</span>'
     body = raw_body + _SIG
 
     # Validation basique des adresses
@@ -8974,7 +8984,7 @@ Applique les regles de ce niveau pour la regeneration des sections :
 - N8-N10 : paires 100% VERBATIM. Section B EXHAUSTIVE."""
 
     try:
-        recal_system = ("Tu es un module interne d'EasyMail, un assistant email local et prive. "
+        recal_system = ("Tu es un module interne de BoosterMail, un assistant email local et prive. "
                         "Tu mets a jour le profil de style redactionnel de l'utilisateur en integrant ses corrections recentes. "
                         "Les corrections montrent la difference entre ce que l'IA proposait et ce que l'utilisateur a reellement envoye.")
         _pb_recal = _get_prompt_builder()
@@ -9602,8 +9612,10 @@ def api_setup_onboarding():
                 except Exception as e:
                     logger.warning(f"Onboarding Graph erreur: {e}")
 
-            # Source 2 : Companion Windows Search (si pas assez via Graph)
-            if len(sent_mails) < 50:
+            # Source 2 : Companion Windows Search (si pas assez via Graph ET Graph KO)
+            # Pivot SaaS 27/04/2026 — ajout du guard `not graph` : en SaaS sans companion,
+            # tenter ce fetch ajoutait un timeout 5s a chaque onboarding pour rien.
+            if len(sent_mails) < 50 and not graph:
                 try:
                     import requests as _req
                     resp = _req.get('http://127.0.0.1:5051/search',   # Fix audit 21/04 : IPv6 fallback

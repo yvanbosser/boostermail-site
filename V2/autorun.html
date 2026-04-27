@@ -7,7 +7,11 @@
          Classic Windows utilise le JS Override (autorunshared.js directement).
          Ce fichier est référencé par le Runtime resid dans manifest.xml V1_1. -->
     <script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
-    <script src="autorunshared.js"></script>
+    <!-- Cache busting : query string ?v=N bumpé à chaque déploiement JS pour
+         forcer WebView2 (New Outlook desktop) à refetch le JS. autorun.html
+         est rechargé à chaque session Outlook (cf ?et=… ajouté par Outlook
+         au bout de l'URL), donc le nouveau ?v= est pris en compte direct. -->
+    <script src="autorunshared.js?v=v9-fix-newoutlook-button-27-04"></script>
 </head>
 <body>
 </body>

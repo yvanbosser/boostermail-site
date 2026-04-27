@@ -3211,7 +3211,7 @@ function _loadMailBodyStandalone() {
         var mb = document.getElementById('mailBody');
         if (mb) mb.innerHTML = _messageId
             ? '<p style="color:#999;">Contenu du mail non disponible.</p>'
-            : '<p style="color:#999;">Body en attente (cliquez le bouton EasyMail dans Outlook).</p>';
+            : '<p style="color:#999;">Body en attente (cliquez le bouton BoosterMail dans Outlook).</p>';
         var bs = document.getElementById('bodySpinner');
         if (bs) bs.classList.remove('active');
     });
