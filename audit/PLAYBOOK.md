@@ -170,6 +170,112 @@ ITÉRATION N
 
 ---
 
+## Workflow 7 — "Kit fin de session" (trigger : Yvan tape "kit fin de session")
+
+### Objectif
+Garantir une clôture de session 100% propre — aucune information perdue, aucune incohérence entre docs, aucune modif locale non commitée. Reproduit la rigueur du kit audit pour l'aspect documentaire.
+
+### Engagement Claude (opposable)
+- **Je ne déclare PAS la session close avant que `audit/tests/cloture_check.sh` retourne exit 0.**
+- **Si je modifie un doc qui contient un chiffre dynamique (commits, audits, etc.), je relance `cloture_check.sh` dans la foulée.**
+- **Je ne touche pas au `PROMPT_REPRISE_NEW_OUTLOOK.md` sans relancer le check de cohérence après.**
+
+### Étapes (ordre strict)
+
+1. **Pré-clôture — état des lieux (2 min)**
+   - `git status --short` → noter modifs locales en cours
+   - `git log --oneline --since='today 00:00' | wc -l` → noter le compte de commits du jour
+   - Si modifs en cours : commiter le travail technique en commits granulaires AVANT d'attaquer la doc
+
+2. **Bilan de session (10-15 min)**
+   - Créer/MAJ `docs/sessions/OUTLOOK_BILAN_SESSION_AAAAMMJJ[_descriptif].md`
+   - Sections obligatoires : Mission accomplie, Récap commits, Découvertes, Travail par bloc, Livrables, État OVH, Sujets ouverts
+   - Format hash commit : `89e6524+` (avec le `+` qui signifie "et les commits suivants potentiels"), PAS de chiffre figé dans l'en-tête
+
+3. **MAJ docs en cascade (10 min)**
+   Ordre obligatoire (suit le graphe de dépendances) :
+   - **`docs/PLUS_TARD_VF.md`** : sujets résolus → DÉJÀ FAIT, nouveaux → catégorie, caducs → ABANDONNÉ + MAJ date d'en-tête
+   - **`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** : MAJ date d'en-tête + section L (liste bilans)
+   - **`docs/specs_proto/HISTORIQUE_DECISIONS.md`** : nouvelle entrée SI décision structurelle (sinon skip)
+   - **`audit/INVARIANTS.md`** : nouveaux invariants SI détectés (sinon skip)
+   - **`audit/ANOMALIES_RECURRENTES.md`** : nouveaux Patterns SI détectés (sinon skip)
+   - **`docs/SOMMAIRE_DETAILLE.md`** : entrée bilan + statuts à jour
+
+4. **MAJ `docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md` (5 min)** ⚠️ TOUJOURS EN DERNIER
+   - Section "ÉTAT DE FIN" : reformulée avec le nouveau contexte
+   - Top commit hash référencé : doit matcher `git log --oneline -1` au moment du commit final
+   - Format : utiliser `git log` comme vérité, pas figer un chiffre
+
+5. **Lancer `cloture_check.sh` (1 min)**
+   ```bash
+   bash audit/tests/cloture_check.sh
+   ```
+   - Si exit 0 → continuer étape 6
+   - Si exit ≥ 1 → fix les anomalies listées + relancer le script + boucle jusqu'à exit 0
+
+6. **Commit final unique des MAJ docs**
+   - 1 seul commit thématique `docs(session): cloture session AAAAMMJJ — bilan + MAJ cascade`
+   - Fast-forward master
+   - Si `cloture_check.sh` retournait exit 0 avant ce commit, il continuera à retourner exit 0 après (le commit ne touche pas aux invariants)
+
+7. **Validation finale (30 sec)**
+   - `git status --short` → vide
+   - `git log --oneline --since='today 00:00' | wc -l` → compte final
+   - `bash audit/tests/cloture_check.sh` → exit 0 confirmé
+
+### Critères de succès (tous obligatoires)
+- ✅ `git status --short` vide
+- ✅ `cloture_check.sh` exit 0
+- ✅ `PROMPT_REPRISE_NEW_OUTLOOK.md` reflète l'état au moment de la clôture
+- ✅ Bilan de session complet (toutes sections obligatoires remplies)
+
+### Anomalies récurrentes à éviter (vécu 27/04/2026)
+- Annoncer "session close" sans avoir lancé `cloture_check.sh`
+- Modifier `PLUS_TARD_VF` sans propager dans `PROMPT_REPRISE`
+- Figer un chiffre de commits qui devient obsolète au commit suivant (auto-référence) → utiliser `git log` comme source dynamique
+- Oublier d'ajouter au backlog les sujets émergents constatés en cours de session
+
+---
+
+## Workflow 8 — "Kit ouverture de session" (trigger : Yvan copie le PROMPT_REPRISE)
+
+### Objectif
+Démarrer une nouvelle session avec le contexte complet de la session précédente, sans rien perdre.
+
+### Activation
+Yvan copie-colle `docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md` dans la nouvelle session Claude. Le prompt référence ce workflow.
+
+### Étapes (à exécuter par Claude au démarrage)
+
+1. **Vérification worktree (30 sec)**
+   - `git -C C:/EasyMail branch --show-current` → doit retourner `master`
+   - `git -C C:/EasyMail log --oneline -5` → top doit matcher l'état décrit dans le PROMPT_REPRISE
+   - Si worktree différent (style `claude/happy-XXXX`), exécuter `git fetch && git merge master --no-edit`
+
+2. **Tests de validation infra (30 sec)**
+   - `ssh -o BatchMode=yes -o ConnectTimeout=5 ubuntu@51.178.162.208 "echo OK_SSH_KEY_WORKS"`
+   - `curl -sk https://api.boostermail.ai/api/warmup_status` → 200 OK
+   - Si l'un échoue → arrêter et alerter Yvan
+
+3. **Lecture docs obligatoires (5 min, dans l'ordre)**
+   - `docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md` (référence vivante)
+   - `docs/PLUS_TARD_VF.md` (TL;DR en haut)
+   - Dernier `docs/sessions/OUTLOOK_BILAN_SESSION_*.md` (contexte session précédente)
+   - `audit/INVARIANTS.md` (consultation rapide — surtout I-SESS-* + I-CACHE-* + I-SEC-* récents)
+   - `audit/ANOMALIES_RECURRENTES.md` (Patterns récents, surtout #18 cache WebView2)
+
+4. **Synthèse rapide à Yvan (1 min)**
+   - "Session précédente : X commits, Y audits clos, sujet en cours = Z (ex: Coaxis ETA J+2/3)"
+   - "Que veux-tu attaquer ? Ou je consulte PLUS_TARD_VF et propose ?"
+
+### Critères de succès
+- ✅ Worktree à jour (top commit match attendu)
+- ✅ OVH joignable (SSH + warmup)
+- ✅ Claude a lu les 5 docs obligatoires
+- ✅ Yvan a la main pour décider l'attaque
+
+---
+
 ## Index rapide
 
 | Demande user | Workflow |
@@ -180,3 +286,5 @@ ITÉRATION N
 | "Il y a un bug : [symptôme]" | 4 |
 | "Boucle jusqu'à 0 anomalie" | 5 |
 | "Après un fix, vérif" | 6 |
+| **"Kit fin de session"** | **7** |
+| **(Yvan copie PROMPT_REPRISE_NEW_OUTLOOK)** | **8** |

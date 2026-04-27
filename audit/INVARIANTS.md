@@ -399,6 +399,41 @@ une fois par session Outlook).
 
 ---
 
+## Catégorie 13 — État de session / cohérence documentaire (ajout 27/04/2026 fin)
+
+> **Contexte** : invariants à vérifier en fin de session (Workflow 7 du PLAYBOOK).
+> Testables mécaniquement par `audit/tests/cloture_check.sh`.
+
+### I-SESS-01 : Aucune modification locale non commitée en fin de session
+- **Test** : `git status --short` retourne vide (aucune ligne)
+- **Pourquoi** : une modif non commitée à la clôture = perte de travail au restart machine, désync entre worktree et master
+- **Action si violé** : commiter les modifs (technique = commits granulaires, doc = commit unique de clôture)
+
+### I-SESS-02 : Aucune référence obsolète dans les docs vivants
+Pas de mention dans les docs vivants (hors archives/bandeau) :
+- `docs/PLUS_TARD\.md` (sans `_VF`) — doit être `docs/PLUS_TARD_VF.md`
+- `docs/v2_specs/TODO_SESSION_SUIVANTE.md` qualifiée d'« état courant » — doit être marquée archivée
+- `BUGS_PROTO_A_CORRIGER_PLUS_TARD.md` sans bandeau « gelé »
+
+- **Test** : grep multi-pattern, retourne 0 dans docs vivants (les BILAN_SESSION_*.md anciens restent OK car figés)
+- **Pourquoi** : références obsolètes = confusion pour la session suivante qui suit le mauvais doc
+- **Action si violé** : remplacer les refs obsolètes par les vivantes, ajouter bandeau si fichier devient archivé
+
+### I-SESS-03 : Top commit hash dans `PROMPT_REPRISE_NEW_OUTLOOK.md` cohérent
+Le hash mentionné dans `PROMPT_REPRISE_NEW_OUTLOOK.md` (section "test git log doit afficher au minimum") doit matcher l'un des 5 derniers commits master.
+- **Test** : extraire hash du PROMPT, vérifier `git log --oneline -5` le contient
+- **Pourquoi** : si désync, la prochaine session démarre avec un état décrit qui ne match pas la réalité Git
+- **Action si violé** : MAJ le hash dans le PROMPT, recommiter
+
+### I-SESS-04 : Chiffres dynamiques (commits, audits) cohérents entre docs vivants
+Tous les chiffres « N commits master » mentionnés dans les docs vivants (PROMPT_REPRISE, ONBOARDING section L, BILAN session, SOMMAIRE_DETAILLE entrée, HISTORIQUE_DECISIONS entrée du jour) doivent être identiques OU absents.
+- **Test** : grep `[0-9]+ commits master` dans docs vivants, dédupliquer, doit retourner ≤ 1 chiffre unique
+- **Pourquoi** : le décalage entre docs (ex: 22 vs 30) crée une confusion sur l'état réel
+- **Recommandation** : préférer une formulation **relative** (« ~30 commits ») ou un hash (`89e6524+`) plutôt qu'un chiffre figé qui devient faux au commit suivant
+- **Action si violé** : harmoniser tous les docs vivants à la même valeur OU passer en formulation relative
+
+---
+
 ## Mise à jour
 
 Ajouter un invariant ici **uniquement si** :

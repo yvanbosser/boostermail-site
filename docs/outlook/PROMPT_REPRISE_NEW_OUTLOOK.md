@@ -1,6 +1,6 @@
 # Prompt de reprise — Session « New Outlook via OVH »
 
-> **Dernière mise à jour** : 27/04/2026 fin de journée (post audit cohérence — 29 commits master)
+> **Dernière mise à jour** : 27/04/2026 fin de journée (post audit cohérence — ~~30 commits master)
 >
 > **Mode d'emploi** : à chaque démarrage d'une nouvelle session Claude sur le sujet « New Outlook via OVH », **copier-coller le bloc ci-dessous en intégralité**. Il référence tous les docs nécessaires et donne le contexte de la session précédente.
 >
@@ -32,7 +32,7 @@ CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
 - Yvan utilise BoosterMail au quotidien depuis https://api.boostermail.ai/
 
 ÉTAT DE FIN DE LA DERNIÈRE SESSION (27/04/2026 fin de journée)
-- **29 commits master cumulés** sur la journée du 27/04
+- **~~30 commits master cumulés** sur la journée du 27/04
 - Bouton BoosterMail New Outlook : **fonctionnel** (était mort en silence)
 - Pattern #18 (cache WebView2 ignore les headers HTTP) découvert + fix structurel : `no-store` HTML + cache busting URL versionnée
 - Cycle audit kit complet (Workflow 4 + 2) : **8 audits clos sur 10**, 2 partiels avec constat livré (#1 Pattern #17 backend profond reporté, #4 except: pass approfondi reporté)
@@ -50,7 +50,7 @@ AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 
 1. **`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** ⭐ — référence vivante de cette session (workflow OVH-first, scope, interdits, procédure déploiement, profil Yvan, tests, procédure purge cache WebView2)
 2. **`docs/PLUS_TARD_VF.md`** ⭐ — référentiel UNIQUE des sujets « plus tard ». **Lis le TL;DR en haut du document** : il liste les 23 items vivants par catégorie (admin, actif, SaaS, audits, tech debt, différé, long terme). Remplace les 3 anciens fichiers PLUS_TARD/TODO/BUGS_PROTO archivés.
-3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`** — bilan complet de la session précédente (~9h, 30 commits, découvertes, livrables)
+3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`** — bilan complet de la session précédente (~9h, ~30 commits, découvertes, livrables)
 4. **`docs/saas/ONBOARDING_SESSION_SAAS.md`** — référence infra OVH partagée (sections B paths serveur, J commandes, G rollback)
 5. **`audit/INVARIANTS.md`** + **`audit/ANOMALIES_RECURRENTES.md`** — invariants techniques + Patterns identifiés (notamment Pattern #18 cache WebView2 + I-CACHE-01/02/03 + I-SEC-06)
 
@@ -102,14 +102,24 @@ Au premier message après lecture des docs, demande à Yvan ce qu'il aimerait fi
 3. **Si chantier multi-tenant SaaS** (Étape 7) attaqué : audit cross-user déjà livré (`audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md`) → 22 caches mono-user à isoler, plan migration ready, 1.5 jour estimé
 4. **Si feedback sur fix précédent** : si après la migration Coaxis effective, Yvan signale qu'un mail légitime ne fonctionne plus (Graph 404 etc.) → vérifier que les fixes du 27/04 PM (fallback Graph dans `/generate_reply`, etc.) couvrent bien le cas
 
-À LA FIN DE LA SESSION
+À L'OUVERTURE DE LA SESSION (avant tout autre action)
+Suivre **Workflow 8 — Kit ouverture de session** (cf `audit/PLAYBOOK.md`) :
+1. Vérifier worktree + git fetch/merge si besoin
+2. Lire les 5 docs listés ci-dessus (onboarding + PLUS_TARD_VF + bilan + saas + invariants/anomalies)
+3. Tester SSH OVH + warmup_status
+4. Si l'un échoue, alerter avant toute action
+
+À LA FIN DE LA SESSION (déclencheur Yvan : « kit fin de session »)
+Suivre **Workflow 7 — Kit fin de session** (cf `audit/PLAYBOOK.md`) qui orchestre :
 - Créer `docs/sessions/OUTLOOK_BILAN_SESSION_AAAAMMJJ[_descriptif].md` (cf convention nommage section F.2 de l'onboarding)
 - MAJ `docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md` section L (liste bilans) + date d'en-tête
 - MAJ `docs/PLUS_TARD_VF.md` (sujets clos déplacés en « ✅ DÉJÀ FAIT » avec hash commit, nouveaux sujets ajoutés)
 - MAJ `docs/SOMMAIRE_DETAILLE.md` (entrée bilan)
 - MAJ `audit/INVARIANTS.md` ou `audit/ANOMALIES_RECURRENTES.md` si nouveaux invariants/patterns identifiés (règle M1 CLAUDE.md)
+- MAJ `docs/specs_proto/HISTORIQUE_DECISIONS.md` si nouvelle décision stratégique (règle M1)
 - **MAJ `docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md`** (ce fichier) avec l'état de fin
-- Commit final master
+- Lancer `bash audit/tests/cloture_check.sh` jusqu'à exit 0 (vérifie I-SESS-01 à I-SESS-04 : git clean + refs obsolètes + hash top commit + cohérence chiffres)
+- Commit final master + sync worktree → master via fast-forward
 ```
 
 ---
