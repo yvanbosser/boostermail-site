@@ -73,19 +73,37 @@ function _showErrorToast(msg) {
     } catch(_){}
 }
 
-/** Intercepte toute exception JS non catchée + toute rejection de Promise. */
+/** Intercepte toute exception JS non catchée + toute rejection de Promise.
+ *  Fix 27/04 PM — filtre les "Script error." génériques cross-origin
+ *  (Office.js CDN Microsoft sans CORS-anonymous). Ces erreurs n'ont aucune
+ *  info actionable (msg vide, line=0, col=0, filename=""), elles sont
+ *  systematiquement masquees par le browser pour des raisons de securite.
+ *  Inutile de polluer l'UX user avec un toast rouge alarmant pour ca. */
+function _isCrossOriginErrorWithoutDetails(ev) {
+    var msg = (ev.error && ev.error.message) || ev.message || '';
+    var src = ev.filename || '';
+    // Pattern type Chromium : "Script error." + filename vide + line=0
+    return msg === 'Script error.' && !src && (ev.lineno === 0 || !ev.lineno);
+}
+
 window.addEventListener('error', function(ev) {
     try {
         var msg = (ev.error && ev.error.message) || ev.message || 'Erreur JS';
         var src = (ev.filename || '').split('/').pop();
-        _showErrorToast('BoosterMail : ' + msg.substring(0, 80));
-        // POST diagnostic non-bloquant (backend si disponible)
+        // Toast UX : masquer les Script error cross-origin sans details (Office.js CDN)
+        if (!_isCrossOriginErrorWithoutDetails(ev)) {
+            _showErrorToast('BoosterMail : ' + msg.substring(0, 80));
+        }
+        // POST diagnostic toujours envoye (utile pour debugger meme sans details visibles)
         fetch(_backendUrl + '/api/debug_addin_log', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 event: 'dialog_js_error',
-                details: { msg: msg, src: src, line: ev.lineno, col: ev.colno }
+                details: {
+                    msg: msg, src: src, line: ev.lineno, col: ev.colno,
+                    cross_origin: _isCrossOriginErrorWithoutDetails(ev)
+                }
             }),
             keepalive: true
         }).catch(function(){});
@@ -94,7 +112,10 @@ window.addEventListener('error', function(ev) {
 window.addEventListener('unhandledrejection', function(ev) {
     try {
         var reason = (ev.reason && ev.reason.message) || String(ev.reason);
-        _showErrorToast('BoosterMail : ' + reason.substring(0, 80));
+        // Skip les "Script error." sans details (idem au handler error ci-dessus)
+        if (reason !== 'Script error.') {
+            _showErrorToast('BoosterMail : ' + reason.substring(0, 80));
+        }
     } catch(_){}
 });
 

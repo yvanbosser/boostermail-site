@@ -589,21 +589,30 @@ body {
     margin-bottom: 8px;
     min-height: 120px;
     outline: none;
-    /* Préserver les sauts de ligne natifs du texte généré par Claude (streaming) */
-    white-space: pre-wrap;
+    /* Fix 27/04 PM (Bug B interlignes v4) — RETIRÉ : white-space: pre-wrap
+       Cause : combiné aux margins des <p>, les \n du HTML source (entre
+       balises) s'affichaient comme des sauts de ligne visibles → interlignes
+       de 30-50px au lieu des 10px voulus.
+       Maintenant : white-space: normal (défaut HTML). Les \n entre balises
+       sont ignorés (comportement HTML standard). markdown_to_html génère
+       déjà du HTML compact ('').join(html_parts), donc pas de régression
+       pour les drafts preemptive. Pour le streaming en cours (cache miss),
+       les chunks Claude contiennent des \n qui doivent être convertis en
+       <br> au fur et à mesure côté dialog.js (déjà fait par html_cleanup
+       backend en fin de streaming). */
 }
 /* Fix 27/04 (Bug B interlignes) — espacement uniforme entre paragraphes
    + un peu plus après le greeting (1er <p>) et avant le closing/sig
    (dernier <p>) pour aérer visuellement la structure email standard. */
 .em-editor p {
-    margin: 0.6em 0;
+    margin: 0.4em 0;
 }
 .em-editor p:first-child {
     margin-top: 0;
-    margin-bottom: 1.2em;  /* +2mm après "Bonjour..." */
+    margin-bottom: 0.8em;  /* après "Bonjour..." */
 }
 .em-editor p:last-child {
-    margin-top: 1.2em;     /* +2mm avant "Cdlt..." */
+    margin-top: 0.8em;     /* avant "Cdlt..." */
     margin-bottom: 0;
 }
 
