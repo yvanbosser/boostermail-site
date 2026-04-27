@@ -592,6 +592,21 @@ body {
     /* Préserver les sauts de ligne natifs du texte généré par Claude (streaming) */
     white-space: pre-wrap;
 }
+/* Fix 27/04 (Bug B interlignes) — espacement uniforme entre paragraphes
+   + un peu plus après le greeting (1er <p>) et avant le closing/sig
+   (dernier <p>) pour aérer visuellement la structure email standard. */
+.em-editor p {
+    margin: 0.6em 0;
+}
+.em-editor p:first-child {
+    margin-top: 0;
+    margin-bottom: 1.2em;  /* +2mm après "Bonjour..." */
+}
+.em-editor p:last-child {
+    margin-top: 1.2em;     /* +2mm avant "Cdlt..." */
+    margin-bottom: 0;
+}
+
 .em-editor:empty::before {
     content: attr(data-placeholder);
     color: #ccc;

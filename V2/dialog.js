@@ -901,13 +901,19 @@ function _loadDialogBundle() {
             if (profile) {
                 _applyContactProfile(profile);
             }
-            // --- Preview (échéance + classement) — Phase 2.A (24/04) ---
+            // --- Preview (échéance + classement + PJ) — Phase 3 (25/04 soir) ---
+            // 3 portes séparées en parallèle au lieu d'1 porte commune.
+            // Chaque plat arrive dès qu'il est prêt → service progressif.
             var preview = bundle.preview;
             if (preview) {
+                // Bundle déjà fourni → applique immédiatement (cas warm).
                 _applyMailPreview(preview);
             } else {
-                _applyMailPreview(null);  // affiche "—" / "Néant"
+                _applyMailPreview(null);  // "—" en attendant
             }
+            // Toujours lancer les 3 portes en parallèle (refresh + couvre miss
+            // bundle). Si déjà cached → instant ; sinon le BG génère et on poll.
+            _fetchSinglePreviewPlates();
         })
         .catch(function(e) {
             console.warn('[dialog] dialog_init bundle échec, fallback:', e);
@@ -1030,7 +1036,7 @@ function _applyMailPreview(preview) {
             if (pjStatus === 'running' || pjStatus === 'miss') {
                 pjEl.textContent = 'Analyse en cours…';
             } else if (pjData && pjData.source === 'no_pj') {
-                pjEl.textContent = 'Pas de PJ';
+                pjEl.textContent = 'Néant';  // Fix Néant (25/04) — "Pas de PJ" → "Néant" (demande user)
             } else if (pjData && pjData.suggestion) {
                 var pjSugg = pjData.suggestion;
                 var pjPath = pjSugg.folder_path || pjSugg.dest_folder || pjSugg.folder_name || 'Dossier suggéré';
@@ -1049,6 +1055,10 @@ function _applyMailPreview(preview) {
                               || (preview.classement && preview.classement.status === 'miss')
                               || (preview.pj_classement && preview.pj_classement.status === 'miss'));
     if (needsPoll && !window.__mailPreviewPolling && _messageId) {
+        // Fix 27/04 (Pattern #17 audit) : snapshot _messageId pour le poll.
+        // Sans ça, si l'user navigue pendant les 20s du poll, on
+        // afficherait les données de l'ancien mail dans le dialog courant.
+        var pollMid = _messageId;
         window.__mailPreviewPolling = true;
         var pollCount = 0;
         var poll = function() {
@@ -1057,11 +1067,20 @@ function _applyMailPreview(preview) {
                 window.__mailPreviewPolling = false;
                 return;
             }
-            fetch(_backendUrl + '/api/mail_preview/' + encodeURIComponent(_messageId))
+            // Garde : abort si user a navigué vers un autre mail
+            if (_messageId !== pollMid) {
+                window.__mailPreviewPolling = false;
+                return;
+            }
+            fetch(_backendUrl + '/api/mail_preview/' + encodeURIComponent(pollMid))
                 .then(function(r) { return r.ok ? r.json() : null; })
                 .then(function(newPreview) {
                     if (!newPreview) { window.__mailPreviewPolling = false; return; }
-                    // Re-appliquer
+                    // Re-vérifier après le fetch
+                    if (_messageId !== pollMid) {
+                        window.__mailPreviewPolling = false;
+                        return;
+                    }
                     _applyMailPreview(newPreview);
                     var stillRunning = (newPreview.echeance && newPreview.echeance.status === 'running')
                                      || (newPreview.classement && newPreview.classement.status === 'running')
@@ -1075,6 +1094,95 @@ function _applyMailPreview(preview) {
                 .catch(function() { window.__mailPreviewPolling = false; });
         };
         setTimeout(poll, 2000);
+    }
+}
+
+/** Phase 3 (25/04 soir) — 3 portes séparées en parallèle.
+ * Chaque plat (échéance, classement mail, classement PJ) a sa porte dédiée.
+ * Service progressif : le rapide arrive avant le lent.
+ * Polling indépendant par plat — l'un peut continuer pendant que l'autre est fini.
+ */
+function _fetchSinglePreviewPlates() {
+    if (!_messageId) return;
+    // Fix 27/04 (Pattern #17 audit) : snapshot _messageId pour les 3 plats.
+    // Si l'user navigue vers un autre mail pendant les retries (24s max),
+    // on évite d'afficher les données du mauvais mail dans le dialog courant.
+    var mid = _messageId;
+    _fetchSinglePlate('echeance', '/api/echeance/', mid);
+    _fetchSinglePlate('classement', '/api/classement_mail/', mid);
+    _fetchSinglePlate('pj_classement', '/api/classement_pj/', mid);
+}
+
+function _fetchSinglePlate(plateName, urlPrefix, messageId, attempt) {
+    attempt = attempt || 0;
+    var maxAttempts = 12;  // 24s max (12 × 2s)
+    // Garde Pattern #17 : si l'user a navigué vers un autre mail, abort
+    // (on n'écrira pas les données de l'ancien mail dans le DOM courant).
+    if (_messageId !== messageId) return;
+    fetch(_backendUrl + urlPrefix + encodeURIComponent(messageId))
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(res) {
+            if (!res) return;
+            // Re-vérifier après le fetch (peut prendre 100ms-2s)
+            if (_messageId !== messageId) return;
+            // Appliquer SEULEMENT ce plat (les autres conservent leur valeur actuelle)
+            _applySinglePlate(plateName, res);
+            // Si still running/miss, repolll dans 2s (max 12 tentatives = 24s)
+            if ((res.status === 'running' || res.status === 'miss') && attempt < maxAttempts) {
+                setTimeout(function() {
+                    _fetchSinglePlate(plateName, urlPrefix, messageId, attempt + 1);
+                }, 2000);
+            }
+        })
+        .catch(function(e) {
+            console.warn('[dialog] _fetchSinglePlate ' + plateName + ' failed:', e);
+        });
+}
+
+function _applySinglePlate(plateName, res) {
+    // Appliquer 1 seul plat sans toucher aux 2 autres.
+    if (plateName === 'echeance') {
+        var echEl = document.getElementById('infoEcheanceContent');
+        if (!echEl) return;
+        if (res.status === 'running' || res.status === 'miss') {
+            echEl.textContent = 'Analyse en cours…';
+        } else if (res.status === 'error') {
+            echEl.textContent = 'Néant';
+        } else if (Array.isArray(res.data) && res.data.length > 0) {
+            var e = res.data[0];
+            var txt = '';
+            if (e.description) txt += e.description;
+            if (e.date_echeance) txt += (txt ? ' — ' : '') + e.date_echeance;
+            echEl.textContent = txt || 'Échéance détectée';
+        } else {
+            echEl.textContent = 'Néant';
+        }
+    } else if (plateName === 'classement') {
+        var clsEl = document.getElementById('infoClassementContent');
+        if (!clsEl) return;
+        if (res.status === 'running' || res.status === 'miss') {
+            clsEl.textContent = 'Analyse en cours…';
+        } else if (res.data && res.data.suggestion) {
+            var sugg = res.data.suggestion;
+            var folderPath = sugg.folder_path || sugg.folder_name || sugg.folder_id || 'Dossier suggéré';
+            clsEl.textContent = folderPath;
+        } else {
+            clsEl.textContent = 'Néant';
+        }
+    } else if (plateName === 'pj_classement') {
+        var pjEl = document.getElementById('infoClassementPJContent');
+        if (!pjEl) return;
+        if (res.status === 'running' || res.status === 'miss') {
+            pjEl.textContent = 'Analyse en cours…';
+        } else if (res.data && res.data.source === 'no_pj') {
+            pjEl.textContent = 'Néant';
+        } else if (res.data && res.data.suggestion) {
+            var pjSugg = res.data.suggestion;
+            var pjPath = pjSugg.folder_path || pjSugg.dest_folder || pjSugg.folder_name || 'Dossier suggéré';
+            pjEl.textContent = pjPath;
+        } else {
+            pjEl.textContent = 'Néant';
+        }
     }
 }
 
@@ -1695,38 +1803,61 @@ function _showDraftBadge(timestamp) {
 // que l'user n'a jamais touchée.
 var _userHasTypedSomething = false;
 
-function _saveDraftNow() {
-    if (!_messageId) return;
-    // Fix 23/04 : ne JAMAIS sauver si l'user n'a pas tapé — sinon on sauve
-    // un préemptif Claude affiché comme s'il s'agissait d'un brouillon user.
+/**
+ * Sauvegarde un brouillon avec un message_id snapshot (capturé au schedule).
+ * Fix 27/04 (BUG CRITIQUE Vincent Hubert ↔ Ombeline) : le timer 2s du debounce
+ * ne doit PAS lire _messageId/_fromEmail au moment du fire car ces variables
+ * globales peuvent avoir changé si l'user a navigué vers un autre mail entre
+ * la frappe et le fire. Symptôme observé 26/04 : draft Ombeline sauvegardé
+ * sous l'IMID Vincent Hubert → au prochain clic V.Hubert, instant_reply
+ * step 1 (draft user_edit, prio absolue) retourne le mauvais texte.
+ */
+function _saveDraftFor(messageId, fromEmail, importance) {
+    if (!messageId) return;
     if (!_userHasTypedSomething) return;
     var editor = document.getElementById('editor');
+    if (!editor) return;
     var text = (editor.innerText || '').trim();
     if (!text) return;  // n'écrase pas avec un éditeur vide
-    // Fix audit 21/04 : keepalive:true pour que la requête survive au
-    // beforeunload (sinon le navigateur annule le fetch quand la page ferme →
-    // brouillon user perdu). Limite : payload < 64KB (largement suffisant).
     fetch(_backendUrl + '/api/save_draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        keepalive: true,
+        keepalive: true,  // survit au beforeunload
         body: JSON.stringify({
-            message_id: _messageId,
+            message_id: messageId,
             text: text,
-            from_email: _fromEmail || '',
-            importance: _importance || '',
+            from_email: fromEmail || '',
+            importance: importance || '',
         }),
     }).catch(function() {});
+}
+
+/**
+ * Sauvegarde immédiate avec les valeurs courantes.
+ * Utilisée par beforeunload (au moment du unload, _messageId est encore
+ * l'ancien — l'unload fire AVANT le changement de page).
+ */
+function _saveDraftNow() {
+    _saveDraftFor(_messageId, _fromEmail, _importance);
 }
 
 function _setupDraftAutoSave() {
     var editor = document.getElementById('editor');
     if (!editor) return;
-    // Debounce 2 s après la dernière frappe
+    // Debounce 2 s après la dernière frappe.
+    // Fix 27/04 : SNAPSHOT _messageId, _fromEmail, _importance au moment de
+    // la frappe. Sans ça, race condition si l'user navigue vers un autre
+    // mail pendant les 2s du debounce → save text Ombeline sous IMID
+    // Vincent Hubert (bug observé 26/04 21:11).
     var schedule = function() {
         _userHasTypedSomething = true;  // fix 23/04 : seul signal fiable
+        var capturedMid = _messageId;
+        var capturedFrom = _fromEmail;
+        var capturedImp = _importance;
         if (_draftSaveTimer) clearTimeout(_draftSaveTimer);
-        _draftSaveTimer = setTimeout(_saveDraftNow, 2000);
+        _draftSaveTimer = setTimeout(function() {
+            _saveDraftFor(capturedMid, capturedFrom, capturedImp);
+        }, 2000);
     };
     editor.addEventListener('input', schedule);
     // Sauvegarde explicite si l'user ferme / quitte l'onglet
@@ -3099,6 +3230,17 @@ function _loadMailBodyStandalone() {
     // Non-bloquant — se déroule en parallèle du chargement du body.
     if (_messageId) {
         _fetchMailSummary();
+    }
+
+    // Fix 26/04 (Bug A) — En mode standalone (Outlook New, le mode courant),
+    // _loadMailBodyStandalone N'APPELAIT PAS _fetchSinglePreviewPlates →
+    // les 3 encadrés (échéance / classement / classement PJ) restaient
+    // bloqués sur "—" indéfiniment. Le fetch est dans _loadDialogBundle
+    // mais celui-ci n'est jamais appelé en mode standalone.
+    // Symptôme observé sur 5/5 mails testés (Ombeline, V.Hubert, V.Lecou,
+    // Christelle, Jules) : tous les encadrés affichaient "—" placeholder.
+    if (_messageId) {
+        _fetchSinglePreviewPlates();
     }
 }
 

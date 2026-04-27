@@ -35,7 +35,7 @@ function _debugLog(eventName, details) {
 
 // Marqueur de version : s'écrit dès le chargement du JS → permet de vérifier
 // en lisant addin_debug.log que Outlook a bien rechargé le nouveau fichier.
-var _ADDIN_VERSION = 'v4-audit-21-04';
+var _ADDIN_VERSION = 'v6-iframe-26-04';
 _debugLog('js_loaded', { version: _ADDIN_VERSION });
 
 // Safety net global (21/04 P3) : toute exception non catchée → log backend
@@ -477,46 +477,7 @@ function _openDialogPlatformRouted(dialogUrl, data, getMailBody, fromName, fromE
         return true;
     }
 
-    // --- Outlook Web : postMessage vers extension BoosterMail ---
-    if (platform === 'web') {
-        try {
-            // L'extension écoute sur window.parent (ou window.top) via content-script
-            var extensionPayload = {
-                type: 'boostermail-open-dialog',
-                version: 1,
-                dialogUrl: dialogUrl,
-                data: data
-            };
-            // postMessage sur parent ET top pour maximiser les chances (iframe imbriqué)
-            try { window.parent.postMessage(extensionPayload, '*'); } catch(e){}
-            try { if (window.top !== window.parent) window.top.postMessage(extensionPayload, '*'); } catch(e){}
-
-            // Handshake : attendre un ACK de l'extension (max 500ms)
-            var _ackReceived = false;
-            var _ackHandler = function(ev) {
-                if (ev.data && ev.data.type === 'boostermail-ack') {
-                    _ackReceived = true;
-                    window.removeEventListener('message', _ackHandler);
-                }
-            };
-            window.addEventListener('message', _ackHandler);
-            setTimeout(function() {
-                window.removeEventListener('message', _ackHandler);
-                if (!_ackReceived) {
-                    console.warn('BoosterMail: extension non détectée — fallback displayDialogAsync');
-                    _openViaDisplayDialog(null, dialogUrl, data, getMailBody, fromName, fromEmail, event);
-                } else {
-                    event.completed();
-                }
-            }, 500);
-        } catch (e) {
-            console.error('BoosterMail: postMessage extension échoué', e);
-            _openViaDisplayDialog(dialogUrl, data, getMailBody, fromName, fromEmail, event);
-        }
-        return true;
-    }
-
-    // --- Classic ou fallback : displayDialogAsync ---
+    // --- Classic / Web : displayDialogAsync ---
     return false;
 }
 
@@ -544,15 +505,21 @@ function _buildAndOpenDialog(item, event, data, getMailBody, fromName, fromEmail
 }
 
 function _openViaDisplayDialog(item, dialogUrl, data, getMailBody, fromName, fromEmail, event, onDialogOpen) {
+    _debugLog('display_dialog_attempt', { url: dialogUrl });
     Office.context.ui.displayDialogAsync(
         dialogUrl,
-        { width: 80, height: 74, promptBeforeOpen: false },
+        { width: 80, height: 74, promptBeforeOpen: false, displayInIframe: true },
         function (asyncResult) {
             if (asyncResult.status === Office.AsyncResultStatus.Failed) {
+                _debugLog('display_dialog_error', {
+                    code: asyncResult.error.code,
+                    message: asyncResult.error.message
+                });
                 console.error('EasyMail: erreur ouverture dialog', asyncResult.error.message);
                 event.completed();
                 return;
             }
+            _debugLog('display_dialog_ok', {});
 
             var dialog = asyncResult.value;
 
