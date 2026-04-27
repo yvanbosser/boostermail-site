@@ -245,11 +245,7 @@ docs/
 | Fichier | Sujet | Clés |
 |---|---|---|
 | `PLAN_ACTION_GLOBAL.md` | Vision produit + roadmap globale | `roadmap`, `vision`, `global` |
-<<<<<<< HEAD
-| `PLAN_ACTION_GLOBAL.md` | Vision produit + roadmap globale | `roadmap`, `vision`, `global` |
-=======
-| **`PLAN_SAAS.md`** | **Migration SaaS 25/04 — VPS OVH, nginx+SSL, multi-tenant, Stripe, beta gratuite** (Phase 1 en cours) | `SaaS`, `OVH`, `VPS`, `cloud`, `déploiement` |
->>>>>>> claude/angry-ishizaka-26efe7
+| **`PLAN_SAAS.md`** | **Migration SaaS 25/04 — VPS OVH, nginx+SSL, multi-tenant, Stripe, beta gratuite** (Étapes 1, 2, 5 closes) | `SaaS`, `OVH`, `VPS`, `cloud`, `déploiement` |
 | `PLAN_1_APPLICATION_DOCUMENTATION.md` | Plan consolidation + datation + maintenance doc (5 phases, ~4h) | `plan1`, `doc`, `consolidation` |
 | `PLAN_2_OPTIMISATION_FLUX.md` | Plan flux optimal : templates + caches + smart spec (7 phases, ~9h15) — **plan d'exécution de référence** | `plan2`, `flux`, `templates`, `caches` |
 | `PLAN_3_INVENTAIRE_CACHES_ET_PORTAGE.md` | Inventaire technique caches V2 vs proto + plan baseline 5 phases (référence) | `plan3`, `inventaire`, `caches`, `portage` |
@@ -294,7 +290,6 @@ docs/
 | `BILAN_SESSION_V2_20260414.md` | 14/04/2026 | Bilan de session V2 (état travaux plugin) |
 | `BILAN_SESSION_20260416.md` | 16/04/2026 | Bilan de session 16/04 |
 | `BILAN_SESSION_20260418.md` | 18/04/2026 | Consolidation doc + Plan 1 exécuté + règles M1-M4 + préparation Plans 2/3 |
-<<<<<<< HEAD
 | `BILAN_SESSION_21-04.md` | 21/04/2026 | Audits cohérence cache, dialog 80% |
 | `BILAN_SESSION_20260422_DIALOG80_AUDIT.md` | 22/04/2026 | Audit dialog 80% (8 colonnes) |
 | `BILAN_SESSION_20260423_VITESSE_COMPLETUDE.md` | 23/04/2026 | Vitesse + complétude pipeline BG |
@@ -302,7 +297,6 @@ docs/
 | **`BILAN_SESSION_20260425.md`** | **25/04/2026** | **Phase 1 (étiquetage IMID canonique) + Phase 2 (filtre unifié) + Phase 3 (3 portes API) + garde-fou drafts (15 commits)** |
 | **`BILAN_SESSION_20260426.md`** | **26/04/2026** | **Bug D (submission dict sans `internet_message_id`) + Bug #2 signature N-B + Bug #3 Graph 400 PJ + clé Anthropic + invariant I-CODE-05 + Patterns #15-#16** |
 | **`BILAN_SESSION_20260427_MATIN.md`** | **27/04/2026** | **Bug critique race condition `_messageId` global (draft Ombeline sauvé sous IMID Vincent Hubert) — Pattern #17** |
-=======
 | **`SAAS_BILAN_SESSION_20260426.md`** | **26/04/2026 (matin)** | **[SaaS] Phase 1 SaaS terminée (VPS OVH + SSL + sécurité + Sentry) + rebrand UI BoosterMail + Outlook Web différé Phase 6** |
 | **`SAAS_BILAN_SESSION_20260426_pm.md`** | **26/04/2026 (après-midi)** | **[SaaS] Étapes 1+2+5.A/B** : `OnMessageCompose` + page `install.boostermail.ai` HTTPS live + nouvelle app Azure multi-tenant `groupe-bosser.fr` + OAuth validé + backup DB auto cron quotidien + cap API par user (Claude 500/jour, OpenAI 200/jour) |
 | **`SAAS_BILAN_SESSION_20260427.md`** | **27/04/2026 (matin)** | **[SaaS] Étape 5 close** : nettoyage user fantôme MSAL + 5.C UptimeRobot 2 monitors + 5.D brand check + 5.E privacy.html + 5.F terms.html. **MPN différé** (entité éditrice à trancher). Reste critique avant beta : Étape 7 multi-tenant DB. |
@@ -311,7 +305,6 @@ docs/
 - `SAAS_BILAN_SESSION_AAAAMMJJ.md` — sessions infra/déploiement SaaS
 - `OUTLOOK_BILAN_SESSION_AAAAMMJJ.md` — sessions optimisation New Outlook (à venir)
 - `BILAN_SESSION_AAAAMMJJ.md` (sans préfixe) — sessions mixtes ou autres sujets
->>>>>>> claude/angry-ishizaka-26efe7
 
 ---
 
@@ -408,8 +401,4 @@ docs/
 
 ---
 
-<<<<<<< HEAD
-*Dernière mise à jour : 25/04/2026 — Ajout PLAN_SAAS.md + décision migration SaaS.*
-=======
-*Dernière mise à jour : 25/04/2026 — Pivot SaaS : ajout de `PLAN_SAAS.md` et entrée historique 25/04.*
->>>>>>> claude/angry-ishizaka-26efe7
+*Dernière mise à jour : 27/04/2026 — Consolidation merge SaaS+Outlook : Étapes 1+2+5 SaaS closes + Patterns #15/#16/#17 Outlook + pivot OVH source de vérité.*
