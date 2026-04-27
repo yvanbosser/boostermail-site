@@ -1,6 +1,6 @@
 # Prompt de reprise — Session « New Outlook via OVH »
 
-> **Dernière mise à jour** : 27/04/2026 fin de journée (post bilan session 1)
+> **Dernière mise à jour** : 27/04/2026 fin de journée (post audit cohérence — 29 commits master)
 >
 > **Mode d'emploi** : à chaque démarrage d'une nouvelle session Claude sur le sujet « New Outlook via OVH », **copier-coller le bloc ci-dessous en intégralité**. Il référence tous les docs nécessaires et donne le contexte de la session précédente.
 >
@@ -20,7 +20,7 @@ Test rapide :
 Si ton worktree est différent (auto-créé style `claude/happy-XXXX`), exécute en début de session :
   git fetch && git merge master --no-edit
 puis :
-  git log --oneline -5    # doit afficher au minimum `1d8d1a0 chore(tech-debt): tier 1`
+  git log --oneline -5    # doit afficher au minimum `0dc1763 docs(plus_tard_vf): corrections incoherences post-cloture session 1`
 
 ---
 
@@ -32,15 +32,16 @@ CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
 - Yvan utilise BoosterMail au quotidien depuis https://api.boostermail.ai/
 
 ÉTAT DE FIN DE LA DERNIÈRE SESSION (27/04/2026 fin de journée)
-- 22 commits master cumulés sur la journée du 27/04
+- **29 commits master cumulés** sur la journée du 27/04
 - Bouton BoosterMail New Outlook : **fonctionnel** (était mort en silence)
 - Pattern #18 (cache WebView2 ignore les headers HTTP) découvert + fix structurel : `no-store` HTML + cache busting URL versionnée
-- Cycle audit kit Workflow 2 : 6 audits du menu de 10 clos (#2 #3 #5 #6 #7 #8 #9 #10), 1 partiel (#4 except: pass — fix dédié 1-2h), 1 reporté (#1 Pattern #17 backend approfondi)
+- Cycle audit kit complet (Workflow 4 + 2) : **8 audits clos sur 10**, 2 partiels avec constat livré (#1 Pattern #17 backend profond reporté, #4 except: pass approfondi reporté)
 - 12 contacts humains analysés via `POST /api/analyze_contact` ($0.30, 9 profils créés en 60s)
 - Pattern #15 (I-CODE-05) : 4 sites mail_data corrigés
 - HTTP 429 propre + SSE event `quota_exceeded`
 - Garde anti-injection sur `_build_prompt` (Pattern #9 / I-SEC-06)
-- Tech debt tier 1 : locks cohérents + log level + cleanup deprecated
+- Tech debt tier 1 : locks cohérents + log level + cleanup deprecated + 4 caches dead retirés
+- Audit cohérence final : PLUS_TARD_VF nettoyé, 6 incohérences corrigées (items déjà faits encore listés comme à faire)
 - État OVH : service active, 0 erreur, routes < 50 ms
 
 ⚠️ SUJET HORS SCOPE CODE EN COURS : migration mailbox `yvan.bosser@groupe-bosser.fr` Coaxis → Microsoft 365 cloud (ETA J+2/3, côté admin Coaxis). En attendant, contournement via compte transitoire. Une fois migration faite : tous les mails Coaxis deviennent éligibles BoosterMail.
@@ -48,7 +49,7 @@ CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
 AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 
 1. **`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** ⭐ — référence vivante de cette session (workflow OVH-first, scope, interdits, procédure déploiement, profil Yvan, tests, procédure purge cache WebView2)
-2. **`docs/PLUS_TARD_VF.md`** ⭐ — référentiel UNIQUE des sujets « plus tard » (sujets actifs, différé stratégique, tech debt, déjà fait avec hashes commits, abandonné/obsolète). Remplace les 3 anciens fichiers PLUS_TARD/TODO/BUGS_PROTO archivés.
+2. **`docs/PLUS_TARD_VF.md`** ⭐ — référentiel UNIQUE des sujets « plus tard ». **Lis le TL;DR en haut du document** : il liste les 23 items vivants par catégorie (admin, actif, SaaS, audits, tech debt, différé, long terme). Remplace les 3 anciens fichiers PLUS_TARD/TODO/BUGS_PROTO archivés.
 3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`** — bilan complet de la session précédente (~9h, 22 commits, découvertes, livrables)
 4. **`docs/saas/ONBOARDING_SESSION_SAAS.md`** — référence infra OVH partagée (sections B paths serveur, J commandes, G rollback)
 5. **`audit/INVARIANTS.md`** + **`audit/ANOMALIES_RECURRENTES.md`** — invariants techniques + Patterns identifiés (notamment Pattern #18 cache WebView2 + I-CACHE-01/02/03 + I-SEC-06)
@@ -91,12 +92,13 @@ DÉMARRAGE TYPIQUE
 Au premier message après lecture des docs, demande à Yvan ce qu'il aimerait fixer en priorité ou quelle direction il veut prendre. Propositions naturelles selon les retours :
 
 1. **Si retour utilisateur sur frustration** : « le bouton X ne marche pas », « la modale est mal placée », etc. → Workflow 4 du kit (diagnostic bug)
-2. **Si Yvan veut avancer le backlog** : ouvrir `docs/PLUS_TARD_VF.md` et proposer le top des sujets actifs :
-   - **#3 Templates 45 fixes + appris** (gros chantier 3-4h, 20-40% mails répondus instantanément, coût API /3)
-   - **#5 Signature personnalisée par contact** (45 min, gain UX fort registre/tutoiement)
-   - **#6 Ré-évaluation classements `source='none'`** (30 min, marginal)
-   - **Audits restants** : #1 Pattern #17 backend approfondi (1-2h), #4 except: pass approfondi (1-2h)
-   - **Cleanup whitelist `_COMPANION_ALLOWED`** (low priority)
+2. **Si Yvan veut avancer le backlog** : ouvrir `docs/PLUS_TARD_VF.md` (le TL;DR en haut suffit) et proposer le top des sujets actifs :
+   - **Templates 45 fixes + appris** (gros chantier 3-4h, 20-40% mails répondus instantanément, coût API /3)
+   - **Signature personnalisée par contact** (45 min, gain UX fort registre/tutoiement)
+   - **Détection forward dans summary/draft** (cas constaté Vincent Hubert "Fwd: leonis" body Orange — UX confuse, taille à estimer)
+   - **Ré-évaluation classements `source='none'`** (30 min, marginal — 3 mails)
+   - **Audits profonds reportés** : #1 Pattern #17 backend (38 closures, 1-2h), #4 except: pass (71 occurrences, 1-2h)
+   - **Tech debt résiduel** : AbortController timeout, btnSend null, _sanitizeHtml, fuites mémoire mineures, re-auth UX, orphans mail_summaries TTL, prefetch atexit fragile, cost tracking, etc.
 3. **Si chantier multi-tenant SaaS** (Étape 7) attaqué : audit cross-user déjà livré (`audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md`) → 22 caches mono-user à isoler, plan migration ready, 1.5 jour estimé
 4. **Si feedback sur fix précédent** : si après la migration Coaxis effective, Yvan signale qu'un mail légitime ne fonctionne plus (Graph 404 etc.) → vérifier que les fixes du 27/04 PM (fallback Graph dans `/generate_reply`, etc.) couvrent bien le cas
 
