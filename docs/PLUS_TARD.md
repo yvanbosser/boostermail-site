@@ -1,8 +1,38 @@
 # Choses à faire plus tard
 
-> **Dernière mise à jour** : 21/04/2026
+> **Dernière mise à jour** : 27/04/2026 PM (ajouts session « New Outlook via OVH » : Pattern #18 cleanup, Graph 400, Coaxis hosting)
 
 *Document vivant — on y note les idées, fonctionnalités et chantiers dont l'implémentation est reportée à plus tard. Révisé ponctuellement.*
+
+---
+
+## 🔄 Backlog ajouté en session 27/04 PM (fix bouton New Outlook)
+
+### Cleanup priorité moyenne (low risk, ~30 min)
+- **`popup.js _checkCompanionForPyQt`** : fonction morte en SaaS (popup PyQt n'existe plus). À supprimer + sites d'appel. Cf rapport `audit/rapports/2026-04-27_audit_dead_code_companion_pivot_saas.md`.
+- **`dialog.js _sendViaCompanionFallback`** : à remplacer par `_onErrorUi('Erreur Graph: <raison>')` clair (le fallback companion est inopérant en SaaS, le 503 affiche une erreur peu user-friendly).
+- **Annoter les sites backend `not graph`** dans `app_plugin.py` (3 sites : 2446, 3105, 3513) avec un commentaire `# DEAD CODE en SaaS — conservé pour fallback robustesse Graph KO`.
+
+### Cleanup priorité basse (~20-40 min)
+- **Whitelist `_COMPANION_ALLOWED`** : audit de cohérence entre subpaths whitelistés et call sites frontend réels. Garder uniquement ce qui est vraiment appelé.
+- **À terme** : suppression complète de la route proxy `/api/companion/*` quand tous les call sites frontend auront été nettoyés.
+- **`boostermail_service.py` local** : service qui tournait en proto (popup de lancement marketing au boot Windows). Plus aucun rôle en SaaS, mais peut encore tourner chez Yvan en background. À désactiver dans le startup Windows si gênant.
+
+### Bug Graph 400 — `get_conversation_thread` `conversationId eq` (préexistant)
+- **Symptôme** : ~30 erreurs Graph 400 le matin du 27/04 dans `syslog`, capturées silencieusement → contexte A vide pour certains mails.
+- **Localisation** : `V2/outlook_graph.py:408-428`.
+- **Cause** : combinaison `$filter=conversationId eq` + `$orderby=receivedDateTime desc` + `$select={_FULL_SELECT}` rejetée par Graph sur certaines mailboxes (limitation E5/Business documentée).
+- **Pré-diag complet** : `audit/rapports/2026-04-27_graph_400_conversationid_pre_diag.md` (4 options de fix : retirer `$orderby` recommandé, réduire `$select`, `$search`, endpoint dédié).
+- **Estimation** : 1h fix + tests sur quelques cas avant déploiement.
+
+### Sites Pattern #15 (I-CODE-05) à inspecter (low priority)
+4 sites suspects identifiés dans `app_plugin.py` (lignes 896, 951, 2480, 2636, 2718) : construction `'message_id':` sans `'internet_message_id':` accompagnant. Pas de bug actuel détecté mais risque MISS persistant dans certaines conditions (cf historique Pattern #15 du 26/04 — Ombeline / Vincent Hubert). Cf rapport `audit/rapports/2026-04-27_audit_patterns_15_17_post_pivot.md`.
+
+### Hosting Coaxis (Compta Santé) — sujet stratégique
+**Découverte 27/04 PM** : New Outlook desktop refuse de se connecter au compte `yvan.bosser@groupe-bosser.fr` car la mailbox est hébergée chez **Coaxis** (probable setup hybride Azure AD auth + Exchange on-premise/private). Fix de contournement : Yvan a basculé sur un compte transitoire du nouveau tenant. **À résoudre côté admin Coaxis** : soit migrer la mailbox vers Microsoft 365 cloud (Exchange Online), soit confirmer que New Outlook peut se connecter (peut-être un policy admin à débloquer). Tant que c'est pas résolu, Yvan utilise un compte transitoire pour valider BoosterMail au quotidien.
+
+### Pattern #17 — bonus (préventif, pas urgent)
+Si un nouveau `setTimeout` capture des globals mutables (`_messageId`, `_fromEmail`, `_importance`, `_mode`, `_currentMail`) sans pattern snapshot, c'est une régression Pattern #17. Audit covert au 27/04, mais à re-vérifier à chaque ajout de setTimeout dans `dialog.js`.
 
 ---
 
