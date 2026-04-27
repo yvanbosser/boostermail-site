@@ -1,6 +1,6 @@
 # ONBOARDING — Sessions « New Outlook via OVH »
 
-> **Dernière mise à jour** : 27/04/2026 PM (création — pivot OVH source de vérité unique)
+> **Dernière mise à jour** : 27/04/2026 PM (création + ajout sections C.2/C.3 cache WebView2 — Pattern #18)
 
 > **Rôle de ce doc** : référence vivante pour toute session Claude qui travaille sur les **fixes UX/UI/data du plugin BoosterMail dans New Outlook**, déployés directement sur OVH. À mettre à jour à la fin de chaque session pour refléter l'état réel.
 
@@ -92,15 +92,54 @@ Critère de fin (subjectif, c'est Yvan qui décide) : « j'utilise BoosterMail t
    Si KO → on diagnostique via les logs OVH (autonomie totale, cf consigne I.2 du onboarding SaaS) + on fix
 ```
 
-### C.2 La règle de l'`_ADDIN_VERSION`
+### C.2 Règles de cache busting (mise à jour 27/04 PM — Pattern #18)
 
-À chaque modif de **JS/HTML/manifest** déployée sur OVH, **bumper `_ADDIN_VERSION` dans `V2/autorunshared.js` ligne ~38**. Sinon Outlook utilise la version en cache 304 et tu n'as pas d'effet visible.
+**Ce qu'on croyait avant** : « bumper `_ADDIN_VERSION` invalide le cache 304 d'Outlook ». **C'était faux.** `_ADDIN_VERSION` est juste un marqueur logué via `_debugLog('js_loaded', ...)` — il ne force aucune invalidation côté client.
 
-Convention de nommage : `vN-fix-<sujet>-<JJ-MM>` (ex: `v9-fix-signature-doublon-28-04`).
+**Ce qui marche en réalité** sur **New Outlook desktop** (`hostName: newOutlookWindows`) :
 
-### C.3 Cache Outlook côté Yvan
+1. **Côté serveur** : la route `/plugin/<filename>` envoie `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` + `Pragma: no-cache` + `Expires: 0` sur tous les `.js` / `.html` / `.css`. Cf invariant I-CACHE-01.
+2. **Cache busting URL** dans `V2/autorun.html` : `<script src="autorunshared.js?v=vN-fix-<sujet>-<JJ-MM>">`. Bumper le `?v=` à chaque modif JS. Cf invariant I-CACHE-02.
+3. **Continuer à bumper `_ADDIN_VERSION`** : utile pour vérifier dans les logs `addin_debug.log` que la nouvelle version est bien chargée (`js_loaded { version: "v9-..." }`).
 
-Si jamais le bump `_ADDIN_VERSION` ne suffit pas (rare), Yvan peut forcer le rechargement avec **Ctrl+F5 dans New Outlook**. Lui rappeler quand on lui demande de tester un fix.
+Convention de nommage (les 2 doivent matcher) : `vN-fix-<sujet>-<JJ-MM>` (ex: `v9-fix-newoutlook-button-27-04`).
+
+### C.3 Procédure de purge cache WebView2 côté user
+
+⚠️ **Ctrl+F5 ne marche PAS en New Outlook desktop** (ce n'est pas un browser). Si malgré les fixes ci-dessus une nouvelle version JS n'est pas prise en compte (cache disque WebView2 antérieur encore en place), procédure de purge :
+
+**Méthode recommandée — reboot Windows** (la plus sûre) :
+
+1. Rebooter Windows
+2. **Avant d'ouvrir Outlook ou Teams**, lancer PowerShell :
+   ```powershell
+   Remove-Item -Path "$env:LOCALAPPDATA\Microsoft\Olk\EBWebView" -Recurse -Force
+   Test-Path "$env:LOCALAPPDATA\Microsoft\Olk\EBWebView"
+   ```
+   La 2ème commande doit retourner `False`.
+3. Lancer New Outlook → fetch frais de tout le runtime → version v(N) chargée.
+
+**Méthode sans reboot** (plus capricieuse, processus respawn) :
+
+1. Fermer Outlook + Teams + autres apps WebView2
+2. ```powershell
+   Get-Process | Where-Object { $_.Name -eq 'msedgewebview2' } | Stop-Process -Force
+   Start-Sleep -Seconds 2
+   Remove-Item -Path "$env:LOCALAPPDATA\Microsoft\Olk\EBWebView" -Recurse -Force
+   Test-Path "$env:LOCALAPPDATA\Microsoft\Olk\EBWebView"
+   ```
+3. Si `False` → relancer New Outlook
+
+**Note** : la purge ne supprime QUE `EBWebView` (cache du runtime add-in). Les autres dossiers `Olk/` (Attachments, cache, pst_index_v2, etc.) restent intacts. Aucune donnée user perdue.
+
+**Diagnostic — dans quels cas une purge est nécessaire ?**
+
+Symptômes typiques :
+- Nouveau fix déployé sur OVH mais bouton/UI inchangé côté user
+- Logs nginx : 0 `GET /plugin/autorunshared.js` ou `/plugin/autorun.html` depuis plusieurs heures pour cet user
+- Logs add-in : `js_loaded` reporte une version périmée
+
+Si ces symptômes apparaissent : Pattern #18 — un cache antérieur à l'introduction des headers `no-store` est en place. Une seule purge suffit, ensuite les futurs déploiements seront pris en compte automatiquement (grâce à `no-store`).
 
 ---
 
@@ -354,7 +393,7 @@ ssh ubuntu@51.178.162.208 -t 'cd /opt/boostermail/V2 && /opt/boostermail/V2/venv
 
 | Date | Fichier | Sujet principal |
 |---|---|---|
-| (à venir au prochain cycle de cette session) | — | — |
+| **27/04/2026 PM** | [`OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`](../sessions/OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md) | Fix bouton BoosterMail mort en New Outlook (POST companion 503) + découverte Pattern #18 cache WebView2 + fix structurel `no-store` |
 
 > **Convention** : `OUTLOOK_BILAN_SESSION_AAAAMMJJ[_descriptif].md` dans `docs/sessions/`
 
