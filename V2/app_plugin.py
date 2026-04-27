@@ -669,11 +669,15 @@ def _execute_warmup(graph):
                              f"subject={msg.get('subject', '')[:40]}")
                 continue
             subject = msg.get('subject', '(sans objet)')
+            # Fix 27/04 PM (audit kit tech debt) — extension du lock pour couvrir
+            # aussi l'ecriture _warmup_cache (etait sans lock, race possible avec
+            # _preload_neighbors qui itere). Le lock est court (microsecondes).
             with _warmup_lock:
                 _warmup_progress["loaded"] = i + 1
                 _warmup_progress["current_subject"] = subject
+                if mid:
+                    _warmup_cache[mid] = msg
             if mid:
-                _warmup_cache[mid] = msg
                 try:
                     _db.save_email_cache(mid, msg)
                 except Exception as _e:
@@ -2844,10 +2848,17 @@ def api_current_mail():
     Consommé par : popup PyQt (SSE), extension, dialog standalone.
     Audit 20/04 : plus de "stale" — on retourne le dernier mail connu
     peu importe son âge, l'user veut voir sa sélection actuelle.
+
+    Fix 27/04 PM (audit kit tech debt) — lecture sous _mail_data_lock pour
+    eviter race avec ecriture concurrente (api_event_message_read).
     """
-    if not _current_mail_data:
-        return jsonify({"status": "no_data"})
-    return jsonify({"status": "ok", "mail": _current_mail_data})
+    with _mail_data_lock:
+        if not _current_mail_data:
+            return jsonify({"status": "no_data"})
+        # Copie defensive : si _current_mail_data est mute apres release du lock,
+        # le client recoit la version coherente capturee maintenant.
+        snapshot = dict(_current_mail_data)
+    return jsonify({"status": "ok", "mail": snapshot})
 
 
 # --- New compose (OnNewMessageCompose) ---------------------------------------
@@ -2899,7 +2910,12 @@ def api_trigger_prefetch():
     Fallback pour les cas où message_read a été appelé sans conversationId.
     """
     data = request.get_json(silent=True) or {}
-    mail_data = data if data else _current_mail_data
+    # Fix 27/04 PM (audit kit tech debt) — lecture _current_mail_data sous lock
+    if data:
+        mail_data = data
+    else:
+        with _mail_data_lock:
+            mail_data = dict(_current_mail_data) if _current_mail_data else {}
     if not mail_data.get('from_email'):
         return jsonify({"status": "error", "reason": "no_mail_data"})
 

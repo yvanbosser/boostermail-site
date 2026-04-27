@@ -218,7 +218,11 @@ class MicrosoftAuthProvider(AuthProvider):
         )
 
         if not result:
-            logger.warning("acquire_token_silent a retourné None (refresh expiré ?)")
+            # Fix 27/04 PM (audit kit) — passe de WARNING a DEBUG. Cas frequent et
+            # non-actionnable (refresh expire OU pas d'utilisateur connecte). Polluait
+            # journalctl avec 1 warning toutes les 30s en cas d'absence de session.
+            # Si on a vraiment besoin de tracer : `journalctl -p debug` ou via Sentry.
+            logger.debug("acquire_token_silent a retourné None (refresh expiré ou pas de user connecté)")
             return None
 
         if 'error' in result:

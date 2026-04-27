@@ -3463,42 +3463,9 @@ function _fetchMailSummary() {
         });
 }
 
-/**
- * DEPRECATED 21/04 — remplacé par _tryInstantReply() qui lit directement
- * le texte caché au lieu de rappeler generateReply() (qui régénérait depuis
- * zéro et écrasait la réponse cachée). Fonction gardée pour compat mais
- * PLUS APPELÉE au démarrage.
- */
-function _checkSpeculativeCache() {
-    console.warn('[dialog] _checkSpeculativeCache est deprecated — use _tryInstantReply');
-    return;
-    var url = _backendUrl + '/api/prefetch_status';  // fix #6 : utiliser _backendUrl comme tous les autres fetch
-    if (_messageId) url += '?message_id=' + encodeURIComponent(_messageId);
-
-    fetch(url)
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.speculative_ready) {
-                // La réponse est prête — attendre que le body soit chargé avant de déclencher
-                // (le fetch /api/email_body est asynchrone : _mailBodyForGeneration peut être vide)
-                console.log('[dialog] Speculative cache ready — attente body...');
-                var _waitBody = function(attempts) {
-                    if (_mailBodyForGeneration || _mode === 'new' || attempts <= 0) {
-                        console.log('[dialog] Declenchement automatique (body=' + _mailBodyForGeneration.length + ' chars)');
-                        generateReply();
-                    } else {
-                        setTimeout(function() { _waitBody(attempts - 1); }, 150);
-                    }
-                };
-                // 20 × 150ms = 3s max d'attente du body avant de déclencher quand même
-                _waitBody(20);
-            } else if (data.status === 'done') {
-                // Prefetch done mais pas de spéculative — contexte prêt
-                console.log('[dialog] Prefetch done (A=' + data.a_count + ' B=' + data.b_count + ' C=' + data.c_count + ')');
-            }
-        })
-        .catch(function() {});
-}
+// _checkSpeculativeCache supprime 27/04 PM (audit kit #10) — deprecated 21/04,
+// remplace par _tryInstantReply() depuis 6 jours. Code mort apres `return` jamais
+// execute, fonction jamais appelee dans le flow actuel.
 
 /**
  * (B10) Fonction appelée par PyQt via page.runJavaScript() pour pré-charger les données.
