@@ -4889,9 +4889,51 @@ def api_companion_proxy(subpath):
 
 @app.route('/api/contact_profiles')
 def api_contact_profiles():
-    """Retourne tous les profils contacts (autocomplete, page Contacts)."""
+    """Retourne tous les profils contacts (page Contacts admin uniquement).
+
+    Note 27/04 PM : pour l'autocomplete dialog, voir /api/contact_search
+    qui retourne uniquement 8 suggestions matchantes (gain ~180 KB par clic).
+    """
     profiles = _db.get_all_contact_profiles()
     return jsonify({"profiles": profiles})
+
+
+@app.route('/api/contact_search')
+def api_contact_search():
+    """Recherche les contacts matchant un prefix (autocomplete dialog).
+
+    Optim 27/04 PM Workflow 3 — remplace le pre-chargement de
+    /api/contact_profiles (187 KB) par un fetch debounced a la frappe.
+    Le cache localStorage cote frontend ne tenait pas dans le contexte
+    iframe Office.js (sandboxe par dialog), du coup chaque ouverture
+    dialog telechargait 187 KB inutilement. Cette route retourne ~3 KB
+    par recherche (8 suggestions max).
+
+    Query : ?q=<prefix> (min 2 chars)
+    Retour : {"contacts": [{name, email, org}, ...]} (max 8)
+    """
+    q = (request.args.get('q', '') or '').strip().lower()
+    if not q or len(q) < 2:
+        return jsonify({"contacts": []})
+
+    # Pour ~100 contacts en DB (cas typique), filter Python est OK.
+    # Si volume > 10k, passer a une query SQL WHERE name LIKE/email LIKE
+    # avec index. Pas necessaire actuellement.
+    all_profiles = _db.get_all_contact_profiles()
+    matches = []
+    for p in all_profiles:
+        name = (p.get('display_name', '') or '').lower()
+        email = (p.get('email', '') or '').lower()
+        org = (p.get('organization', '') or '').lower()
+        if q in name or q in email or q in org:
+            matches.append({
+                'name': p.get('display_name', ''),
+                'email': p.get('email', ''),
+                'org': p.get('organization', ''),
+            })
+            if len(matches) >= 8:
+                break
+    return jsonify({"contacts": matches})
 
 
 @app.route('/api/contact_profile/<path:email>')

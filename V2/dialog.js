@@ -39,7 +39,7 @@ var _isStandardMode = false;  // Détecté via /api/status au chargement
 var _sendStartTime = 0;       // Timestamp pour métrique duration
 var _receivedBody = '';        // Body du mail reçu (pour sauvegarde DB post-envoi + génération)
 var _mailBodyForGeneration = ''; // Body complet pour la génération IA
-var _contactsCache = [];       // Cache contacts pour autocomplete
+// _contactsCache supprime 27/04 PM — autocomplete passe par /api/contact_search debounced (cf _initAutocomplete)
 
 // (Phase 3) Mode standalone : ouvert dans QWebEngineView (PyQt) ou window.open (extension)
 var _isStandaloneMode = _params.has('standalone');
@@ -310,8 +310,8 @@ window.addEventListener('beforeunload', _cleanupAllStreams);
     // Détecter le mode (Standard vs Perf. Réduite) et adapter le bouton envoi
     _detectMode();
 
-    // Charger les contacts pour autocomplete
-    _loadContacts();
+    // Autocomplete contacts : fetch debounced /api/contact_search a la frappe
+    // (plus de pre-load 187 KB upfront — cf optim Workflow 3 du 27/04 PM)
     _initAutocomplete('fieldTo', 'acTo');
     _initAutocomplete('fieldCc', 'acCc');
 
@@ -2861,49 +2861,14 @@ function _listenParentMessages() {
 // AUTOCOMPLETE CONTACTS (12o)
 // =============================================================================
 
-var _contactsCacheLoaded = false;
-
-function _loadContacts() {
-    if (_contactsCacheLoaded) return;
-    _contactsCacheLoaded = true;
-
-    // Fix 2 (20/04) — cache localStorage TTL 1 h.
-    // /api/contact_profiles change rarement (nouveau contact rencontré).
-    // Cache hit → autocomplete dispo instantanément + revalidation BG.
-    var _apply = function(profiles) {
-        _contactsCache = (profiles || []).map(function(p) {
-            return {
-                name: p.display_name || '',
-                email: p.email || '',
-                org: p.organization || '',
-            };
-        });
-    };
-    try {
-        var cached = JSON.parse(localStorage.getItem('em_contacts_v1') || 'null');
-        if (cached && (Date.now() - cached.ts) < 3600000) {
-            _apply(cached.profiles);   // 0 ms — appliqué instantanément
-        }
-    } catch(e) {
-        // Fix D5 (21/04 audit) : cache corrompu → fallback safe + purge
-        _contactsCache = [];
-        try { localStorage.removeItem('em_contacts_v1'); } catch(_){}
-    }
-
-    // Revalidation BG
-    fetch(_backendUrl + '/api/contact_profiles')
-        .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-        .then(function(data) {
-            _apply(data.profiles);
-            try {
-                localStorage.setItem('em_contacts_v1', JSON.stringify({
-                    ts: Date.now(),
-                    profiles: data.profiles || [],
-                }));
-            } catch(e) {}
-        })
-        .catch(function() { if (!_contactsCache.length) _contactsCache = []; });
-}
+// Optim 27/04 PM (Workflow 3 audit kit) — remplacement du pre-load
+// /api/contact_profiles 187 KB par un fetch debounced /api/contact_search
+// a la frappe. Le cache localStorage TTL 1h ne tenait pas dans le contexte
+// iframe Office.js (sandboxe par dialog), donc 187 KB telecharges a chaque
+// clic. Avec contact_search : ~3 KB par recherche, declenche seulement
+// quand l'user tape > 2 chars dans À : ou Cc :.
+//
+// _loadContacts() et _contactsCache supprimes (plus utilises).
 
 function _initAutocomplete(inputId, dropdownId) {
     var input = document.getElementById(inputId);
@@ -2911,24 +2876,14 @@ function _initAutocomplete(inputId, dropdownId) {
     if (!input || !dropdown) return;
 
     var selectedIndex = -1;
+    var _searchTimer = null;
+    var _searchAbortCtrl = null;
 
-    input.addEventListener('input', function() {
-        var val = input.value.trim().toLowerCase();
-        if (val.length < 2) {
+    function _renderMatches(matches) {
+        if (!matches || !matches.length) {
             dropdown.classList.remove('active');
             return;
         }
-        var matches = _contactsCache.filter(function(c) {
-            return (c.name && c.name.toLowerCase().indexOf(val) >= 0) ||
-                   (c.email && c.email.toLowerCase().indexOf(val) >= 0) ||
-                   (c.org && c.org.toLowerCase().indexOf(val) >= 0);
-        }).slice(0, 8);
-
-        if (matches.length === 0) {
-            dropdown.classList.remove('active');
-            return;
-        }
-
         selectedIndex = -1;
         dropdown.innerHTML = matches.map(function(c, i) {
             return '<div class="em-ac-item" data-email="' + _escapeHtml(c.email) + '" data-index="' + i + '">'
@@ -2954,6 +2909,40 @@ function _initAutocomplete(inputId, dropdownId) {
                 setTimeout(function() { dropdown.classList.remove('active'); }, 50);
             });
         });
+    }
+
+    function _doSearch(val) {
+        // Annuler le fetch precedent si encore en vol (evite race)
+        if (_searchAbortCtrl) {
+            try { _searchAbortCtrl.abort(); } catch(_) {}
+        }
+        _searchAbortCtrl = (typeof AbortController !== 'undefined')
+            ? new AbortController() : null;
+
+        var url = _backendUrl + '/api/contact_search?q=' + encodeURIComponent(val);
+        var opts = _searchAbortCtrl ? { signal: _searchAbortCtrl.signal } : {};
+
+        fetch(url, opts)
+            .then(function(r) { return r.ok ? r.json() : { contacts: [] }; })
+            .then(function(data) { _renderMatches(data.contacts || []); })
+            .catch(function(err) {
+                // AbortError = nouveau fetch parti, normal. Autres = silent.
+                if (err && err.name === 'AbortError') return;
+            });
+    }
+
+    input.addEventListener('input', function() {
+        var val = input.value.trim().toLowerCase();
+        if (val.length < 2) {
+            dropdown.classList.remove('active');
+            return;
+        }
+        // Debounce 150 ms : evite de spammer le serveur a chaque touche
+        if (_searchTimer) clearTimeout(_searchTimer);
+        _searchTimer = setTimeout(function() {
+            _searchTimer = null;
+            _doSearch(val);
+        }, 150);
     });
 
     // Navigation clavier
