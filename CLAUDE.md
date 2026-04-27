@@ -1,6 +1,8 @@
-# EasyMail (BoosterMail) — Assistant Email Intelligent
+# BoosterMail (ex EasyMail) — Assistant Email Intelligent
 
 Assistant email intelligent integre a Outlook (plugin + Graph API). Claude AI genere des reponses adaptees au style de l'utilisateur et au profil de chaque correspondant.
+
+**Note rebranding 26/04/2026** : le produit s'appelle **BoosterMail** côté utilisateur (manifest, UI Outlook, install). Le code interne garde `easymail` (IDs, variables, URIs `easymail://`, logger Python, paths `C:\EasyMail\`) pour stabilité — pas visible utilisateur.
 
 ---
 
@@ -365,6 +367,41 @@ Avant : `/api/mail_preview/<id>` retournait les 3 plats ensemble. Après : `/api
 - Interlignes apparaissent puis disparaissent dans le dialog
 - Signature dupliquée ou mal placée
 - Graph 400 sur `extract_attachments` (frontend envoie IMID, Graph veut Entry ID)
+
+---
+
+## Session du 25-26/04/2026 — PIVOT SaaS + Phase 1 deployee
+
+### Pivot strategique (25/04)
+Decision de basculer BoosterMail de l'installation locale (proto + V2 + start.bat + companion COM) vers un SaaS hebergé sur **VPS OVH Gravelines**. Motivation : eliminer les frictions d'installation (versions Windows/Outlook variables, COM, OneDrive, droits admin).
+
+Domaine **`boostermail.ai`** acheté 25/04 (~80€/an). Cout fixe ~29€/mois HT, rentable des 2 clients à 19€/mois.
+
+### Phase 1 SaaS terminee (26/04)
+- VPS OVH Public Cloud b3-8 (4 vCPU / 8 Go RAM / 160 Go SSD NVMe), IP `51.178.162.208`
+- nginx reverse proxy 443 → Flask 3443 HTTPS (cert Let's Encrypt + cert auto-signe Flask interne)
+- Service `boostermail.service` systemd auto-restart
+- Securite : UFW (22/80/443 only), fail2ban (1 IP bannie en 17ms), SSH key-only
+- API keys Anthropic + OpenAI regenerees (anciennes exposees dans transcripts → supprimees)
+- Sentry monitoring actif (free tier EU, send_default_pii=False RGPD-safe)
+- Rebrand UI EasyMail → BoosterMail (26 strings user-visibles : manifest + HTML + JS)
+
+### Outlook Web differe en Phase 6 post-beta
+Code 12011 `displayDialogAsync` resolu via `displayInIframe: true` mais le contenu du dialog ne se charge pas dans l'iframe (erreur JS cross-origin masquee). Les beta-testeurs utiliseront New Outlook ou Outlook Classic.
+
+### Ordre d'execution post-26/04
+1. Cleanup docs (en cours)
+2. Retrouver tenant Azure + creer app multi-tenant + regenerer Microsoft client_secret
+3. Soumission AppSource (4-8 semaines de validation Microsoft)
+4. Page `install.boostermail.ai`
+5. Phase 2 multi-tenant (DB user_id, isolation routes)
+6. Test New Outlook complet (post migration mail OVH)
+7. Phase 4 paiement Stripe + RGPD
+8. Phase 6 debug dialog Outlook Web (post-beta)
+
+→ Bilan complet : `docs/sessions/SAAS_BILAN_SESSION_20260426.md`
+→ Onboarding vivant SaaS (à lire au début de toute session SaaS) : `docs/saas/ONBOARDING_SESSION_SAAS.md`
+→ Plan SaaS detaille : `docs/plans/PLAN_SAAS.md`
 
 ---
 

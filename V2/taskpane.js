@@ -168,7 +168,7 @@ function _addInsightMessage(item) {
             }
         }
 
-        var message = 'EasyMail : mail de ' + (item.from ? item.from.displayName : 'inconnu');
+        var message = 'BoosterMail : mail de ' + (item.from ? item.from.displayName : 'inconnu');
         if (attachmentCount > 0) {
             message += ', ' + attachmentCount + ' PJ analysable' + (attachmentCount > 1 ? 's' : '');
         }
@@ -179,7 +179,7 @@ function _addInsightMessage(item) {
             icon: 'icon16',
             actions: [{
                 actionType: Office.MailboxEnums.ActionType.ShowTaskPane,
-                actionText: 'Ouvrir EasyMail',
+                actionText: 'Ouvrir BoosterMail',
                 commandId: 'easymailTaskpaneButton'
             }]
         }, function (result) {
@@ -448,7 +448,7 @@ function _showSetupWizard(step) {
         }
         document.getElementById('setupStep3').style.display = 'block';
         document.getElementById('setupInstallCompanion').onclick = function() {
-            alert('Telechargez le Companion depuis le site EasyMail, puis relancez le plugin.');
+            alert('Telechargez le Companion depuis le site BoosterMail, puis relancez le plugin.');
             _setupPost('3', {companion_installed: true}, '4');
         };
         document.getElementById('setupSkipCompanion').onclick = function() {

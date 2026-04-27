@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BoosterMail — Politique de confidentialité</title>
+    <meta name="description" content="Politique de confidentialité de BoosterMail, assistant email intelligent.">
+    <link rel="icon" type="image/png" href="/assets/icon-32.png">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; color: #333; background: #f5f8fc; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+        a { color: #0F6CBD; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        .topbar { background: #0F6CBD; color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 10px; }
+        .topbar-logo { width: 28px; height: 28px; }
+        .topbar-title { font-weight: 700; font-size: 18px; letter-spacing: 0.2px; }
+        .topbar a.back { color: #fff; margin-left: auto; font-size: 14px; opacity: 0.9; }
+        .topbar a.back:hover { opacity: 1; text-decoration: underline; }
+
+        main { max-width: 820px; margin: 32px auto 56px; padding: 0 24px; }
+        h1 { font-size: 28px; font-weight: 700; margin-bottom: 6px; color: #1a1a1a; }
+        .last-update { color: #666; font-size: 13px; margin-bottom: 24px; font-style: italic; }
+        h2 { font-size: 20px; font-weight: 700; margin: 28px 0 10px; color: #1a1a1a; padding-top: 12px; border-top: 1px solid #e0e6ed; }
+        h2:first-of-type { border-top: none; padding-top: 0; }
+        h3 { font-size: 16px; font-weight: 600; margin: 16px 0 6px; color: #1a1a1a; }
+        p { margin-bottom: 12px; }
+        ul { margin: 8px 0 12px 22px; }
+        li { margin-bottom: 6px; }
+        code { background: #f0f7ff; padding: 2px 6px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 13px; color: #0F6CBD; }
+        .draft-banner { background: #fff8e1; border-left: 4px solid #ffa000; padding: 12px 16px; border-radius: 0 6px 6px 0; margin-bottom: 24px; font-size: 14px; color: #5d4500; }
+
+        table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+        th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e0e6ed; vertical-align: top; }
+        th { background: #f0f7ff; color: #1a1a1a; font-weight: 600; }
+
+        footer { background: #1a1a1a; color: #aaa; padding: 24px; text-align: center; font-size: 13px; }
+        footer a { color: #fff; }
+
+        @media (max-width: 600px) {
+            h1 { font-size: 22px; }
+            h2 { font-size: 17px; }
+            main { padding: 0 16px; margin: 20px auto 32px; }
+        }
+    </style>
+</head>
+<body>
+
+<header class="topbar">
+    <img class="topbar-logo" src="/assets/icon-32.png" alt="BoosterMail" onerror="this.style.display='none'">
+    <span class="topbar-title">BoosterMail</span>
+    <a class="back" href="/">← Retour à l'installation</a>
+</header>
+
+<main>
+    <h1>Politique de confidentialité</h1>
+    <p class="last-update">Dernière mise à jour : 27 avril 2026</p>
+
+    <div class="draft-banner">
+        <strong>Document en cours de finalisation.</strong> Cette politique de confidentialité est un draft technique en cours de revue juridique. Elle sera officiellement validée avant l'ouverture commerciale du service. Pour toute question dans l'intervalle, écrire à <a href="mailto:yvan.bosser@groupe-bosser.fr">yvan.bosser@groupe-bosser.fr</a>.
+    </div>
+
+    <h2>1. Qui sommes-nous ?</h2>
+    <p>BoosterMail est un assistant email intelligent qui s'intègre à Microsoft Outlook pour générer des réponses adaptées au style de l'utilisateur et au profil de chaque correspondant.</p>
+    <p><strong>Responsable de traitement :</strong> [Entité éditrice en cours de finalisation — voir bandeau ci-dessus.]</p>
+    <p><strong>Contact :</strong> <a href="mailto:yvan.bosser@groupe-bosser.fr">yvan.bosser@groupe-bosser.fr</a></p>
+
+    <h2>2. Quelles données collectons-nous ?</h2>
+
+    <h3>2.1 Données d'identité (lors de la connexion Microsoft)</h3>
+    <ul>
+        <li>Votre <strong>nom</strong> et <strong>adresse email Microsoft</strong> (récupérés via le protocole OAuth 2.0 Microsoft Graph)</li>
+        <li>Votre <strong>identifiant utilisateur Microsoft</strong> (UUID interne, pour distinguer les utilisateurs)</li>
+        <li>Le <strong>tenant Microsoft</strong> auquel vous appartenez (organisation ou compte personnel)</li>
+    </ul>
+
+    <h3>2.2 Données de contenu (à la demande, uniquement quand vous utilisez le service)</h3>
+    <ul>
+        <li>Le <strong>contenu des emails</strong> que vous demandez à BoosterMail d'analyser ou de répondre (sujet, corps, expéditeur, destinataires, pièces jointes)</li>
+        <li>Le <strong>contenu textuel des pièces jointes</strong> que vous joignez à votre demande (PDF, Word, Excel, images via OCR)</li>
+        <li>Vos <strong>instructions optionnelles</strong> et corrections sur les réponses générées (utilisées pour ajuster le style de l'IA à votre écriture)</li>
+    </ul>
+
+    <h3>2.3 Données techniques (générées automatiquement)</h3>
+    <ul>
+        <li><strong>Tokens d'authentification Microsoft</strong> (chiffrés en base, permettent à BoosterMail d'accéder à votre boîte mail en votre nom selon les permissions accordées)</li>
+        <li><strong>Métriques d'usage</strong> : nombre de réponses générées, temps de génération, taux d'acceptation des suggestions (anonymisées au niveau utilisateur, pas de contenu)</li>
+        <li><strong>Logs techniques</strong> : adresse IP, user-agent, horodatage des requêtes (pour la sécurité et le débogage)</li>
+        <li><strong>Erreurs applicatives</strong> envoyées à Sentry (notre outil de monitoring) — sans informations personnelles identifiables, configuration RGPD-safe (<code>send_default_pii=False</code>)</li>
+    </ul>
+
+    <h2>3. Pourquoi collectons-nous ces données (finalités) ?</h2>
+    <table>
+        <tr><th>Donnée</th><th>Finalité</th><th>Base légale</th></tr>
+        <tr><td>Identité Microsoft</td><td>Authentification, identification du compte utilisateur</td><td>Exécution du contrat de service</td></tr>
+        <tr><td>Contenu des emails</td><td>Génération de réponses contextuelles, analyse du style, profil de correspondants</td><td>Exécution du contrat de service</td></tr>
+        <tr><td>Pièces jointes</td><td>Analyse pour génération de réponses prenant en compte les documents</td><td>Exécution du contrat de service</td></tr>
+        <tr><td>Tokens OAuth</td><td>Accès délégué à Microsoft Graph en votre nom (lecture/envoi de mails)</td><td>Exécution du contrat de service</td></tr>
+        <tr><td>Métriques d'usage</td><td>Amélioration du service, statistiques agrégées</td><td>Intérêt légitime</td></tr>
+        <tr><td>Logs techniques + erreurs</td><td>Sécurité, débogage, prévention des abus</td><td>Intérêt légitime</td></tr>
+    </table>
+
+    <h2>4. Avec qui partageons-nous vos données (sous-traitants) ?</h2>
+    <p>BoosterMail s'appuie sur des prestataires techniques tiers, dits « sous-traitants », qui agissent sur instructions de BoosterMail uniquement et sont contractuellement tenus à la confidentialité :</p>
+    <table>
+        <tr><th>Sous-traitant</th><th>Rôle</th><th>Données transférées</th><th>Localisation</th></tr>
+        <tr><td><a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener">Anthropic (Claude API)</a></td><td>Génération de texte par IA</td><td>Contenu des emails à analyser, instructions, contexte</td><td>États-Unis (clauses contractuelles types)</td></tr>
+        <tr><td><a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener">OpenAI</a></td><td>OCR pour pièces jointes scannées</td><td>Images des PDF scannés</td><td>États-Unis (clauses contractuelles types)</td></tr>
+        <tr><td><a href="https://privacy.microsoft.com/" target="_blank" rel="noopener">Microsoft (Graph API)</a></td><td>Authentification + accès aux emails</td><td>Identité, tokens, requêtes Graph</td><td>UE (Microsoft Cloud Europe)</td></tr>
+        <tr><td><a href="https://sentry.io/privacy/" target="_blank" rel="noopener">Sentry</a></td><td>Monitoring d'erreurs serveur</td><td>Logs techniques, traces d'erreurs (anonymisés)</td><td>Allemagne (région UE)</td></tr>
+        <tr><td><a href="https://www.ovhcloud.com/fr/personal-data-protection/" target="_blank" rel="noopener">OVH Cloud</a></td><td>Hébergement serveur</td><td>L'ensemble des données (chiffrement au repos)</td><td>France (Gravelines)</td></tr>
+    </table>
+    <p><strong>Important :</strong> BoosterMail ne <strong>vend</strong> ni ne <strong>commercialise</strong> vos données à aucun tiers à des fins publicitaires ou commerciales. Vos emails ne sont pas utilisés pour entraîner des modèles d'IA.</p>
+
+    <h2>5. Combien de temps conservons-nous vos données ?</h2>
+    <ul>
+        <li><strong>Compte actif</strong> : tant que vous utilisez le service. Vous pouvez vous désinscrire à tout moment depuis le menu Microsoft Outlook → Mes compléments → BoosterMail → Supprimer.</li>
+        <li><strong>Après désinscription</strong> : suppression complète des données dans un délai de 30 jours, sauf obligations légales (logs de sécurité conservés 1 an, données de facturation 10 ans pour les comptes payants conformément au Code de commerce).</li>
+        <li><strong>Backups quotidiens</strong> : la base de données est sauvegardée chaque nuit avec une rotation glissante de 30 jours. Vos données disparaissent intégralement de tous les backups au plus tard 30 jours après leur suppression de la base active.</li>
+        <li><strong>Logs serveur</strong> : 30 jours glissants.</li>
+        <li><strong>Métriques anonymisées</strong> : conservées indéfiniment sous forme agrégée (pas de lien possible avec une personne identifiée).</li>
+    </ul>
+
+    <h2>6. Quels sont vos droits ?</h2>
+    <p>Conformément au RGPD (UE 2016/679) et à la loi française Informatique et Libertés modifiée, vous disposez des droits suivants :</p>
+    <ul>
+        <li><strong>Droit d'accès</strong> : obtenir la confirmation que des données vous concernant sont traitées et en obtenir une copie</li>
+        <li><strong>Droit de rectification</strong> : demander la correction de données inexactes</li>
+        <li><strong>Droit à l'effacement</strong> (« droit à l'oubli ») : demander la suppression de vos données</li>
+        <li><strong>Droit à la limitation</strong> : demander la suspension temporaire du traitement</li>
+        <li><strong>Droit à la portabilité</strong> : recevoir vos données dans un format structuré et lisible</li>
+        <li><strong>Droit d'opposition</strong> : vous opposer au traitement pour motifs légitimes</li>
+        <li><strong>Droit de définir des directives post-mortem</strong> sur le sort de vos données</li>
+    </ul>
+    <p>Pour exercer ces droits, contactez : <a href="mailto:yvan.bosser@groupe-bosser.fr">yvan.bosser@groupe-bosser.fr</a>. Nous vous répondrons dans un délai maximum d'un mois.</p>
+    <p>Vous avez également le droit d'introduire une réclamation auprès de la <strong>CNIL</strong> (Commission Nationale de l'Informatique et des Libertés) : <a href="https://www.cnil.fr/fr/plaintes" target="_blank" rel="noopener">www.cnil.fr/fr/plaintes</a>.</p>
+
+    <h2>7. Comment vos données sont-elles sécurisées ?</h2>
+    <ul>
+        <li><strong>Chiffrement en transit</strong> : tout échange entre votre Outlook et BoosterMail passe par HTTPS (TLS 1.2+, certificat Let's Encrypt).</li>
+        <li><strong>Chiffrement des secrets en base</strong> : les tokens d'authentification Microsoft sont chiffrés avec une clé Fernet (AES-128 avec HMAC) avant stockage en base de données.</li>
+        <li><strong>Authentification serveur</strong> : accès SSH par clé uniquement (pas de mot de passe), firewall UFW restrictif, fail2ban actif.</li>
+        <li><strong>Pas de PII dans les logs d'erreur</strong> : configuration Sentry <code>send_default_pii=False</code>, garantissant qu'aucune donnée personnelle identifiable n'est envoyée au monitoring.</li>
+        <li><strong>Hébergement souverain européen</strong> : serveur OVH Cloud à Gravelines (France), backups stockés sur le même serveur (même territoire).</li>
+        <li><strong>Cap API par utilisateur</strong> : limitation quotidienne d'appels API pour prévenir les abus et protéger contre les utilisations malveillantes.</li>
+    </ul>
+
+    <h2>8. Cookies et stockage local</h2>
+    <p>BoosterMail utilise un <strong>cookie de session technique</strong> nommé <code>session</code>, strictement nécessaire au fonctionnement du service (mémorisation de votre état de connexion). Ce cookie est :</p>
+    <ul>
+        <li>Marqué <code>HttpOnly</code> (inaccessible en JavaScript)</li>
+        <li>Marqué <code>Secure</code> (transmis uniquement en HTTPS)</li>
+        <li>Limité au domaine <code>api.boostermail.ai</code></li>
+        <li>Supprimé à la fin de votre session ou à la déconnexion</li>
+    </ul>
+    <p>Aucun cookie publicitaire, aucun cookie tiers, aucun pixel de tracking ne sont déposés.</p>
+
+    <h2>9. Modifications de cette politique</h2>
+    <p>Toute évolution significative de cette politique de confidentialité sera notifiée aux utilisateurs actifs par email avec un préavis de 15 jours. La date de dernière mise à jour est indiquée en haut de cette page.</p>
+
+    <h2>10. Contact</h2>
+    <p>Pour toute question relative à cette politique ou à la protection de vos données :</p>
+    <ul>
+        <li>Email : <a href="mailto:yvan.bosser@groupe-bosser.fr">yvan.bosser@groupe-bosser.fr</a></li>
+        <li>Site : <a href="https://install.boostermail.ai/">install.boostermail.ai</a></li>
+    </ul>
+
+</main>
+
+<footer>
+    <p>© 2026 BoosterMail · Assistant email intelligent</p>
+    <p style="margin-top: 6px;"><a href="/">Retour à l'installation</a> · <a href="/terms.html">Conditions Générales d'Utilisation</a></p>
+</footer>
+
+</body>
+</html>

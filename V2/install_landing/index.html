@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BoosterMail — Installer le plugin Outlook</title>
+    <meta name="description" content="Guide d'installation du plugin BoosterMail pour Outlook : générez des réponses email adaptées à votre style en un clic.">
+    <link rel="icon" type="image/png" href="/assets/icon-32.png">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; color: #333; background: #f5f8fc; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+        a { color: #0F6CBD; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        /* Header */
+        .topbar { background: #0F6CBD; color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 10px; }
+        .topbar-logo { width: 28px; height: 28px; }
+        .topbar-title { font-weight: 700; font-size: 18px; letter-spacing: 0.2px; }
+
+        /* Hero */
+        .hero { max-width: 880px; margin: 56px auto 32px; padding: 0 24px; text-align: center; }
+        .hero h1 { font-size: 38px; font-weight: 700; color: #1a1a1a; margin-bottom: 14px; line-height: 1.2; }
+        .hero p.tagline { font-size: 18px; color: #555; max-width: 640px; margin: 0 auto 32px; }
+
+        /* Manifest URL bloc */
+        .manifest-block { background: #fff; border: 1px solid #e0e6ed; border-radius: 10px; padding: 20px 24px; max-width: 720px; margin: 0 auto 16px; box-shadow: 0 2px 8px rgba(15, 108, 189, 0.06); display: flex; align-items: center; gap: 12px; }
+        .manifest-label { font-size: 13px; color: #666; font-weight: 600; flex-shrink: 0; }
+        .manifest-url { flex: 1; font-family: 'Consolas', 'Menlo', monospace; font-size: 14px; color: #0F6CBD; background: #f0f7ff; padding: 8px 12px; border-radius: 6px; overflow-x: auto; white-space: nowrap; user-select: all; }
+        .copy-btn { padding: 8px 14px; background: #0F6CBD; color: #fff; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; flex-shrink: 0; transition: background 0.15s; }
+        .copy-btn:hover { background: #0a5599; }
+        .copy-btn.copied { background: #4caf50; }
+
+        /* CTA */
+        .cta-row { text-align: center; margin: 28px 0 56px; }
+        .cta-btn { display: inline-block; padding: 14px 28px; background: #0F6CBD; color: #fff; border-radius: 8px; font-weight: 600; font-size: 16px; text-decoration: none; transition: background 0.15s; }
+        .cta-btn:hover { background: #0a5599; text-decoration: none; }
+        .cta-btn:focus { outline: 3px solid rgba(15,108,189,0.3); }
+        .cta-help { display: block; margin-top: 12px; color: #666; font-size: 14px; }
+
+        /* Steps */
+        .steps-section { max-width: 880px; margin: 0 auto; padding: 32px 24px; }
+        .steps-section h2 { font-size: 26px; font-weight: 700; margin-bottom: 28px; color: #1a1a1a; text-align: center; }
+        .steps { display: grid; gap: 18px; }
+        .step { background: #fff; border: 1px solid #e0e6ed; border-radius: 10px; padding: 20px 22px; display: flex; gap: 16px; align-items: flex-start; }
+        .step-num { flex-shrink: 0; width: 36px; height: 36px; background: #0F6CBD; color: #fff; border-radius: 50%; font-weight: 700; font-size: 16px; display: flex; align-items: center; justify-content: center; }
+        .step-body h3 { font-size: 16px; font-weight: 600; margin-bottom: 4px; color: #1a1a1a; }
+        .step-body p { color: #555; font-size: 14px; }
+        .step-body code { background: #f0f7ff; padding: 2px 6px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 13px; color: #0F6CBD; }
+
+        /* Compat */
+        .compat-section { max-width: 880px; margin: 0 auto; padding: 32px 24px 16px; }
+        .compat-section h2 { font-size: 22px; font-weight: 700; margin-bottom: 18px; color: #1a1a1a; text-align: center; }
+        .compat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+        .compat-card { background: #fff; border: 1px solid #e0e6ed; border-radius: 10px; padding: 16px 18px; }
+        .compat-card-title { font-weight: 600; font-size: 15px; margin-bottom: 6px; color: #1a1a1a; display: flex; align-items: center; gap: 8px; }
+        .compat-status { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 700; }
+        .compat-status.ok { background: #e6f4ea; color: #1f7a3a; }
+        .compat-status.partial { background: #fff4e1; color: #8a5a00; }
+        .compat-status.no { background: #fbe7e7; color: #a02828; }
+        .compat-card p { font-size: 13px; color: #555; }
+
+        /* FAQ */
+        .faq-section { max-width: 720px; margin: 0 auto; padding: 24px 24px 56px; }
+        .faq-section h2 { font-size: 22px; font-weight: 700; margin-bottom: 18px; color: #1a1a1a; text-align: center; }
+        details { background: #fff; border: 1px solid #e0e6ed; border-radius: 10px; padding: 14px 18px; margin-bottom: 10px; }
+        details summary { font-weight: 600; cursor: pointer; color: #1a1a1a; font-size: 15px; outline: none; list-style: none; position: relative; padding-right: 24px; }
+        details summary::-webkit-details-marker { display: none; }
+        details summary::after { content: '+'; position: absolute; right: 0; top: 50%; transform: translateY(-50%); font-size: 22px; color: #0F6CBD; font-weight: 400; }
+        details[open] summary::after { content: '−'; }
+        details > p { margin-top: 10px; font-size: 14px; color: #555; }
+        details > p code { background: #f0f7ff; padding: 2px 6px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 12px; color: #0F6CBD; }
+
+        /* Footer */
+        footer { background: #1a1a1a; color: #aaa; padding: 28px 24px; text-align: center; font-size: 13px; }
+        footer a { color: #fff; }
+
+        @media (max-width: 600px) {
+            .hero h1 { font-size: 28px; }
+            .hero p.tagline { font-size: 16px; }
+            .manifest-block { flex-direction: column; align-items: stretch; padding: 14px; }
+            .manifest-url { font-size: 12px; }
+            .step { padding: 14px; gap: 12px; }
+        }
+    </style>
+</head>
+<body>
+
+<header class="topbar">
+    <img class="topbar-logo" src="/assets/icon-32.png" alt="BoosterMail" onerror="this.style.display='none'">
+    <span class="topbar-title">BoosterMail</span>
+</header>
+
+<section class="hero">
+    <h1>Installer BoosterMail pour Outlook</h1>
+    <p class="tagline">Assistant email intelligent qui rédige vos réponses dans <strong>votre</strong> style, adaptées à chaque correspondant. L'installation prend <strong>moins de 2 minutes</strong>.</p>
+
+    <div class="manifest-block">
+        <span class="manifest-label">Lien à copier :</span>
+        <span class="manifest-url" id="manifestUrl">https://api.boostermail.ai/plugin/manifest.xml</span>
+        <button class="copy-btn" id="copyBtn" type="button" aria-label="Copier le lien">Copier</button>
+    </div>
+
+    <div class="cta-row">
+        <a class="cta-btn" href="https://aka.ms/olksideload" target="_blank" rel="noopener noreferrer">
+            Ouvrir le sideload Outlook →
+        </a>
+        <span class="cta-help">S'ouvre dans Outlook (Web ou Desktop). Suivez les étapes ci-dessous.</span>
+    </div>
+</section>
+
+<section class="steps-section">
+    <h2>Comment installer en 5 étapes</h2>
+    <div class="steps">
+        <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+                <h3>Copier le lien du manifest</h3>
+                <p>Cliquez sur <strong>Copier</strong> en haut de cette page. Le lien <code>https://api.boostermail.ai/plugin/manifest.xml</code> est maintenant dans votre presse-papier.</p>
+            </div>
+        </div>
+        <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+                <h3>Ouvrir l'installeur de compléments Outlook</h3>
+                <p>Cliquez sur le bouton <strong>« Ouvrir le sideload Outlook »</strong> ci-dessus, ou rendez-vous sur <a href="https://aka.ms/olksideload" target="_blank" rel="noopener noreferrer">aka.ms/olksideload</a>. La fenêtre <em>Mes compléments</em> s'ouvre.</p>
+            </div>
+        </div>
+        <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+                <h3>Choisir « Ajouter un complément personnalisé »</h3>
+                <p>En bas de la fenêtre, cliquez sur <strong>« Ajouter un complément personnalisé »</strong> puis <strong>« Ajouter à partir d'une URL »</strong>.</p>
+            </div>
+        </div>
+        <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+                <h3>Coller le lien du manifest</h3>
+                <p>Collez l'URL copiée à l'étape 1 dans le champ, validez avec <strong>OK</strong>, puis acceptez les permissions demandées.</p>
+            </div>
+        </div>
+        <div class="step">
+            <div class="step-num">5</div>
+            <div class="step-body">
+                <h3>C'est prêt !</h3>
+                <p>Le bouton <strong>BoosterMail</strong> apparaît dans votre ruban Outlook. Ouvrez un mail, cliquez dessus et générez votre première réponse intelligente.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="compat-section">
+    <h2>Versions Outlook compatibles</h2>
+    <div class="compat-grid">
+        <div class="compat-card">
+            <div class="compat-card-title">Outlook Classic <span class="compat-status ok">Compatible</span></div>
+            <p>Versions desktop Outlook 2019, 2021, Microsoft 365.</p>
+        </div>
+        <div class="compat-card">
+            <div class="compat-card-title">New Outlook (Desktop) <span class="compat-status ok">Compatible</span></div>
+            <p>La nouvelle expérience Outlook sur Windows et macOS.</p>
+        </div>
+        <div class="compat-card">
+            <div class="compat-card-title">Outlook Web <span class="compat-status partial">Bientôt</span></div>
+            <p>Le support du dialog dans iframe est en cours de finalisation.</p>
+        </div>
+    </div>
+</section>
+
+<section class="faq-section">
+    <h2>Questions fréquentes</h2>
+
+    <details>
+        <summary>Le lien <code>aka.ms/olksideload</code> ne fait rien chez moi</summary>
+        <p>Ouvrez Outlook → menu <strong>Accueil</strong> → <strong>Obtenir des compléments</strong> → onglet <strong>Mes compléments</strong> → <strong>Ajouter un complément personnalisé</strong> → <strong>Ajouter à partir d'une URL</strong>.</p>
+    </details>
+
+    <details>
+        <summary>BoosterMail est-il gratuit ?</summary>
+        <p>Pendant la phase beta, oui. Les tarifs payants seront communiqués avant le passage en version commerciale ; aucun prélèvement automatique sans accord explicite.</p>
+    </details>
+
+    <details>
+        <summary>Qu'est-ce qui est envoyé à BoosterMail ?</summary>
+        <p>Uniquement le contenu strictement nécessaire pour générer la réponse : objet, corps du mail courant, et historique pertinent. Aucune donnée n'est revendue. Les clés API et tokens sont chiffrés côté serveur.</p>
+    </details>
+
+    <details>
+        <summary>Comment désinstaller ?</summary>
+        <p>Dans Outlook : <strong>Obtenir des compléments</strong> → <strong>Mes compléments</strong> → BoosterMail → <strong>Supprimer</strong>.</p>
+    </details>
+
+    <details>
+        <summary>Je rencontre un problème, comment être aidé ?</summary>
+        <p>Écrivez à <a href="mailto:yvan.bosser@gmail.com">yvan.bosser@gmail.com</a> en décrivant la version d'Outlook utilisée et le message d'erreur exact si possible.</p>
+    </details>
+</section>
+
+<footer>
+    <p>© 2026 BoosterMail · Assistant email intelligent</p>
+    <p style="margin-top: 6px;">
+        <a href="/privacy.html">Politique de confidentialité</a> ·
+        <a href="/terms.html">Conditions Générales d'Utilisation</a> ·
+        <a href="https://api.boostermail.ai">api.boostermail.ai</a>
+    </p>
+</footer>
+
+<script>
+(function() {
+    var btn = document.getElementById('copyBtn');
+    var url = document.getElementById('manifestUrl').textContent.trim();
+    btn.addEventListener('click', function() {
+        var ok = false;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(url).then(function() {
+                showCopied();
+            }).catch(function() {
+                fallback();
+            });
+        } else {
+            fallback();
+        }
+        function fallback() {
+            var ta = document.createElement('textarea');
+            ta.value = url; ta.setAttribute('readonly', '');
+            ta.style.position = 'absolute'; ta.style.left = '-9999px';
+            document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); showCopied(); }
+            catch (e) { btn.textContent = 'Erreur'; }
+            document.body.removeChild(ta);
+        }
+        function showCopied() {
+            btn.textContent = 'Copié !';
+            btn.classList.add('copied');
+            setTimeout(function() {
+                btn.textContent = 'Copier';
+                btn.classList.remove('copied');
+            }, 2000);
+        }
+    });
+})();
+</script>
+
+</body>
+</html>

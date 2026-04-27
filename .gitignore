@@ -95,5 +95,3 @@ test_com_selection.py
 # Worktrees Claude Code
 .claude/worktrees/
 
-# Dossier site web (work in progress)
-site web/

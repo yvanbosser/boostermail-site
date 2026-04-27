@@ -438,4 +438,94 @@ améliorée si leurs contacts avaient des profils).
 
 ---
 
+## ⏸️ MPN (Microsoft Cloud Partner Program) — différé (27/04/2026)
+
+### Statut
+**Inscription MPN différée** jusqu'à clarification de l'entité juridique éditrice de BoosterMail (décision business + fiscale, pas technique).
+
+### Contexte
+Pour résoudre le warning Azure « End users cannot grant consent to newly registered multitenant apps without verified publishers » et débloquer la liste publique sur AppSource (Microsoft marketplace), il faut un **MPN ID** (Microsoft Partner Network ID, gratuit, attribué en 24-48h après inscription sur https://partner.microsoft.com/dashboard).
+
+### Pourquoi différé
+La structure du Groupe Bosser ne contient **aucune entité juridique « Groupe Bosser »** stricto sensu. Les options possibles d'éditeur :
+
+| Entité | Localisation | Détention | Adapté à éditer BoosterMail ? |
+|---|---|---|---|
+| OFEC 2 (holding) | Paris | Top de la chaîne | Possible mais holding pas vocation d'éditer du SaaS |
+| OFEC | Paris | Détenue par OFEC 2 | Possible mais immobilier, pas SaaS |
+| 25 SCI immobilières | France | Sous OFEC | Non (objet social incompatible) |
+| **PDLC** | **Île Maurice** | **OFEC 2 détient 10%** | Possible — mais 10% c'est un faible bras de levier |
+| **Nouvelle SAS dédiée** | À créer | À définir | **Recommandé long terme** |
+
+**Adresse mail unique** `yvan.bosser@groupe-bosser.fr` partagée par les 25-30 entités du groupe — pas un blocker mais peut compliquer la vérification Microsoft.
+
+### Pas bloquant à court/moyen terme
+- ✅ **Beta gratuite** : possible sans MPN
+- ✅ **1er client payant** : possible tant qu'il accepte le warning
+- ❌ **Liste publique AppSource** : MPN obligatoire — mais AppSource = minimum 4-8 sem de validation post-soumission
+
+### Reprise prévue
+**Avant l'Étape 6 (soumission AppSource)** : clarifier avec expert-comptable / juriste l'entité éditrice cible, inscrire MPN, récupérer MPN ID + l'enregistrer dans Azure (Branding & properties).
+
+---
+
+## ⏸️ Cap API : retour HTTP 429 propre dans les routes Flask (27/04/2026)
+
+### Statut
+Reporté à une session ultérieure (touche aux routes `/api/generate_reply`, `/api/refine_*` qui sont susceptibles d'évolutions par la session New Outlook → coordination requise).
+
+### Contexte
+Étape 5.B (cap API par user/jour) livrée le 26/04 PM avec module `V2/quota_tracker.py` (table `api_quota`, limites Claude 500/jour, OpenAI 200/jour). Hook minimal dans `core/claude_provider.py` et `core/openai_provider.py`.
+
+**Comportement actuel** : si un user dépasse son quota, `QuotaExceeded` (sous-classe `RuntimeError`) est levée et remonte en **HTTP 500 standard**. Le user voit une erreur générique « erreur serveur ».
+
+### À faire
+**Capture explicite dans les routes Flask appelantes** pour retour **HTTP 429** propre avec message UX clair :
+
+```python
+@app.route('/api/generate_reply', methods=['POST'])
+def generate_reply():
+    try:
+        ...
+    except QuotaExceeded as e:
+        return jsonify({
+            'error': 'quota_exceeded',
+            'provider': e.provider,
+            'used': e.used,
+            'limit': e.limit,
+            'message': f"Vous avez atteint votre quota quotidien BoosterMail "
+                       f"({e.used}/{e.limit} générations). Réessayez demain."
+        }), 429
+```
+
+Côté frontend (dialog.js) gérer le 429 avec un toast UX clair.
+
+### Pourquoi reporté
+- Touche `app_plugin.py` (modifié régulièrement par session New Outlook)
+- Touche `dialog.js` (scope strict de la session New Outlook)
+- Pas urgent : le 500 actuel est désagréable mais pas bloquant en beta interne
+
+---
+
+## ⏸️ Warnings logs cosmétiques (27/04/2026)
+
+### Statut
+Reportés. Sans impact fonctionnel, juste du bruit log.
+
+### Détails
+
+**1. `acquire_token_silent retourné None` toutes les 30 sec quand pas de user connecté**
+- Cause : auto-warmup tente toutes les 30s d'acquérir un token silencieusement même quand aucun user n'est en session
+- Impact : aucun, juste du bruit dans `journalctl`
+- Fix éventuel : modifier `app_plugin.py` pour fail-silently après N tentatives, ou logger en DEBUG au lieu de WARNING
+
+**2. Compteur `step` du `/api/warmup_status` ne reflète pas le warmup réel**
+- Cause : 2 code paths déclenchent le warmup (auto-warmup BG + warmup post-login user). Seul le 1er met à jour le step tracker.
+- Impact : l'UI peut afficher « Démarrage... » alors que le warmup est en réalité fini
+
+### Déclencheur reprise
+Ces 2 fixes peuvent être faits par la session New Outlook lors de son prochain cycle de fixes UX (probablement avant la beta).
+
+---
+
 ## (Autres items à documenter au fil du temps)

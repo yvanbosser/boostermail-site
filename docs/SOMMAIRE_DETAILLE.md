@@ -1,6 +1,6 @@
-# SOMMAIRE DÉTAILLÉ — Documentation BoosterMail/EasyMail
+# SOMMAIRE DÉTAILLÉ — Documentation BoosterMail (ex EasyMail)
 
-> **Dernière mise à jour** : 25/04/2026 (session Phase 1+2+3 + garde-fou drafts + V3 doc)
+> **Dernière mise à jour** : 27/04/2026 (consolidation merge SaaS + Outlook : Étapes 1+2+5 SaaS closes + 3 commits Outlook + pivot OVH source de vérité)
 
 > **Objectif** : index unique de TOUTE la documentation du projet.
 > À lire en début de session pour savoir **où trouver quoi** sans relire les docs entiers.
@@ -48,8 +48,14 @@ En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux
 - TTL des caches de réponses → **SUPPRIMÉS** au profit d'une purge événementielle pure + safety net 4 semaines (18/04)
 - Smart Speculative « 6 filtres » de la spec → **CORRIGÉ** : 5 à porter + 1 à créer en V2 (filtre open_count absent du proto) (18/04)
 - Popup « à chaque démarrage Outlook » → **AFFINÉE** : matrice 4 modes user × cache, toujours affichée mais contenu adapté (18/04)
-- Installation locale (start.bat + ZIP) → **REMPLACÉE** par architecture SaaS (serveur OVH + plugin AppSource) (25/04)
+- Installation locale (start.bat + ZIP) → **PIVOT SaaS** : V2 hébergé sur VPS OVH Gravelines (`api.boostermail.ai`), accessible depuis Outlook Web sans installation. Architecture décentralisée remplacée par SaaS centralisée. Voir `docs/plans/PLAN_SAAS.md` (25/04)
 - `NOUVELLE_SESSION_V2.md` → **REMPLACÉ** par `NOUVELLE_SESSION_V3.md` (25/04, ajoute règle nocode élargie + consultation kit audit en réflexe + sections Phase 1+2+3)
+- **Phase 1 SaaS terminée** (26/04) : VPS OVH `51.178.162.208` actif, SSL Let's Encrypt sur `api.boostermail.ai`, sécurité serveur (UFW + fail2ban + SSH key-only), Sentry monitoring (free tier EU, RGPD-safe), API keys régénérées (Anthropic + OpenAI). Voir `docs/sessions/SAAS_BILAN_SESSION_20260426.md` + `docs/saas/ONBOARDING_SESSION_SAAS.md` (référence vivante)
+- **Outlook Web différé en Phase 6 post-beta** (26/04) : code 12011 `displayDialogAsync` résolu via `displayInIframe: true` mais le contenu du dialog ne se charge pas dans l'iframe (erreur JS cross-origin masquée). Les beta-testeurs utiliseront New Outlook ou Outlook Classic
+- **Rebrand user-visible EasyMail → BoosterMail** (26/04) : 26 strings UI (manifest + HTML + JS). Le back garde `easymail` (IDs internes, URIs `easymail://`, logger Python) — pas visible utilisateur
+- **Phase 5 démarrée** (26/04 après-midi) : `OnNewMessageCompose` → `OnMessageCompose` (couvre new + reply + forward) + page `install.boostermail.ai` HTML + nginx HTTP-only déployée. Activation HTTPS attente DNS A record côté Yvan (procédure section F.3.1 onboarding). Voir `docs/sessions/SAAS_BILAN_SESSION_20260426_pm.md`
+- **Étapes 1, 2 et 5.A/5.B closes** (26/04 PM) : page install live HTTPS, nouvelle app Azure multi-tenant `groupe-bosser.fr` + OAuth end-to-end validé, backup DB cron quotidien + rotation 30j, cap API par user/jour (Claude 500, OpenAI 200) avec table SQLite auto-créée.
+- **Étape 5 close + MPN différé** (27/04 matin) : 5.C UptimeRobot 2 monitors actifs + 5.D brand check + 5.E privacy.html + 5.F terms.html déployés. Cleanup auth_token_cache MSAL fantôme. **MPN inscription différée** (décision business sur entité éditrice — voir `docs/PLUS_TARD.md`). Étape 5 100% close. Prochain verrou critique avant beta = Étape 7 multi-tenant DB user_id.
 - Étiquetage cache mixte (IMID/message_id/Graph id) → **UNIFIÉ** sur IMID strict via `_canonical_mid()` (25/04, Phase 1)
 - Smart Speculative filtrait juste la réponse → **UNIFIÉ** : 1 filtre = 5 plats (résumé/réponse/échéance/classement/PJ) (25/04, Phase 2)
 - `/api/mail_preview/<id>` retournait les 3 plats ensemble → **SPLITTÉ** en 3 portes dédiées (`/api/echeance/<id>`, `/api/classement_mail/<id>`, `/api/classement_pj/<id>`) (25/04, Phase 3)
@@ -90,6 +96,7 @@ docs/
 ├── v2_specs/          ← 11 specs Phase 2 V1/V2 (ex-V1_outlook/*.md)
 ├── analyses_proto_v2/         ← 16 analyses comparatives proto vs V2
 ├── plans/                     ← Plans d'action
+├── saas/                      ← Onboarding + état vivant infra SaaS (depuis 26/04)
 ├── installation/              ← Onboarding + chatbot + admin deploy
 ├── sessions/                  ← Bilans de sessions + rapports d'audit
 ├── audits/                    ← Rapports d'audit dédiés
@@ -238,7 +245,11 @@ docs/
 | Fichier | Sujet | Clés |
 |---|---|---|
 | `PLAN_ACTION_GLOBAL.md` | Vision produit + roadmap globale | `roadmap`, `vision`, `global` |
+<<<<<<< HEAD
 | `PLAN_ACTION_GLOBAL.md` | Vision produit + roadmap globale | `roadmap`, `vision`, `global` |
+=======
+| **`PLAN_SAAS.md`** | **Migration SaaS 25/04 — VPS OVH, nginx+SSL, multi-tenant, Stripe, beta gratuite** (Phase 1 en cours) | `SaaS`, `OVH`, `VPS`, `cloud`, `déploiement` |
+>>>>>>> claude/angry-ishizaka-26efe7
 | `PLAN_1_APPLICATION_DOCUMENTATION.md` | Plan consolidation + datation + maintenance doc (5 phases, ~4h) | `plan1`, `doc`, `consolidation` |
 | `PLAN_2_OPTIMISATION_FLUX.md` | Plan flux optimal : templates + caches + smart spec (7 phases, ~9h15) — **plan d'exécution de référence** | `plan2`, `flux`, `templates`, `caches` |
 | `PLAN_3_INVENTAIRE_CACHES_ET_PORTAGE.md` | Inventaire technique caches V2 vs proto + plan baseline 5 phases (référence) | `plan3`, `inventaire`, `caches`, `portage` |
@@ -259,6 +270,15 @@ docs/
 
 ---
 
+### H-bis. SaaS infra (`docs/saas/` — depuis 26/04/2026)
+
+| Fichier | Sujet | Clés |
+|---|---|---|
+| **`ONBOARDING_SESSION_SAAS.md`** | **Référence vivante** pour toute session SaaS : infra OVH, accès SSH, conventions, interdits, planning Étapes 1-10, rollback, tests, profil Yvan | `saas`, `onboarding`, `infra`, `serveur`, `ovh`, `nginx`, `let's encrypt`, `sentry` |
+| **`AZURE_CONFIG.md`** | Config complète Azure / Microsoft Entra ID (tenant `groupe-bosser.fr`, app `BoosterMail` multi-tenant, permissions Graph, MPN/publisher verification, procédure régénération secret) | `azure`, `entra`, `tenant`, `client_id`, `client_secret`, `oauth`, `microsoft graph`, `permissions`, `mpn` |
+
+---
+
 ### I. Sessions de travail (`docs/sessions/`)
 
 **Bilans et rapports par date — ordre chronologique.**
@@ -274,6 +294,7 @@ docs/
 | `BILAN_SESSION_V2_20260414.md` | 14/04/2026 | Bilan de session V2 (état travaux plugin) |
 | `BILAN_SESSION_20260416.md` | 16/04/2026 | Bilan de session 16/04 |
 | `BILAN_SESSION_20260418.md` | 18/04/2026 | Consolidation doc + Plan 1 exécuté + règles M1-M4 + préparation Plans 2/3 |
+<<<<<<< HEAD
 | `BILAN_SESSION_21-04.md` | 21/04/2026 | Audits cohérence cache, dialog 80% |
 | `BILAN_SESSION_20260422_DIALOG80_AUDIT.md` | 22/04/2026 | Audit dialog 80% (8 colonnes) |
 | `BILAN_SESSION_20260423_VITESSE_COMPLETUDE.md` | 23/04/2026 | Vitesse + complétude pipeline BG |
@@ -281,6 +302,16 @@ docs/
 | **`BILAN_SESSION_20260425.md`** | **25/04/2026** | **Phase 1 (étiquetage IMID canonique) + Phase 2 (filtre unifié) + Phase 3 (3 portes API) + garde-fou drafts (15 commits)** |
 | **`BILAN_SESSION_20260426.md`** | **26/04/2026** | **Bug D (submission dict sans `internet_message_id`) + Bug #2 signature N-B + Bug #3 Graph 400 PJ + clé Anthropic + invariant I-CODE-05 + Patterns #15-#16** |
 | **`BILAN_SESSION_20260427_MATIN.md`** | **27/04/2026** | **Bug critique race condition `_messageId` global (draft Ombeline sauvé sous IMID Vincent Hubert) — Pattern #17** |
+=======
+| **`SAAS_BILAN_SESSION_20260426.md`** | **26/04/2026 (matin)** | **[SaaS] Phase 1 SaaS terminée (VPS OVH + SSL + sécurité + Sentry) + rebrand UI BoosterMail + Outlook Web différé Phase 6** |
+| **`SAAS_BILAN_SESSION_20260426_pm.md`** | **26/04/2026 (après-midi)** | **[SaaS] Étapes 1+2+5.A/B** : `OnMessageCompose` + page `install.boostermail.ai` HTTPS live + nouvelle app Azure multi-tenant `groupe-bosser.fr` + OAuth validé + backup DB auto cron quotidien + cap API par user (Claude 500/jour, OpenAI 200/jour) |
+| **`SAAS_BILAN_SESSION_20260427.md`** | **27/04/2026 (matin)** | **[SaaS] Étape 5 close** : nettoyage user fantôme MSAL + 5.C UptimeRobot 2 monitors + 5.D brand check + 5.E privacy.html + 5.F terms.html. **MPN différé** (entité éditrice à trancher). Reste critique avant beta : Étape 7 multi-tenant DB. |
+
+**Convention de nommage des bilans** (depuis 26/04/2026) :
+- `SAAS_BILAN_SESSION_AAAAMMJJ.md` — sessions infra/déploiement SaaS
+- `OUTLOOK_BILAN_SESSION_AAAAMMJJ.md` — sessions optimisation New Outlook (à venir)
+- `BILAN_SESSION_AAAAMMJJ.md` (sans préfixe) — sessions mixtes ou autres sujets
+>>>>>>> claude/angry-ishizaka-26efe7
 
 ---
 
@@ -377,4 +408,8 @@ docs/
 
 ---
 
+<<<<<<< HEAD
 *Dernière mise à jour : 25/04/2026 — Ajout PLAN_SAAS.md + décision migration SaaS.*
+=======
+*Dernière mise à jour : 25/04/2026 — Pivot SaaS : ajout de `PLAN_SAAS.md` et entrée historique 25/04.*
+>>>>>>> claude/angry-ishizaka-26efe7

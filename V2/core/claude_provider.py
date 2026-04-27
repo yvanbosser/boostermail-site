@@ -63,7 +63,17 @@ class ClaudeProvider(AIProvider):
 
         En mode stream : utilise messages.stream() avec prompt caching.
         En mode non-stream : utilise messages.create() avec retry.
+
+        Quota : check_and_record('claude') au début pour bloquer les abus user.
+        Lève QuotaExceeded si limite quotidienne atteinte (cap par user/jour).
+        Si pas de Flask context (jobs BG), no-op.
         """
+        try:
+            from quota_tracker import check_and_record
+            check_and_record('claude')
+        except ImportError:
+            pass  # module quota absent → fail-open (mode dev local)
+
         if stream:
             return self._generate_stream(system_prompt, user_prompt, max_tokens, temperature)
         else:

@@ -63,7 +63,17 @@ class OpenAIProvider(AIProvider):
 
         En mode stream : retourne un itérateur de chunks texte.
         En mode non-stream : retourne le texte complet.
+
+        Quota : check_and_record('openai') au début pour bloquer les abus user.
+        Lève QuotaExceeded si limite quotidienne atteinte (cap par user/jour).
+        Si pas de Flask context (jobs BG), no-op.
         """
+        try:
+            from quota_tracker import check_and_record
+            check_and_record('openai')
+        except ImportError:
+            pass  # module quota absent → fail-open (mode dev local)
+
         if stream:
             return self._generate_stream(system_prompt, user_prompt, max_tokens, temperature)
         else:

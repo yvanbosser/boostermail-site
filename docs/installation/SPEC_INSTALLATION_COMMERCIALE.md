@@ -1,6 +1,6 @@
 # BoosterMail — Spec Installation Commerciale
 
-> **Dernière mise à jour** : 18/04/2026 (git)
+> **Dernière mise à jour** : 26/04/2026
 
 *Cree le 16/04/2026*
 
@@ -96,7 +96,7 @@ Total : ~15-20 jours de dev + ~1000 EUR/an de couts fixes
 ## Parcours cible utilisateur unique
 
 ```
-1. Va sur boostermail.fr → telecharge setup.exe
+1. Va sur boostermail.ai → telecharge setup.exe
 2. Double-clic → UAC "Autoriser" → installation automatique
 3. Ouvre Outlook → l'installeur a ouvert la page "Ajouter complement"
 4. Clic "Installer BoosterMail" → bouton BM apparait

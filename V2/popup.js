@@ -94,7 +94,7 @@ function _checkModeBeforeDisplay(attempt) {
             } else {
                 document.body.innerHTML =
                     '<div style="padding:20px;color:#c00;font-family:sans-serif;font-size:13px;">'
-                    + 'EasyMail : le serveur ne repond pas.<br>'
+                    + 'BoosterMail : le serveur ne repond pas.<br>'
                     + 'Verifiez que start_v1.bat est lance, puis rouvrez ce panneau.'
                     + '</div>';
                 console.log('[popup] Backend indisponible apres ' + maxAttempts + ' tentatives.');
@@ -114,15 +114,15 @@ function _checkCompanionForPyQt() {
             } else {
                 // Companion non disponible → ne pas afficher la popup
                 document.body.innerHTML = '<div style="padding:20px;text-align:center;font-size:12px;color:#999;font-family:Segoe UI,sans-serif;">'
-                    + '<p>Activez le <b>Mode Standard</b> pour utiliser EasyMail ici.</p>'
-                    + '<p style="font-size:10px;margin-top:8px;">Profil > Mode EasyMail > Activer</p></div>';
+                    + '<p>Activez le <b>Mode Standard</b> pour utiliser BoosterMail ici.</p>'
+                    + '<p style="font-size:10px;margin-top:8px;">Profil > Mode BoosterMail > Activer</p></div>';
             }
         })
         .catch(function() {
             // Companion offline → afficher un message
             document.body.innerHTML = '<div style="padding:20px;text-align:center;font-size:12px;color:#999;font-family:Segoe UI,sans-serif;">'
-                + '<p>Activez le <b>Mode Standard</b> pour utiliser EasyMail ici.</p>'
-                + '<p style="font-size:10px;margin-top:8px;">Profil > Mode EasyMail > Activer</p></div>';
+                + '<p>Activez le <b>Mode Standard</b> pour utiliser BoosterMail ici.</p>'
+                + '<p style="font-size:10px;margin-top:8px;">Profil > Mode BoosterMail > Activer</p></div>';
         });
 }
 
@@ -506,7 +506,7 @@ function _startWarmupProgressPoll() {
     var bar = document.getElementById('prefetchBar');
     if (!bar) return;
 
-    bar.textContent = 'Demarrage EasyMail...';
+    bar.textContent = 'Demarrage BoosterMail...';
     bar.className = 'tp-prefetch active';
 
     var maxPolls = 120;   // 120 × 1s = 2min max
@@ -522,7 +522,7 @@ function _startWarmupProgressPoll() {
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 if (data.status === 'done') {
-                    bar.textContent = 'EasyMail pret';
+                    bar.textContent = 'BoosterMail pret';
                     bar.className = 'tp-prefetch active';
                     setTimeout(function() { bar.className = 'tp-prefetch'; }, 2000);
                     _warmupPollTimer = null;
@@ -565,7 +565,7 @@ function _addInsightMessage(item) {
                 if (!item.attachments[i].isInline) attachmentCount++;
             }
         }
-        var message = 'EasyMail : mail de ' + (item.from ? item.from.displayName : 'inconnu');
+        var message = 'BoosterMail : mail de ' + (item.from ? item.from.displayName : 'inconnu');
         if (attachmentCount > 0) {
             message += ', ' + attachmentCount + ' PJ';
         }
@@ -575,7 +575,7 @@ function _addInsightMessage(item) {
             icon: 'icon16',
             actions: [{
                 actionType: Office.MailboxEnums.ActionType.ShowTaskPane,
-                actionText: 'Ouvrir EasyMail',
+                actionText: 'Ouvrir BoosterMail',
                 commandId: 'easymailTaskpaneItem'
             }]
         }, function () {});
