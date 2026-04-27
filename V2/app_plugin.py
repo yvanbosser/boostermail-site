@@ -341,29 +341,42 @@ def is_standard_mode() -> bool:
 def serve_plugin_file(filename):
     """Sert les fichiers du plugin (manifest, dialog, commands, assets).
 
-    Pivot SaaS 27/04/2026 — Cache-Control: no-store sur .js/.html.
-    Le fix ETag (20/04) supposait que le client (WebView2) respecte
-    must-revalidate et fait un If-None-Match a chaque session. Constate
-    le 27/04 : New Outlook desktop (WebView2 hosted) ignore les headers
-    de revalidation et garde un cache disque permanent dans EBWebView.
-    Consequence : un deploiement JS n'est jamais pris en compte sans
-    purge manuelle du cache disque cote user.
-    Fix : Cache-Control: no-store force le client a NE PAS stocker le
-    fichier. Chaque session = fetch frais.
-    Trade-off : +200-500ms par fichier vs comportement deterministe et
-    deploiements JS pris en compte automatiquement. Acceptable pour un
-    add-in qui charge ~5 fichiers par session.
-    Les assets (icones .png) restent cachables (max-age=86400 = 1 jour).
+    Pivot SaaS 27/04/2026 PM v2 — strategie cache differenciee :
+
+    - .html, .xml -> no-store : ce sont les points d'entree (manifest,
+      autorun.html, dialog.html, popup.html, taskpane.html, commands.html).
+      Doivent etre refetches a chaque session pour que les nouveaux
+      ?v=... sur les assets soient pris en compte.
+    - .js, .css -> public, max-age=157680000, immutable (5 ans) :
+      versionnes via ?v=... dans les <script src> et <link href> des
+      .html parents. URL differente = cache miss = fetch frais. URL
+      identique = cache hit instantane (zero re-download des 158 KB
+      de dialog.js, etc.).
+    - assets images -> public, max-age=86400, must-revalidate (1 jour).
+
+    Pourquoi ce changement (vs v1 qui avait no-store sur tout) :
+    Constate 27/04 PM que WebView2 New Outlook re-telecharge les .js/.css
+    a chaque clic du bouton (158 KB de dialog.js + 21 KB de dialog.css)
+    -> latence 1-4 sec par clic + bande passante gaspillee.
+    Avec versioning URL, un seul fetch initial puis cache permanent
+    jusqu'au prochain deploiement (qui bumpera ?v=).
+
+    Pattern web standard ("cache busting via URL"). Decouvert applicable
+    a WebView2 le 27/04 PM apres test du Pattern #18.
     """
     resp = send_from_directory(PLUGIN_DIR, filename)
-    if filename.endswith(('.js', '.html', '.css')):
-        # Force WebView2 a refetch a chaque session (cache disque permanent
-        # ignore must-revalidate sur New Outlook desktop)
+    if filename.endswith(('.html', '.xml')):
+        # Points d'entree : refetch obligatoire a chaque session
         resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         resp.headers['Pragma'] = 'no-cache'
         resp.headers['Expires'] = '0'
+    elif filename.endswith(('.js', '.css')):
+        # Assets versionnes via ?v=... dans les .html parents : cache 5 ans
+        # (max-age=157680000 = 5*365*24*3600). Le ?v= force le refetch
+        # quand on bump la version dans le HTML.
+        resp.headers['Cache-Control'] = 'public, max-age=157680000, immutable'
     elif filename.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')):
-        # Assets statiques : cachables 1 jour (mtime change = ETag invalide)
+        # Assets images : cachables 1 jour (mtime change = ETag invalide)
         resp.headers['Cache-Control'] = 'public, max-age=86400, must-revalidate'
     return resp
 
