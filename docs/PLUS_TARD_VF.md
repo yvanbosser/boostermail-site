@@ -1,6 +1,51 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 27/04/2026 PM tardif (cycle audit kit complet : 6 audits clos + tech debt tier 1 + 12 contacts analysés)
+> **Dernière mise à jour** : 27/04/2026 fin journée (audit cohérence post-clôture session 1 — incohérences corrigées)
+
+---
+
+## ⚡ TL;DR — Que reste-t-il à faire ? (au 27/04 fin journée)
+
+Si tu reviens sur ce doc au début d'une nouvelle session, voici **uniquement ce qui reste vivant**.
+
+### 🚨 En attente côté admin (pas de code Claude)
+1. **Migration mailbox Coaxis** → Microsoft 365 cloud (ETA J+2/3, côté Coaxis)
+
+### 🔥 Sujets ACTIFS (à traiter quand tu veux/peux)
+2. **Templates 45 fixes + appris** (Plan 2 historique) — 3-4 h, 20-40 % mails instantanés
+3. **Signature personnalisée par contact** — 30-45 min, gain UX fort registre
+4. **Ré-évaluation classements `source='none'`** — 30 min (marginal, 3 mails seulement)
+5. **Optim Phase 2 filtrage par plat** — à revoir quand `folder_classifications` aura 6-12 mois d'historique (passif)
+6. **Améliorer détection forward dans summary/draft** — bug constaté (mail Vincent Hubert "Fwd: leonis" body Orange) — taille à estimer
+
+### 🚨 Avant SaaS multi-tenant Étape 7
+7. **Chantier migration multi-tenant** — 1.5 jour. **Plan ready** dans `audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md` (helper `get_user_cache`, 22 caches à isoler, ordre migration).
+
+### 🟡 Audits profonds reportés (sessions dédiées 1-2 h)
+8. **Audit #1 Pattern #17 backend approfondi** — 38 closures Python à auditer
+9. **Audit #4 except: pass approfondi** — 71 occurrences à sampler/classifier
+
+### 📋 Tech debt résiduel (priorité basse, items qu'on a CHOISI de ne pas faire dans la session)
+10. `AbortController` timeout généralisé dialog.js — 15 min (skipé : risque envoi mail)
+11. `btnSend` null protection dans `.then` tardif
+12. Auditer `_sanitizeHtml` couvre vecteurs courants (iframes, etc.)
+13. `setInterval` pas cleared popup.js (`_pollingInterval`, `_warmupPollTimer`, `_onboardingPoll`)
+14. SSE `addEventListener` non retirés au `close()`
+15. Re-auth 401 manuelle — bouton « Se reconnecter » dans dialog
+16. « Pas de points clés identifiés » ambigu (mail vide vs résumé indispo)
+17. Orphans `mail_summaries` TTL 90 j cleanup
+18. Prefetch cache `atexit` fragile (fsync périodique 5 min)
+19. Cost tracking aggrégé Claude/mois user
+
+### ⏸️ Différé stratégique (décision business)
+20. **MPN** Microsoft Cloud Partner Program — bloqué décision entité éditrice
+21. Suppression complète `pywin32` (priorité basse)
+22. Suppression polling Companion résiduel (priorité moyenne, à faire quand tous call sites front nettoyés)
+
+### 💤 Long terme
+23. Inbox web standalone V2 — différé (décision V2 = plugin Outlook, pas web app)
+
+---
 >
 > **Rôle** : ce document est désormais **LE seul référentiel vivant** pour tout sujet « à faire plus tard » de BoosterMail. Il consolide et remplace les 3 fichiers historiques :
 > - `docs/PLUS_TARD.md` (573 lignes, à jour 27/04 PM mais redondant après cette session)
@@ -93,24 +138,24 @@
 
 ---
 
-### 7. Audits préventifs restants — état au 27/04 PM
+### 7. Audits préventifs — état au 27/04 PM tardif
 
-Sur les 10 audits du menu : **5 traités**, 5 restants.
+Sur les 10 audits du menu : **8 audits clos avec rapport ou fix**, 2 partiels (constat livré, approfondissement reporté).
 
 | # | Audit | Statut | Détails |
 |---|---|---|---|
-| 1 | Pattern #17 backend | ⏳ À faire | Race conditions threads/callbacks Python (analogue Vincent Hubert mais serveur) — 20 min |
-| 2 | Pattern #14 récidive caches | ✅ **Fait 27/04 PM** | Constat : `_attachment_cache`, `_echeance_post_send_cache`, `_classification_post_send_cache`, `_pj_classification_post_send_cache` sont **dead code** (déclarés jamais utilisés ou write-only). Pas une anomalie kit (pas de bug). À nettoyer dans le backlog cleanup priorité basse. Caches actifs (warmup/prefetch/reply/pj_text/mail_summaries) déjà conformes. |
-| **3** | **État global cross-user (SaaS readiness)** | ⏳ **🚨 Avant SaaS multi-tenant Étape 7** | Lister toutes les variables `_xxx_cache` qui supposent un seul user — 30 min, à coordonner avec session SaaS |
-| 4 | Erreurs silencieuses (Pattern #3) | 🔄 **Constat livré** | 71 occurrences `except: pass` dans V2/*.py (claude_ai 4, app_plugin 59, database 4, outlook_graph 3, core 1). Trop pour quick win → **session dédiée 1-2h** pour sampler/classifier les sites critiques |
-| 5 | Phase 1 strict canonical IMID | ✅ **Fait 27/04 PM** | Couvert par fix Pattern #15 commit `71c58a5` (4 sites mail_data sans `internet_message_id` corrigés) |
-| 6 | Prompt injection (Pattern #9) | ✅ **Fait 27/04 PM** | Découverte critique : `_build_prompt` (generate_reply_stream) **n'avait pas la garde** anti-injection. Fix commit `59fd9d8` ajoute `_SECURITY_GUARD` ligne 610 de `claude_ai.py` qui s'applique aux 3 modes (reply/forward/first_mail). Invariant **I-SEC-06** ajouté à INVARIANTS.md. |
-| 7 | Cohérence DB | ✅ **Fait 27/04 matin** | doublons/orphelins audités |
-| 8 | Profils contacts buggés | ✅ **Fait 27/04 matin** | 13 profils greeting tordus identifiés et corrigés |
-| 9 | Slow paths > 500 ms | ⏳ Reporter | Perf déjà OK depuis cache 5 ans + lazy contact_search |
-| 10 | Code mort / imports inutiles | ⏳ Reporter | Audit complémentaire — l'audit #2 a déjà découvert 4 caches dead code |
+| 1 | Pattern #17 backend | 🔄 **Constat livré** | Rapport `2026-04-27_audits_1_9_10_synthese.md` : 61 threads, 0 violation évidente, 19 avec args= safe, 38 closures pures à inspecter en profondeur. **Audit profond reporté** : session dédiée 1-2h si symptôme user. Pas urgent. |
+| 2 | Pattern #14 récidive caches | ✅ **Fait** (rapport `2026-04-27_audits_1_9_10_synthese.md`) | 4 caches dead identifiés et **supprimés** (`210d2c5`). Caches actifs (warmup/prefetch/reply/pj_text/mail_summaries) conformes. |
+| 3 | **Cross-user SaaS readiness** | ✅ **Fait** (rapport dédié `2026-04-27_audit_cross_user_saas_readiness.md`) | 22 caches mono-user inventoriés + 27 locks classés + 4 dead code. **Plan migration multi-tenant ready** (1.5 jour, helper `get_user_cache`, ordre migration). 🚨 **Pré-requis Étape 7 SaaS** = ce rapport, à exécuter quand chantier multi-tenant attaqué. |
+| 4 | Erreurs silencieuses (Pattern #3) | 🔄 **Constat livré** | 71 occurrences `except: pass` dans V2/*.py (claude_ai 4, app_plugin 59, database 4, outlook_graph 3, core 1). Trop pour quick win → **session dédiée 1-2h** pour sampler/classifier les sites critiques. |
+| 5 | Phase 1 strict canonical IMID | ✅ **Fait** | Couvert par fix Pattern #15 commit `71c58a5` (4 sites mail_data sans `internet_message_id` corrigés). |
+| 6 | Prompt injection (Pattern #9) | ✅ **Fait** (`59fd9d8`) | Découverte critique : `_build_prompt` n'avait pas la garde anti-injection. Fix structurel + invariant **I-SEC-06** ajouté. |
+| 7 | Cohérence DB | ✅ **Fait matin** | Doublons/orphelins audités. |
+| 8 | Profils contacts buggés | ✅ **Fait matin** | 13 profils greeting tordus identifiés et corrigés. |
+| 9 | Slow paths > 500 ms | ✅ **Fait** (mesure rapport `2026-04-27_audits_1_9_10_synthese.md`) | 4 routes critiques mesurées : 35-43 ms (largement < seuil 500 ms I-UX-02). À ré-mesurer post-multi-tenant + en charge beta. |
+| 10 | Code mort / imports inutiles | ✅ **Fait partiel** (`210d2c5`) | 4 caches dead retirés. Audit complet fonctions/routes (88 routes Flask, 82 fonctions privées) reporté à session dédiée. |
 
-**Récap** : 5 audits clos (#2, #5, #6, #7, #8), 1 partiel (#4 constat livré, fix dans session dédiée), 4 à programmer (#1, #3, #9, #10).
+**Récap final** : **8 audits clos** (#2, #3, #5, #6, #7, #8, #9, #10), **2 partiels avec constat livré** (#1 race conditions Python profond, #4 except: pass approfondi). Approfondissements de #1 et #4 reportés à sessions dédiées 1-2h chacune.
 
 ---
 
@@ -210,9 +255,9 @@ Suite à l'audit exhaustif multi-angles du 21/04 (~60 anomalies, 15 corrigées i
 - **`setInterval` jamais cleared** dans popup.js (`_pollingInterval`, `_warmupPollTimer`, `_onboardingPoll`) — leak si popup re-loadée.
 - **SSE `addEventListener` non retirés** à `_sseSource.close()` (popup.js).
 
-### Race conditions (fenêtres étroites, rares en pratique)
-- **Lectures `_current_mail_data` sans `_mail_data_lock`** (`app_plugin.py` lignes 1597, 1651, 2791) — fenêtre microsecondes.
-- **`_warmup_cache[mid] = msg` sans lock** (`app_plugin.py` ligne 480) — risque `RuntimeError` si `_preload_neighbors` itère en parallèle.
+### Race conditions (fenêtres étroites, rares en pratique) — ✅ FAIT 27/04 PM
+- ✅ ~~Lectures `_current_mail_data` sans `_mail_data_lock`~~ — Fix tier 1 commit `1d8d1a0` : `api_current_mail` (l. 2848) et `api_trigger_prefetch` (l. 2902) passent maintenant sous `with _mail_data_lock:` + copie défensive.
+- ✅ ~~`_warmup_cache[mid] = msg` sans lock~~ — Fix tier 1 commit `1d8d1a0` : extension du `with _warmup_lock:` pour englober l'écriture du cache (ligne 676).
 
 ### UX
 - **Re-auth 401 manuelle** : MSAL gère refresh, mais si refresh_token expiré → user doit se reconnecter. L'`alert()` actuel demande navigation manuelle → améliorer avec bouton « Se reconnecter » intégré au dialog.
@@ -226,11 +271,13 @@ Suite à l'audit exhaustif multi-angles du 21/04 (~60 anomalies, 15 corrigées i
 - **Prefetch cache sauvé par `atexit`** (`_prefetch_cache_v2.json`) : si supervisor `kill -9`, atexit non exécuté → perte du cache. **Fsync périodique (5 min) à ajouter**.
 - **Cost tracking** : pas d'agrégat total coût Claude dans la DB. User ne peut pas dire « combien m'a coûté BoosterMail ce mois ».
 
-### Dead code résiduel
-- `_checkSpeculativeCache` (dialog.js:2508) — deprecated, `return;` immédiat, code post-return à supprimer.
+### Dead code résiduel — ✅ FAIT 27/04 PM
+- ✅ ~~`_checkSpeculativeCache` (dialog.js)~~ — supprimée tier 1 commit `1d8d1a0` (~30 lignes mortes après `return;`).
+- ✅ ~~4 caches dead (`_attachment_cache`, 3× `_post_send_cache`)~~ — supprimés commit `210d2c5`.
 
-### Warnings logs cosmétiques (27/04)
-- **`acquire_token_silent retourné None`** toutes les 30 sec quand pas de user connecté → bruit log, pas d'impact fonctionnel. Fix éventuel : logger en DEBUG au lieu de WARNING, ou fail-silently après N tentatives.
+### Warnings logs cosmétiques — ✅ FAIT 27/04 PM
+- ✅ ~~`acquire_token_silent retourné None` toutes les 30s~~ — Fix tier 1 commit `1d8d1a0` : passé en `logger.debug` au lieu de `WARNING`.
+- ✅ ~~Compteur `step` du `/api/warmup_status` coincé sur "Demarrage auto retry"~~ — Fix commit `b9cacd3` : boucle retry avec backoff + messages d'état cohérents (`Connexion Microsoft attendue` puis `Connexion Microsoft requise`).
 
 ---
 
