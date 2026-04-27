@@ -1,6 +1,6 @@
 # Anomalies récurrentes — mémoire des patterns
 
-> **Dernière mise à jour** : 27/04/2026 PM (ajout Pattern #18 — cache WebView2 New Outlook ignore les headers HTTP)
+> **Dernière mise à jour** : 27/04/2026 PM (ajout Pattern #18 cache WebView2 + Pattern #15 fixé sur 4 sites suspects via audit kit)
 > **Règle** : à chaque nouveau bug détecté, ajouter ici **immédiatement**. À chaque nouveau symptôme, consulter ici **d'abord**.
 
 ---
@@ -475,9 +475,20 @@ grep -n "'message_id':" V2/app_plugin.py | grep -B5 "submissions.append\|mail_da
 **Sites corrigés au 26/04** :
 - `_parallel_prefetch_batch:931` ✅ (commit 26/04)
 
-**Sites à auditer** : tous les autres constructeurs de `mail_data` ou
-`submissions` dans `app_plugin.py` (audit à faire en suivant l'invariant
-I-CODE-05).
+**Sites corrigés au 27/04 PM** (audit Pattern #15 systematique via kit) :
+- `_preload_neighbors:904` ✅ — preload N+1/N-1 destine `_run_prefetch`
+- `_companion_polling new_data:2489` ✅ — Mode Degrade companion local
+- `api_event_message_read new_data:2645` ✅ — **CRITIQUE** : appele a chaque
+  ouverture mail Office.js, sans le fix le BG `_run_prefetch` skipait
+  silencieusement chaque mail ouvert (cause probable des MISS rapportes
+  par Yvan post-pivot SaaS)
+- `_prescan_summary:2730` ✅ — coherence canonique pour `save_mail_summary`
+
+**Audit complet** : grep `'message_id':` dans `V2/app_plugin.py` confirmé
+le 27/04 PM. 4 sites destinés au BG ou DB partagée → tous fixés. Sites
+restants utilisent `'message_id'` dans des contextes locaux (broadcast SSE,
+mail_payload de stream summary, lookup DB seul) → pas de violation
+I-CODE-05.
 
 ---
 

@@ -907,6 +907,10 @@ def _preload_neighbors(message_id):
                 'subject': target.get('subject', ''),
                 'body': target.get('body') or target.get('body_preview', ''),
                 'message_id': target_id,
+                # Fix I-CODE-05 (27/04 PM) — _canonical_mid lit uniquement
+                # internet_message_id. Sans ce champ, _run_prefetch ligne 2911
+                # retourne '' et skip le mail silencieusement.
+                'internet_message_id': target_id,
                 'conversation_id': target.get('conversation_id', ''),
             }
             if mail_data['from_email']:
@@ -2491,6 +2495,9 @@ def _poll_companion_loop():
                         'from_email': from_email,
                         'from_name': data.get('from_name', ''),
                         'message_id': data.get('message_id', ''),
+                        # Fix I-CODE-05 (27/04 PM) — Mode Degrade Companion :
+                        # cohérence canonique pour _run_prefetch en aval.
+                        'internet_message_id': data.get('message_id', ''),
                         'conversation_id': data.get('conversation_id', ''),
                         'has_attachments': data.get('has_attachments', False),
                         'attachments': data.get('attachments', []),
@@ -2647,6 +2654,13 @@ def api_event_message_read():
         'from_email': data.get('from_email', ''),
         'from_name': data.get('from_name', ''),
         'message_id': data.get('message_id', ''),
+        # Fix I-CODE-05 (27/04 PM) — message_read est appele a chaque ouverture
+        # mail Office.js. new_data est passe a _run_prefetch ligne 2690 puis a
+        # _preload_neighbors ligne 2697. Sans internet_message_id explicite,
+        # _canonical_mid retourne '' et tout le pipeline BG est skip silencieux.
+        # Frontend autorunshared.js envoie deja message_id = internetMessageId
+        # (cf ligne 282), on copie donc juste explicite ici.
+        'internet_message_id': data.get('message_id', ''),
         'conversation_id': data.get('conversation_id', ''),
         'has_attachments': data.get('has_attachments', False),
         'to': data.get('to', ''),
@@ -2729,6 +2743,9 @@ def api_event_message_read():
                 # Lancer le scan résumé (idempotent)
                 summarize_mails_to_db([{
                     'message_id': _mid_new,
+                    # Fix I-CODE-05 (27/04 PM) — coherence canonique pour la
+                    # cle DB save_mail_summary (consommateur ulterieur lit IMID).
+                    'internet_message_id': _mid_new,
                     'subject': email.get('subject', '') or new_data.get('subject', ''),
                     'body': body,
                     'from_email': email.get('from_email', '') or new_data.get('from_email', ''),
