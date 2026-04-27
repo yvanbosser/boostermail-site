@@ -126,7 +126,7 @@ docs/
 | **Écart proto vs V2** | `docs/analyses_proto_v2/V2_vs_PROTO_GAPS.md` |
 | **Plan de portage proto → V2** | `docs/analyses_proto_v2/PLAN_PORTAGE_PROTO_V2.md` |
 | **Installation côté utilisateur** | `docs/installation/SPEC_ONBOARDING_COMPLET.md` |
-| **Bugs connus à corriger plus tard** | `docs/analyses_proto_v2/BUGS_PROTO_A_CORRIGER_PLUS_TARD.md` |
+| **Sujets « à faire plus tard » (référentiel unique)** | `docs/PLUS_TARD_VF.md` ⭐ |
 | **Plan migration SaaS** | `docs/plans/PLAN_SAAS.md` |
 
 ---
@@ -149,7 +149,8 @@ docs/
 | `STRUCTURE_PROJET.md` | Carte complète du projet (arborescence, rôle de chaque fichier) | `structure`, `carte`, `où est` |
 | `SOMMAIRE_DETAILLE.md` | **CE FICHIER** — index maître | `sommaire`, `index`, `table des matières` |
 | `_TEMPLATE_NOUVEAU_DOC.md` | Template à utiliser pour tout nouveau doc (règle M2 de CLAUDE.md) | `template`, `nouveau doc` |
-| `PLUS_TARD.md` | Liste des fonctionnalités/bugs reportés sciemment (dette technique assumée) | `plus tard`, `reporté`, `dette` |
+| **`PLUS_TARD_VF.md`** ⭐ | **Référentiel UNIQUE des sujets « plus tard » BoosterMail (consolidation des 3 anciens fichiers, marquage des items obsolètes)** | `plus tard`, `backlog`, `dette` |
+| `PLUS_TARD.md` | ⚠️ **Archivé** — remplacé par `PLUS_TARD_VF.md` le 27/04/2026 PM | `archive` |
 
 ---
 
@@ -200,7 +201,7 @@ docs/
 
 | Fichier | Sujet | Clés |
 |---|---|---|
-| `TODO_SESSION_SUIVANTE.md` | **Ce qu'il reste à faire, bugs ouverts, état des flux** | `TODO`, `bugs`, `priorités` |
+| `TODO_SESSION_SUIVANTE.md` | ⚠️ **Largement obsolète (pré-pivot SaaS)** — voir `PLUS_TARD_VF.md` | `archive` |
 | `PLAN_FINALISATION_OUTLOOK.md` | Avancement par plateforme, tableau de bord, ordre d'exécution | `plan`, `avancement`, `plateforme` |
 | `PLAN_ACTION_PHASE_2.md` | Plan d'action Phase 2 | `phase2`, `plan` |
 | `PLAN_ACTION_PHASE_3.md` | Plan d'action Phase 3 (dialog/overlay) | `phase3`, `dialog`, `overlay` |
@@ -235,7 +236,7 @@ docs/
 | `COMPARATIF_PROTO_V1.md` | Plan de branchement V1 en 15 étapes | `branchement`, `V1`, `proto` |
 | `PLAN_PORTAGE_PROTO_V2.md` | Plan de portage proto → V2 | `portage`, `migration` |
 | `PLAN_PROTO_vs_V2_PAR_PLATEFORME.md` | Plan par plateforme (Classic/New/Web) | `plateforme`, `classic`, `new`, `web` |
-| `BUGS_PROTO_A_CORRIGER_PLUS_TARD.md` | Bugs proto reportés (dette technique) | `bugs`, `dette`, `later` |
+| `BUGS_PROTO_A_CORRIGER_PLUS_TARD.md` | ⚠️ **Gelé** — proto en lecture seule depuis pivot SaaS 27/04 PM. Voir `PLUS_TARD_VF.md` pour les sujets actifs | `archive`, `proto-frozen` |
 | `RESUME_EXECUTIF_PROTO_V2.md` | Résumé exécutif (vue de haut) | `résumé`, `exécutif`, `synthèse` |
 
 ---

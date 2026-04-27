@@ -1,6 +1,12 @@
 # BUGS PROTO À CORRIGER PLUS TARD
 
-> **Dernière mise à jour** : 18/04/2026 (git)
+> ⚠️ **GELÉ — PROTO EN LECTURE SEULE DEPUIS LE PIVOT SAAS DU 27/04/2026 PM**
+>
+> Le proto (`app.py`) est désormais **LECTURE SEULE** (règle absolue #1 du `CLAUDE.md`) car les beta-testeurs sont en production. Ces bugs **ne seront probablement jamais corrigés** tant que le proto est actif. Quand le proto sera archivé, ce fichier pourra être supprimé.
+>
+> **Pour les sujets « à faire plus tard » ACTIFS de BoosterMail (V2 SaaS), voir [`docs/PLUS_TARD_VF.md`](../PLUS_TARD_VF.md)**.
+
+> **Dernière mise à jour** : 18/04/2026 (git). **Gelé en VF le 27/04/2026 PM**.
 
 *Document de suivi — bugs détectés dans le proto (app.py) à corriger après V2 stabilisé*
 

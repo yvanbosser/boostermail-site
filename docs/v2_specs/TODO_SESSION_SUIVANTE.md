@@ -1,6 +1,17 @@
 # TODO — Prochaine session BoosterMail
 
-> **Dernière mise à jour** : 18/04/2026 (consolidation doc + bilan post V1_outlook→V2)
+> ⚠️ **LARGEMENT OBSOLÈTE — PRÉ-PIVOT SAAS DU 27/04/2026 PM**
+>
+> Ce fichier date du 18/04 (V2 stabilisé en local). Plusieurs sujets listés sont **caducs** depuis le pivot SaaS :
+> - Phase 0 « Popup moderne PyQt » → caduc (PyQt n'existe plus en SaaS)
+> - Phase 4 « PyQt chaud » → caduc (idem)
+> - « Lancement instantané popup Windows » → caduc (popup locale supprimée)
+> - « Overlay auto + détection auto (admin deploy Compta Santé) » → remplacé par Étape 6 AppSource du `PLAN_SAAS.md`
+> - Plan 1 « Application doc » → en grande partie fait dans les sessions suivantes
+>
+> **Pour les sujets ACTIFS de BoosterMail (V2 SaaS), voir [`docs/PLUS_TARD_VF.md`](../PLUS_TARD_VF.md)**. Les seuls items toujours pertinents (Templates 45 fixes + appris notamment) y sont repris explicitement.
+
+> **Dernière mise à jour** : 18/04/2026 (consolidation doc + bilan post V1_outlook→V2). **Archivé en VF le 27/04/2026 PM**.
 
 ---
 

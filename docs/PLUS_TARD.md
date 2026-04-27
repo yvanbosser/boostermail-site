@@ -1,6 +1,12 @@
 # Choses à faire plus tard
 
-> **Dernière mise à jour** : 27/04/2026 PM (ajouts session « New Outlook via OVH » : Pattern #18 cleanup, Graph 400, Coaxis hosting)
+> ⚠️ **REMPLACÉ PAR `docs/PLUS_TARD_VF.md` LE 27/04/2026 PM**
+>
+> Ce fichier est conservé pour archive. **Ne plus modifier ici** — toute nouvelle idée « à faire plus tard » va dans **[`docs/PLUS_TARD_VF.md`](PLUS_TARD_VF.md)** qui consolide ce fichier + 2 autres anciens (`docs/analyses_proto_v2/BUGS_PROTO_A_CORRIGER_PLUS_TARD.md` et `docs/v2_specs/TODO_SESSION_SUIVANTE.md`) et marque les items obsolètes.
+>
+> Plusieurs items listés ci-dessous **ont été résolus le 27/04 PM** (cleanup companion, Pattern #15, warmup retry, etc.) — voir la VF pour le statut consolidé.
+
+> **Dernière mise à jour** : 27/04/2026 PM (ajouts session « New Outlook via OVH » : Pattern #18 cleanup, Graph 400, Coaxis hosting). **Archivé en VF le 27/04/2026 PM.**
 
 *Document vivant — on y note les idées, fonctionnalités et chantiers dont l'implémentation est reportée à plus tard. Révisé ponctuellement.*
 
