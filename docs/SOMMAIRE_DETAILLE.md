@@ -30,10 +30,12 @@ En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux
 
 - `CLAUDE.md` (source de vérité actuelle)
 - `NOUVELLE_SESSION_V3.md` → section « DÉCISIONS STRATÉGIQUES » (V3 succède à V2 depuis 25/04)
-- `audit/INVARIANTS.md` (pour les questions techniques — invariants P1-P14)
-- `docs/v2_specs/TODO_SESSION_SUIVANTE.md` (état courant)
+- `audit/INVARIANTS.md` (pour les questions techniques — invariants P1-P14, I-CACHE-01/02/03, I-SEC-06)
+- **`docs/PLUS_TARD_VF.md`** ⭐ (référentiel UNIQUE des sujets « plus tard » — TL;DR en haut)
+- **`docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md`** ⭐ (prompt de reprise pour nouvelle session « New Outlook via OVH »)
 - `docs/sessions/` les plus récents (bilans datés)
 - `docs/specs_proto/HISTORIQUE_DECISIONS.md` (timeline décisions)
+- ~~`docs/v2_specs/TODO_SESSION_SUIVANTE.md`~~ (archivé pré-pivot SaaS — voir PLUS_TARD_VF)
 - Les specs thématiques (seulement si cohérentes avec ce qui précède)
 
 ### Décisions qui ont bougé récemment (non exhaustif)
@@ -55,7 +57,7 @@ En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux
 - **Rebrand user-visible EasyMail → BoosterMail** (26/04) : 26 strings UI (manifest + HTML + JS). Le back garde `easymail` (IDs internes, URIs `easymail://`, logger Python) — pas visible utilisateur
 - **Phase 5 démarrée** (26/04 après-midi) : `OnNewMessageCompose` → `OnMessageCompose` (couvre new + reply + forward) + page `install.boostermail.ai` HTML + nginx HTTP-only déployée. Activation HTTPS attente DNS A record côté Yvan (procédure section F.3.1 onboarding). Voir `docs/sessions/SAAS_BILAN_SESSION_20260426_pm.md`
 - **Étapes 1, 2 et 5.A/5.B closes** (26/04 PM) : page install live HTTPS, nouvelle app Azure multi-tenant `groupe-bosser.fr` + OAuth end-to-end validé, backup DB cron quotidien + rotation 30j, cap API par user/jour (Claude 500, OpenAI 200) avec table SQLite auto-créée.
-- **Étape 5 close + MPN différé** (27/04 matin) : 5.C UptimeRobot 2 monitors actifs + 5.D brand check + 5.E privacy.html + 5.F terms.html déployés. Cleanup auth_token_cache MSAL fantôme. **MPN inscription différée** (décision business sur entité éditrice — voir `docs/PLUS_TARD.md`). Étape 5 100% close. Prochain verrou critique avant beta = Étape 7 multi-tenant DB user_id.
+- **Étape 5 close + MPN différé** (27/04 matin) : 5.C UptimeRobot 2 monitors actifs + 5.D brand check + 5.E privacy.html + 5.F terms.html déployés. Cleanup auth_token_cache MSAL fantôme. **MPN inscription différée** (décision business sur entité éditrice — voir `docs/PLUS_TARD_VF.md`). Étape 5 100% close. Prochain verrou critique avant beta = Étape 7 multi-tenant DB user_id.
 - Étiquetage cache mixte (IMID/message_id/Graph id) → **UNIFIÉ** sur IMID strict via `_canonical_mid()` (25/04, Phase 1)
 - Smart Speculative filtrait juste la réponse → **UNIFIÉ** : 1 filtre = 5 plats (résumé/réponse/échéance/classement/PJ) (25/04, Phase 2)
 - `/api/mail_preview/<id>` retournait les 3 plats ensemble → **SPLITTÉ** en 3 portes dédiées (`/api/echeance/<id>`, `/api/classement_mail/<id>`, `/api/classement_pj/<id>`) (25/04, Phase 3)
@@ -75,8 +77,8 @@ Ces docs portent un bandeau **⚠️ DOCUMENT PÉRIMÉ/HISTORIQUE** en en-tête 
 | `docs/v2_specs/SPEC_PHASE2_GRAPH.md` | Périmé léger | V1_outlook, Mode Standard (API Graph reste OK) |
 | `docs/STRUCTURE_PROJET.md` | Périmé | Chemins V1_outlook/ obsolètes |
 
-**En attente de décision utilisateur** sur 3 docs NIVEAU 1 qui mentionnent aussi du vocabulaire périmé (option : bandeau + retirer NIVEAU 1, ou updater le contenu) :
-- `docs/v2_specs/TODO_SESSION_SUIVANTE.md`
+**En attente de décision utilisateur** sur 2 docs NIVEAU 1 qui mentionnent aussi du vocabulaire périmé (option : bandeau + retirer NIVEAU 1, ou updater le contenu) :
+- ~~`docs/v2_specs/TODO_SESSION_SUIVANTE.md`~~ ✅ archivé 27/04 PM (pré-pivot SaaS) — voir `docs/PLUS_TARD_VF.md`
 - `docs/v2_specs/PLAN_FINALISATION_OUTLOOK.md`
 - `docs/v2_specs/PLAN_ACTION_PHASE_3.md`
 
@@ -115,7 +117,7 @@ docs/
 |---|---|
 | **Architecture globale, où est quoi** | `docs/STRUCTURE_PROJET.md` |
 | **Règles de projet, contraintes** | `CLAUDE.md` (racine) |
-| **Ce qu'il faut faire cette session** | `docs/v2_specs/TODO_SESSION_SUIVANTE.md` |
+| **Ce qu'il faut faire cette session** | `docs/PLUS_TARD_VF.md` (TL;DR en haut) ⭐ |
 | **Pourquoi tel choix a été fait** | `docs/specs_proto/HISTORIQUE_DECISIONS.md` |
 | **État d'un flux / avancement** | `docs/v2_specs/PLAN_FINALISATION_OUTLOOK.md` |
 | **Le moteur IA, système prompt** | `docs/specs_proto/SPEC_SYSTEM_PROMPT.md` |
@@ -314,7 +316,7 @@ docs/
 | **`SAAS_BILAN_SESSION_20260426_pm.md`** | **26/04/2026 (après-midi)** | **[SaaS] Étapes 1+2+5.A/B** : `OnMessageCompose` + page `install.boostermail.ai` HTTPS live + nouvelle app Azure multi-tenant `groupe-bosser.fr` + OAuth validé + backup DB auto cron quotidien + cap API par user (Claude 500/jour, OpenAI 200/jour) |
 | **`SAAS_BILAN_SESSION_20260427.md`** | **27/04/2026 (matin)** | **[SaaS] Étape 5 close** : nettoyage user fantôme MSAL + 5.C UptimeRobot 2 monitors + 5.D brand check + 5.E privacy.html + 5.F terms.html. **MPN différé** (entité éditrice à trancher). Reste critique avant beta : Étape 7 multi-tenant DB. |
 | **`SAAS_BILAN_SESSION_20260427_pm.md`** | **27/04/2026 (après-midi)** | **[SaaS] Pivot stratégique « OVH = source de vérité unique »** + consolidation merge SaaS+Outlook (10 commits SaaS + 3 commits Outlook, 7 conflits résolus) + déploiement code & DB sur OVH + 3 grandes étapes définies (New Outlook nickel → Outlook Web → Multi-utilisateurs). Étape 7 multi-tenant repoussée jusqu'à validation mono-user. |
-| **`OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`** | **27/04/2026 (journée complète)** | **[Outlook] Session ~9h, 22 commits master** : Fix bouton BoosterMail New Outlook (POST companion 503) + Pattern #18 cache WebView2 + cycle audit kit complet (Workflow 4 : Graph 400, HTTP 429 ; Workflow 2 : 6 audits clos sur 10 menu) + tech debt tier 1 (locks, log level, cleanup deprecated) + 12 contacts humains analysés + consolidation `PLUS_TARD_VF.md` (3 anciens fichiers archivés). Pattern #18 + I-SEC-06 + I-CACHE-01/02/03 ajoutés. 6 rapports d'audit livrés. État OVH : 0 erreur, routes < 50 ms. Sujet hors scope code en cours : migration mailbox Coaxis ETA J+2/3. |
+| **`OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`** | **27/04/2026 (journée complète)** | **[Outlook] Session ~9h, 30 commits master** : Fix bouton BoosterMail New Outlook (POST companion 503) + Pattern #18 cache WebView2 + cycle audit kit complet (Workflow 4 : Graph 400, HTTP 429 ; Workflow 2 : **8 audits clos sur 10 menu**, 2 partiels avec constat livré) + tech debt tier 1 (locks, log level, cleanup deprecated, 4 caches dead retirés) + 12 contacts humains analysés + consolidation `PLUS_TARD_VF.md` (3 anciens fichiers archivés). Pattern #18 + I-SEC-06 + I-CACHE-01/02/03 ajoutés. 6 rapports d'audit livrés. État OVH : 0 erreur, routes < 50 ms. Sujet hors scope code en cours : migration mailbox Coaxis ETA J+2/3. |
 
 **Convention de nommage des bilans** (depuis 26/04/2026) :
 - `SAAS_BILAN_SESSION_AAAAMMJJ.md` — sessions infra/déploiement SaaS
@@ -382,7 +384,7 @@ docs/
    Lire : docs/SOMMAIRE_DETAILLE.md  ← CE FICHIER
                │
                ▼
-   Lire : docs/v2_specs/TODO_SESSION_SUIVANTE.md
+   Lire : docs/PLUS_TARD_VF.md (TL;DR en haut)
                │
                ▼
 ┌──────────────────────────────────────┐

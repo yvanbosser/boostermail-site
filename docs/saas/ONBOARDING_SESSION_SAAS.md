@@ -349,7 +349,7 @@ curl -sI https://install.boostermail.ai/ | head -3
 - Préparation Stripe (avant 1er payant)
 
 **Cleanup à faire plus tard** :
-- Warmup step tracker cosmétique (`/api/warmup_status` reste `Demarrage auto retry` même quand le warmup réel est fini) — `docs/PLUS_TARD.md`
+- ~~Warmup step tracker cosmétique (`/api/warmup_status` reste `Demarrage auto retry`)~~ ✅ Fix 27/04 PM commit `b9cacd3` (boucle retry avec backoff + messages d'état cohérents). Référentiel sujets ouverts : `docs/PLUS_TARD_VF.md`.
 - Route `/api/companion/open_dialog_native` → 503 (companion local PyQt n'existe plus en SaaS) : à nettoyer côté JS dans une session "New Outlook via OVH"
 - DB anciens résidus : `boostermail.db.before_local_swap` à supprimer 7-15 jours après validation
 

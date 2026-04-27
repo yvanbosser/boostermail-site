@@ -1,6 +1,6 @@
 # ONBOARDING — Sessions « New Outlook via OVH »
 
-> **Dernière mise à jour** : 27/04/2026 fin de journée (clôture session 1 : 22 commits master, 5 audits Workflow 2 clos, Pattern #18 cache WebView2 documenté, hosting Coaxis identifié, PLUS_TARD_VF consolidé)
+> **Dernière mise à jour** : 27/04/2026 fin de journée (clôture session 1 : **30 commits master**, **8 audits Workflow 2 clos**, Pattern #18 cache WebView2 documenté, hosting Coaxis identifié, PLUS_TARD_VF consolidé)
 
 > **Rôle de ce doc** : référence vivante pour toute session Claude qui travaille sur les **fixes UX/UI/data du plugin BoosterMail dans New Outlook**, déployés directement sur OVH. À mettre à jour à la fin de chaque session pour refléter l'état réel.
 
@@ -393,7 +393,7 @@ ssh ubuntu@51.178.162.208 -t 'cd /opt/boostermail/V2 && /opt/boostermail/V2/venv
 
 | Date | Fichier | Sujet principal |
 |---|---|---|
-| **27/04/2026 (journée complète)** | [`OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`](../sessions/OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md) | **Session de référence (~9h)** : fix bouton BoosterMail New Outlook + Pattern #18 cache WebView2 + cycle audit kit complet (Workflow 4 + Workflow 2, 5 audits clos) + tech debt tier 1 + 12 contacts analysés + consolidation PLUS_TARD_VF + 22 commits master |
+| **27/04/2026 (journée complète)** | [`OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`](../sessions/OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md) | **Session de référence (~9h)** : fix bouton BoosterMail New Outlook + Pattern #18 cache WebView2 + cycle audit kit complet (Workflow 4 + Workflow 2, **8 audits clos sur 10**) + tech debt tier 1 + 12 contacts analysés + consolidation PLUS_TARD_VF + **30 commits master** |
 
 > **Convention** : `OUTLOOK_BILAN_SESSION_AAAAMMJJ[_descriptif].md` dans `docs/sessions/`
 >

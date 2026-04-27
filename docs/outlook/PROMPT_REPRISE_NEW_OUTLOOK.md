@@ -50,7 +50,7 @@ AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 
 1. **`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** ⭐ — référence vivante de cette session (workflow OVH-first, scope, interdits, procédure déploiement, profil Yvan, tests, procédure purge cache WebView2)
 2. **`docs/PLUS_TARD_VF.md`** ⭐ — référentiel UNIQUE des sujets « plus tard ». **Lis le TL;DR en haut du document** : il liste les 23 items vivants par catégorie (admin, actif, SaaS, audits, tech debt, différé, long terme). Remplace les 3 anciens fichiers PLUS_TARD/TODO/BUGS_PROTO archivés.
-3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`** — bilan complet de la session précédente (~9h, 22 commits, découvertes, livrables)
+3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`** — bilan complet de la session précédente (~9h, 30 commits, découvertes, livrables)
 4. **`docs/saas/ONBOARDING_SESSION_SAAS.md`** — référence infra OVH partagée (sections B paths serveur, J commandes, G rollback)
 5. **`audit/INVARIANTS.md`** + **`audit/ANOMALIES_RECURRENTES.md`** — invariants techniques + Patterns identifiés (notamment Pattern #18 cache WebView2 + I-CACHE-01/02/03 + I-SEC-06)
 
