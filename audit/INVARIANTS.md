@@ -1,6 +1,6 @@
 # Invariants V2 — règles absolues testables
 
-> **Dernière mise à jour** : 22/04/2026
+> **Dernière mise à jour** : 27/04/2026 PM (ajout I-CACHE-01 — convention cache busting WebView2)
 > **Principe** : chaque invariant est testable mécaniquement par `smoke_test.ps1`. Une violation = anomalie, point final.
 
 ---
@@ -333,6 +333,52 @@ Après 10 min d'uptime V2, les 3 tables Phase 1+2 doivent couvrir au moins 70% d
 
 ---
 
+---
+
+## Catégorie 12 — Cache HTTP / WebView2 (ajout 27/04/2026)
+
+### I-CACHE-01 : Headers no-store sur fichiers `.js` / `.html` / `.css` du plugin
+La route Flask `/plugin/<filename>` doit servir tout fichier `.js`, `.html`,
+`.css` avec les headers HTTP suivants :
+- `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`
+- `Pragma: no-cache`
+- `Expires: 0`
+- **Test** : `curl -sIk https://api.boostermail.ai/plugin/autorunshared.js`
+  retourne ces 3 headers
+- **Pourquoi** : New Outlook desktop (WebView2 hosted) ignore les headers
+  de revalidation et garde un cache disque permanent. `no-store` est le
+  seul header qu'il respecte fiablement, en empêchant la mise en cache.
+  Sans cette protection, chaque déploiement JS/HTML nécessite une purge
+  manuelle EBWebView côté user (cf Pattern #18 dans ANOMALIES_RECURRENTES).
+- **Historique** : 27/04/2026 PM — Pattern #18 découvert lors du fix bouton
+  New Outlook (v9 non chargée malgré déploiement, kill processes, fermeture
+  Outlook). Fix `app_plugin.py:340-365`.
+
+### I-CACHE-02 : Convention cache busting `?v=` dans autorun.html
+Le `<script src="autorunshared.js?v=N">` dans `V2/autorun.html` doit avoir
+un query string `?v=...` qui change à chaque déploiement modifiant le JS.
+- **Test** : `grep "src=\"autorunshared.js?v=" V2/autorun.html` retourne
+  une ligne
+- **Pourquoi** : protection redondante avec I-CACHE-01. Si pour une raison
+  quelconque le `no-store` n'est pas respecté, le query string force quand
+  même WebView2 à voir une URL différente → cache miss → fetch.
+- **Convention** : `?v=vN-fix-<sujet>-<JJ-MM>` (cohérent avec la convention
+  `_ADDIN_VERSION` dans `autorunshared.js`). Bumper les deux ensemble.
+
+### I-CACHE-03 : Pas de cache permanent du JS chez les users actifs
+Pour un user actif depuis > 1h, vérifier dans les logs nginx que les
+fichiers `.js` du plugin sont fetchés à intervalle régulier (au moins
+une fois par session Outlook).
+- **Test** : `grep "GET /plugin/autorunshared" /var/log/nginx/access.log
+  | grep <user_ip>` doit retourner des lignes datant de < 24h.
+- **Pourquoi** : si plus aucune requête depuis longtemps malgré l'usage
+  actif, c'est que le cache permanent WebView2 est en place et qu'un
+  déploiement futur ne sera pas pris en compte.
+- **Action si violé** : alerter le user, demander purge cache (cf
+  procédure onboarding section purge WebView2).
+
+---
+
 ## Mise à jour
 
 Ajouter un invariant ici **uniquement si** :
@@ -341,3 +387,5 @@ Ajouter un invariant ici **uniquement si** :
 3. Le test correspondant est ajouté à `smoke_test.ps1`
 
 **Leçon 23/04/2026** : les audits "code" sont insuffisants. **Toujours tester l'état des données** en plus de la cohérence du code. Un endpoint peut répondre 200 en servant du vide.
+
+**Leçon 27/04/2026** : les headers HTTP ne suffisent pas pour les clients hosted (WebView2). **Toujours combiner `no-store` + cache busting URL** + procédure de purge documentée pour les déploiements JS/HTML/CSS.

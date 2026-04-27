@@ -1,6 +1,6 @@
 # Anomalies récurrentes — mémoire des patterns
 
-> **Dernière mise à jour** : 23/04/2026 (ajout Pattern #14 — clé cache producteur/consommateur)
+> **Dernière mise à jour** : 27/04/2026 PM (ajout Pattern #18 — cache WebView2 New Outlook ignore les headers HTTP)
 > **Règle** : à chaque nouveau bug détecté, ajouter ici **immédiatement**. À chaque nouveau symptôme, consulter ici **d'abord**.
 
 ---
@@ -576,6 +576,88 @@ capturer des variables globales mutables.
 
 **Note pour SaaS** : ce pattern est typiquement front-end. En SaaS l'archi
 peut continuer à avoir ce risque côté JS — l'invariant reste valide.
+
+---
+
+## Pattern #18 — Cache WebView2 New Outlook ignore les headers HTTP de revalidation
+
+**Contexte** : New Outlook desktop (`hostName: newOutlookWindows`) charge les
+add-ins via WebView2 (Edge embedded). WebView2 conserve un **cache disque
+permanent** dans `%LOCALAPPDATA%\Microsoft\Olk\EBWebView` qui **ignore les
+headers HTTP `must-revalidate`, `max-age=0`, `no-cache`** sur les ressources
+chargées par le runtime add-in (ex: `autorun.html`, `autorunshared.js`).
+
+**Différence avec Outlook Web et Outlook Classic** :
+- Outlook Web (browser) : respecte `must-revalidate` → revalide à chaque
+  session, ETag négocié, fichier modifié servi directement.
+- Outlook Classic (WebView2 hosted) : comportement intermédiaire, généralement
+  refetch correctement.
+- New Outlook desktop : cache permanent jusqu'à purge manuelle ou
+  désinstallation/réinstallation de l'add-in.
+
+**Historique** :
+- 27/04/2026 PM : découverte lors du fix du bouton BoosterMail mort en
+  New Outlook (POST companion 503). Le déploiement de v9 sur OVH n'était
+  pas pris en compte malgré bump `_ADDIN_VERSION`, fermeture/réouverture
+  Outlook, kill `Stop-Process msedgewebview2`. Le `js_loaded` continuait
+  à indiquer `v8` même après plusieurs cycles. Cause : WebView2 chargeait
+  depuis le cache disque sans faire de requête HTTP au serveur.
+
+**Symptôme générique** :
+- Modif déployée sur le serveur, headers HTTP corrects, ETag changé,
+  mais le client New Outlook continue à exécuter l'ancienne version.
+- Logs serveur : aucune requête GET vers `/plugin/autorunshared.js` ou
+  `/plugin/autorun.html` lors d'une session Outlook.
+- Logs add-in : `js_loaded` reporte une version périmée.
+
+**Cause racine** :
+WebView2 sur New Outlook desktop a un mode de cache "offline-first" pour
+les add-ins hostés. Les fichiers `.html` / `.js` / `.css` chargés une fois
+depuis l'URL canonique (sans query string) sont conservés indéfiniment
+sur disque. Le runtime add-in les sert depuis ce cache au démarrage de
+chaque session sans validation HTTP.
+
+**Fix canonique (combiné)** :
+1. **Côté serveur** : `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`
+   + `Pragma: no-cache` + `Expires: 0` sur tous les `.js` / `.html` / `.css`
+   du plugin. Ne suffit PAS à invalider un cache existant, mais empêche
+   le re-cache après purge.
+2. **Cache busting URL** : ajouter `?v=N` dans `autorun.html` au
+   `<script src="autorunshared.js?v=N">`. Bump à chaque déploiement JS.
+   À combiner avec (1) car `autorun.html` lui-même est aussi cachable.
+3. **Purge manuelle initiale (one-shot)** côté user :
+   ```powershell
+   # Outlook + Teams + Edge fermés, msedgewebview2 tués
+   Remove-Item -Path "$env:LOCALAPPDATA\Microsoft\Olk\EBWebView" -Recurse -Force
+   ```
+   Procédure complète documentée dans
+   `docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md` section sur la purge
+   cache WebView2. Méthode la plus sûre : reboot Windows + purge avant
+   ouverture de toute app.
+
+**Test de non-régression** :
+- Après chaque déploiement JS/HTML, vérifier dans les logs nginx que
+  `GET /plugin/autorunshared.js?v=X` apparaît avec un statut `200` au
+  premier ouverture Outlook post-déploiement (et plus jamais ensuite —
+  prouve que le serveur sert no-store et que le cache est vide).
+- Vérifier que `js_loaded` reporte la version attendue.
+
+**Signaux d'alerte** :
+- User signale qu'un fix JS récemment déployé "n'a pas l'air pris en compte"
+- Aucune requête `GET /plugin/*.js` dans les logs nginx récents pour cet user
+- `js_loaded` reporte une version périmée alors que le serveur sert la nouvelle
+
+**Action si violé** :
+- Si on est dans une session de fix urgent : guider l'user pour purger
+  EBWebView (procédure onboarding)
+- Si récurrence sur plusieurs deploiements : inspecter les headers HTTP
+  côté serveur pour vérifier que `no-store` est bien appliqué (route
+  `/plugin/<filename>` dans `app_plugin.py`)
+
+**Cleanup à venir** : la mention "bumper `_ADDIN_VERSION` invalide cache 304"
+dans la doc `docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md` était une
+fausse promesse à corriger (`_ADDIN_VERSION` est juste un marqueur log,
+pas un cache buster).
 
 ---
 
