@@ -1233,10 +1233,27 @@ def _auto_trigger_warmup():
     """
     Lance le warmup automatiquement 3s après le démarrage de Flask.
     Non-bloquant (thread daemon). Ignoré si warmup déjà fait.
+
+    Fix 27/04 PM (Workflow 4 audit kit) — boucle de retry avec backoff
+    et messages d'état cohérents (avant : 2 tentatives max, current_subject
+    coince a 'Demarrage auto retry' indefiniment si Graph KO).
+
+    Strategie :
+    - 1ere tentative apres 3s (cas nominal : token cache valide)
+    - Si Graph KO : boucle de retry toutes les 60s, max 30 tentatives (= 30 min)
+      pendant lesquelles l'user peut se loguer cote OAuth
+    - Pendant l'attente : current_subject='Connexion Microsoft attendue', status=idle
+      (pas 'running' qui afficherait une popup bloquante chez l'user)
+    - Si Graph devient dispo : transition propre vers running -> _execute_warmup
+    - Si epuise les 30 retries : current_subject='Connexion Microsoft requise', stop
     """
+    MAX_RETRIES = 30
+    RETRY_INTERVAL = 60  # secondes
+
     def _run():
         time.sleep(3)  # Laisser Flask + auth s'initialiser
-        # ANOMALIE #1 fix : vérifier _warmup_done ET status sous le même lock (pas de race condition)
+
+        # 1ere tentative
         with _warmup_lock:
             if _warmup_done:
                 logger.info("Auto-warmup: déjà fait, skip")
@@ -1246,26 +1263,53 @@ def _auto_trigger_warmup():
                 return
             _warmup_progress.update({"status": "running", "loaded": 0, "total": 10,
                                       "current_subject": "Demarrage auto..."})
-        # ANOMALIE #6 fix : retry si token pas encore disponible (1 tentative après 30s)
+
         graph = get_graph()
-        if not graph:
-            logger.info("Auto-warmup: token non dispo, retry dans 30s")
+        if graph:
+            logger.info("Auto-warmup démarré (1ere tentative OK)")
+            _execute_warmup(graph)
+            return
+
+        # Graph KO : passer en mode attente avec retry boucle
+        logger.info(f"Auto-warmup: token non dispo, boucle de retry "
+                    f"toutes les {RETRY_INTERVAL}s (max {MAX_RETRIES} fois)")
+        with _warmup_lock:
+            _warmup_progress.update({
+                "status": "idle",
+                "current_subject": "Connexion Microsoft attendue",
+            })
+
+        for attempt in range(1, MAX_RETRIES + 1):
+            time.sleep(RETRY_INTERVAL)
             with _warmup_lock:
-                _warmup_progress["status"] = "idle"
-            time.sleep(30)
-            with _warmup_lock:
+                # Sortie si le warmup a deja ete declenche par autre voie
+                # (POST /api/warmup_inbox apres OAuth callback, etc.)
                 if _warmup_done or _warmup_progress.get("status") == "running":
+                    logger.info(f"Auto-warmup: declenche par autre voie, "
+                                f"sortie de la boucle de retry (attempt={attempt})")
                     return
-                _warmup_progress.update({"status": "running", "loaded": 0, "total": 10,
-                                          "current_subject": "Demarrage auto (retry)..."})
             graph = get_graph()
-            if not graph:
-                logger.info("Auto-warmup: token non disponible (connexion Microsoft requise)")
+            if graph:
                 with _warmup_lock:
-                    _warmup_progress["status"] = "idle"
+                    _warmup_progress.update({
+                        "status": "running",
+                        "loaded": 0,
+                        "total": 10,
+                        "current_subject": f"Demarrage (apres login Microsoft, retry {attempt})...",
+                    })
+                logger.info(f"Auto-warmup démarré (retry {attempt} OK apres {attempt * RETRY_INTERVAL}s)")
+                _execute_warmup(graph)
                 return
-        logger.info("Auto-warmup démarré")
-        _execute_warmup(graph)
+
+        # MAX_RETRIES atteint : etat final clair
+        logger.info(f"Auto-warmup: token Microsoft non disponible apres "
+                    f"{MAX_RETRIES} tentatives ({MAX_RETRIES * RETRY_INTERVAL}s). "
+                    f"L'user doit se loguer puis appeler /api/warmup_inbox manuellement.")
+        with _warmup_lock:
+            _warmup_progress.update({
+                "status": "idle",
+                "current_subject": "Connexion Microsoft requise",
+            })
 
     threading.Thread(target=_run, daemon=True).start()
 
