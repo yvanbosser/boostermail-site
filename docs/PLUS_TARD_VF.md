@@ -114,15 +114,15 @@ Sur les 10 audits du menu : **5 traités**, 5 restants.
 
 ---
 
-### 7-bis. Cleanup dead code détecté pendant audit #2 (priorité basse)
+### 7-bis. ~~Cleanup dead code détecté pendant audit #2~~ ✅ FAIT 27/04 PM
 
-4 caches déclarés mais inutilisés détectés via audit Pattern #14 :
-- `_attachment_cache` (`app_plugin.py:6858`) — write-only ligne 6465, jamais lu
-- `_echeance_post_send_cache` (`app_plugin.py:1695`) — déclaré, jamais utilisé
-- `_classification_post_send_cache` (`app_plugin.py:1696`) — idem
-- `_pj_classification_post_send_cache` (`app_plugin.py:1697`) — idem
+✅ 4 caches dead retirés en fin de session 27/04 PM (audit kit #10) :
+- `_attachment_cache` + son lock + MAX (write-only)
+- `_echeance_post_send_cache` (jamais utilisé)
+- `_classification_post_send_cache` (jamais utilisé)
+- `_pj_classification_post_send_cache` (jamais utilisé)
 
-Effort cleanup : ~10 min (suppression déclarations + code adjacent). Bénéfice : marginal RAM + clarté. Pas urgent, à grouper avec autre cleanup.
+Service restart 0 erreur. Code allégé sans impact fonctionnel.
 
 ---
 

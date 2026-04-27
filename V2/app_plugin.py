@@ -1690,14 +1690,15 @@ def _reply_cache_metrics_report_loop():
         time.sleep(15 * 60)  # 15 min
 
 # --- Plan 2 Phase 2.C — Post-send caches (portés depuis proto app.py:415-467) ---
-# Évitent un re-appel Claude si le user revient sur la popup post-envoi dans les
-# premières minutes (change d'avis sur la classification, échéance, etc.).
-_echeance_post_send_cache = {}      # email_id -> {'echeances': [...], 'ts': float}
-_classification_post_send_cache = {}  # email_id -> {'suggestion': {...}, 'ts': float}
-_pj_classification_post_send_cache = {}  # email_id -> {'suggestion': {...}, 'ts': float}
+# Cleanup 27/04 PM (audit kit #10) — _echeance_post_send_cache,
+# _classification_post_send_cache et _pj_classification_post_send_cache
+# supprimes : declares mais JAMAIS utilises (ni read ni write) dans tout
+# le code V2. Etaient prevus pour eviter un re-appel Claude post-envoi
+# mais l'implementation a ete remplacee par d'autres mecanismes
+# (mail_preview_cache, classification post-send via DB).
 _MAX_POST_SEND_CACHE = 30
 _MAX_PJ_POST_SEND_CACHE = 30
-_POST_SEND_CACHE_TTL = 5 * 60  # 5 min (suggestion classement)
+_POST_SEND_CACHE_TTL = 5 * 60  # 5 min (constante conservee, peut etre utilisee ailleurs)
 
 # --- Phase 2.A (24/04 plan structurel) — Pré-chauffe BG preview dialog 80%
 # Alimente les cards `infoEcheance` + `infoClassement` du dialog 80% avec
@@ -6460,9 +6461,8 @@ def api_suggest_pj_folder(email_id):
         attachments = graph.get_attachments(email_id)
     except Exception:
         attachments = []
-    with _attachment_cache_lock:
-        _trim_dict_cache(_attachment_cache, _MAX_ATTACHMENT_CACHE)
-        _attachment_cache[email_id] = attachments
+    # Cleanup 27/04 PM (audit kit #10) — _attachment_cache supprime (write-only,
+    # jamais lu nulle part dans le code). Le fetch Graph est fait directement.
     relevant_pj = [a for a in attachments if not a.get('is_inline', False)]
     pj_names = [a['name'] for a in relevant_pj]
 
@@ -6855,9 +6855,9 @@ def _start_pj_pre_extract_v2(message_id, attachments=None):
 
     threading.Thread(target=_bg_extract, daemon=True).start()
 
-_attachment_cache = {}     # email_id → [{'id', 'name', 'size', 'content_type', 'is_inline'}]
-_attachment_cache_lock = threading.Lock()  # Audit : protège _attachment_cache (accès BG vs main)
-_MAX_ATTACHMENT_CACHE = 30
+# Cleanup 27/04 PM (audit kit #10) — _attachment_cache + lock + MAX supprimes
+# (etaient declares + un seul site d'ecriture, jamais lu). Audit Pattern #14
+# du 27/04 PM a confirme l'absence totale de read sites.
 _upload_dir = os.path.join(tempfile.gettempdir(), 'easymail_uploads')
 os.makedirs(_upload_dir, exist_ok=True)
 
