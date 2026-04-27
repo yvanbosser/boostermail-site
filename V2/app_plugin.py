@@ -4832,12 +4832,18 @@ def api_selected_mail():
 
 # --- Proxy Companion (P43, B15) ----------------------------------------------
 
-# Whitelist des subpaths autorises pour le proxy Companion (#7 audit)
-# Pivot SaaS 27/04/2026 — 'open_dialog_native' retire (companion PyQt local
-# n'existe plus en SaaS, le dialog s'ouvre via displayDialogAsync cote JS).
+# Whitelist des subpaths autorises pour le proxy Companion (#7 audit).
+# Pivot SaaS 27/04/2026 PM — cleanup progressif :
+# - 'open_dialog_native' retire (dialog s'ouvre via displayDialogAsync JS)
+# - 'inject_reply' retire (cleanup _sendViaCompanionFallback dialog.js)
+# - 'status' retire (cleanup _checkCompanionForPyQt popup.js)
+# Restants : subpaths encore appeles cote backend Python (Mode Degrade
+# fallback) ou potentiellement par frontend dans flux moins frequents.
+# A re-auditer periodiquement, suppression complete possible quand
+# tous les call sites front/back du companion seront retires.
 _COMPANION_ALLOWED = {
-    'current_selection', 'inject_reply', 'detect_compose', 'folders',
-    'copy', 'status', 'prefetch_sender', 'prefetch_subject',
+    'current_selection', 'detect_compose', 'folders',
+    'copy', 'prefetch_sender', 'prefetch_subject',
     'search', 'scan_folders', 'outlook_folders',
 }
 

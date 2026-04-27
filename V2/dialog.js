@@ -3565,31 +3565,11 @@ function _sendViaCompanion(body, to, cc, subject) {
         document.getElementById('btnSend').innerHTML = '&#x1f4e4; Envoyer';
     }
 
-    function _sendViaCompanionFallback() {
-        fetch(_backendUrl + '/api/companion/inject_reply', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                html_body: body,
-                mode: _mode,
-                to: to,
-                cc: cc,
-                subject: subject,
-                compose_already_open: true,  // standalone : compose ouvert par OnNewMessageCompose
-            })
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.status === 'ok') {
-                _onSuccessUi('companion');
-            } else {
-                _onErrorUi('Erreur injection : ' + (data.reason || 'inconnue'));
-            }
-        })
-        .catch(function(err) {
-            _onErrorUi('Companion non disponible : ' + err.message);
-        });
-    }
+    // Cleanup 27/04 PM : _sendViaCompanionFallback supprime (companion local
+    // PyQt n'existe plus en SaaS, le POST /api/companion/inject_reply
+    // retournait 403 systematiquement depuis le pivot et generait une UX
+    // confuse). Erreurs Graph 403/reseau remontent maintenant directement
+    // a l'user via _onErrorUi avec message clair.
 
     // 1. Graph first via /send_reply (route existante, enrichie 21/04 avec
     //    idempotence + conversion internet_id → Graph id + attachments).
@@ -3608,9 +3588,8 @@ function _sendViaCompanion(body, to, cc, subject) {
     })
     .then(function(r) {
         if (r.status === 403) {
-            // Mode Dégradé (pas de token Graph) → fallback Companion COM
-            console.info('[dialog] Graph 403 (Mode Complet requis) → fallback Companion');
-            _sendViaCompanionFallback();
+            // Token Microsoft expire ou non disponible
+            _onErrorUi('Session Microsoft expiree. Reconnectez-vous via Profil > Mode Standard, puis reessayez.');
             return null;
         }
         if (!r.ok) {
@@ -3621,7 +3600,7 @@ function _sendViaCompanion(body, to, cc, subject) {
         return r.json();
     })
     .then(function(data) {
-        if (!data) return;  // fallback déjà déclenché
+        if (!data) return;  // erreur deja affichee
         if (data.success) {
             _onSuccessUi('graph');
         } else if (data.auth_required) {
@@ -3631,8 +3610,8 @@ function _sendViaCompanion(body, to, cc, subject) {
         }
     })
     .catch(function(err) {
-        // Erreur Graph (réseau, exception, etc.) : dernier recours Companion
-        console.warn('[dialog] Envoi Graph échoué (' + err.message + ') → fallback Companion');
-        _sendViaCompanionFallback();
+        // Erreur reseau ou exception JS : message clair user
+        console.warn('[dialog] Envoi Graph échoué : ' + err.message);
+        _onErrorUi('Erreur d\'envoi : ' + (err.message || 'inconnue') + '. Verifiez votre connexion et reessayez.');
     });
 }

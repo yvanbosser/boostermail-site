@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>EasyMail - V9 Overlay 30/70 (Outlook gauche, EasyMail droite)</title>
+<title>BoosterMail - V9 Overlay 30/70 (Outlook gauche, BoosterMail droite)</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Segoe UI', sans-serif; background: #f3f3f3; overflow: hidden; height: 100vh; }
@@ -38,7 +38,7 @@ body { font-family: 'Segoe UI', sans-serif; background: #f3f3f3; overflow: hidde
 .r-spacer { flex: 1; }
 .em-ribbon { background: #0078d4; color: #fff; border: none; border-radius: 5px; padding: 5px 12px; font-size: 11px; font-weight: 600; cursor: pointer; }
 
-/* OVERLAY 30 (Outlook) / 70 (EasyMail) */
+/* OVERLAY 30 (Outlook) / 70 (BoosterMail) */
 .em-overlay {
     position: absolute; top: 0; right: 0; bottom: 0; left: 0;
     display: flex; z-index: 100;
@@ -178,7 +178,7 @@ body { font-family: 'Segoe UI', sans-serif; background: #f3f3f3; overflow: hidde
             <div class="r-tab active">Accueil</div>
             <div class="r-tab">Affichage</div>
             <div class="r-spacer"></div>
-            <button class="em-ribbon" onclick="document.getElementById('em-overlay').style.display='flex'">&#x2709; EasyMail</button>
+            <button class="em-ribbon" onclick="document.getElementById('em-overlay').style.display='flex'">&#x2709; BoosterMail</button>
         </div>
         <div class="main-body">
             <div class="mail-list">
@@ -200,7 +200,7 @@ body { font-family: 'Segoe UI', sans-serif; background: #f3f3f3; overflow: hidde
                 </div>
             </div>
 
-            <!-- OVERLAY : Outlook 30% gauche / EasyMail 70% droite -->
+            <!-- OVERLAY : Outlook 30% gauche / BoosterMail 70% droite -->
             <div class="em-overlay" id="em-overlay">
 
                 <!-- 30% MAIL RECU (gauche) -->
@@ -274,7 +274,7 @@ body { font-family: 'Segoe UI', sans-serif; background: #f3f3f3; overflow: hidde
                 <!-- 70% EASYMAIL (droite) -->
                 <div class="em-panel">
                     <div class="em-header">
-                        <div class="em-logo">&#x2709; EasyMail — Repondre</div>
+                        <div class="em-logo">&#x2709; BoosterMail — Repondre</div>
                         <div class="em-header-actions">
                             <button class="em-hdr-btn" title="Reduire" onclick="document.getElementById('em-overlay').style.display='none'">&#x2014;</button>
                             <button class="em-hdr-btn" title="Fermer" onclick="document.getElementById('em-overlay').style.display='none'">&times;</button>

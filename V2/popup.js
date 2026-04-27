@@ -102,29 +102,11 @@ function _checkModeBeforeDisplay(attempt) {
         });
 }
 
-function _checkCompanionForPyQt() {
-    // En Mode Perf. Reduite, la popup PyQt ne s'affiche QUE si le Companion COM est disponible
-    // (Classic Outlook Windows = Companion alimente la popup via /current_selection)
-    fetch(_backendUrl + '/api/companion/status')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.status === 'ok') {
-                // Companion disponible → afficher la popup (alimentee par COM)
-                _initConsumerMode();
-            } else {
-                // Companion non disponible → ne pas afficher la popup
-                document.body.innerHTML = '<div style="padding:20px;text-align:center;font-size:12px;color:#999;font-family:Segoe UI,sans-serif;">'
-                    + '<p>Activez le <b>Mode Standard</b> pour utiliser BoosterMail ici.</p>'
-                    + '<p style="font-size:10px;margin-top:8px;">Profil > Mode BoosterMail > Activer</p></div>';
-            }
-        })
-        .catch(function() {
-            // Companion offline → afficher un message
-            document.body.innerHTML = '<div style="padding:20px;text-align:center;font-size:12px;color:#999;font-family:Segoe UI,sans-serif;">'
-                + '<p>Activez le <b>Mode Standard</b> pour utiliser BoosterMail ici.</p>'
-                + '<p style="font-size:10px;margin-top:8px;">Profil > Mode BoosterMail > Activer</p></div>';
-        });
-}
+// Cleanup 27/04 PM : _checkCompanionForPyQt() supprime.
+// Cette fonction etait appelee dans le mode "consommateur" de la popup
+// quand on n'etait pas dans une taskpane Office.js (popup PyQt locale).
+// En SaaS le PyQt n'existe plus, et la fonction n'etait plus referencee
+// par aucun code path actif (verifie par grep complet 27/04 PM).
 
 // ============================================================================
 // MODE TASKPANE — Office.js source PRIMAIRE (P36)
