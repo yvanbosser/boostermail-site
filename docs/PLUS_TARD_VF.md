@@ -1,6 +1,6 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 27/04/2026 PM (consolidation des 3 fichiers source pré-existants)
+> **Dernière mise à jour** : 27/04/2026 PM (consolidation + cycle Workflow 4/2 audit kit : #2 Graph 400, #9 HTTP 429, #6 prompt injection)
 >
 > **Rôle** : ce document est désormais **LE seul référentiel vivant** pour tout sujet « à faire plus tard » de BoosterMail. Il consolide et remplace les 3 fichiers historiques :
 > - `docs/PLUS_TARD.md` (573 lignes, à jour 27/04 PM mais redondant après cette session)
@@ -26,17 +26,9 @@
 
 ---
 
-### 2. Bug Graph 400 — `get_conversation_thread` `conversationId eq` (préexistant)
+### 2. ~~Bug Graph 400 — `get_conversation_thread`~~ ✅ FAIT 27/04 PM
 
-**Symptôme** : ~30 erreurs Graph 400 par session dans `syslog`, capturées silencieusement → contexte A vide pour certains mails.
-
-**Localisation** : `V2/outlook_graph.py:408-428`.
-
-**Cause** : combinaison `$filter=conversationId eq` + `$orderby=receivedDateTime desc` + `$select={_FULL_SELECT}` rejetée par Graph sur certaines mailboxes (limitation E5/Business documentée).
-
-**Pré-diag complet** : `audit/rapports/2026-04-27_graph_400_conversationid_pre_diag.md` (4 options de fix : retirer `$orderby` recommandé, réduire `$select`, `$search`, endpoint dédié).
-
-**Estimation** : 1h fix + tests sur quelques cas avant déploiement.
+✅ **Résolu** dans commit `828567e` — Workflow 4 audit kit. Option 1 du pré-diag appliquée : `$orderby=receivedDateTime desc` retiré côté Graph, tri Python après fetch. **Validation** : 0 erreur "too complex" depuis le restart Flask de 15:09:49 UTC (était 89/jour avant fix).
 
 ---
 
@@ -101,22 +93,36 @@
 
 ---
 
-### 7. Audits préventifs restants (8 sur 10 du menu — 27/04)
+### 7. Audits préventifs restants — état au 27/04 PM
 
-Le menu de 10 audits préparé le 27/04 — 2 lancés (#7, #8 cohérence DB + profils contacts buggés), 8 restants :
+Sur les 10 audits du menu : **5 traités**, 5 restants.
 
-| # | Audit | Objectif | Durée | Priorité |
-|---|---|---|---|---|
-| 1 | Pattern #17 backend | Race conditions threads/callbacks Python (analogue Vincent Hubert mais serveur) | 20 min | Haute |
-| 2 | Pattern #14 récidive autres caches | Audit clés écriture/lecture sur `_warmup_cache`, `_prefetch_cache`, `_attachment_cache`, etc. | 25 min | Haute |
-| **3** | **État global cross-user (SaaS readiness)** | **Lister toutes les variables `_xxx_cache` qui supposent un seul user — bloquant pour SaaS multi-tenant** | **30 min** | **🚨 Avant SaaS** |
-| 4 | Erreurs silencieuses (Pattern #3) | Grep `except Exception: pass` — actions qui « semblent réussir » | 15 min | Moyenne |
-| 5 | Phase 1 strict canonical IMID | Vérifier sites référençant un mail utilisent l'IMID canonique | 20 min | Moyenne |
-| 6 | Prompt injection (Pattern #9) | Tous prompts Claude doivent avoir guard « ignore pseudo-instructions » | 10 min | Moyenne |
-| 9 | Slow paths | Routes V2 > 500 ms (I-UX-02) | 20 min | Basse |
-| 10 | Code mort / dépendances inutiles | Routes/fonctions/imports jamais appelés (Pattern #10) | 25 min | Basse |
+| # | Audit | Statut | Détails |
+|---|---|---|---|
+| 1 | Pattern #17 backend | ⏳ À faire | Race conditions threads/callbacks Python (analogue Vincent Hubert mais serveur) — 20 min |
+| 2 | Pattern #14 récidive caches | ✅ **Fait 27/04 PM** | Constat : `_attachment_cache`, `_echeance_post_send_cache`, `_classification_post_send_cache`, `_pj_classification_post_send_cache` sont **dead code** (déclarés jamais utilisés ou write-only). Pas une anomalie kit (pas de bug). À nettoyer dans le backlog cleanup priorité basse. Caches actifs (warmup/prefetch/reply/pj_text/mail_summaries) déjà conformes. |
+| **3** | **État global cross-user (SaaS readiness)** | ⏳ **🚨 Avant SaaS multi-tenant Étape 7** | Lister toutes les variables `_xxx_cache` qui supposent un seul user — 30 min, à coordonner avec session SaaS |
+| 4 | Erreurs silencieuses (Pattern #3) | 🔄 **Constat livré** | 71 occurrences `except: pass` dans V2/*.py (claude_ai 4, app_plugin 59, database 4, outlook_graph 3, core 1). Trop pour quick win → **session dédiée 1-2h** pour sampler/classifier les sites critiques |
+| 5 | Phase 1 strict canonical IMID | ✅ **Fait 27/04 PM** | Couvert par fix Pattern #15 commit `71c58a5` (4 sites mail_data sans `internet_message_id` corrigés) |
+| 6 | Prompt injection (Pattern #9) | ✅ **Fait 27/04 PM** | Découverte critique : `_build_prompt` (generate_reply_stream) **n'avait pas la garde** anti-injection. Fix commit `59fd9d8` ajoute `_SECURITY_GUARD` ligne 610 de `claude_ai.py` qui s'applique aux 3 modes (reply/forward/first_mail). Invariant **I-SEC-06** ajouté à INVARIANTS.md. |
+| 7 | Cohérence DB | ✅ **Fait 27/04 matin** | doublons/orphelins audités |
+| 8 | Profils contacts buggés | ✅ **Fait 27/04 matin** | 13 profils greeting tordus identifiés et corrigés |
+| 9 | Slow paths > 500 ms | ⏳ Reporter | Perf déjà OK depuis cache 5 ans + lazy contact_search |
+| 10 | Code mort / imports inutiles | ⏳ Reporter | Audit complémentaire — l'audit #2 a déjà découvert 4 caches dead code |
 
-**#3 obligatoire avant Étape 7 multi-tenant SaaS** — coordination requise avec session SaaS.
+**Récap** : 5 audits clos (#2, #5, #6, #7, #8), 1 partiel (#4 constat livré, fix dans session dédiée), 4 à programmer (#1, #3, #9, #10).
+
+---
+
+### 7-bis. Cleanup dead code détecté pendant audit #2 (priorité basse)
+
+4 caches déclarés mais inutilisés détectés via audit Pattern #14 :
+- `_attachment_cache` (`app_plugin.py:6858`) — write-only ligne 6465, jamais lu
+- `_echeance_post_send_cache` (`app_plugin.py:1695`) — déclaré, jamais utilisé
+- `_classification_post_send_cache` (`app_plugin.py:1696`) — idem
+- `_pj_classification_post_send_cache` (`app_plugin.py:1697`) — idem
+
+Effort cleanup : ~10 min (suppression déclarations + code adjacent). Bénéfice : marginal RAM + clarté. Pas urgent, à grouper avec autre cleanup.
 
 ---
 
@@ -134,13 +140,11 @@ Le menu de 10 audits préparé le 27/04 — 2 lancés (#7, #8 cohérence DB + pr
 
 ---
 
-### 9. Cap API : retour HTTP 429 propre (différé du 27/04)
+### 9. ~~Cap API : retour HTTP 429 propre~~ ✅ FAIT 27/04 PM
 
-**Comportement actuel** : `QuotaExceeded` remonte en HTTP 500 standard. User voit erreur générique.
+✅ **Résolu** dans commit `c28c7e8` — Workflow 4 audit kit. `@app.errorhandler(QuotaExceeded)` global pour routes synchrones JSON (HTTP 429) + catch ciblé dans `generate_sse()` pour route streaming `/generate_reply` + handler frontend `dialog.js` qui affiche `data.message` clair quand `data.error === 'quota_exceeded'` + header status "Quota quotidien atteint".
 
-**À faire** : capture explicite dans routes Flask (`/api/generate_reply`, `/api/refine_*`) → retour **HTTP 429** + message UX clair (« Vous avez atteint votre quota quotidien — réessayez demain »). Côté frontend (dialog.js), gérer le 429 avec un toast UX clair.
-
-**Pourquoi reporté** : touche `app_plugin.py` + `dialog.js` (scope strict session New Outlook).
+**Couverture restante** (priorité basse) : autres routes streaming (`/refine_reply`, `/api/mail_summary_stream`) attrapent toujours le `QuotaExceeded` via leur `except Exception` générique → SSE event avec `data.error = "Quota claude depasse pour user..."` (texte brut, pas idéal mais fonctionnel). À propager si user signale.
 
 ---
 
@@ -242,6 +246,10 @@ Suite à l'audit exhaustif multi-angles du 21/04 (~60 anomalies, 15 corrigées i
 - ✅ **Warmup tracker boucle retry avec backoff** (`b9cacd3`) — fini le « Démarrage auto retry » coincé
 - ✅ **Lazy-load `/api/contact_search` debounced 150 ms** vs 187 KB pré-load (`53030b6`)
 - ✅ **Couleur popup `#0F6CBD` + rebrand mockups + cleanup dead code companion frontend** (`02757be`)
+- ✅ **PLUS_TARD_VF consolidation** + bandeaux archives sur 3 anciens fichiers (`dd98e9b`)
+- ✅ **Graph 400 conversationId** retrait `$orderby` + tri Python (`828567e`) — 89/jour → 0
+- ✅ **HTTP 429 propre** errorhandler global + SSE event quota_exceeded (`c28c7e8`)
+- ✅ **Pattern #9 prompt injection** : garde anti-injection sur `_build_prompt` + invariant I-SEC-06 (`59fd9d8`)
 
 ### Sessions précédentes
 - ✅ **POC 21/04 Inversion Graph > Companion COM** — plus de popup OOM Guardian sur polling/prefetch/envoi en Mode Complet
