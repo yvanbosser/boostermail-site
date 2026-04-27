@@ -31,6 +31,18 @@
 ### Hosting Coaxis (Compta Santé) — sujet stratégique
 **Découverte 27/04 PM** : New Outlook desktop refuse de se connecter au compte `yvan.bosser@groupe-bosser.fr` car la mailbox est hébergée chez **Coaxis** (probable setup hybride Azure AD auth + Exchange on-premise/private). Fix de contournement : Yvan a basculé sur un compte transitoire du nouveau tenant. **À résoudre côté admin Coaxis** : soit migrer la mailbox vers Microsoft 365 cloud (Exchange Online), soit confirmer que New Outlook peut se connecter (peut-être un policy admin à débloquer). Tant que c'est pas résolu, Yvan utilise un compte transitoire pour valider BoosterMail au quotidien.
 
+**MAJ 27/04 PM (fin de session)** : Yvan en relation avec Coaxis pour **migrer définitivement la mailbox** vers Microsoft 365 cloud. ETA 2-3 jours. Une fois la migration faite :
+- Le compte `yvan.bosser@groupe-bosser.fr` sera entièrement sur Microsoft 365 (Exchange Online)
+- New Outlook desktop pourra s'y connecter sans `MailboxInfoStaleException`
+- Graph API verra tous les mails (résout le 404 sur `/api/email_body`, le cohesion check qui purge les drafts orphelins, le pré-gen qui ne fonctionne pas pour les mails Coaxis)
+- Les nouveaux mails reçus seront tous éligibles au pipeline BoosterMail
+
+**Effets observables aujourd'hui (avant migration)** :
+- Mails dans la mailbox Coaxis affichés en local Outlook → invisibles via Graph → instant_reply MISS systématique + draft pré-généré de ce matin (session Coaxis avant le crash) purgé en boucle par le cohesion check
+- Mails reçus directement dans le compte transitoire → fonctionnent normalement avec BoosterMail
+
+**Ne nécessite aucun code change côté BoosterMail** — la résolution est intégralement côté admin Coaxis. Un éventuel suivi à faire côté BoosterMail post-migration : vérifier qu'aucune trace Coaxis legacy ne pose problème dans les caches DB (contact_profiles, email_cache).
+
 ### Pattern #17 — bonus (préventif, pas urgent)
 Si un nouveau `setTimeout` capture des globals mutables (`_messageId`, `_fromEmail`, `_importance`, `_mode`, `_currentMail`) sans pattern snapshot, c'est une régression Pattern #17. Audit covert au 27/04, mais à re-vérifier à chaque ajout de setTimeout dans `dialog.js`.
 

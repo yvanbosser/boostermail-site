@@ -7446,6 +7446,47 @@ def generate_reply():
     except Exception:
         pass
 
+    # Fix 27/04 PM (Vincent Hubert leonis) — fallback Graph si body vide.
+    # Si Office.js n'a pas pu fetcher le body (mail forward avec PJ inline,
+    # body MIME complexe, etc.), tenter de le recuperer via Graph API avant
+    # d'appeler Claude. Sinon Claude repondrait "je ne vois pas le contenu"
+    # et le draft poubelle polluerait le cache.
+    if not _dbg_body and message_id:
+        graph = get_graph()
+        if graph:
+            try:
+                if message_id.startswith('<'):
+                    _email_fetched = graph.get_email_by_internet_id(message_id)
+                else:
+                    _email_fetched = graph.get_email_by_id(message_id)
+                if _email_fetched:
+                    _body_from_graph = (_email_fetched.get('body')
+                                        or _email_fetched.get('html_body')
+                                        or _email_fetched.get('body_preview') or '')
+                    if _body_from_graph:
+                        data['body'] = _body_from_graph
+                        _dbg_body = _body_from_graph
+                        _dbg_len = len(_body_from_graph)
+                        logger.info(f"[generate_reply] Body fallback Graph OK pour "
+                                    f"{message_id[:40]} ({_dbg_len} chars)")
+            except Exception as e:
+                logger.warning(f"[generate_reply] Echec fallback Graph body : {e}")
+
+        # Si toujours vide apres fallback Graph -> ne PAS appeler Claude
+        # (eviterait un draft poubelle qui pollue le cache + frustre l'user).
+        if not _dbg_body:
+            logger.warning(f"[generate_reply] Body vide et Graph KO/absent pour "
+                           f"{message_id[:40]} - refus pour eviter pollution")
+            def _gen_no_body_error():
+                _err_msg = ("Le contenu de ce mail n'a pas pu être récupéré. "
+                            "Réessayez dans quelques secondes ou rouvrez le mail "
+                            "depuis Outlook.")
+                yield f"event: error\ndata: {json.dumps({'error': _err_msg})}\n\n"
+                yield f"event: done\ndata: {json.dumps({'text': '', 'reason': 'no_body'})}\n\n"
+            return Response(stream_with_context(_gen_no_body_error()),
+                            mimetype='text/event-stream',
+                            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
     # Cache unifié (Plan 3 §9.1) : pas de TTL — purge purement événementielle.
     # Safety net 4 semaines géré par le thread `_reply_cache_safety_net_loop`.
     if message_id and not brief:
