@@ -1,0 +1,14 @@
+# Redirection intelligente par langue
+# Détecte Accept-Language header et redirige vers la bonne page
+
+# Allemand
+/  /blog-de.html  200!  Language=de
+
+# Anglais
+/  /blog-en.html  200!  Language=en
+
+# Espagnol
+/  /blog-es.html  200!  Language=es
+
+# Français (par défaut)
+/  /index.html  200!

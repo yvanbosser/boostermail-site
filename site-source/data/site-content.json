@@ -1,0 +1,78 @@
+{
+  "nav": {
+    "fr": {
+      "features": "Fonctionnalités",
+      "pricing": "Tarifs",
+      "blog": "Blog",
+      "cta": "Essayer gratuitement"
+    },
+    "en": {
+      "features": "Features",
+      "pricing": "Pricing",
+      "blog": "Blog",
+      "cta": "Try for free"
+    },
+    "de": {
+      "features": "Funktionen",
+      "pricing": "Preise",
+      "blog": "Blog",
+      "cta": "Kostenlos testen"
+    },
+    "es": {
+      "features": "Características",
+      "pricing": "Precios",
+      "blog": "Blog",
+      "cta": "Prueba gratis"
+    }
+  },
+  "blog_hero": {
+    "fr": {
+      "tag": "Ressources",
+      "title": "Conseils IA & Productivité Email",
+      "description": "Guides pratiques pour reprendre le contrôle de votre boîte Outlook grâce à l'intelligence artificielle."
+    },
+    "en": {
+      "tag": "Resources",
+      "title": "AI Tips & Email Productivity",
+      "description": "Practical guides to take control of your inbox with artificial intelligence."
+    },
+    "de": {
+      "tag": "Ressourcen",
+      "title": "KI-Tipps & E-Mail-Produktivität",
+      "description": "Praktische Leitfäden zur Kontrolle Ihres Posteingangs durch künstliche Intelligenz."
+    },
+    "es": {
+      "tag": "Recursos",
+      "title": "Consejos de IA y Productividad de Email",
+      "description": "Guías prácticas para tomar control de tu bandeja de entrada con inteligencia artificial."
+    }
+  },
+  "footer": {
+    "fr": {
+      "copyright": "© 2026 BoosterMail. Tous droits réservés.",
+      "privacy": "Confidentialité",
+      "terms": "Conditions"
+    },
+    "en": {
+      "copyright": "© 2026 BoosterMail. All rights reserved.",
+      "privacy": "Privacy",
+      "terms": "Terms"
+    },
+    "de": {
+      "copyright": "© 2026 BoosterMail. Alle Rechte vorbehalten.",
+      "privacy": "Datenschutz",
+      "terms": "Bedingungen"
+    },
+    "es": {
+      "copyright": "© 2026 BoosterMail. Todos los derechos reservados.",
+      "privacy": "Privacidad",
+      "terms": "Términos"
+    }
+  },
+  "date_formats": {
+    "fr": "d MMMM yyyy",
+    "en": "MMM d, yyyy",
+    "de": "d. MMMM yyyy",
+    "es": "d 'de' MMMM 'de' yyyy"
+  }
+}

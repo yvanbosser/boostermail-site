@@ -1,0 +1,183 @@
+{
+  "articles": [
+    {
+      "id": "10-cas-usage",
+      "slug": "10-cas-usage",
+      "title_fr": "10 Cas d'Usage Pratiques de BoosterMail : Exemples Réels | BoosterMail",
+      "description_fr": "10 cas d'usage réels : commerciaux, RH, support, direction... Comment BoosterMail transforme chaque rôle. Exemples concrets et gains mesurés.",
+      "keywords_fr": "",
+      "date": "22 avril 2026",
+      "readTime": 9,
+      "emoji": "📊",
+      "category_fr": "Cas d'Usage",
+      "content_fr": "<!-- CONTENU À EXTRAIRE MANUELLEMENT -->"
+    },
+    {
+      "id": "5-erreurs",
+      "slug": "5-erreurs",
+      "title_fr": "5 Erreurs Qui Ralentissent Votre Réponse aux Emails | BoosterMail",
+      "description_fr": "5 erreurs courantes ralentissent votre productivité email. Comment les éviter et économiser 2h/jour sur la rédaction d'emails. Guide complet avec solutions IA.",
+      "keywords_fr": "",
+      "date": "22 avril 2026",
+      "readTime": 7,
+      "emoji": "⚠️",
+      "category_fr": "Productivité",
+      "content_fr": "<!-- CONTENU À EXTRAIRE MANUELLEMENT -->"
+    },
+    {
+      "id": "87-pourcent",
+      "slug": "87-pourcent",
+      "title_fr": "Pourquoi 87% des Emails Générés par IA Échouent (et Comment Réussir) | BoosterMail",
+      "description_fr": "87% des emails générés par IA générique sont rejetés. Raisons : manque de personnalisation, contexte ignoré, ton générique. Comment éviter ces pièges ?",
+      "keywords_fr": "",
+      "date": "22 avril 2026",
+      "readTime": 8,
+      "emoji": "📈",
+      "category_fr": "Benchmark",
+      "content_fr": "<!-- CONTENU À EXTRAIRE MANUELLEMENT -->"
+    },
+    {
+      "id": "apprentissage-style",
+      "slug": "apprentissage-style",
+      "title_fr": "Comment l'IA Apprend Votre Style d'Écriture : Guide Complet | BoosterMail",
+      "description_fr": "Guide complet : comment fonctionne l'apprentissage automatique du style d'écriture ? Machine learning, algorithmes, données. Tout ce que vous devez savoir sur la personnalisation IA.",
+      "keywords_fr": "",
+      "date": "22 avril 2026",
+      "readTime": 10,
+      "emoji": "🧠",
+      "category_fr": "Machine Learning",
+      "content_fr": "<!-- CONTENU À EXTRAIRE MANUELLEMENT -->"
+    },
+    {
+      "id": "claude-vs-chatgpt",
+      "slug": "claude-vs-chatgpt",
+      "title_fr": "Claude vs ChatGPT pour les Emails : Quel Moteur IA Choisir ? | BoosterMail",
+      "description_fr": "Claude vs ChatGPT vs Gemini pour générer des emails. Comparatif complet : qualité, vitesse, coût, confidentialité. Quel moteur IA choisir pour Outlook ?",
+      "keywords_fr": "",
+      "date": "22 avril 2026",
+      "readTime": 9,
+      "emoji": "⚙️",
+      "category_fr": "Comparaison",
+      "content_fr": "<!-- CONTENU À EXTRAIRE MANUELLEMENT -->"
+    },
+    {
+      "id": "email-4-secondes",
+      "slug": "email-4-secondes",
+      "title_fr": "Email en 4 Secondes : Mythe ou Réalité ? Test Complet | BoosterMail",
+      "description_fr": "BoosterMail promet email en 4 sec. Est-ce réel ? Benchmark détaillé : spéculation streaming, pré-génération, optimisations. Comment atteindre 4 secondes.",
+      "keywords_fr": "",
+      "date": "22 avril 2026",
+      "readTime": 7,
+      "emoji": "⚡",
+      "category_fr": "Performance",
+      "content_fr": "<!-- CONTENU À EXTRAIRE MANUELLEMENT -->"
+    },
+    {
+      "id": "email-ia",
+      "slug": "email-ia",
+      "title_fr": "Rédiger des emails professionnels avec l'IA en 2026 — Guide complet — BoosterMail",
+      "description_fr": "GPT, Claude, Gemini… Comment utiliser l'IA pour rédiger vos emails professionnels ? Guide complet pour choisir le bon outil et l'intégrer dans Outlook sans changer vos habitudes.",
+      "keywords_fr": "rédiger email professionnel IA, génération email automatique, assistant email IA, email IA outlook, claude email, GPT email professionnel, rédaction automatique email",
+      "date": "18 avril 2026",
+      "readTime": 8,
+      "emoji": "🖊️",
+      "category_fr": "IA & Rédaction",
+      "content_fr": "<!-- CONTENU À EXTRAIRE MANUELLEMENT -->"
+    },
+    {
+      "id": "gain-temps",
+      "slug": "gain-temps",
+      "title_fr": "Gain de Temps Email : Mesurer le Vrai Impact de l'IA | BoosterMail",
+      "description_fr": "Combien de temps l'IA économise vraiment ? 2h/jour ? Étude complète : temps écriture, édition, relecture, procrastination. ROI calculé pour vous.",
+      "keywords_fr": "",
+      "date": "22 avril 2026",
+      "readTime": 8,
+      "emoji": "⏱️",
+      "category_fr": "Productivité",
+      "content_fr": "<!-- CONTENU À EXTRAIRE MANUELLEMENT -->"
+    },
+    {
+      "id": "ia-confidentialite",
+      "slug": "ia-confidentialite",
+      "title_fr": "Intelligence Artificielle et Confidentialité : Garder le Contrôle | BoosterMail",
+      "description_fr": "IA et confidentialité : vos données sont-elles sûres ? Chiffrement, RGPD, stockage. Tout ce que vous devez savoir pour générer des emails en confiance.",
+      "keywords_fr": "",
+      "date": "22 avril 2026",
+      "readTime": 7,
+      "emoji": "🔒",
+      "category_fr": "Sécurité",
+      "content_fr": "<!-- CONTENU À EXTRAIRE MANUELLEMENT -->"
+    },
+    {
+      "id": "outlook-web-vs-plugin",
+      "slug": "outlook-web-vs-plugin",
+      "title_fr": "Outlook Web vs Plugin : Quelle Solution IA pour Générer des Emails ? | BoosterMail",
+      "description_fr": "Outlook Web ou Plugin Outlook ? Lequel pour générer des emails avec l'IA ? Comparatif : facilité, fonctionnalités, performance. Quel choix pour vous.",
+      "keywords_fr": "",
+      "date": "22 avril 2026",
+      "readTime": 6,
+      "emoji": "💻",
+      "category_fr": "Intégration",
+      "content_fr": "<!-- CONTENU À EXTRAIRE MANUELLEMENT -->"
+    },
+    {
+      "id": "plugin-outlook-ia",
+      "slug": "plugin-outlook-ia",
+      "title_fr": "Plugin Outlook IA : répondez à vos emails 3X plus vite — BoosterMail",
+      "description_fr": "30% de votre journée part dans les emails. Un plugin Outlook IA vous permet de répondre 3 fois plus vite, dans votre propre style. Découvrez comment BoosterMail change concrètement votre quotidien.",
+      "keywords_fr": "plugin outlook IA, gagner du temps email, assistant email intelligence artificielle, outlook productivité, répondre email automatiquement, plugin outlook windows",
+      "date": "21 avril 2026",
+      "readTime": 5,
+      "emoji": "🔌",
+      "category_fr": "Intégration",
+      "content_fr": "<!-- CONTENU À EXTRAIRE MANUELLEMENT -->"
+    },
+    {
+      "id": "profil-contact",
+      "slug": "profil-contact",
+      "title_fr": "Profil Contact Automatique : Analyser Chaque Personne en 3 Secondes | BoosterMail",
+      "description_fr": "Découvrez le système de profil contact automatique. Comment BoosterMail analyse chaque destinataire en 3 secondes pour adapter sa réponse. Contexte relationnel, historique d'échanges.",
+      "keywords_fr": "",
+      "date": "22 avril 2026",
+      "readTime": 8,
+      "emoji": "👤",
+      "category_fr": "Analyse Contexte",
+      "content_fr": "<!-- CONTENU À EXTRAIRE MANUELLEMENT -->"
+    },
+    {
+      "id": "rgpd-ia",
+      "slug": "rgpd-ia",
+      "title_fr": "RGPD et IA : Tout Ce Que Vous Devez Savoir | BoosterMail",
+      "description_fr": "RGPD et intelligence artificielle : conformité, droits utilisateurs, stockage données. Guide complet pour utiliser l'IA légalement en Europe. Mistral vs Claude vs ChatGPT.",
+      "keywords_fr": "",
+      "date": "22 avril 2026",
+      "readTime": 8,
+      "emoji": "⚖️",
+      "category_fr": "Conformité",
+      "content_fr": "<!-- CONTENU À EXTRAIRE MANUELLEMENT -->"
+    },
+    {
+      "id": "scoring-redactionnel",
+      "slug": "scoring-redactionnel",
+      "title_fr": "Scoring Rédactionnel IA : Emails Notés 0-100 | BoosterMail",
+      "description_fr": "Découvrez le scoring rédactionnel BoosterMail : 0-100 sur 5 critères. Comprenez pourquoi vos emails doivent noter 80+ pour maximiser l'impact professionnel.",
+      "keywords_fr": "",
+      "date": "22 avril 2026",
+      "readTime": 8,
+      "emoji": "📊",
+      "category_fr": "Productivité IA",
+      "content_fr": "<!-- CONTENU À EXTRAIRE MANUELLEMENT -->"
+    }
+  ],
+  "metadata": {
+    "version": "1.0",
+    "generated": "2026-04-28",
+    "total_articles": 14,
+    "languages": [
+      "fr",
+      "en",
+      "de",
+      "es"
+    ]
+  }
+}

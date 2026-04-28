@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block meta_tags %}
+  <title>{{ page_title }} | BoosterMail</title>
+  <meta name="description" content="{{ page_description }}">
+  <link rel="canonical" href="https://www.boostermail.ai/blog{{ '-' + lang_code if lang_code != 'fr' else '' }}">
+  <meta property="og:title" content="{{ page_title }}">
+  <meta property="og:description" content="{{ page_description }}">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://www.boostermail.ai/blog{{ '-' + lang_code if lang_code != 'fr' else '' }}">
+  <script type="application/ld+json">
+  {
+    "@context":"https://schema.org",
+    "@type":"Blog",
+    "name":"BoosterMail Blog",
+    "description":"{{ page_description }}",
+    "url":"https://www.boostermail.ai/blog{{ '-' + lang_code if lang_code != 'fr' else '' }}"
+  }
+  </script>
+{% endblock %}
+
+{% block extra_styles %}
+  <style>
+    .blog-hero{padding:100px 48px 60px;background:var(--bg2);border-bottom:1px solid var(--border)}
+    .blog-hero-in{max-width:1000px;margin:0 auto}
+    h1{font-family:'Space Grotesk',sans-serif;font-size:42px;font-weight:700;margin-bottom:16px}
+    .blog-header{color:var(--muted);font-size:16px;margin-bottom:40px}
+    .blog-grid{max-width:1000px;margin:0 auto;padding:60px 48px;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:32px}
+    .blog-card{background:var(--card);border:1px solid var(--border);padding:32px;border-radius:12px;transition:all .3s}
+    .blog-card:hover{transform:translateY(-4px);border-color:var(--pl)}
+    .blog-tag{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--pl);background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);padding:5px 12px;border-radius:16px;margin-bottom:12px}
+    .blog-card h3{font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700;margin-bottom:12px;color:var(--text)}
+    .blog-card p{font-size:14px;line-height:1.6;color:var(--muted);margin-bottom:20px}
+    .blog-meta{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted)}
+    .blog-meta span{color:var(--text);font-size:14px;font-weight:500;display:inline-flex;align-items:center;gap:4px}
+    .blog-card a{display:inline-flex;align-items:center;gap:8px;color:var(--pl);text-decoration:none;font-weight:600;transition:all .2s}
+    .blog-card a:hover{gap:12px}
+    @media(max-width:768px){
+      .blog-hero{padding:60px 20px 40px}
+      .blog-grid{padding:40px 20px}
+      h1{font-size:28px}
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+<section class="blog-hero">
+  <div class="blog-hero-in">
+    <h1>{{ blog_hero.title }}</h1>
+    <p class="blog-header">{{ blog_hero.description }}</p>
+  </div>
+</section>
+
+<div class="blog-grid">
+{% for article in articles %}
+  <div class="blog-card">
+    <span class="blog-tag">{{ article.category }}</span>
+    <h3>{{ article.title }}</h3>
+    <p>{{ article.description[:150] }}...</p>
+    <div class="blog-meta">
+      <span>{{ article.emoji }} {{ article.date_formatted }}</span>
+      <span>⏱️ {{ article.read_time }} min</span>
+    </div>
+    <a href="blog-{{ article.slug }}-{{ lang_code if lang_code != 'fr' else '' }}.html">
+      {{ read_more }} →
+    </a>
+  </div>
+{% endfor %}
+</div>
+{% endblock %}

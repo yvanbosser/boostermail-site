@@ -3,83 +3,90 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Blog BoosterMail — Conseils IA, Productivité Email, Outlook</title>
-  <meta name="description" content="Conseils pratiques pour optimiser votre productivité email avec l'IA. Plugin Outlook, rédaction automatique, gestion du temps : le blog de BoosterMail.">
   <meta name="robots" content="index, follow">
+  
+  <title>Conseils IA &amp; Productivité Email | BoosterMail</title>
+  <meta name="description" content="Guides pratiques pour reprendre le contrôle de votre boîte Outlook grâce à l&#39;intelligence artificielle.">
   <link rel="canonical" href="https://www.boostermail.ai/blog">
-  <meta property="og:title" content="Blog BoosterMail — IA, Outlook & Productivité Email">
-  <meta property="og:description" content="Conseils pratiques pour gagner du temps sur vos emails avec l'IA et Outlook.">
+  <meta property="og:title" content="Conseils IA &amp; Productivité Email">
+  <meta property="og:description" content="Guides pratiques pour reprendre le contrôle de votre boîte Outlook grâce à l&#39;intelligence artificielle.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://www.boostermail.ai/blog">
   <script type="application/ld+json">
   {
     "@context":"https://schema.org",
     "@type":"Blog",
-    "name":"Blog BoosterMail",
-    "description":"Conseils et ressources sur la productivité email, l'IA et Microsoft Outlook",
-    "url":"https://www.boostermail.ai/blog",
-    "publisher":{"@type":"Organization","name":"BoosterMail","url":"https://www.boostermail.ai"}
+    "name":"BoosterMail Blog",
+    "description":"Guides pratiques pour reprendre le contrôle de votre boîte Outlook grâce à l&#39;intelligence artificielle.",
+    "url":"https://www.boostermail.ai/blog"
   }
   </script>
+
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+
   <style>
-    :root{--bg:#060914;--bg2:#0d1424;--card:rgba(255,255,255,0.04);--border:rgba(255,255,255,0.08);--primary:#6366f1;--pl:#818cf8;--violet:#8b5cf6;--cyan:#06b6d4;--green:#10b981;--text:#f1f5f9;--muted:#94a3b8;--faint:#475569;--grad:linear-gradient(135deg,#6366f1 0%,#8b5cf6 55%,#06b6d4 100%)}
-    *{margin:0;padding:0;box-sizing:border-box}
-    html{scroll-behavior:smooth}
-    body{font-family:'Inter',-apple-system,sans-serif;color:var(--text);background:var(--bg);overflow-x:hidden}
-    nav{position:fixed;top:0;width:100%;z-index:100;padding:20px 48px;display:flex;align-items:center;justify-content:space-between;background:rgba(6,9,20,.95);backdrop-filter:blur(20px);border-bottom:1px solid var(--border)}
-    .nav-logo{font-family:'Space Grotesk',sans-serif;font-size:21px;font-weight:700;text-decoration:none;display:flex;align-items:center;gap:9px}
-    .nav-logo-icon{width:30px;height:30px;border-radius:7px;background:var(--grad);display:flex;align-items:center;justify-content:center;font-size:15px}
-    .nav-logo-text{background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-    .nav-links{display:flex;gap:28px;align-items:center}
-    .nav-links a{text-decoration:none;color:var(--muted);font-size:14px;font-weight:500;transition:color .2s}
-    .nav-links a:hover{color:var(--text)}
-    .nav-cta{background:var(--grad)!important;color:white!important;padding:9px 22px;border-radius:8px;font-weight:600!important;box-shadow:0 0 20px rgba(99,102,241,.3);transition:all .3s!important}
-    .nav-cta:hover{transform:translateY(-1px)!important;box-shadow:0 0 32px rgba(99,102,241,.5)!important}
-    .blog-hero{padding:140px 48px 80px;text-align:center;background:var(--bg2)}
-    .blog-tag{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--pl);background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);padding:5px 13px;border-radius:18px;margin-bottom:16px}
-    .blog-hero h1{font-family:'Space Grotesk',sans-serif;font-size:46px;font-weight:700;line-height:1.15;letter-spacing:-.8px;margin-bottom:14px}
-    .blog-hero p{font-size:17px;color:var(--muted);max-width:520px;margin:0 auto;line-height:1.65}
-    .blog-grid{padding:72px 48px;max-width:1100px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:28px}
-    .blog-card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;transition:all .3s;text-decoration:none;display:flex;flex-direction:column}
-    .blog-card:hover{border-color:rgba(99,102,241,.3);transform:translateY(-5px);box-shadow:0 24px 60px rgba(0,0,0,.35)}
-    .blog-card-img{height:160px;display:flex;align-items:center;justify-content:center;font-size:56px;position:relative;overflow:hidden}
-    .blog-card-img.g1{background:linear-gradient(135deg,rgba(99,102,241,.2),rgba(139,92,246,.1))}
-    .blog-card-img.g2{background:linear-gradient(135deg,rgba(6,182,212,.2),rgba(99,102,241,.1))}
-    .blog-card-img.g3{background:linear-gradient(135deg,rgba(16,185,129,.15),rgba(6,182,212,.1))}
-    .blog-card-body{padding:24px;flex:1;display:flex;flex-direction:column;gap:10px}
-    .blog-cat{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--pl)}
-    .blog-card h2{font-size:17px;font-weight:700;line-height:1.4;color:var(--text)}
-    .blog-card p{font-size:13px;color:var(--muted);line-height:1.7;flex:1}
-    .blog-meta{display:flex;align-items:center;gap:12px;padding-top:14px;border-top:1px solid var(--border);margin-top:auto}
-    .blog-date{font-size:11px;color:var(--faint)}
-    .blog-read{font-size:11px;color:var(--faint)}
-    .blog-arrow{font-size:13px;color:var(--pl);margin-left:auto;transition:transform .2s}
-    .blog-card:hover .blog-arrow{transform:translateX(4px)}
-    .blog-cta{padding:72px 48px;text-align:center;border-top:1px solid var(--border)}
-    .btn-main{display:inline-flex;align-items:center;gap:8px;background:var(--grad);color:white;padding:15px 34px;border-radius:11px;font-size:15px;font-weight:700;text-decoration:none;transition:all .3s;box-shadow:0 4px 28px rgba(99,102,241,.4)}
-    .btn-main:hover{transform:translateY(-2px);box-shadow:0 8px 40px rgba(99,102,241,.55)}
-    footer{padding:36px 48px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--faint)}
-    footer a{color:var(--muted);text-decoration:none;transition:color .2s}
-    footer a:hover{color:var(--pl)}
-    .footer-links{display:flex;gap:24px}
-    @media(max-width:768px){
-      nav{padding:14px 20px}.blog-hero{padding:100px 20px 60px}.blog-hero h1{font-size:30px}
-      .blog-grid{grid-template-columns:1fr;padding:48px 20px;gap:20px}
-      .blog-cta{padding:56px 20px}
-      footer{flex-direction:column;gap:14px;text-align:center}
+    :root{
+      --bg:#060914;
+      --bg2:#0d1424;
+      --card:rgba(255,255,255,0.04);
+      --border:rgba(255,255,255,0.08);
+      --primary:#6366f1;
+      --pl:#818cf8;
+      --violet:#8b5cf6;
+      --cyan:#06b6d4;
+      --green:#10b981;
+      --text:#f1f5f9;
+      --muted:#94a3b8;
+      --faint:#475569;
+      --grad:linear-gradient(135deg,#6366f1 0%,#8b5cf6 55%,#06b6d4 100%)
+    }
+    * { margin:0; padding:0; box-sizing:border-box }
+    html { scroll-behavior:smooth }
+    body { font-family:'Inter',-apple-system,sans-serif; color:var(--text); background:var(--bg); overflow-x:hidden }
+    nav { position:fixed; top:0; width:100%; z-index:100; padding:20px 48px; display:flex; align-items:center; justify-content:space-between; background:rgba(6,9,20,.95); backdrop-filter:blur(20px); border-bottom:1px solid var(--border) }
+    .nav-logo { font-family:'Space Grotesk',sans-serif; font-size:21px; font-weight:700; text-decoration:none; display:flex; align-items:center; gap:9px; background:var(--grad); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text }
+    .nav-links { display:flex; gap:28px; align-items:center }
+    .nav-links a { text-decoration:none; color:var(--muted); font-size:14px; font-weight:500; transition:color .2s }
+    .nav-links a:hover { color:var(--text) }
+    .nav-cta { background:var(--grad)!important; color:white!important; padding:9px 22px; border-radius:8px; font-weight:600!important; box-shadow:0 0 20px rgba(99,102,241,.3); transition:all .3s!important }
+    footer { padding:36px 48px; border-top:1px solid var(--border); text-align:center; font-size:12px; color:var(--muted) }
+    @media(max-width:768px) {
+      nav { padding:14px 20px }
+      footer { padding:20px }
     }
   </style>
+
+  
+  <style>
+    .blog-hero{padding:100px 48px 60px;background:var(--bg2);border-bottom:1px solid var(--border)}
+    .blog-hero-in{max-width:1000px;margin:0 auto}
+    h1{font-family:'Space Grotesk',sans-serif;font-size:42px;font-weight:700;margin-bottom:16px}
+    .blog-header{color:var(--muted);font-size:16px;margin-bottom:40px}
+    .blog-grid{max-width:1000px;margin:0 auto;padding:60px 48px;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:32px}
+    .blog-card{background:var(--card);border:1px solid var(--border);padding:32px;border-radius:12px;transition:all .3s}
+    .blog-card:hover{transform:translateY(-4px);border-color:var(--pl)}
+    .blog-tag{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--pl);background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);padding:5px 12px;border-radius:16px;margin-bottom:12px}
+    .blog-card h3{font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700;margin-bottom:12px;color:var(--text)}
+    .blog-card p{font-size:14px;line-height:1.6;color:var(--muted);margin-bottom:20px}
+    .blog-meta{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted)}
+    .blog-meta span{color:var(--text);font-size:14px;font-weight:500;display:inline-flex;align-items:center;gap:4px}
+    .blog-card a{display:inline-flex;align-items:center;gap:8px;color:var(--pl);text-decoration:none;font-weight:600;transition:all .2s}
+    .blog-card a:hover{gap:12px}
+    @media(max-width:768px){
+      .blog-hero{padding:60px 20px 40px}
+      .blog-grid{padding:40px 20px}
+      h1{font-size:28px}
+    }
+  </style>
+
 </head>
 <body>
 
 <nav>
-  <a href="index.html" class="nav-logo">
-    <div class="nav-logo-icon">⚡</div>
-    <span class="nav-logo-text">BoosterMail</span>
-  </a>
+  <a href="index.html" class="nav-logo">⚡ BoosterMail</a>
   <div class="nav-links">
     <a href="index.html#features">Fonctionnalités</a>
     <a href="index.html#pricing">Tarifs</a>
@@ -88,229 +95,207 @@
   </div>
 </nav>
 
+
 <section class="blog-hero">
-  <div class="blog-tag">Ressources</div>
-  <h1>Conseils IA & Productivité Email</h1>
-  <p>Guides pratiques pour reprendre le contrôle de votre boîte Outlook grâce à l'intelligence artificielle.</p>
+  <div class="blog-hero-in">
+    <h1>Conseils IA &amp; Productivité Email</h1>
+    <p class="blog-header">Guides pratiques pour reprendre le contrôle de votre boîte Outlook grâce à l&#39;intelligence artificielle.</p>
+  </div>
 </section>
 
 <div class="blog-grid">
 
-  <a href="blog-plugin-outlook-ia.html" class="blog-card">
-    <div class="blog-card-img g1">⚡</div>
-    <div class="blog-card-body">
-      <div class="blog-cat">Productivité</div>
-      <h2>Plugin Outlook IA : répondez à vos emails 3X plus vite</h2>
-      <p>30% de votre journée part dans les emails. Découvrez comment un plugin IA intégré à Outlook vous permet de répondre 3 fois plus vite, dans votre propre style.</p>
-      <div class="blog-meta">
-        <span class="blog-date">21 avril 2026</span>
-        <span class="blog-read">7 min de lecture</span>
-        <span class="blog-arrow">→</span>
-      </div>
+  <div class="blog-card">
+    <span class="blog-tag">Cas d&#39;Usage</span>
+    <h3>10 Cas d&#39;Usage Pratiques de BoosterMail : Exemples Réels | BoosterMail</h3>
+    <p>10 cas d&#39;usage réels : commerciaux, RH, support, direction... Comment BoosterMail transforme chaque rôle. Exemples concrets et gains mesurés....</p>
+    <div class="blog-meta">
+      <span>📊 22 avril 2026</span>
+      <span>⏱️ 9 min</span>
     </div>
-  </a>
+    <a href="blog-10-cas-usage-.html">
+      Lire l&#39;article →
+    </a>
+  </div>
 
-  <a href="blog-email-ia.html" class="blog-card">
-    <div class="blog-card-img g2">🖊️</div>
-    <div class="blog-card-body">
-      <div class="blog-cat">IA & Rédaction</div>
-      <h2>Rédiger des emails professionnels automatiquement avec l'IA en 2026</h2>
-      <p>GPT, Claude, Gemini… Les IA pour rédiger des emails se multiplient. Laquelle choisir ? Comment l'intégrer à Outlook sans changer vos habitudes ?</p>
-      <div class="blog-meta">
-        <span class="blog-date">18 avril 2026</span>
-        <span class="blog-read">8 min de lecture</span>
-        <span class="blog-arrow">→</span>
-      </div>
+  <div class="blog-card">
+    <span class="blog-tag">Productivité</span>
+    <h3>5 Erreurs Qui Ralentissent Votre Réponse aux Emails | BoosterMail</h3>
+    <p>5 erreurs courantes ralentissent votre productivité email. Comment les éviter et économiser 2h/jour sur la rédaction d&#39;emails. Guide complet avec solu...</p>
+    <div class="blog-meta">
+      <span>⚠️ 22 avril 2026</span>
+      <span>⏱️ 7 min</span>
     </div>
-  </a>
+    <a href="blog-5-erreurs-.html">
+      Lire l&#39;article →
+    </a>
+  </div>
 
-  <a href="blog-scoring-redactionnel.html" class="blog-card">
-    <div class="blog-card-img g1">📊</div>
-    <div class="blog-card-body">
-      <div class="blog-cat">Productivité IA</div>
-      <h2>Scoring Rédactionnel IA : Pourquoi Vos Emails Doivent Noter 80/100</h2>
-      <p>Découvrez comment notre système automatisé note vos emails 0-100. Les emails notés 80+ obtiennent 3X plus de réponses. Guide complet du scoring invisible.</p>
-      <div class="blog-meta">
-        <span class="blog-date">22 avril 2026</span>
-        <span class="blog-read">8 min de lecture</span>
-        <span class="blog-arrow">→</span>
-      </div>
+  <div class="blog-card">
+    <span class="blog-tag">Benchmark</span>
+    <h3>Pourquoi 87% des Emails Générés par IA Échouent (et Comment Réussir) | BoosterMail</h3>
+    <p>87% des emails générés par IA générique sont rejetés. Raisons : manque de personnalisation, contexte ignoré, ton générique. Comment éviter ces pièges ...</p>
+    <div class="blog-meta">
+      <span>📈 22 avril 2026</span>
+      <span>⏱️ 8 min</span>
     </div>
-  </a>
+    <a href="blog-87-pourcent-.html">
+      Lire l&#39;article →
+    </a>
+  </div>
 
-  <a href="blog-apprentissage-style.html" class="blog-card">
-    <div class="blog-card-img g2">🧠</div>
-    <div class="blog-card-body">
-      <div class="blog-cat">Machine Learning</div>
-      <h2>Comment l'IA Apprend Votre Style d'Écriture : Guide Complet</h2>
-      <p>Machine learning appliqué aux emails. Tokenization, embeddings, cycle continu. Comment Claude analyse vos 800 emails pour générer du contenu 100% vous.</p>
-      <div class="blog-meta">
-        <span class="blog-date">22 avril 2026</span>
-        <span class="blog-read">10 min de lecture</span>
-        <span class="blog-arrow">→</span>
-      </div>
+  <div class="blog-card">
+    <span class="blog-tag">Machine Learning</span>
+    <h3>Comment l&#39;IA Apprend Votre Style d&#39;Écriture : Guide Complet | BoosterMail</h3>
+    <p>Guide complet : comment fonctionne l&#39;apprentissage automatique du style d&#39;écriture ? Machine learning, algorithmes, données. Tout ce que vous devez sa...</p>
+    <div class="blog-meta">
+      <span>🧠 22 avril 2026</span>
+      <span>⏱️ 10 min</span>
     </div>
-  </a>
+    <a href="blog-apprentissage-style-.html">
+      Lire l&#39;article →
+    </a>
+  </div>
 
-  <a href="blog-profil-contact.html" class="blog-card">
-    <div class="blog-card-img g3">👤</div>
-    <div class="blog-card-body">
-      <div class="blog-cat">Analyse Contexte</div>
-      <h2>Profil Contact Automatique : Savoir à Qui Vous Écrivez en 3 Secondes</h2>
-      <p>Chaque contact a un profil relationnel unique. BoosterMail le construit automatiquement — hiérarchie, historique, contexte — pour adapter chaque réponse.</p>
-      <div class="blog-meta">
-        <span class="blog-date">22 avril 2026</span>
-        <span class="blog-read">8 min de lecture</span>
-        <span class="blog-arrow">→</span>
-      </div>
+  <div class="blog-card">
+    <span class="blog-tag">Comparaison</span>
+    <h3>Claude vs ChatGPT pour les Emails : Quel Moteur IA Choisir ? | BoosterMail</h3>
+    <p>Claude vs ChatGPT vs Gemini pour générer des emails. Comparatif complet : qualité, vitesse, coût, confidentialité. Quel moteur IA choisir pour Outlook...</p>
+    <div class="blog-meta">
+      <span>⚙️ 22 avril 2026</span>
+      <span>⏱️ 9 min</span>
     </div>
-  </a>
+    <a href="blog-claude-vs-chatgpt-.html">
+      Lire l&#39;article →
+    </a>
+  </div>
 
-  <a href="blog-5-erreurs.html" class="blog-card">
-    <div class="blog-card-img g1">⚠️</div>
-    <div class="blog-card-body">
-      <div class="blog-cat">Productivité</div>
-      <h2>5 Erreurs Courantes Qui Ralentissent Votre Réponse aux Emails</h2>
-      <p>Rédaction, indécision, relecture, procrastination. 5 erreurs classiques coûtent 1h/jour. Comment les éviter avec l'IA.</p>
-      <div class="blog-meta">
-        <span class="blog-date">22 avril 2026</span>
-        <span class="blog-read">7 min de lecture</span>
-        <span class="blog-arrow">→</span>
-      </div>
+  <div class="blog-card">
+    <span class="blog-tag">Performance</span>
+    <h3>Email en 4 Secondes : Mythe ou Réalité ? Test Complet | BoosterMail</h3>
+    <p>BoosterMail promet email en 4 sec. Est-ce réel ? Benchmark détaillé : spéculation streaming, pré-génération, optimisations. Comment atteindre 4 second...</p>
+    <div class="blog-meta">
+      <span>⚡ 22 avril 2026</span>
+      <span>⏱️ 7 min</span>
     </div>
-  </a>
+    <a href="blog-email-4-secondes-.html">
+      Lire l&#39;article →
+    </a>
+  </div>
 
-  <a href="blog-gain-temps.html" class="blog-card">
-    <div class="blog-card-img g2">⏱️</div>
-    <div class="blog-card-body">
-      <div class="blog-cat">Métriques</div>
-      <h2>Gain de Temps Email : Mesurer le Vrai Impact de l'IA</h2>
-      <p>Combien de temps économisez-vous vraiment ? Étude complète : rédaction, édition, relecture, procrastination. ROI calculé pour vous. 3h/jour, c'est réaliste.</p>
-      <div class="blog-meta">
-        <span class="blog-date">22 avril 2026</span>
-        <span class="blog-read">8 min de lecture</span>
-        <span class="blog-arrow">→</span>
-      </div>
+  <div class="blog-card">
+    <span class="blog-tag">IA &amp; Rédaction</span>
+    <h3>Rédiger des emails professionnels avec l&#39;IA en 2026 — Guide complet — BoosterMail</h3>
+    <p>GPT, Claude, Gemini… Comment utiliser l&#39;IA pour rédiger vos emails professionnels ? Guide complet pour choisir le bon outil et l&#39;intégrer dans Outlook...</p>
+    <div class="blog-meta">
+      <span>🖊️ 18 avril 2026</span>
+      <span>⏱️ 8 min</span>
     </div>
-  </a>
+    <a href="blog-email-ia-.html">
+      Lire l&#39;article →
+    </a>
+  </div>
 
-  <a href="blog-claude-vs-chatgpt.html" class="blog-card">
-    <div class="blog-card-img g3">⚖️</div>
-    <div class="blog-card-body">
-      <div class="blog-cat">Comparatif</div>
-      <h2>Claude vs ChatGPT pour les Emails : Quel Moteur IA Choisir ?</h2>
-      <p>OpenAI, Anthropic, Google. Comparatif complet : qualité, vitesse, coût, confidentialité, RGPD. Quel moteur IA choisir pour vos emails ? Verdict BoosterMail.</p>
-      <div class="blog-meta">
-        <span class="blog-date">22 avril 2026</span>
-        <span class="blog-read">9 min de lecture</span>
-        <span class="blog-arrow">→</span>
-      </div>
+  <div class="blog-card">
+    <span class="blog-tag">Productivité</span>
+    <h3>Gain de Temps Email : Mesurer le Vrai Impact de l&#39;IA | BoosterMail</h3>
+    <p>Combien de temps l&#39;IA économise vraiment ? 2h/jour ? Étude complète : temps écriture, édition, relecture, procrastination. ROI calculé pour vous....</p>
+    <div class="blog-meta">
+      <span>⏱️ 22 avril 2026</span>
+      <span>⏱️ 8 min</span>
     </div>
-  </a>
+    <a href="blog-gain-temps-.html">
+      Lire l&#39;article →
+    </a>
+  </div>
 
-  <a href="blog-email-4-secondes.html" class="blog-card">
-    <div class="blog-card-img g1">⚡</div>
-    <div class="blog-card-body">
-      <div class="blog-cat">Benchmark</div>
-      <h2>Email en 4 Secondes : Mythe ou Réalité ? Test Complet</h2>
-      <p>BoosterMail promet email en 4 secondes. Est-ce possible ? Benchmark réel vs ChatGPT. Spéculation streaming, pré-génération, optimisations expliquées.</p>
-      <div class="blog-meta">
-        <span class="blog-date">22 avril 2026</span>
-        <span class="blog-read">7 min de lecture</span>
-        <span class="blog-arrow">→</span>
-      </div>
+  <div class="blog-card">
+    <span class="blog-tag">Sécurité</span>
+    <h3>Intelligence Artificielle et Confidentialité : Garder le Contrôle | BoosterMail</h3>
+    <p>IA et confidentialité : vos données sont-elles sûres ? Chiffrement, RGPD, stockage. Tout ce que vous devez savoir pour générer des emails en confiance...</p>
+    <div class="blog-meta">
+      <span>🔒 22 avril 2026</span>
+      <span>⏱️ 7 min</span>
     </div>
-  </a>
+    <a href="blog-ia-confidentialite-.html">
+      Lire l&#39;article →
+    </a>
+  </div>
 
-  <a href="blog-ia-confidentialite.html" class="blog-card">
-    <div class="blog-card-img g2">🔐</div>
-    <div class="blog-card-body">
-      <div class="blog-cat">Sécurité</div>
-      <h2>Intelligence Artificielle et Confidentialité : Garder le Contrôle</h2>
-      <p>Vos données sont-elles sûres avec une IA ? Chiffrement, RGPD, stockage. Pourquoi Claude et Mistral > ChatGPT pour la confidentialité.</p>
-      <div class="blog-meta">
-        <span class="blog-date">22 avril 2026</span>
-        <span class="blog-read">7 min de lecture</span>
-        <span class="blog-arrow">→</span>
-      </div>
+  <div class="blog-card">
+    <span class="blog-tag">Intégration</span>
+    <h3>Outlook Web vs Plugin : Quelle Solution IA pour Générer des Emails ? | BoosterMail</h3>
+    <p>Outlook Web ou Plugin Outlook ? Lequel pour générer des emails avec l&#39;IA ? Comparatif : facilité, fonctionnalités, performance. Quel choix pour vous....</p>
+    <div class="blog-meta">
+      <span>💻 22 avril 2026</span>
+      <span>⏱️ 6 min</span>
     </div>
-  </a>
+    <a href="blog-outlook-web-vs-plugin-.html">
+      Lire l&#39;article →
+    </a>
+  </div>
 
-  <a href="blog-87-pourcent.html" class="blog-card">
-    <div class="blog-card-img g3">❌</div>
-    <div class="blog-card-body">
-      <div class="blog-cat">Analyse Données</div>
-      <h2>Pourquoi 87% des Emails Générés par IA Échouent</h2>
-      <p>ChatGPT générique génère des emails que vous rejetez. Raisons : contexte zéro, ton générique, pas de mémoire. Comment BoosterMail résout les 3.</p>
-      <div class="blog-meta">
-        <span class="blog-date">22 avril 2026</span>
-        <span class="blog-read">8 min de lecture</span>
-        <span class="blog-arrow">→</span>
-      </div>
+  <div class="blog-card">
+    <span class="blog-tag">Intégration</span>
+    <h3>Plugin Outlook IA : répondez à vos emails 3X plus vite — BoosterMail</h3>
+    <p>30% de votre journée part dans les emails. Un plugin Outlook IA vous permet de répondre 3 fois plus vite, dans votre propre style. Découvrez comment B...</p>
+    <div class="blog-meta">
+      <span>🔌 21 avril 2026</span>
+      <span>⏱️ 5 min</span>
     </div>
-  </a>
+    <a href="blog-plugin-outlook-ia-.html">
+      Lire l&#39;article →
+    </a>
+  </div>
 
-  <a href="blog-outlook-web-vs-plugin.html" class="blog-card">
-    <div class="blog-card-img g1">🌐</div>
-    <div class="blog-card-body">
-      <div class="blog-cat">Comparatif</div>
-      <h2>Outlook Web vs Plugin : Quelle Solution IA Choisir ?</h2>
-      <p>Outlook Web (browser) ou Plugin (desktop) ? Comparatif complet : installation, vitesse, contexte, offline. Quel choix pour vous ?</p>
-      <div class="blog-meta">
-        <span class="blog-date">22 avril 2026</span>
-        <span class="blog-read">6 min de lecture</span>
-        <span class="blog-arrow">→</span>
-      </div>
+  <div class="blog-card">
+    <span class="blog-tag">Analyse Contexte</span>
+    <h3>Profil Contact Automatique : Analyser Chaque Personne en 3 Secondes | BoosterMail</h3>
+    <p>Découvrez le système de profil contact automatique. Comment BoosterMail analyse chaque destinataire en 3 secondes pour adapter sa réponse. Contexte re...</p>
+    <div class="blog-meta">
+      <span>👤 22 avril 2026</span>
+      <span>⏱️ 8 min</span>
     </div>
-  </a>
+    <a href="blog-profil-contact-.html">
+      Lire l&#39;article →
+    </a>
+  </div>
 
-  <a href="blog-rgpd-ia.html" class="blog-card">
-    <div class="blog-card-img g2">⚖️</div>
-    <div class="blog-card-body">
-      <div class="blog-cat">Conformité Légale</div>
-      <h2>RGPD et IA : Tout Ce Que Vous Devez Savoir</h2>
-      <p>IA pour vos emails, c'est légal ? Droit à l'oubli, localisation données, transparence. Mistral vs Claude vs ChatGPT. Guide RGPD 2026.</p>
-      <div class="blog-meta">
-        <span class="blog-date">22 avril 2026</span>
-        <span class="blog-read">8 min de lecture</span>
-        <span class="blog-arrow">→</span>
-      </div>
+  <div class="blog-card">
+    <span class="blog-tag">Conformité</span>
+    <h3>RGPD et IA : Tout Ce Que Vous Devez Savoir | BoosterMail</h3>
+    <p>RGPD et intelligence artificielle : conformité, droits utilisateurs, stockage données. Guide complet pour utiliser l&#39;IA légalement en Europe. Mistral ...</p>
+    <div class="blog-meta">
+      <span>⚖️ 22 avril 2026</span>
+      <span>⏱️ 8 min</span>
     </div>
-  </a>
+    <a href="blog-rgpd-ia-.html">
+      Lire l&#39;article →
+    </a>
+  </div>
 
-  <a href="blog-10-cas-usage.html" class="blog-card">
-    <div class="blog-card-img g3">📧</div>
-    <div class="blog-card-body">
-      <div class="blog-cat">Cas d'Usage</div>
-      <h2>Transformer Votre Inbox : 10 Cas d'Usage Pratiques</h2>
-      <p>Commercial, support, RH, legal, startup... 10 rôles réels. Comment BoosterMail transforme chaque fonction. Exemples concrets et gains mesurés.</p>
-      <div class="blog-meta">
-        <span class="blog-date">22 avril 2026</span>
-        <span class="blog-read">9 min de lecture</span>
-        <span class="blog-arrow">→</span>
-      </div>
+  <div class="blog-card">
+    <span class="blog-tag">Productivité IA</span>
+    <h3>Scoring Rédactionnel IA : Emails Notés 0-100 | BoosterMail</h3>
+    <p>Découvrez le scoring rédactionnel BoosterMail : 0-100 sur 5 critères. Comprenez pourquoi vos emails doivent noter 80+ pour maximiser l&#39;impact professi...</p>
+    <div class="blog-meta">
+      <span>📊 22 avril 2026</span>
+      <span>⏱️ 8 min</span>
     </div>
-  </a>
+    <a href="blog-scoring-redactionnel-.html">
+      Lire l&#39;article →
+    </a>
+  </div>
 
 </div>
 
-<div class="blog-cta">
-  <p style="font-size:18px;font-weight:600;margin-bottom:20px">Prêt à essayer BoosterMail ?</p>
-  <a href="index.html#waitlist" class="btn-main">Essayer gratuitement →</a>
-  <p style="font-size:12px;color:var(--faint);margin-top:14px">14 jours gratuits · Sans carte bancaire</p>
-</div>
 
 <footer>
-  <a href="index.html" class="nav-logo" style="font-size:16px">
-    <div class="nav-logo-icon" style="width:24px;height:24px;font-size:12px">⚡</div>
-    <span class="nav-logo-text">BoosterMail</span>
-  </a>
-  <div class="footer-links">
-    <a href="#">Mentions légales</a>
-    <a href="#">Confidentialité</a>
-    <a href="mailto:contact@boostermail.ai">contact@boostermail.ai</a>
+  <p>© 2026 BoosterMail. Tous droits réservés.</p>
+  <div style="margin-top:12px; font-size:11px">
+    <a href="#privacy" style="color:var(--muted); text-decoration:none; margin:0 12px">Confidentialité</a>
+    <a href="#terms" style="color:var(--muted); text-decoration:none; margin:0 12px">Conditions</a>
   </div>
-  <span>© 2026 BoosterMail</span>
 </footer>
 
 </body>

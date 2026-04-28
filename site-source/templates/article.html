@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block meta_tags %}
+  <title>{{ title }} | BoosterMail</title>
+  <meta name="description" content="{{ description }}">
+  <meta name="keywords" content="{{ keywords }}">
+  <link rel="canonical" href="https://www.boostermail.ai/{{ canonical_url }}">
+  <meta property="og:title" content="{{ title }}">
+  <meta property="og:description" content="{{ description }}">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://www.boostermail.ai/{{ canonical_url }}">
+  <meta property="og:locale" content="{{ og_locale }}">
+  <script type="application/ld+json">
+  {
+    "@context":"https://schema.org",
+    "@type":"BlogPosting",
+    "headline":"{{ title }}",
+    "description":"{{ description }}",
+    "datePublished":"{{ date_iso }}",
+    "author":{"@type":"Organization","name":"BoosterMail"},
+    "publisher":{"@type":"Organization","name":"BoosterMail"}
+  }
+  </script>
+{% endblock %}
+
+{% block extra_styles %}
+  <style>
+    .article-hero{padding:140px 48px 60px;background:var(--bg2);border-bottom:1px solid var(--border)}
+    .article-hero-in{max-width:720px;margin:0 auto}
+    .blog-tag{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--pl);background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);padding:5px 13px;border-radius:18px;margin-bottom:16px}
+    h1{font-family:'Space Grotesk',sans-serif;font-size:42px;font-weight:700;line-height:1.15;letter-spacing:-.8px;margin-bottom:16px}
+    .article-meta{display:flex;align-items:center;gap:16px;font-size:13px;color:var(--muted);margin-bottom:8px}
+    .article-content{max-width:720px;margin:0 auto;padding:60px 48px}
+    h2{font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;margin:36px 0 16px;color:var(--text)}
+    h3{font-size:18px;font-weight:700;margin:24px 0 12px;color:var(--text)}
+    p{font-size:15px;line-height:1.8;margin-bottom:16px;color:var(--text)}
+    a{color:var(--pl);text-decoration:none}
+    a:hover{text-decoration:underline}
+    blockquote{padding:16px 20px;border-left:4px solid var(--pl);background:rgba(99,102,241,.05);margin:24px 0;color:var(--muted)}
+    table{width:100%;border-collapse:collapse;margin:24px 0}
+    th,td{padding:12px;border:1px solid var(--border);text-align:left}
+    th{background:rgba(99,102,241,.1);font-weight:600}
+    @media(max-width:768px){
+      .article-hero{padding:60px 20px 40px}
+      .article-content{padding:40px 20px}
+      h1{font-size:28px}
+      h2{font-size:20px}
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+<section class="article-hero">
+  <div class="article-hero-in">
+    <span class="blog-tag">{{ category }}</span>
+    <h1>{{ title }}</h1>
+    <div class="article-meta">
+      <span>{{ emoji }} {{ date_formatted }}</span>
+      <span>⏱️ {{ read_time }} min</span>
+    </div>
+  </div>
+</section>
+
+<article class="article-content">
+  {{ content_html }}
+</article>
+{% endblock %}
