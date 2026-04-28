@@ -672,6 +672,70 @@ pas un cache buster).
 
 ---
 
+## Pattern #19 — Convergence Microsoft New Outlook desktop ↔ Outlook Web
+
+**Contexte** : Microsoft a annoncé depuis 2024 une convergence progressive
+entre New Outlook desktop (WebView2 hosted) et Outlook Web (browser hosted).
+Conséquences observées le 28/04/2026 sur le build `OneOutlook/1.2026.420.300`
+(daté du 20/04/2026) :
+
+1. **`displayDialogAsync` avec `displayInIframe: true`** : auparavant, sur
+   New Outlook desktop, ouvrait une fenêtre WebView2 native pleine sans
+   chrome (juste X Windows en haut). Désormais, ouvre une **iframe avec
+   chrome Microsoft identique à Outlook Web** (titre add-in + croix +
+   corniche). C'est le comportement uniformisé.
+
+2. **`displayDialogAsync` avec `displayInIframe: false`** : ouvre une
+   fenêtre browser détachée sur les 2 plateformes, **soumise au bloqueur
+   de popup Edge/Chrome**. Le code 12011 « zones de sécurité différentes »
+   est en réalité le message générique pour cet échec popup-blocker.
+
+3. **Pinning des add-ins customs** : sur Outlook Web (et probablement bientôt
+   New Outlook desktop), Microsoft relègue les add-ins customs sideloadés
+   vers le launcher d'apps secondaire. Seuls les add-ins validés AppSource
+   restent dans la barre d'actions principale en permanence. Politique
+   assumée pour épurer la barre.
+
+**Symptôme générique** :
+- Comportement qui « marchait avant » sur New Outlook desktop ne marche
+  plus pareil après une update Microsoft silencieuse
+- L'add-in se déplace, le chrome change, le flow d'événements évolue
+- Pas de communication explicite Microsoft → on découvre par le fait
+
+**Stratégie côté nous** :
+- **Aligner notre code sur le comportement Outlook Web** par défaut (puisque
+  c'est ce vers quoi Microsoft converge)
+- **Tester sur les 2 plateformes** systématiquement (un fix sur l'une peut
+  régresser sur l'autre transitoirement)
+- **Préférer les solutions Microsoft-natives** (iframe centré, settings
+  paramétriques) aux contournements (window.moveTo, hijacking flow)
+- **Privilégier AppSource long terme** pour profiter du placement garanti
+  et d'un comportement stable
+
+**Historique** :
+- 28/04/2026 PM : découverte lors du test du chrome Microsoft sur New
+  Outlook desktop (cadre blanc apparu alors qu'absent ce matin). Manifest
+  XML inchangé depuis le 27/04, donc côté Microsoft. Vérifié via build
+  `OneOutlook/1.2026.420.300` capturé dans `addin_debug.log`.
+- Solution adoptée : `displayInIframe: true` + 80×80 + compactage CSS étendu
+  (`html.platform-newOutlook` en plus de `html.platform-web`) = comportement
+  uniforme web ↔ desktop, accepter le chrome Microsoft, optimiser ce qu'on
+  contrôle.
+
+**Test de non-régression** :
+- À chaque session de modif UX dialog : tester sur New Outlook desktop ET
+  Outlook Web. Si comportement diverge, vérifier le build Microsoft.
+- Surveiller les annonces Microsoft Office Add-ins (blog, dev tracker)
+  pour anticiper les prochaines convergences.
+
+**Action si nouvelle divergence détectée** :
+- Capturer le build Microsoft (`hostVersion` dans logs `addin_debug.log`)
+- Identifier ce qui a changé concrètement (rendu, événements, API)
+- Adapter notre code pour le nouveau comportement (sans casser l'ancien)
+- Documenter dans ce Pattern #19 et inviter à attaquer un audit complet
+
+---
+
 ## Patterns "rayés" (résolus définitivement)
 
 Aucun pour l'instant — tous les patterns ci-dessus sont "vivants" au sens où ils peuvent récidiver si on n'est pas vigilant.

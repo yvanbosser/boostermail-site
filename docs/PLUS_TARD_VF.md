@@ -1,6 +1,6 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 28/04/2026 (sujets #3 + #4 livrés ; #2 reformulé en mesurabilité templates post-diagnostic)
+> **Dernière mise à jour** : 28/04/2026 fin de session 3 (sujets #11/#12/#13/#14 ajoutés — welcome wizard 3 étapes avant beta + auto-ouverture OnMessageCompose débloqué post-migration Coaxis, à attaquer en session dédiée demain)
 
 ---
 
@@ -15,9 +15,17 @@ Si tu reviens sur ce doc au début d'une nouvelle session, voici **uniquement ce
 2. **Templates — optimisation post-beta** (différé jusqu'à beta-testeurs actifs, instrumentation déjà déployée 28/04 — voir `audit/rapports/2026-04-28_diagnostic_sujet_2_templates.md`)
 5. **Optim Phase 2 filtrage par plat** — à revoir quand `folder_classifications` aura 6-12 mois d'historique (passif)
 6. **Améliorer détection forward dans summary/draft** — bug constaté (mail Vincent Hubert "Fwd: leonis" body Orange) — taille à estimer
+14. **🔥 PROCHAINE SESSION — Auto-ouverture popup BoosterMail au clic Répondre Outlook (OnMessageCompose)** — débloqué post-migration Coaxis 28/04 PM (mailbox passée sur Microsoft 365 cloud). Effet WOW majeur : l'user clique « Répondre » dans Outlook → BoosterMail s'ouvre automatiquement sans cliquer le bouton add-in. Effort 6-7 h en session dédiée. Détail section 14 ci-dessous.
 
 ### 🚨 Avant SaaS multi-tenant Étape 7
 7. **Chantier migration multi-tenant** — 1.5 jour. **Plan ready** dans `audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md` (helper `get_user_cache`, 22 caches à isoler, ordre migration).
+
+### 🚨 Avant Étape 8 Beta gratuite (5-10 testeurs externes)
+> **Stratégie consolidée** : les 3 sujets ci-dessous (#11, #12, #13) seront tous traités dans une **session dédiée** où on construira la **page Welcome (`api.boostermail.ai/welcome`)** comme un **wizard en 3 étapes guidées**. Cohérence UX maximale, l'utilisateur est accompagné une fois pour toutes pour configurer son BoosterMail proprement.
+
+11. **Popup BoosterMail bloquée par Edge au 1er clic chez les beta-testeurs Outlook Web** — fix « fallback intelligent » (1-2 h). Détail section 11 ci-dessous. → **Étape 1 du welcome : autoriser les popups**
+12. **Placement intelligent de la popup BoosterMail (multi-écrans, centrage parfait)** — Window Management API demandée pendant le Welcome sur `api.boostermail.ai/welcome` (5-6 h). Détail section 12 ci-dessous. → **Étape 2 du welcome : activer le placement intelligent**
+13. **Bouton BoosterMail relégué au launcher d'apps Outlook Web par Microsoft (politique sideload)** — instructions de pinning intégrées au welcome (1 h). Détail section 13 ci-dessous. → **Étape 3 du welcome : épingler BoosterMail dans la barre d'actions**
 
 ### 🟡 Audits profonds reportés (sessions dédiées 1-2 h)
 8. **Audit #1 Pattern #17 backend approfondi** — 38 closures Python à auditer
@@ -222,6 +230,435 @@ Service restart 0 erreur. Code allégé sans impact fonctionnel.
 - Porter depuis `app.py` proto : routes `/inbox`, `/email/<id>`, `/new_mail` + templates HTML + JS frontend + CSS
 
 **Déclencheur** : demande client desktop standalone, ou stratégie produit nouvelle.
+
+---
+
+### 11. Popup BoosterMail bloquée par Edge au 1er clic — à traiter avant Étape 8 Beta
+
+> **Statut au 28/04/2026 fin de session** : RÉSOLU pour Yvan personnellement (popups autorisées dans son Edge), À TRAITER pour les beta-testeurs externes futurs.
+
+#### En 2 phrases
+
+Sur Outlook Web, BoosterMail ouvre maintenant une **vraie fenêtre détachée** au lieu d'une popup encadrée par Microsoft (UX premium, plus d'ascenseur, plus de double titre). MAIS Edge bloque cette fenêtre **au tout premier clic** chez chaque nouvel utilisateur — seul un clic dans la barre d'adresse permet d'autoriser définitivement.
+
+#### Symptôme côté utilisateur (= ce qui s'est passé chez Yvan le 28/04 PM)
+
+1. Yvan clique sur le bouton BoosterMail dans Outlook Web
+2. **Rien ne se passe visuellement** (pas de popup)
+3. Edge affiche une **petite icône discrète** dans la barre d'adresse (un rectangle barré d'une croix, à côté de l'étoile favoris)
+4. Si Yvan **ne sait pas** que cette icône existe → il pense que BoosterMail est cassé → mauvaise première impression
+5. Si Yvan clique l'icône + « Toujours autoriser pop-ups depuis outlook.cloud.microsoft » → ça marche **définitivement** sur cet ordinateur
+
+#### Pourquoi ça arrive
+
+C'est une **règle de sécurité standard de tous les browsers modernes** (Edge, Chrome, Firefox, Safari) : ils bloquent par défaut les popups non sollicitées pour éviter les abus publicitaires. Quand on clique sur le bouton BoosterMail dans Outlook Web, le browser ne sait pas que c'est une action voulue par l'utilisateur — il bloque par précaution.
+
+**Microsoft le savait** : c'est exactement pour ça qu'ils ont créé l'option `displayInIframe: true` (popup encadrée par leur chrome iframe, qui n'est pas considérée comme une popup browser standard donc jamais bloquée). Mais cette option crée le problème inverse : double titre, ascenseur, UX dégradée.
+
+#### Solution prévue : « Fallback intelligent » (Piste 3)
+
+**Analogie cuisine** : on installe un **maître d'hôtel intelligent** à l'entrée :
+
+1. **D'abord** : il essaie de servir le client à la **table privée détachée** (popup browser native, expérience VIP, ce qu'on a aujourd'hui sur OVH v13)
+2. **Si la table privée est inaccessible** (browser bloque la popup) : il bascule **automatiquement** sur la **table standard** (popup iframe avec chrome Microsoft — ça marche dans 100% des cas, juste un peu moins joli)
+3. **Optionnel** : afficher un petit message discret au client « 💡 Pour une fenêtre plus grande, autorisez les popups dans la barre d'adresse » → l'utilisateur peut upgrader vers la table privée s'il le souhaite
+
+Le client mange dans tous les cas. Aucun ne voit le bouton BoosterMail « cassé ».
+
+#### Risques identifiés (et leur traitement)
+
+| # | Risque | Probabilité | Mitigation |
+|---|---|---|---|
+| 1 | **Sanction Microsoft** (= la peur d'Yvan) | **NULLE** | `displayInIframe` est un paramètre officiel et documenté. Microsoft encourage explicitement ce pattern de retry. Aucun risque AppSource, aucune sanction possible. |
+| 2 | Latence visible au clic (~0.5-1 s) si le 1er essai échoue | Faible | Acceptable. Et seulement chez les users qui ont un bloqueur popup. |
+| 3 | Beta-testeurs n'autorisent jamais → expérience sub-optimale à vie | Modéré | Toast discret au moment du fallback les invite à autoriser. |
+| 4 | Erreur d'implémentation (boucle infinie, runtime Office.js mal libéré) | À maîtriser | Compteur max 2 tentatives + code review attentif au moment de l'implémentation. |
+| 5 | Browsers exotiques (Safari, Firefox, mobile) | Faible | Restreindre le test « popup détachée » aux browsers desktop sûrs (Edge/Chrome récents). Sinon → direct iframe. |
+
+#### Effort estimé
+
+**1-2 h de dev** + tests sur 2-3 browsers + commit + déploiement.
+
+#### Quand l'attaquer
+
+**Juste avant l'Étape 8 « Beta gratuite »** (5-10 premiers testeurs externes invités). Pas urgent tant qu'Yvan est seul utilisateur — chez lui ça marche déjà parfaitement (popups autorisées une fois pour toutes le 28/04 PM).
+
+#### État actuel après session 28/04 PM (commit v13)
+
+- **Code en place** : `displayInIframe: false` activé sur Outlook Web (sortie de l'iframe Microsoft → popup browser détachée)
+- **Backups disponibles** : `.bak.20260428_143332` sur OVH si besoin de revert
+- **Yvan personnellement** : popup détachée fonctionne, plus d'ascenseur, UX premium au quotidien
+- **Beta-testeurs futurs** : KO au premier clic, RÉSOLU dès qu'ils autorisent les popups (mais friction onboarding)
+
+#### Référence implémentation
+
+Quand on attaquera : créer un wrapper `_displayDialogWithFallback()` dans `V2/autorunshared.js` qui appelle `displayDialogAsync` avec `displayInIframe: false` d'abord, puis tente `displayInIframe: true` en cas de `Failed` callback. Compteur de tentatives = 2 max. `event.completed()` uniquement à la fermeture finale du dialog (jamais entre les 2 tentatives sinon le runtime se libère prématurément).
+
+---
+
+### 12. Placement intelligent de la popup BoosterMail — à traiter avant Étape 8 Beta
+
+> **Statut au 28/04/2026 fin de session 3** : Yvan personnellement teste actuellement un workaround `width: 100, height: 100` (v15 sur OVH). Si concluant pour son usage, ce sujet reste à traiter pour les beta-testeurs externes (vraie solution propre = Window Management API).
+
+#### En 2 phrases
+
+Microsoft ne propose **aucun paramètre de positionnement** pour `displayDialogAsync` (pas de `x`, `y`, `top`, `left`). Conséquence : la popup BoosterMail s'ouvre **où Microsoft décide**, généralement en haut-gauche de l'écran principal — pas centrée, pas sur l'écran où l'utilisateur travaille (problématique pour les setups multi-écrans).
+
+#### Symptôme côté utilisateur
+
+1. User clique BoosterMail dans Outlook
+2. Popup s'ouvre **collée en haut-gauche** de l'écran principal (visuellement « mal placée »)
+3. Si user a plusieurs écrans, popup peut s'ouvrir sur un écran différent de celui où il travaillait → il doit la déplacer manuellement à chaque clic
+4. Pas d'effet WOW, perception « outil bricolé » alors que tout le reste est premium
+
+#### Pourquoi ça arrive
+
+C'est une **limitation architecturale de l'API `displayDialogAsync`** de Microsoft, pas un bug de notre code. Microsoft a probablement standardisé ce comportement pour éviter que des add-ins malveillants déplacent les popups n'importe où.
+
+#### Solution propre prévue : Window Management API + permission Welcome
+
+**Analogie cuisine** : on installe un **maître d'hôtel intelligent** qui demande au client une autorisation **une fois pour toutes pendant le welcome** : « est-ce que j'ai le droit de placer ta table sur l'écran exact où tu travailles ? ». Si oui, à chaque clic BoosterMail ensuite, table parfaitement placée. Si non, fallback sur le placement Microsoft natif.
+
+#### Architecture SaaS-correcte (révisée 28/04 PM)
+
+> **Note importante** : depuis le pivot SaaS, il n'y a plus de phase d'installation classique — juste 30 secondes de sideload manifest. Le terme « onboarding » est remplacé par « Welcome » pour clarifier.
+
+```
+1. DÉCOUVERTE → install.boostermail.ai (page marketing + bouton sideload)
+
+2. SIDELOAD → 30 secondes dans Outlook (UI native Microsoft)
+
+3. WELCOME → api.boostermail.ai/welcome (NOUVELLE PAGE À CRÉER)
+   • Page web propre, 3 étapes guidées :
+     - Connexion Microsoft (OAuth) si pas déjà faite
+     - Préférences style + signature
+     - "🎯 Activer le placement intelligent" → demande permission browser
+   • Quand user clique "Activer" :
+     - JS appelle window.getScreenDetails()
+     - Edge affiche popup native : "api.boostermail.ai veut voir vos
+       écrans et ouvrir des fenêtres sur d'autres écrans. [Autoriser]"
+     - User clique "Autoriser" → permission persistée pour ce domaine
+     - Stocké en DB BoosterMail : settings.smart_placement = true
+   • Fin welcome : "Va dans Outlook, clique BoosterMail, on est prêt"
+
+4. PREMIER CLIC RÉEL BOOSTERMAIL DANS OUTLOOK
+   • Popup détachée parfaitement centrée sur l'écran où l'user travaille
+   • Effet WOW dès le 1er usage productif
+```
+
+**Pourquoi ça doit absolument être sur `api.boostermail.ai`** : la permission est liée au domaine. La popup BoosterMail est servie par `api.boostermail.ai/plugin/dialog.html` — donc la permission doit être donnée à ce même domaine. Si on demandait sur `install.boostermail.ai`, elle ne s'appliquerait pas à la popup.
+
+#### Mécanisme « popup browser native » (rappel pour ne plus avoir de doute)
+
+Quand notre JS appelle `window.getScreenDetails()`, **Edge prend le contrôle** et affiche sa propre boîte de dialogue (PAS notre code), sous la barre d'adresse :
+
+```
+┌──────────────────────────────────────────────────┐
+│ ⚠ api.boostermail.ai veut :                      │
+│   - Voir vos écrans                              │
+│   - Ouvrir des fenêtres sur d'autres écrans      │
+│                                                  │
+│             [ Bloquer ]   [ Autoriser ]          │
+└──────────────────────────────────────────────────┘
+```
+
+C'est **EXACTEMENT le même mécanisme** que Google Maps demandant la géolocalisation, ou Zoom demandant la caméra/micro. **Standard W3C éprouvé**, pas de risque que ça « ne fonctionne pas ».
+
+#### Compatibilité
+
+| Browser / Plateforme | Window Management API | Action |
+|---|---|---|
+| **Edge** ≥ 100 (avril 2022) | ✅ Supporté | OK |
+| **Chrome** ≥ 100 | ✅ Supporté | OK |
+| **WebView2 New Outlook desktop** | ✅ Supporté (= Edge sous le capot) | OK |
+| **Firefox** | ❌ Non supporté | Fallback sur centrage approximatif (workaround v15 ou Option D PLUS_TARD) |
+| **Safari** | ❌ Non supporté | Idem fallback |
+
+**Pour les beta-testeurs** : 95 %+ utilisent Edge/Chrome → impact très limité du non-support Firefox/Safari.
+
+#### Risques identifiés
+
+| # | Risque | Probabilité | Mitigation |
+|---|---|---|---|
+| 1 | **Sanction Microsoft** (= la peur d'Yvan) | **NULLE** | API standard W3C, totalement indépendante des guidelines Microsoft |
+| 2 | User refuse la permission au welcome | Modéré | Page pédagogique avec screenshot avant/après + bouton « Plus tard » qui réactive l'opportunité depuis les paramètres profil |
+| 3 | User skip le welcome | Faible | Si pas de permission, fallback sur placement Microsoft natif → BoosterMail reste fonctionnel, juste pas WOW |
+| 4 | Edge bloque la demande de permission | Très faible | API standard W3C, ne devrait pas être bloqué |
+| 5 | API évolue (encore récente, 2022) | Faible | Suivre la spec W3C, code défensif avec feature detection |
+
+#### Effort estimé
+
+| Tâche | Heures |
+|---|---|
+| Création page `api.boostermail.ai/welcome` (HTML + JS + CSS, intégrée à V2/) | 1.5 h |
+| Workflow welcome : OAuth + préférences + demande permission | 1 h |
+| Modif `dialog.js` : feature-detect + appel `window.getScreenDetails()` au load + positionnement précis sur l'écran courant + fallback gracieux si permission refusée/non supportée | 1.5 h |
+| Tests multi-écrans (1, 2, 3 écrans) + multi-browsers (Edge desktop + Edge web + Chrome web + fallback Firefox) | 1.5 h |
+| Documentation + intégration cascade (PLUS_TARD_VF, ANOMALIES_RECURRENTES, onboarding) | 30 min |
+| **Total** | **5-6 h** |
+
+#### Quand l'attaquer
+
+**Juste avant l'Étape 8 « Beta gratuite »**, en même temps que le sujet #11 (fallback popup intelligent). Les 2 sujets sont liés (UX premier clic beta-testeurs) et peuvent être traités dans une même session de 7-8 h.
+
+#### État actuel après session 28/04 PM
+
+- **v15 déployée** : `width: 100, height: 100` plein écran (workaround temporaire pour Yvan)
+- Si workaround concluant pour usage Yvan → on garde v15 jusqu'à ce qu'on attaque ce sujet #12 proprement
+- Si workaround pas concluant → on roll back v14 et on accepte le placement Microsoft jusqu'à l'implémentation de la solution propre
+
+#### Vocabulaire convenu (à propager dans toute la doc)
+
+- **Découverte** ou **Démarrer** = page marketing `install.boostermail.ai`
+- **Sideload** = geste technique de 30 sec dans Outlook
+- **Welcome** = page web `api.boostermail.ai/welcome`, configuration initiale produit (préférences + placement intelligent + etc.)
+
+Ces 3 termes remplacent l'ancien vocabulaire « install + onboarding » qui prêtait à confusion en SaaS.
+
+#### Référence implémentation
+
+Quand on attaquera :
+1. Créer `V2/welcome.html` + `V2/welcome.js` + `V2/welcome.css` servies par Flask sur `/welcome`
+2. Dans `welcome.js`, exposer un bouton dont le `onclick` appelle `window.getScreenDetails()` avec `try/catch` pour gérer le cas browser non supporté
+3. Stocker la réussite dans `settings.smart_placement = true` via une nouvelle route Flask `POST /api/settings/smart_placement`
+4. Dans `dialog.js` (ou autorunshared.js), au load du dialog, feature-detect `window.getScreenDetails`, lire `screen.availLeft / availTop / availWidth / availHeight` de l'écran courant, calculer le centre, et `window.moveTo(x, y)` immédiatement
+5. Tester sur 1, 2, 3 écrans (Yvan en a 3 → cas réel) + Edge / Chrome / Firefox (fallback)
+
+---
+
+### 13. Bouton BoosterMail relégué au launcher d'apps Outlook Web par Microsoft — à traiter avant Étape 8 Beta
+
+> **Statut au 28/04/2026 fin de session 3** : RÉGRESSION CONSTATÉE chez Yvan en fin de session — bouton BoosterMail déplacé de la barre d'actions vers le petit pictogramme carré « Apps launcher » d'Outlook Web. Notre code n'est PAS en cause (manifest XML inchangé depuis le 27/04 matin, vérifié sur OVH). C'est une **politique Microsoft assumée**.
+
+#### En 2 phrases
+
+Microsoft a une politique depuis ~2023 pour Outlook Web : les **add-ins customs sideloadés** (= manifest privé pas publié sur AppSource) sont **automatiquement déplacés vers le launcher d'apps secondaire** au bout d'un certain temps, pour ne pas encombrer la barre d'actions principale. Seuls les add-ins validés AppSource (officiels Microsoft) sont garantis dans la barre principale en permanence.
+
+#### Symptôme côté utilisateur (= ce qui s'est passé chez Yvan le 28/04 fin de session)
+
+1. User installe BoosterMail via sideload
+2. Au premier usage : **bouton BoosterMail visible dans la barre d'actions** d'Outlook Web (à côté de Répondre / Répondre à tous / Transférer)
+3. Microsoft, après quelques heures/jours, **relègue silencieusement le bouton vers le launcher d'apps** (le petit carré 3×3)
+4. User cherche le bouton dans la barre d'actions, ne le trouve plus → **panique / pense que BoosterMail est cassé**
+5. Si user ne sait pas ouvrir le launcher pour récupérer l'icône → support ticket / abandon
+
+#### Pourquoi ça arrive
+
+C'est un **comportement officiel de Microsoft Outlook Web** (vérifié sur leur tracker public Office Add-ins). Logique business :
+- Microsoft veut que la barre d'actions reste **épurée** (pas encombrée par des dizaines d'add-ins)
+- Microsoft favorise les **add-ins validés AppSource** (= passés par leur processus de validation, contractualisés)
+- Les **add-ins customs sideloadés** (= cas de toute beta avant AppSource) sont relégués au launcher par défaut
+
+**Aucun paramètre du manifest XML ne permet de forcer le pinning permanent** sur Outlook Web. Microsoft ne l'expose pas.
+
+#### Solution prévue (Option B — Pragmatique)
+
+**Analogie cuisine** : on **explique au client dès son arrivée** au restaurant que pour avoir BoosterMail directement dans sa barre principale, il doit l'**épingler une fois** (geste user). Comme ça, plus de surprise quand Microsoft décide de le déplacer.
+
+**Concrètement** : intégrer une **étape 3 « Épingle BoosterMail dans ta barre d'actions »** dans le **welcome** (`api.boostermail.ai/welcome`), avec :
+- **Capture d'écran** illustrative (où se trouve le launcher d'apps + comment épingler)
+- **Texte clair** : « Outlook Web peut déplacer BoosterMail vers son launcher secondaire après quelques jours. Pour l'éviter, fais ce geste une fois pour toutes. »
+- **Bouton « J'ai épinglé »** que le user clique après avoir fait le geste → on stocke `settings.web_pinning_done = true`
+- **Si user n'a pas épinglé après X jours** : rappel doux dans le dialog BoosterMail (« 💡 Astuce : épingle BoosterMail dans ta barre d'actions pour le retrouver plus vite »)
+
+#### Architecture welcome consolidée (3 étapes regroupant #11 + #12 + #13)
+
+```
+api.boostermail.ai/welcome — wizard 3 étapes guidées
+│
+├── ÉTAPE 1 — Autoriser les popups Edge (sujet #11)
+│   « Pour que BoosterMail puisse s'ouvrir au clic, autorise les popups
+│     depuis outlook.cloud.microsoft. Voici comment : [screenshot] »
+│   [ Bouton ] « J'ai autorisé »  → fallback automatique sinon
+│
+├── ÉTAPE 2 — Activer le placement intelligent (sujet #12)
+│   « Veux-tu que BoosterMail s'ouvre toujours centré sur l'écran où tu
+│     travailles ? »
+│   [ Bouton ] « Activer »  → window.getScreenDetails() → permission Edge
+│   [ Bouton ] « Plus tard »  → settings.smart_placement = false
+│
+└── ÉTAPE 3 — Épingler BoosterMail (sujet #13)
+    « Sur Outlook Web, Microsoft peut déplacer BoosterMail vers le launcher
+      d'apps. Voici comment l'épingler définitivement dans ta barre :
+      [screenshot] »
+    [ Bouton ] « J'ai épinglé »  → settings.web_pinning_done = true
+    [ Bouton ] « Plus tard »  → rappel dans dialog dans 7 jours
+```
+
+**Bénéfices** :
+✅ **Onboarding cohérent** : 3 étapes courtes guidées en 2 minutes
+✅ **Aucune friction** : chaque problème connu Microsoft est désamorcé dès le départ
+✅ **L'utilisateur sait quoi attendre** au lieu d'être surpris en cours d'usage
+✅ **Aucune dépendance code Microsoft** : pas de bricolage, juste de la pédagogie
+
+#### Solution PROPRE long terme (= Option A documentée mais pas dans le scope court)
+
+**AppSource** : add-ins validés AppSource → **placement garanti permanent** dans la barre d'actions, plus jamais de relégation au launcher. Étape 6 SaaS, **bloquée par MPN** (cf #20 — décision business entité éditrice).
+
+**Délai** : 4-8 semaines de validation Microsoft une fois MPN obtenu. Pas court terme.
+
+**Dès que AppSource OK** → **on pourra retirer l'étape 3 du welcome** (devient inutile pour les users qui installent depuis AppSource). On gardera l'étape 3 uniquement pour les sideload manuels.
+
+#### Risques identifiés
+
+| # | Risque | Probabilité | Mitigation |
+|---|---|---|---|
+| 1 | User skip l'étape 3 du welcome | Modéré | Rappel doux dans le dialog au bout de 7 jours sans pinning |
+| 2 | Procédure de pinning change avec une update Microsoft | Faible | Maintenir la doc à jour, screenshots datés |
+| 3 | Pinning ne tient pas dans le temps (Microsoft dépin malgré l'action user) | Faible | Si rapporté, ré-afficher le rappel |
+| 4 | Sanction Microsoft pour avoir documenté la friction | **NULLE** | C'est leur politique officielle, on respecte |
+
+#### Effort estimé
+
+| Tâche | Heures |
+|---|---|
+| Identification précise de la procédure de pinning à jour Outlook Web (avec screenshots datés) | 30 min |
+| Intégration dans la page welcome (HTML + JS + CSS — partagé avec #11 et #12) | 30 min |
+| Logique stockage `settings.web_pinning_done` + rappel après 7 jours | 30 min |
+| Tests sur Outlook Web (Edge + Chrome) | 30 min |
+| Documentation interne | 15 min |
+| **Total** | **2 h 15** (dont 1 h partagée avec #11 et #12 dans la même session welcome) |
+
+#### Quand l'attaquer
+
+**Dans la même session que #11 et #12** (juste avant l'Étape 8 « Beta gratuite »). Total session welcome consolidée : **8-9 h** pour un onboarding produit complet et professionnel. Effort cohérent avec l'objectif « expérience parfaite + WOW » de BoosterMail.
+
+#### État actuel après session 28/04 PM
+
+- **Code intact** : manifest XML inchangé depuis le 27/04 matin, déploiement OVH stable
+- **Yvan personnellement** : peut re-pinner manuellement le bouton via le launcher d'apps Outlook Web (procédure documentée plus bas)
+- **Beta-testeurs futurs** : KO si pas anticipé. Welcome en 3 étapes = solution.
+
+#### Procédure de pinning manuel pour Yvan (en attendant le welcome)
+
+Sur Outlook Web :
+1. Ouvrir un mail
+2. Cliquer le **petit carré (apps launcher)** dans la barre d'actions
+3. **Survoler l'icône EasyMail** (sans cliquer) → un mini-menu apparaît
+4. Chercher l'option **« Pin »** ou **« Épingler à la barre d'actions »** (icône en forme d'épingle 📌)
+5. Cliquer → BoosterMail revient dans la barre d'actions principale
+
+**Alternative** si pas de menu au survol : **clic droit** sur l'icône dans le launcher → menu contextuel.
+
+**Re-sideload** : à faire quand tu veux, ça resetterait l'état Outlook Web et au passage rafraîchirait le titre « EasyMail » → « BoosterMail » dans le chrome de la popup (procédure dans Settings → Manage add-ins → Remove + Add from URL).
+
+#### Référence implémentation
+
+Quand on attaquera (en même temps que #11 et #12) :
+1. Étape 3 dans `welcome.html` avec placeholder pour screenshot animé du pinning
+2. Bouton « J'ai épinglé » → POST `/api/settings/web_pinning_done` → DB
+3. Logique côté `dialog.js` : si `web_pinning_done === false` ET host === 'OutlookWebApp' ET dialog ouvert depuis > 7 jours → afficher toast discret « 💡 Astuce... »
+4. Test : sur Outlook Web, simuler le pinning manuel + le dépin Microsoft, vérifier que le rappel se déclenche
+
+---
+
+### 14. 🔥 PROCHAINE SESSION — Auto-ouverture popup BoosterMail au clic Répondre Outlook (OnMessageCompose)
+
+> **Statut au 28/04/2026 fin de session 3** : DÉBLOQUÉ post-migration Coaxis (mailbox Yvan passée définitivement sur Microsoft 365 cloud le 28/04 PM). Le code handler existe déjà mais sert un usage périmé (notify backend pour popup PyQt locale, supprimée au pivot SaaS 27/04). À adapter pour ouvrir directement la popup BoosterMail. **Premier point à attaquer en session du 29/04.**
+
+#### Vision produit
+
+**Effet WOW ultime** : l'utilisateur ne clique plus sur le bouton BoosterMail dans la barre d'actions. Il **clique simplement « Répondre »** comme dans n'importe quel client mail, et **BoosterMail s'ouvre automatiquement** avec la réponse pré-générée. Aucune friction, aucune étape supplémentaire, BoosterMail devient l'**assistant par défaut** au moment où l'utilisateur en a vraiment besoin.
+
+**Analogie cuisine** : aujourd'hui, le client doit appeler le serveur en levant la main pour qu'il vienne prendre sa commande. Demain, dès que le client s'assoit, le serveur arrive **avec un menu personnalisé déjà prêt** correspondant à ses goûts habituels. C'est ça la différence.
+
+#### État technique actuel (vérifié 28/04 PM)
+
+**`onNewMessageComposeHandler`** existe déjà dans `V2/autorunshared.js` ligne 481, et est correctement déclaré dans `V2/manifest.xml` ligne 180 (`<LaunchEvent Type="OnMessageCompose" FunctionName="onNewMessageComposeHandler"/>`).
+
+**Comportement actuel** (héritage pré-pivot SaaS) :
+1. Détecte le clic Répondre / Reply All / Forward / Nouveau
+2. Lit le sujet → détermine le mode
+3. POST `/api/event/new_compose` au backend OVH avec sujet + mode
+4. `event.completed()` → la fenêtre Outlook native s'ouvre normalement
+
+**Problème** : le step 3 servait à alimenter une **popup PyQt locale** qui détectait le compose via SSE et ouvrait son fenêtre. Depuis le pivot SaaS 27/04, **plus de popup PyQt locale**. La notification arrive sur le serveur, mais **rien ne s'ouvre côté user**.
+
+**Pourquoi la migration Coaxis débloque ça** : avant le 28/04, la mailbox Yvan était sur les serveurs Coaxis avec des limitations Graph API (`MailboxInfoStaleException`, accès limité aux events Office.js). Maintenant que Yvan est sur Microsoft 365 cloud, **tous les events Office.js et Graph fonctionnent à 100%**. OnMessageCompose se déclenche fiablement.
+
+#### Architecture cible
+
+```
+1. User clique « Répondre » dans Outlook (Web ou New Outlook desktop)
+2. Office.js déclenche OnMessageCompose → onNewMessageComposeHandler
+3. Handler :
+   a. Récupère subject (item.subject.getAsync)
+   b. Récupère expéditeur original (item.from.getAsync)
+   c. Récupère body complet (item.body.getAsync)
+   d. Récupère threadId / conversationId / messageId si possible
+   e. Détecte mode (reply / reply_all / forward / new)
+   f. Vérifie le toggle settings.auto_open_on_reply (default: true)
+   g. Si toggle ON : appelle displayDialogAsync avec ces données
+       → popup BoosterMail s'ouvre AUTOMATIQUEMENT
+   h. Si toggle OFF : event.completed() → Outlook ouvre sa fenêtre native
+4. Popup BoosterMail :
+   - Affiche le résumé du mail original (panneau gauche)
+   - Affiche la réponse pré-générée (cache HIT instant_reply ou stream Claude)
+   - User génère / refine / edit
+5. Au clic « Relire et envoyer » :
+   - Soit injection dans la fenêtre compose Outlook (qui peut être en arrière-plan)
+   - Soit envoi direct via Graph API (route /send_reply existante)
+6. Cleanup : event.completed() pour libérer le runtime Office.js
+```
+
+#### Point critique — Toggle ON/OFF
+
+**Obligatoire** pour respecter l'utilisateur. Certains cas où l'auto-ouverture est gênante :
+- L'user veut juste taper « Merci, c'est noté » en 5 sec → BoosterMail est de trop
+- L'user veut transférer un mail à un collègue avec une note rapide → idem
+- L'user est en mode hors-ligne → BoosterMail ne peut pas générer
+
+**Implémentation** :
+- Setting DB : `settings.auto_open_on_reply` (bool, default `true`)
+- UI : toggle dans la page profil / paramètres BoosterMail (« Ouvrir BoosterMail automatiquement quand je clique Répondre : Oui / Non »)
+- Logique handler : if `settings.auto_open_on_reply === false` → event.completed() direct, pas d'ouverture popup
+
+#### Risques + mitigations
+
+| # | Risque | Probabilité | Mitigation |
+|---|---|---|---|
+| 1 | Auto-ouverture intrusive sans toggle | Élevée | **Toggle obligatoire** dès le départ |
+| 2 | `displayDialogAsync` échoue dans contexte OnMessageCompose | Modérée | Fallback : event.completed() → Outlook ouvre fenêtre native |
+| 3 | Cas drafts pré-existants (user reprend un brouillon) | Modérée | Détection : si `item.body.getAsync` retourne du contenu user pré-existant, ne pas auto-ouvrir |
+| 4 | Performance — handler bloque l'ouverture du draft | Faible | Async, event.completed() rapide après ouverture popup |
+| 5 | Microsoft change le timing OnMessageCompose | Faible | Gestion défensive |
+| 6 | Toggle ON par défaut → user surpris au premier usage | Élevée si pas anticipé | **Tutoriel au welcome** (étape 4 ?) ou notification première ouverture « BoosterMail s'ouvrira automatiquement... [Désactiver] » |
+| 7 | Sanction Microsoft pour « hijacking » du flow Outlook | **NULLE** | C'est exactement l'usage prévu de OnMessageCompose event |
+
+#### Effort estimé
+
+| Tâche | Heures |
+|---|---|
+| Refonte `onNewMessageComposeHandler` (récupération infos + appel `displayDialogAsync`) | 1.5 h |
+| Toggle ON/OFF (DB column + route Flask + UI paramètres) | 1.5 h |
+| Logique défensive (drafts pré-existants, mode dégradé, fallback Outlook natif) | 1 h |
+| Tests sur les 4 modes (reply / reply_all / forward / new) sur Web + Desktop | 2 h |
+| Documentation (PLUS_TARD_VF, ANOMALIES_RECURRENTES, onboarding) | 30 min |
+| **Total** | **6-7 h** (session dédiée) |
+
+#### Quand l'attaquer
+
+**Premier point en session du 29/04** (= prochaine session). Yvan vient de débloquer techniquement la fonctionnalité (migration Coaxis terminée 28/04 PM). On peut attaquer dès demain.
+
+**Stratégie de test** : Yvan teste en condition réelle sur ses propres mails (il sera le premier user de cette feature). Si un edge case casse, rollback en 1 commande prêt comme d'habitude.
+
+#### État actuel après session 28/04 PM
+
+- **Code intact** : handler existe, manifest déclare l'event, infrastructure prête
+- **Notify backend mort** depuis pivot SaaS, à remplacer par appel `displayDialogAsync` direct
+- **Migration Coaxis terminée** ce 28/04 PM → tous les events Graph et Office.js fiables
+- **Bénéfice secondaire** : si auto-ouverture marche, **#13 (pinning bouton barre d'actions) devient moins critique** — l'user n'a même plus besoin du bouton BoosterMail dans la barre, le clic Répondre suffit
+
+#### Référence implémentation
+
+Quand on attaquera demain :
+1. Lire le code complet de `onNewMessageComposeHandler` (autorunshared.js l. 481-514)
+2. Comprendre comment récupérer le contexte mail en mode compose (différent du mode read)
+3. Vérifier si `displayDialogAsync` peut être appelé depuis `OnMessageCompose` event handler (limitation API ?)
+4. Adapter la logique d'ouverture pour passer les bonnes données au dialog (subject, from, body, mode)
+5. Implémenter le toggle settings.auto_open_on_reply
+6. Tester sur les 4 modes en réel sur Yvan
+7. Documenter dans audit/INVARIANTS.md (nouveau invariant I-FLUX-* ?) et ANOMALIES_RECURRENTES.md si nouveau pattern
 
 ---
 

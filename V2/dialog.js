@@ -1700,6 +1700,16 @@ function _tryInstantReply() {
                 source: res.template_source, confidence: res.confidence,
             };
         }
+        // Fix 28/04 PM : btnSend reste disabled sur New Outlook desktop si on
+        // n'active pas explicitement apres un cache HIT instant_reply. Le path
+        // streaming Claude passe par _onGenerationDone() qui active le bouton
+        // (l. 2040), mais le path cache HIT (ce bloc) ne passait pas par la.
+        // Sur Outlook Web, un effet de bord du browser (re-render via assignation
+        // innerHTML) reactivait accidentellement le bouton, mais ce n'est pas
+        // fiable cross-platform — sur New Outlook desktop (WebView2) le bouton
+        // restait grise. Activation explicite ici = comportement uniforme.
+        var _btnSendInstant = document.getElementById('btnSend');
+        if (_btnSendInstant) _btnSendInstant.disabled = false;
         // Perf : réponse affichée en instant via cache (draft / préemptif / template)
         _perfMonitor.mark('T5_reply_first_chunk', res.source || 'cache');
         _perfMonitor.mark('T5_reply_done', res.source || 'cache');
@@ -1765,25 +1775,17 @@ function _triggerAutoGenerate() {
 }
 
 function _showInstantReplyBadge(res) {
+    // Refonte 28/04/2026 — Option A : suppression complete du badge instant
+    // reply ("Pre-generee il y a X j" / "Reponse depuis brouillon" / template
+    // confidence %). Decision Yvan post-test Outlook Web : info non pertinente
+    // pour l'usage quotidien (sur-mesure pret, peu importe quand) et rognait
+    // ~26 px d'editeur. Si plus tard on veut reafficher la confidence sur les
+    // templates pour les beta-testeurs, restaurer le bloc complet depuis git
+    // history (commit precedent). Cleanup d'un eventuel badge orphelin garde
+    // par securite (au cas ou la fonction serait appelee plusieurs fois dans
+    // le meme runtime — ne devrait pas arriver mais sans risque).
     var existing = document.getElementById('tplBadge') || document.getElementById('draftBadge');
     if (existing) existing.remove();
-    var badge = document.createElement('div');
-    badge.id = 'tplBadge';
-    badge.className = 'tpl-badge';
-    var extra = '';
-    if (res.source === 'template' && typeof res.confidence === 'number') {
-        extra = ' <span class="tpl-badge-conf">' +
-                Math.round(res.confidence * 100) + '%</span>';
-    } else if ((res.source === 'draft' || res.source === 'preemptive') && res.timestamp) {
-        var delta = Math.round((Date.now() / 1000 - res.timestamp) / 60);
-        if (delta < 60) extra = ' il y a ' + delta + ' min';
-        else if (delta < 1440) extra = ' il y a ' + Math.round(delta / 60) + ' h';
-        else extra = ' il y a ' + Math.round(delta / 1440) + ' j';
-    }
-    badge.innerHTML = '<span class="tpl-badge-dot">●</span> ' +
-                      (res.badge || 'Réponse instantanée') + extra;
-    var editor = document.getElementById('editor');
-    editor.parentNode.insertBefore(badge, editor);
 }
 
 

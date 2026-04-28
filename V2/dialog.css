@@ -319,9 +319,14 @@ body {
 }
 .em-field-row input:focus { border-color: #0F6CBD; }
 
-/* Boutons mode reply/reply_all/forward */
+/* Boutons mode reply/reply_all/forward + (28/04) trombone + R/S/H sur la
+   meme ligne (em-gen-row supprimee, fieldBrief cache). align-items center
+   et flex-wrap permettent un rendu propre meme si la fenetre est etroite
+   (Outlook Web sur petit ecran, mobile, etc.). */
 .em-mode-row {
     display: flex;
+    align-items: center;
+    flex-wrap: wrap;
     gap: 4px;
     margin-bottom: 6px;
 }
@@ -341,6 +346,10 @@ body {
     color: #fff;
     border-color: #0F6CBD;
 }
+
+/* Separation visuelle apres les 3 boutons mode (refonte 28/04) */
+.em-mode-row .em-attach-btn { margin-left: 12px; }
+.em-mode-row .em-imp-group  { margin-left: 8px; }
 
 /* Brief + Importance + Générer */
 .em-gen-row {
@@ -435,19 +444,20 @@ body {
     cursor: not-allowed;
 }
 
-/* Trombone */
+/* Trombone — taille reduite 32->28 px (refonte 28/04) pour mieux s'aligner
+   avec les boutons mode (~26 px) et chips R/S/H (~28 px) sur em-mode-row. */
 .em-attach-btn {
     border: 1px solid #ddd;
     border-radius: 6px;
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     background: none;
     color: #555;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    font-size: 13px;
     flex-shrink: 0;
 }
 .em-attach-btn:hover { border-color: #0F6CBD; color: #0F6CBD; }
@@ -949,4 +959,53 @@ body {
     color: #0F6CBD;
     background: rgba(255, 255, 255, 0.7);
     border-radius: 8px;
+}
+
+/* === Mode Outlook Web + New Outlook desktop (compactage, 28/04/2026) =======
+ * Microsoft impose un chrome iframe (~60 px : titre "BoosterMail" + croix)
+ * autour de la popup, sur Outlook Web ET sur New Outlook desktop depuis la
+ * convergence Microsoft (build OneOutlook/1.2026.420.300+). On compacte le
+ * header bleu interne sur les 2 plateformes pour limiter le double titre :
+ *   1. Demande 90% de hauteur (cf autorunshared.js _openViaDisplayDialog)
+ *   2. Compacte le header bleu interne (padding, separateur, tags)
+ *   3. Retire le contour 2px (le chrome Microsoft sert deja de cadre)
+ * Activation : <html class="platform-web"> OU <html class="platform-newOutlook">
+ * (set par dialog.html script inline a partir du param URL platform= injecte
+ * par autorunshared.js _detectOutlookPlatform).
+ * Aucun impact sur classic/mac/mobile.
+ * Extension a newOutlook ajoutee 28/04 fin de session (Option E v16).
+ * =========================================================================== */
+html.platform-web body,
+html.platform-newOutlook body {
+    border: none;
+}
+html.platform-web .em-header,
+html.platform-newOutlook .em-header {
+    padding: 5px 12px;
+}
+html.platform-web .em-header-sep,
+html.platform-newOutlook .em-header-sep {
+    height: 22px;
+    margin: 0 10px;
+}
+html.platform-web .em-logo,
+html.platform-newOutlook .em-logo {
+    font-size: 13px;
+}
+html.platform-web .em-tag,
+html.platform-newOutlook .em-tag {
+    font-size: 9px;
+    padding: 1px 5px;
+}
+html.platform-web .em-hdr-btn,
+html.platform-newOutlook .em-hdr-btn {
+    width: 24px;
+    height: 24px;
+    font-size: 13px;
+}
+html.platform-web .em-hdr-return,
+html.platform-newOutlook .em-hdr-return {
+    height: 24px;
+    padding: 0 10px;
+    font-size: 11px;
 }

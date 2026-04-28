@@ -35,7 +35,7 @@ function _debugLog(eventName, details) {
 
 // Marqueur de version : s'écrit dès le chargement du JS → permet de vérifier
 // en lisant addin_debug.log que Outlook a bien rechargé le nouveau fichier.
-var _ADDIN_VERSION = 'v11-classement-none-wording-28-04';
+var _ADDIN_VERSION = 'v17-iframe-80x80-compact-28-04';
 _debugLog('js_loaded', { version: _ADDIN_VERSION });
 
 // Safety net global (21/04 P3) : toute exception non catchée → log backend
@@ -382,7 +382,8 @@ function _buildAndOpenDialog(item, event, data, getMailBody, fromName, fromEmail
         'hasAttachments=' + (data.hasAttachments ? '1' : '0'),
         'to=' + encodeURIComponent(data.to),
         'cc=' + encodeURIComponent(data.cc),
-        'mode=' + encodeURIComponent(data.mode)
+        'mode=' + encodeURIComponent(data.mode),
+        'platform=' + encodeURIComponent(_detectOutlookPlatform())
     ];
     var dialogUrl = _backendUrl + '/plugin/dialog.html?' + params.join('&');
 
@@ -391,10 +392,20 @@ function _buildAndOpenDialog(item, event, data, getMailBody, fromName, fromEmail
 }
 
 function _openViaDisplayDialog(item, dialogUrl, data, getMailBody, fromName, fromEmail, event, onDialogOpen) {
-    _debugLog('display_dialog_attempt', { url: dialogUrl });
+    // 28/04 PM v16 — Option E : displayInIframe: true (chrome Microsoft
+    // centre naturellement) + 90% x 90% (marge autour pour voir Outlook
+    // derriere = contexte rassurant pour user) + compactage CSS desktop
+    // (cf dialog.css regles html.platform-newOutlook ajoutees). Decision
+    // post-test v15 plein ecran : trop intrusif, perte du contexte Outlook,
+    // 3 cartes du bas coupees. v16 = compromis pragmatique en attendant
+    // solution propre Window Management API (cf PLUS_TARD_VF #12).
+    // Rollback : .bak.20260428_170756 si KO.
+    var _plat = _detectOutlookPlatform();
+    var _dlgOpts = { width: 80, height: 80, promptBeforeOpen: false, displayInIframe: true };
+    _debugLog('display_dialog_attempt', { url: dialogUrl, platform: _plat, opts: _dlgOpts });
     Office.context.ui.displayDialogAsync(
         dialogUrl,
-        { width: 80, height: 74, promptBeforeOpen: false, displayInIframe: true },
+        _dlgOpts,
         function (asyncResult) {
             if (asyncResult.status === Office.AsyncResultStatus.Failed) {
                 _debugLog('display_dialog_error', {

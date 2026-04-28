@@ -4,7 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BoosterMail</title>
-    <link rel="stylesheet" href="dialog.css?v=v15-tech-debt-tier1-27-04">
+    <!-- Propage la plateforme (web/newOutlook/classic/mac/mobile) en classe sur
+         <html> AVANT le link CSS pour que les regles .platform-web s'appliquent
+         des le premier rendu (evite flash). Param injecte par autorunshared.js
+         _buildAndOpenDialog. -->
+    <script>
+    (function() {
+        try {
+            var p = new URLSearchParams(window.location.search);
+            var plat = p.get('platform') || '';
+            if (plat) document.documentElement.classList.add('platform-' + plat);
+        } catch (_) { /* noop */ }
+    })();
+    </script>
+    <link rel="stylesheet" href="dialog.css?v=v19-compact-extended-newoutlook-28-04">
     <!-- Fix 23/04 : 'defer' → 'async' sur Office.js CDN.
          Diagnostic via perf_log + popup_pyqt.log : il y avait un gap de ~2 s
          entre "full-load DONE" côté QWebEngineView et "T0_script_start" côté
@@ -136,18 +149,20 @@
                     </div>
                 </div>
 
-                <!-- Boutons mode réponse (comme le proto) -->
+                <!-- Refonte 28/04/2026 — Boutons mode + 📎 + R/S/H sur UNE ligne.
+                     Avant : ligne em-gen-row separee avec textarea Instructions
+                     (rarement utilise — refineInput en bas de l'editeur fait le
+                     meme job apres generation). Gain : ~38-44 px hauteur utile.
+                     fieldBrief + btnGenerate conserves caches pour retro-compat
+                     dialog.js (6 refs : l. 288, 580, 1477, 1485, 1665, 2863). -->
                 <div class="em-mode-row" id="modeRow">
                     <button class="em-mode-btn active" id="modeReply" data-mode="reply" onclick="setReplyMode('reply')">&#x21a9; Repondre</button>
                     <button class="em-mode-btn" id="modeReplyAll" data-mode="reply_all" onclick="setReplyMode('reply_all')">&#x21a9;&#x21a9; Rep. a tous</button>
                     <button class="em-mode-btn" id="modeForward" data-mode="forward" onclick="setReplyMode('forward')">&#x21aa; Transferer</button>
-                </div>
 
-                <!-- Brief + Importance + Joindre + Générer (mockup v14) -->
-                <div class="em-gen-row">
-                    <textarea class="em-brief" id="fieldBrief" rows="1"
-                        placeholder="Instructions (optionnel)"
-                        oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"></textarea>
+                    <button class="em-attach-btn" title="Trombone intelligent" onclick="smartPaperclip()">
+                        &#x1f4ce;
+                    </button>
 
                     <div class="em-imp-group">
                         <div class="em-imp-chip" data-imp="R" onclick="selectImportance(this)">
@@ -161,15 +176,9 @@
                         </div>
                     </div>
 
-                    <button class="em-attach-btn" title="Trombone intelligent" onclick="smartPaperclip()">
-                        &#x1f4ce;
-                    </button>
-
-                    <!-- Test 21/04 — Bouton Générer caché : la génération est
-                         maintenant AUTOMATIQUE à l'ouverture du dialog (cache hit
-                         ou déclenchement automatique via _tryInstantReply). -->
-                    <button class="em-gen-btn" id="btnGenerate" onclick="generateReply()"
-                            style="display:none;">
+                    <!-- Caches pour retro-compat dialog.js (refonte 28/04). -->
+                    <textarea id="fieldBrief" rows="1" style="display:none;"></textarea>
+                    <button class="em-gen-btn" id="btnGenerate" onclick="generateReply()" style="display:none;">
                         &#x2728; Generer
                     </button>
                 </div>
@@ -417,6 +426,6 @@
         </div>
     </div>
 
-    <script defer src="dialog.js?v=v16-classement-none-wording-28-04"></script>
+    <script defer src="dialog.js?v=v18-fix-btnsend-cache-hit-28-04"></script>
 </body>
 </html>
