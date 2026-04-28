@@ -1134,15 +1134,23 @@ La signature est ce qui suit le closing (derniere ligne avant fin du mail).
                     profile['closing'] = closing
 
                     # Normaliser user_signature_for_contact (28/04 — sujet PLUS_TARD_VF #3)
-                    # Validation : nullable, ≤ 100 chars, pas de @ (= adresse mail),
-                    # pas plus de 3 lignes (signature mail standard).
+                    # Validation defense-in-depth :
+                    #   - nullable
+                    #   - ≤ 100 chars
+                    #   - pas de @ (= adresse mail)
+                    #   - pas de < > (defense-in-depth XSS : la sig est in fine insérée
+                    #     dans editor.innerHTML côté dialog ; escape front existe via
+                    #     _escapeHtml mais on rejette en amont pour faire profiter de
+                    #     2 couches — si Claude était trompé via prompt injection
+                    #     malgré la garde I-SEC-06, le back filtre ici)
+                    #   - max 3 lignes (signature mail standard)
                     _sig_raw = profile.get('user_signature_for_contact', None)
                     if _sig_raw is None or _sig_raw == '' or (isinstance(_sig_raw, str) and _sig_raw.strip().lower() in ('null', 'none', 'aucune', 'aucun')):
                         profile['user_signature_for_contact'] = None
                     else:
                         try:
                             _sig = str(_sig_raw).strip()
-                            if not _sig or len(_sig) > 100 or '@' in _sig:
+                            if not _sig or len(_sig) > 100 or '@' in _sig or '<' in _sig or '>' in _sig:
                                 print(f"[profile] VALIDATION: user_signature_for_contact invalide ('{_sig[:50]}...') → null", flush=True)
                                 profile['user_signature_for_contact'] = None
                             elif _sig.count('\n') > 2:
