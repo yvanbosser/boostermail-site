@@ -1,6 +1,6 @@
 # ONBOARDING — Sessions « New Outlook via OVH »
 
-> **Dernière mise à jour** : 27/04/2026 fin de journée (clôture session 1 : **~32 commits master**, **8 audits Workflow 2 clos**, Pattern #18 cache WebView2 documenté, hosting Coaxis identifié, PLUS_TARD_VF consolidé, kit fin de session opposable Workflow 7/8 + I-SESS-01 à 04)
+> **Dernière mise à jour** : 28/04/2026 fin de session 2 (3 sujets PLUS_TARD_VF traités end-to-end avec audit kit Workflow 2 : #3 signature par contact + #4 wording transparent classement + #2 instrumentation pipeline templates ; Outlook Web décidé pour la prochaine session)
 
 > **Rôle de ce doc** : référence vivante pour toute session Claude qui travaille sur les **fixes UX/UI/data du plugin BoosterMail dans New Outlook**, déployés directement sur OVH. À mettre à jour à la fin de chaque session pour refléter l'état réel.
 
@@ -394,6 +394,7 @@ ssh ubuntu@51.178.162.208 -t 'cd /opt/boostermail/V2 && /opt/boostermail/V2/venv
 | Date | Fichier | Sujet principal |
 |---|---|---|
 | **27/04/2026 (journée complète)** | [`OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`](../sessions/OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md) | **Session de référence (~9h + ext. ~30 min kit fin de session)** : fix bouton BoosterMail New Outlook + Pattern #18 cache WebView2 + cycle audit kit complet (Workflow 4 + Workflow 2, **8 audits clos sur 10**) + tech debt tier 1 + 12 contacts analysés + consolidation PLUS_TARD_VF + kit fin de session opposable (Workflow 7/8 + I-SESS-01 à 04 + script `cloture_check.sh`) + **~32 commits master** |
+| **28/04/2026** | [`OUTLOOK_BILAN_SESSION_20260428.md`](../sessions/OUTLOOK_BILAN_SESSION_20260428.md) | **Session 2 (~5h)** : 3 sujets PLUS_TARD_VF traités end-to-end avec audit kit Workflow 2 — #3 signature personnalisée par contact (1 anomalie BASSE detected+fixed) + #4 wording transparent classement « pas de suggestion » (pivot produit, 0 anomalie) + #2 diagnostic + instrumentation pipeline templates (pivot produit, 0 anomalie). Outlook Web décidé pour prochaine session. 4 commits BoosterMail master + 3 rapports audit. |
 
 > **Convention** : `OUTLOOK_BILAN_SESSION_AAAAMMJJ[_descriptif].md` dans `docs/sessions/`
 >

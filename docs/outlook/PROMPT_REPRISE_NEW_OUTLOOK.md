@@ -1,6 +1,6 @@
 # Prompt de reprise — Session « New Outlook via OVH »
 
-> **Dernière mise à jour** : 27/04/2026 fin de journée (post test kit fin de session — ~32 commits master, Workflow 7 validé en conditions réelles)
+> **Dernière mise à jour** : 28/04/2026 fin de session 2 (3 sujets PLUS_TARD_VF traités end-to-end avec audit kit + décision Outlook Web prochaine session)
 >
 > **Mode d'emploi** : à chaque démarrage d'une nouvelle session Claude sur le sujet « New Outlook via OVH », **copier-coller le bloc ci-dessous en intégralité**. Il référence tous les docs nécessaires et donne le contexte de la session précédente.
 >
@@ -15,12 +15,12 @@
 
 Test rapide :
   git -C C:/EasyMail branch --show-current   # doit retourner `master`
-  git -C C:/EasyMail log --oneline -5        # le top doit afficher les commits du 27/04 PM
+  git -C C:/EasyMail log --oneline -5        # le top doit afficher les commits du 28/04
 
 Si ton worktree est différent (auto-créé style `claude/happy-XXXX`), exécute en début de session :
   git fetch && git merge master --no-edit
 puis :
-  git log --oneline -5    # doit afficher au minimum `f8473e8 feat(kit-fin-session): kit fin de session opposable + script cloture_check`
+  git log --oneline -5    # doit afficher au minimum `86d0e60 feat(metrics): instrumentation pipeline templates`
 
 ---
 
@@ -31,27 +31,30 @@ CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
 - Toutes les modifs (UX/UI/data) déployées sur OVH dans la foulée — plus de WIP local persistant
 - Yvan utilise BoosterMail au quotidien depuis https://api.boostermail.ai/
 
-ÉTAT DE FIN DE LA DERNIÈRE SESSION (27/04/2026 fin de journée)
-- **~32 commits master cumulés** sur la journée du 27/04 (top : `f8473e8`)
-- Bouton BoosterMail New Outlook : **fonctionnel** (était mort en silence)
-- Pattern #18 (cache WebView2 ignore les headers HTTP) découvert + fix structurel : `no-store` HTML + cache busting URL versionnée
-- Cycle audit kit complet (Workflow 4 + 2) : **8 audits clos sur 10**, 2 partiels avec constat livré (#1 Pattern #17 backend profond reporté, #4 except: pass approfondi reporté)
-- 12 contacts humains analysés via `POST /api/analyze_contact` ($0.30, 9 profils créés en 60s)
-- Pattern #15 (I-CODE-05) : 4 sites mail_data corrigés
-- HTTP 429 propre + SSE event `quota_exceeded`
-- Garde anti-injection sur `_build_prompt` (Pattern #9 / I-SEC-06)
-- Tech debt tier 1 : locks cohérents + log level + cleanup deprecated + 4 caches dead retirés
-- Audit cohérence final : PLUS_TARD_VF nettoyé, 6 incohérences corrigées (items déjà faits encore listés comme à faire)
-- **Kit fin de session opposable** créé en fin de journée : Workflow 7 (clôture) + Workflow 8 (ouverture) dans `audit/PLAYBOOK.md`, invariants I-SESS-01 à 04 dans `audit/INVARIANTS.md`, script auto `audit/tests/cloture_check.sh`. Validé en conditions réelles : 1er run a détecté 3 anomalies réelles toutes corrigées avant validation.
-- État OVH : service active, 0 erreur, routes < 50 ms
+ÉTAT DE FIN DE LA DERNIÈRE SESSION (28/04/2026 fin de session 2)
+- **4 commits BoosterMail master sur la session** (top : `86d0e60`) + 1 commit hors-scope Yvan (blog system)
+- **3 sujets PLUS_TARD_VF traités end-to-end avec audit kit Workflow 2 systématique** (méthodologie validée 3x sans accroc) :
+  - **#3 Signature personnalisée par contact** (`d9a454d` + `1126e80`) : DB migration `contact_profiles.user_signature_for_contact` + prompt `analyze_contact_profile` enrichi (champ + règle 6) + helper `_resolve_user_signature` + 6 sites de rendu. Audit kit : 1 anomalie BASSE detected+fixed (defense-in-depth XSS validation back). Rétrocompat : 115 profils conservés.
+  - **#4 Wording transparent classement « pas de suggestion »** (`fef423f`) : pivot produit Yvan, abandon BG calendaire au profit de transparence pédagogique 4 catégories `none_auto_email/new_sender/unknown_domain/low_signal`. Détection auto_email AVANT Claude (économie API). Audit kit : 0 anomalie.
+  - **#2 Templates** (`86d0e60`) : diagnostic révèle code Plan 2 Phase 1 déjà implémenté, mais usage faible (1.8% match + 0 envoi/12j). Pivot produit Yvan : pas optimiser pour profil atypique, garder pour cible mondiale. Instrumentation déployée : helper `_log_template_metric` + endpoint `GET /api/admin/templates_stats?days=N` avec verdict textuel auto-généré pour décision data-driven post-beta. Audit kit : 0 anomalie.
+- 3 rapports audit livrés dans `audit/rapports/2026-04-28_*`
+- État OVH : service active, 0 erreur sur 6h, routes < 50 ms, distribution `mail_classement_cache.source` = ai=63 / none=5 / rule=3 / none_unknown_domain=1
 
-⚠️ SUJET HORS SCOPE CODE EN COURS : migration mailbox `yvan.bosser@groupe-bosser.fr` Coaxis → Microsoft 365 cloud (ETA J+2/3, côté admin Coaxis). En attendant, contournement via compte transitoire. Une fois migration faite : tous les mails Coaxis deviennent éligibles BoosterMail.
+🎯 DÉCISION FIN DE SESSION : basculer sur **Outlook Web** prochaine session (étape 3 du planning post-pivot 27/04). Audit préparatoire déjà fait :
+- ✅ Manifest XML validé (`Hosts: Mailbox`, `Requirements 1.5+`, V1.0 fallback compatible Web sans LaunchEvent)
+- ✅ Manifest accessible publiquement (HTTP 200, Content-Type `application/xml`, no-store headers OK)
+- ✅ Toutes les URLs référencées (icones, autorun.html, autorunshared.js, taskpane.html, popup.html, commands.html) servies en HTTP 200 depuis Internet
+- 📋 À faire prochaine session : guider Yvan pour le sideload manuel sur `outlook.office.com` (Settings → Manage add-ins → Add custom from URL = `https://api.boostermail.ai/plugin/manifest.xml`) + observer les logs OVH en temps réel pour diagnostiquer ce qui apparaît/manque
+- ⚠️ Si bouton apparaît : tester le clic et reproduire bug iframe content du 26/04 (body vide via `messageChild`, routes en boucle, `Script error.` masqué CORS) — TIMEBOX 4h pour le bug profond
+- ⚠️ Si bouton n'apparaît pas : diagnostic du blocage (tenant policy ? validation manifest ? sideload non effectué ?)
+
+⚠️ SUJET HORS SCOPE CODE EN COURS : migration mailbox `yvan.bosser@groupe-bosser.fr` Coaxis → Microsoft 365 cloud (Yvan espère finir 28/04 côté admin Coaxis). Une fois migration faite : valider le flux ENVOYER complet sur New Outlook (test 15 min, hook templates / metrics `send` / extraction learned templates). Diagnostic #2 a révélé 0 envoi via BoosterMail/12 jours — à expliquer post-Coaxis.
 
 AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 
 1. **`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** ⭐ — référence vivante de cette session (workflow OVH-first, scope, interdits, procédure déploiement, profil Yvan, tests, procédure purge cache WebView2)
 2. **`docs/PLUS_TARD_VF.md`** ⭐ — référentiel UNIQUE des sujets « plus tard ». **Lis le TL;DR en haut du document** : il liste les 23 items vivants par catégorie (admin, actif, SaaS, audits, tech debt, différé, long terme). Remplace les 3 anciens fichiers PLUS_TARD/TODO/BUGS_PROTO archivés.
-3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260427_fix_newoutlook_button.md`** — bilan complet de la session précédente (~9h, ~32 commits, découvertes, livrables)
+3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260428.md`** — bilan complet de la session précédente (~5h, 4 commits, 3 sujets PLUS_TARD_VF traités, décision Outlook Web pour cette session)
 4. **`docs/saas/ONBOARDING_SESSION_SAAS.md`** — référence infra OVH partagée (sections B paths serveur, J commandes, G rollback)
 5. **`audit/INVARIANTS.md`** + **`audit/ANOMALIES_RECURRENTES.md`** — invariants techniques + Patterns identifiés (notamment Pattern #18 cache WebView2 + I-CACHE-01/02/03 + I-SEC-06)
 
@@ -90,18 +93,19 @@ Conventions complémentaires :
 - **Procédure purge cache WebView2** documentée dans onboarding section C.3 si user signale qu'un fix JS n'apparaît pas
 
 DÉMARRAGE TYPIQUE
-Au premier message après lecture des docs, demande à Yvan ce qu'il aimerait fixer en priorité ou quelle direction il veut prendre. Propositions naturelles selon les retours :
+**Décision actée fin de session 28/04** : on attaque **Outlook Web** en début de cette session. Plan :
 
-1. **Si retour utilisateur sur frustration** : « le bouton X ne marche pas », « la modale est mal placée », etc. → Workflow 4 du kit (diagnostic bug)
-2. **Si Yvan veut avancer le backlog** : ouvrir `docs/PLUS_TARD_VF.md` (le TL;DR en haut suffit) et proposer le top des sujets actifs :
-   - **Templates 45 fixes + appris** (gros chantier 3-4h, 20-40% mails répondus instantanément, coût API /3)
-   - **Signature personnalisée par contact** (45 min, gain UX fort registre/tutoiement)
-   - **Détection forward dans summary/draft** (cas constaté Vincent Hubert "Fwd: leonis" body Orange — UX confuse, taille à estimer)
-   - **Ré-évaluation classements `source='none'`** (30 min, marginal — 3 mails)
+1. **Si Yvan confirme « on attaque Outlook Web »** (le plus probable) :
+   - Audit préparatoire déjà fait fin de session 28/04 (manifest validé, accessibilité serveur OK)
+   - Étape suivante = **guider Yvan pour le sideload sur `outlook.office.com`** (Settings → Manage add-ins → Add custom from URL = `https://api.boostermail.ai/plugin/manifest.xml`) + observer les logs OVH en temps réel (`sudo journalctl -u boostermail -f` filtré sur `/plugin/manifest.xml` + `/plugin/autorun.html` + `/plugin/autorunshared.js`)
+   - **Si bouton apparaît** : tester clic → diagnostiquer bug iframe content du 26/04 (body vide via `messageChild`, routes en boucle, `Script error.` masqué CORS) — TIMEBOX 4h pour le bug profond
+   - **Si bouton n'apparaît pas** : diagnostic blocage (tenant policy ? validation manifest ? sideload non effectué ?)
+2. **Si Yvan signale un retour utilisateur sur frustration** New Outlook : Workflow 4 du kit (diagnostic bug ciblé)
+3. **Si Yvan veut basculer sur autre sujet du backlog** :
+   - **Détection forward dans summary/draft** (cas Vincent Hubert "Fwd: leonis" body Orange — UX confuse, taille à estimer) — sujet #6 PLUS_TARD_VF
    - **Audits profonds reportés** : #1 Pattern #17 backend (38 closures, 1-2h), #4 except: pass (71 occurrences, 1-2h)
-   - **Tech debt résiduel** : AbortController timeout, btnSend null, _sanitizeHtml, fuites mémoire mineures, re-auth UX, orphans mail_summaries TTL, prefetch atexit fragile, cost tracking, etc.
-3. **Si chantier multi-tenant SaaS** (Étape 7) attaqué : audit cross-user déjà livré (`audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md`) → 22 caches mono-user à isoler, plan migration ready, 1.5 jour estimé
-4. **Si feedback sur fix précédent** : si après la migration Coaxis effective, Yvan signale qu'un mail légitime ne fonctionne plus (Graph 404 etc.) → vérifier que les fixes du 27/04 PM (fallback Graph dans `/generate_reply`, etc.) couvrent bien le cas
+   - **Test ENVOYER complet post-Coaxis** (15 min, valider hooks templates + metrics + apprentissage) — bloquant pour sortir du « 0 envoi/12j »
+4. **Si chantier multi-tenant SaaS** (Étape 7) attaqué : audit cross-user déjà livré (`audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md`) → 22 caches mono-user à isoler, plan migration ready, 1.5 jour estimé
 
 À L'OUVERTURE DE LA SESSION (avant tout autre action)
 Suivre **Workflow 8 — Kit ouverture de session** (cf `audit/PLAYBOOK.md`) :
