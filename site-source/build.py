@@ -7,10 +7,11 @@ Gère traduction + génération HTML + synchronisation
 import json
 import argparse
 import sys
+import time
 from pathlib import Path
 from datetime import datetime
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from anthropic import Anthropic
+from anthropic import Anthropic, APITimeoutError, RateLimitError
 
 # Configuration chemins
 SOURCE_DIR = Path(__file__).parent
@@ -35,6 +36,44 @@ class Logger:
     def warning(msg): print(f"⚠️  {msg}")
     @staticmethod
     def error(msg): print(f"❌ {msg}")
+    @staticmethod
+    def progress(current, total, label=""):
+        pct = int((current / total) * 100) if total > 0 else 0
+        bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
+        print(f"  [{bar}] {pct}% ({current}/{total}) {label}", end="\r")
+
+class Validator:
+    """Valide données avant traitement"""
+    @staticmethod
+    def validate_articles_json(articles):
+        """Valide structure articles.json"""
+        required_fields = ["id", "slug", "title_fr", "description_fr", "date", "readTime"]
+
+        for i, article in enumerate(articles):
+            for field in required_fields:
+                if field not in article:
+                    raise ValueError(f"Article #{i} '{article.get('id', 'UNKNOWN')}': champ requis '{field}' manquant")
+
+            if not isinstance(article["readTime"], int):
+                raise ValueError(f"Article '{article['id']}': readTime doit être un entier, got {type(article['readTime'])}")
+
+        Logger.success(f"Validé {len(articles)} articles")
+
+    @staticmethod
+    def validate_site_content(content):
+        """Valide structure site-content.json"""
+        required_langs = ["fr", "en", "de", "es"]
+        required_sections = ["nav", "blog_hero", "footer"]
+
+        for section in required_sections:
+            if section not in content:
+                raise ValueError(f"Section '{section}' manquante dans site-content.json")
+
+            for lang in required_langs:
+                if lang not in content[section]:
+                    raise ValueError(f"Langue '{lang}' manquante dans {section}")
+
+        Logger.success("site-content.json valide")
 
 class ConfigManager:
     """Gère la configuration du projet"""
@@ -104,14 +143,19 @@ class Translator:
         self.client = Anthropic(api_key=api_key)
 
     def translate_article(self, article, target_langs=["en", "de", "es"]):
-        """Traduit un article depuis FR vers target_langs"""
+        """Traduit un article depuis FR vers target_langs avec retry logic"""
         translations = {}
 
         for target_lang in target_langs:
-            try:
-                Logger.info(f"Traduction {article['slug']} → {LANG_NAMES[target_lang]}...")
+            max_retries = 3
+            retry_count = 0
+            backoff_seconds = 1
 
-                prompt = f"""You are an expert translator for a professional email productivity website.
+            while retry_count < max_retries:
+                try:
+                    Logger.info(f"Traduction {article['slug']} → {LANG_NAMES[target_lang]}...")
+
+                    prompt = f"""You are an expert translator for a professional email productivity website.
 
 TASK: Translate the following article metadata from French to {LANG_NAMES[target_lang]}.
 
@@ -133,28 +177,42 @@ ARTICLE:
 
 RESPONSE (JSON only, no markdown):"""
 
-                message = self.client.messages.create(
-                    model="claude-opus-4-1-20250805",
-                    max_tokens=500,
-                    messages=[{"role": "user", "content": prompt}]
-                )
+                    # Call avec timeout de 30s
+                    message = self.client.messages.create(
+                        model="claude-opus-4-1-20250805",
+                        max_tokens=500,
+                        timeout=30.0,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
 
-                response_text = message.content[0].text.strip()
-                # Remove markdown code blocks if present
-                if response_text.startswith("```"):
-                    response_text = "\n".join(response_text.split("\n")[1:-1])
+                    response_text = message.content[0].text.strip()
+                    if response_text.startswith("```"):
+                        response_text = "\n".join(response_text.split("\n")[1:-1])
 
-                translated = json.loads(response_text)
-                translations[target_lang] = translated
+                    translated = json.loads(response_text)
+                    translations[target_lang] = translated
+                    Logger.success(f"  {article['slug']} → {target_lang}")
+                    break  # Success, exit retry loop
 
-                Logger.success(f"  {article['slug']} → {target_lang}")
+                except (RateLimitError, APITimeoutError) as e:
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        Logger.warning(f"  Rate limit/timeout {target_lang}, retry {retry_count}/{max_retries} in {backoff_seconds}s...")
+                        time.sleep(backoff_seconds)
+                        backoff_seconds *= 2  # Exponential backoff
+                    else:
+                        Logger.warning(f"  Max retries atteint {target_lang}: {e}")
+                        translations[target_lang] = {}
 
-            except json.JSONDecodeError as e:
-                Logger.warning(f"  JSON parse error {target_lang}: {e}")
-                translations[target_lang] = {}
-            except Exception as e:
-                Logger.warning(f"  Erreur traduction {target_lang}: {e}")
-                translations[target_lang] = {}
+                except json.JSONDecodeError as e:
+                    Logger.warning(f"  JSON parse error {target_lang}: {e}")
+                    translations[target_lang] = {}
+                    break
+
+                except Exception as e:
+                    Logger.warning(f"  Erreur traduction {target_lang}: {e}")
+                    translations[target_lang] = {}
+                    break
 
         return translations
 
@@ -166,6 +224,13 @@ class HTMLGenerator:
             autoescape=select_autoescape(['html', 'xml'])
         )
         self.site_content = ArticleManager.load_site_content()
+
+        # Valider le contenu du site
+        try:
+            Validator.validate_site_content(self.site_content)
+        except ValueError as e:
+            Logger.error(f"Validation site-content.json échouée: {e}")
+            raise
 
     def generate_blog_articles(self, articles, translations):
         """Génère les fichiers article HTML"""
@@ -321,15 +386,21 @@ class CLI:
         articles = ArticleManager.load_articles()
         translations = ArticleManager.load_translations()
 
+        # Valider les données avant traduction
+        try:
+            Validator.validate_articles_json(articles)
+        except ValueError as e:
+            Logger.error(f"Validation échouée: {e}")
+            sys.exit(1)
+
         Logger.info(f"Chargé {len(articles)} articles")
 
-        for article in articles:
-            article_id = article["id"]
+        articles_to_translate = [a for a in articles if a["id"] not in translations.get("en", {})]
+        Logger.info(f"À traduire: {len(articles_to_translate)} articles")
 
-            # Vérifier si déjà traduit
-            if article_id in translations.get("en", {}):
-                Logger.info(f"  {article_id} déjà traduit, skip")
-                continue
+        for idx, article in enumerate(articles_to_translate, 1):
+            article_id = article["id"]
+            Logger.progress(idx, len(articles_to_translate), f"Traduction {article_id}")
 
             # Traduire
             trans = self.translator.translate_article(article)
@@ -344,6 +415,7 @@ class CLI:
             with open(trans_file, 'w', encoding='utf-8') as f:
                 json.dump(translations, f, ensure_ascii=False, indent=2)
 
+        print()  # Newline après la barre de progression
         Logger.success("Traduction terminée")
 
     def generate(self):
@@ -352,6 +424,15 @@ class CLI:
 
         articles = ArticleManager.load_articles()
         translations = ArticleManager.load_translations()
+
+        # Valider les données avant génération
+        try:
+            Validator.validate_articles_json(articles)
+            site_content = ArticleManager.load_site_content()
+            Validator.validate_site_content(site_content)
+        except ValueError as e:
+            Logger.error(f"Validation échouée: {e}")
+            sys.exit(1)
 
         # Créer dossier output si besoin
         SITE_WEB_DIR.mkdir(exist_ok=True)
