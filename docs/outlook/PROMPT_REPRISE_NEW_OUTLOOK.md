@@ -20,7 +20,7 @@ Test rapide :
 Si ton worktree est différent (auto-créé style `claude/happy-XXXX`), exécute en début de session :
   git fetch && git merge master --no-edit
 puis :
-  git log --oneline -5    # doit afficher au minimum le commit de cloture session 3 du 28/04 PM (Outlook Web validé + refonte UI dialog Option E v17 + fix btnSend)
+  git log --oneline -5    # doit afficher au minimum `3cc8893 feat(outlook-web): refonte UI dialog + Option E v17 + fix btnSend grisé`
 
 ---
 
