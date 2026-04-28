@@ -7207,6 +7207,60 @@ def api_get_draft():
     return jsonify({"found": False})
 
 
+# Sujet PLUS_TARD_VF #2 (28/04) — Mesurabilité du pipeline templates.
+# Avant : 0 visibilité sur l'usage réel des templates fixes/appris.
+# Diagnostic 28/04 a montré qu'on ne pouvait pas décider d'optimiser sans data.
+# Approche : logger via metrics chaque issue du pipeline /api/instant_reply
+# (HIT draft / HIT preemptive / HIT template fixed.{name} / HIT template learned /
+#  MISS.{raison}) + skip reasons côté extraction post-envoi. Permet, dès qu'un
+# beta-testeur utilisera la plateforme 2-3 jours, d'avoir les vrais chiffres
+# par profil utilisateur pour décider d'éventuels ajustements de seuils.
+
+_MISS_REASON_CODE = {
+    'inconnu': 'unknown',
+    'contact UNKNOWN (pas de profil)': 'no_contact_profile',
+    'BG non scanné (mail hors top 50 ou récent)': 'bg_not_scanned',
+    'spéculation cancelled': 'speculation_cancelled',
+    'scan Claude erreur': 'claude_error',
+}
+
+
+def _miss_reason_to_code(reason):
+    """Normalise une miss_reason française en code court pour metrics action."""
+    if not reason:
+        return 'unknown'
+    if reason in _MISS_REASON_CODE:
+        return _MISS_REASON_CODE[reason]
+    # Format spécial 'filtre Smart Speculative : XXX' → smart_spec.{slug}
+    if reason.startswith('filtre Smart Speculative'):
+        # ex: 'filtre Smart Speculative : sender automatique' → 'smart_spec.sender_automatique'
+        try:
+            detail = reason.split(':', 1)[1].strip().lower()
+            slug = re.sub(r'[^a-z0-9_]+', '_', detail).strip('_')[:40]
+            return f'smart_spec.{slug or "filtered"}'
+        except Exception:
+            return 'smart_spec.filtered'
+    # Fallback générique
+    slug = re.sub(r'[^a-z0-9_]+', '_', reason.lower()).strip('_')[:40]
+    return slug or 'unknown'
+
+
+def _log_template_metric(action, message_id=''):
+    """Helper non-bloquant pour logger un event du pipeline templates.
+    PLUS_TARD_VF #2 (28/04). Réutilise la table metrics existante avec une
+    convention d'action 'template.{source}[.{detail}]' ou 'learned_tpl.{event}'.
+    Jamais bloquant : exception silencieuse pour ne pas casser le pipeline."""
+    try:
+        _db.save_metric(
+            email_id=message_id or '',
+            action=action,
+            importance=0, duration_ms=0, direct_send=0,
+            correspondent='', project='',
+        )
+    except Exception:
+        pass
+
+
 @app.route('/api/instant_reply', methods=['POST'])
 def api_instant_reply():
     """
@@ -7254,6 +7308,7 @@ def api_instant_reply():
             entry = _reply_cache.get(message_id, {})
         if _is_user_modified(entry) and entry.get('status') == 'done':
             _reply_metric_inc('hits')
+            _log_template_metric('template.draft', message_id)
             logger.info(f"[instant_reply] HIT source=draft msg={message_id[:30]}")
             # P0.5 : garantir HTML propre pour affichage direct côté dialog
             return jsonify({
@@ -7408,6 +7463,7 @@ def api_instant_reply():
                 # signature → ajouter signature seule après.
                 html_parts.append(f'<p>{_html_mod.escape(signature, quote=False)}</p>')
 
+            _log_template_metric('template.preemptive', message_id)
             logger.info(f"[instant_reply] HIT source=preemptive msg={message_id[:30]}")
             return jsonify({
                 "source": "preemptive",
@@ -7450,8 +7506,11 @@ def api_instant_reply():
         signature = _resolve_user_signature(contact_profile, user_name)
         if m['source'] == 'fixed':
             text = assemble_template(m['template_dict'], contact_profile, signature)
+            # PLUS_TARD_VF #2 (28/04) — track quel template fixe matche
+            _log_template_metric(f"template.fixed.{m.get('template_name', 'unknown')}", message_id)
         else:
             text = assemble_learned_template(m['learned'], contact_profile, signature)
+            _log_template_metric('template.learned', message_id)
         logger.info(f"[instant_reply] HIT source=template conf={m.get('confidence'):.2f} "
                     f"name={m.get('template_name')} msg={message_id[:30]}")
         # P0.5 : normaliser en HTML pour affichage direct côté dialog
@@ -7512,6 +7571,8 @@ def api_instant_reply():
                     pass
         except Exception:
             pass
+    # PLUS_TARD_VF #2 (28/04) — track le code de la miss reason pour stats agrégées
+    _log_template_metric(f"template.miss.{_miss_reason_to_code(miss_reason)}", message_id)
     logger.info(f"[instant_reply] MISS reason='{miss_reason}' "
                 f"msg={message_id[:30] if message_id else 'no-id'}")
     return jsonify({"source": "none", "miss_reason": miss_reason})
@@ -7644,6 +7705,147 @@ def api_template_feedback():
         logger.info(f"Template fixe {template_id} : {feedback} (non stocké)")
 
     return jsonify({"ok": True})
+
+
+@app.route('/api/admin/templates_stats', methods=['GET'])
+def api_admin_templates_stats():
+    """Sujet PLUS_TARD_VF #2 (28/04) — Tableau de bord agrégé du pipeline templates.
+
+    Permet de répondre à : « combien de mails matchent un template fixe / appris /
+    preemptive ? Quelles sont les top raisons des MISS ? Quels templates fixes
+    sont les plus utilisés ? Pourquoi le carnet d'apprentissage reste vide ? »
+
+    Query params optionnels :
+      - days : période en jours (default 30)
+
+    Réponse JSON : agrégation lisible directement sans dépendance dashboard externe.
+    """
+    try:
+        days = int(request.args.get('days', '30'))
+    except (ValueError, TypeError):
+        days = 30
+    days = max(1, min(days, 365))
+
+    try:
+        conn = _db._conn()
+        c = conn.cursor()
+
+        # 1. Totaux par catégorie (template.* et learned_tpl.*)
+        c.execute(
+            "SELECT action, COUNT(*) as n FROM metrics "
+            "WHERE (action LIKE 'template.%' OR action LIKE 'learned_tpl.%') "
+            "AND datetime(created_at) >= datetime('now', ?) "
+            "GROUP BY action ORDER BY n DESC",
+            (f'-{days} days',)
+        )
+        all_actions = [(r[0], r[1]) for r in c.fetchall()]
+
+        # 2. Agrégation par catégorie haute
+        instant_reply_total = 0
+        by_source = {'draft': 0, 'preemptive': 0, 'fixed': 0, 'learned': 0, 'miss': 0}
+        top_fixed_templates = {}
+        miss_reasons = {}
+        learned_skipped = {}
+        learned_created = 0
+        learned_usage_inc = 0
+
+        for action, n in all_actions:
+            # template.* events
+            if action == 'template.draft':
+                by_source['draft'] += n
+                instant_reply_total += n
+            elif action == 'template.preemptive':
+                by_source['preemptive'] += n
+                instant_reply_total += n
+            elif action == 'template.learned':
+                by_source['learned'] += n
+                instant_reply_total += n
+            elif action.startswith('template.fixed.'):
+                by_source['fixed'] += n
+                instant_reply_total += n
+                tpl_name = action[len('template.fixed.'):]
+                top_fixed_templates[tpl_name] = top_fixed_templates.get(tpl_name, 0) + n
+            elif action.startswith('template.miss.'):
+                by_source['miss'] += n
+                instant_reply_total += n
+                reason = action[len('template.miss.'):]
+                miss_reasons[reason] = miss_reasons.get(reason, 0) + n
+            # learned_tpl.* events
+            elif action.startswith('learned_tpl.skipped.'):
+                reason = action[len('learned_tpl.skipped.'):]
+                learned_skipped[reason] = learned_skipped.get(reason, 0) + n
+            elif action == 'learned_tpl.created':
+                learned_created += n
+            elif action == 'learned_tpl.usage_incremented':
+                learned_usage_inc += n
+
+        # 3. Distribution % par source (pour interprétation rapide)
+        by_source_pct = {}
+        if instant_reply_total > 0:
+            for k, v in by_source.items():
+                by_source_pct[k] = round(100 * v / instant_reply_total, 1)
+
+        # 4. Stats table learned_templates (état présent, indépendant de la fenêtre)
+        c.execute("SELECT COUNT(*) FROM learned_templates")
+        learned_total = c.fetchone()[0]
+        c.execute(
+            "SELECT status, COUNT(*) FROM learned_templates GROUP BY status"
+        )
+        learned_by_status = {r[0] or 'null': r[1] for r in c.fetchall()}
+
+        # 5. Top templates fixes (10 premiers)
+        top_fixed = sorted(top_fixed_templates.items(), key=lambda x: -x[1])[:10]
+        # 6. Top miss reasons (10 premières)
+        top_miss = sorted(miss_reasons.items(), key=lambda x: -x[1])[:10]
+        # 7. Top learned skip reasons (toutes)
+        top_learned_skipped = sorted(learned_skipped.items(), key=lambda x: -x[1])
+
+        return jsonify({
+            'window_days': days,
+            'instant_reply_total': instant_reply_total,
+            'by_source': by_source,
+            'by_source_pct': by_source_pct,
+            'top_fixed_templates': [{'name': n, 'count': c} for n, c in top_fixed],
+            'top_miss_reasons': [{'reason': r, 'count': c} for r, c in top_miss],
+            'learned_templates': {
+                'table_total': learned_total,
+                'by_status': learned_by_status,
+                'created_in_window': learned_created,
+                'usage_incremented_in_window': learned_usage_inc,
+                'skipped_in_window': dict(top_learned_skipped),
+            },
+            'verdict': _interpret_template_stats(by_source, by_source_pct, learned_total),
+        })
+    except Exception as e:
+        logger.warning(f"[admin/templates_stats] erreur : {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+def _interpret_template_stats(by_source, by_source_pct, learned_total):
+    """Donne une interprétation textuelle simple des stats pour faciliter
+    la lecture humaine. Décision-ready sans dashboard externe."""
+    notes = []
+    total = sum(by_source.values())
+    if total == 0:
+        notes.append("Aucun appel /api/instant_reply dans la fenêtre. Pipeline non utilisé.")
+        return notes
+    fixed_pct = by_source_pct.get('fixed', 0)
+    learned_pct = by_source_pct.get('learned', 0)
+    preemptive_pct = by_source_pct.get('preemptive', 0)
+    miss_pct = by_source_pct.get('miss', 0)
+    if fixed_pct + learned_pct + preemptive_pct >= 30:
+        notes.append(f"Pipeline EFFICACE : {fixed_pct + learned_pct + preemptive_pct}% des "
+                     f"appels ont un HIT (objectif 30-60%).")
+    elif miss_pct >= 80:
+        notes.append(f"Pipeline SOUS-EFFICACE : {miss_pct}% de MISS. Seuils probablement "
+                     f"trop stricts pour le profil utilisateur.")
+    if learned_total <= 1:
+        notes.append("Carnet d'apprentissage QUASI VIDE : voir 'learned_templates.skipped_in_window' "
+                     "pour identifier le filtre qui bloque l'extraction.")
+    if by_source.get('learned', 0) == 0 and learned_total >= 5:
+        notes.append(f"{learned_total} templates appris en DB mais 0 HIT learned : seuils de "
+                     "matching probablement trop stricts (tous les keywords doivent matcher).")
+    return notes or ["Stats disponibles. Aucune anomalie évidente détectée."]
 
 
 @app.route('/generate_reply', methods=['POST'])
@@ -8525,17 +8727,30 @@ def _extract_learned_template_post_send(message_id, sent_raw_body, mode):
     - Pas de données spécifiques (chiffres longs, URL, dates, €, emails)
     - Pattern keywords non vide
     """
+    # PLUS_TARD_VF #2 (28/04) — Mesurabilité : logger chaque skip pour pouvoir
+    # diagnostiquer ensuite pourquoi le carnet d'apprentissage reste vide.
+    # Action format : 'learned_tpl.skipped.{raison}' ou 'learned_tpl.created'.
     if mode not in ('reply', 'reply_all'):
+        _log_template_metric(f'learned_tpl.skipped.mode_{mode or "unknown"}', message_id)
         return
     if not message_id or not sent_raw_body:
+        _log_template_metric('learned_tpl.skipped.no_id_or_body', message_id)
         return
     try:
         # Core = sent_raw_body sans HTML, sans greeting/closing
         core = re.sub(r'<[^>]+>', ' ', sent_raw_body).strip()
         core = _strip_greeting_closing(core)
-        if not core or len(core) > 500 or len(core) < 10:
+        if not core:
+            _log_template_metric('learned_tpl.skipped.core_empty', message_id)
+            return
+        if len(core) > 500:
+            _log_template_metric('learned_tpl.skipped.core_too_long', message_id)
+            return
+        if len(core) < 10:
+            _log_template_metric('learned_tpl.skipped.core_too_short', message_id)
             return
         if _LEARNED_TPL_EXCLUDE_RE.search(core):
+            _log_template_metric('learned_tpl.skipped.has_specifics', message_id)
             return  # contient des données spécifiques → pas générique
 
         # Récupérer le mail reçu (pattern_keywords)
@@ -8546,8 +8761,14 @@ def _extract_learned_template_post_send(message_id, sent_raw_body, mode):
         if mail:
             received_body = mail.get('body') or mail.get('body_preview', '')
             received_subject = mail.get('subject', '')
+        else:
+            # Cas fréquent : mail évincé du warmup_cache au moment de l'envoi
+            # → pattern_keywords vide → skip silencieux. On log pour mesurer
+            # combien d'opportunités d'apprentissage sont perdues à cause de ça.
+            _log_template_metric('learned_tpl.skipped.no_warmup_cache', message_id)
         pattern = _extract_pattern_keywords(received_body, received_subject)
         if not pattern or len(pattern.split(',')) < 2:
+            _log_template_metric('learned_tpl.skipped.pattern_too_weak', message_id)
             return  # pas assez de signal
 
         # Deviner le registre (tu/vous) selon le contenu envoyé
@@ -8561,6 +8782,7 @@ def _extract_learned_template_post_send(message_id, sent_raw_body, mode):
                 if lt.get('pattern_keywords') == pattern:
                     # Même pattern → probablement la même situation : incrémenter usage
                     _db.increment_learned_template(lt['id'], field='usage_count')
+                    _log_template_metric('learned_tpl.usage_incremented', message_id)
                     # Audit 20/04 — D7 : ne pas logger le pattern complet
                     # (peut contenir du contenu email). Hash court pour le debug.
                     import hashlib as _hl
@@ -8573,6 +8795,7 @@ def _extract_learned_template_post_send(message_id, sent_raw_body, mode):
         # Créer le candidat
         try:
             tpl_id = _db.add_learned_template(pattern, core, register=register)
+            _log_template_metric('learned_tpl.created', message_id)
             # Audit 20/04 — D7 : hash du pattern (données sensibles) + kw_count non-intrusif
             import hashlib as _hl
             _psig = _hl.sha1(pattern.encode('utf-8')).hexdigest()[:8]
@@ -8582,6 +8805,7 @@ def _extract_learned_template_post_send(message_id, sent_raw_body, mode):
         except Exception as e:
             logger.warning(f"[learned-tpl] add erreur : {e}")
     except Exception as e:
+        _log_template_metric('learned_tpl.skipped.exception', message_id)
         logger.warning(f"[learned-tpl] extraction erreur : {e}")
 
 

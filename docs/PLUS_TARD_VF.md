@@ -1,6 +1,6 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 28/04/2026 (sujets #3 « Signature personnalisée par contact » + #4 « Wording transparent classement none » livrés)
+> **Dernière mise à jour** : 28/04/2026 (sujets #3 + #4 livrés ; #2 reformulé en mesurabilité templates post-diagnostic)
 
 ---
 
@@ -12,7 +12,7 @@ Si tu reviens sur ce doc au début d'une nouvelle session, voici **uniquement ce
 1. **Migration mailbox Coaxis** → Microsoft 365 cloud (ETA J+2/3, côté Coaxis)
 
 ### 🔥 Sujets ACTIFS (à traiter quand tu veux/peux)
-2. **Templates 45 fixes + appris** (Plan 2 historique) — 3-4 h, 20-40 % mails instantanés
+2. **Templates — optimisation post-beta** (différé jusqu'à beta-testeurs actifs, instrumentation déjà déployée 28/04 — voir `audit/rapports/2026-04-28_diagnostic_sujet_2_templates.md`)
 5. **Optim Phase 2 filtrage par plat** — à revoir quand `folder_classifications` aura 6-12 mois d'historique (passif)
 6. **Améliorer détection forward dans summary/draft** — bug constaté (mail Vincent Hubert "Fwd: leonis" body Orange) — taille à estimer
 
@@ -75,17 +75,27 @@ Si tu reviens sur ce doc au début d'une nouvelle session, voici **uniquement ce
 
 ---
 
-### 3. Templates 45 fixes + appris (pipeline $0 / 50 ms, 20-40 % des mails)
+### 3. Templates 45 fixes + appris — différé post-beta (diagnostic 28/04)
 
 **Origine** : Plan 2 du 18/04 (`docs/plans/PLAN_2_OPTIMISATION_FLUX.md`), priorité ⭐ historique.
 
-**Idée** : pré-câbler 45 templates fixes (réponses types pour cas récurrents : « out of office », accusé réception, demande de rendez-vous, etc.) + apprendre des templates à partir des envois utilisateur. Au clic BoosterMail, si un template matche le mail entrant, **réponse en 50 ms sans appel Claude**.
+**Idée** : pré-câbler 45 templates fixes + apprendre des templates à partir des envois utilisateur. Au clic BoosterMail, si un template matche le mail entrant, réponse en 50 ms sans appel Claude. Bénéfice annoncé : 20-40 % des mails répondus instantanément.
 
-**Bénéfice** : 20-40 % des mails répondus instantanément, coût API divisé par ~3.
+**Diagnostic 28/04** : tout le code est **déjà implémenté** (45 templates fixes + match + apprentissage + endpoint + UI). Mais en pratique :
+- Sur l'inbox d'Yvan : **1.8 % des mails matchent** un template fixe (filtre `< 30 mots` élimine 82 % des mails car profil immobilier/juridique = mails longs)
+- **0 envoi via BoosterMail** dans les 12 derniers jours → carnet d'apprentissage ne peut pas se remplir (hook post-envoi jamais appelé)
+- **0 metrics** template_* → impossible de mesurer la performance réelle
 
-**Estimation** : 1h30 (selon Plan 2 du 18/04 — à réviser).
+**Décision Yvan 28/04** : pas optimiser pour son profil personnel (atypique), mais garder la feature pour la cible mondiale (TPE, indépendants, profils plus standards). Différer toute optimisation aveugle jusqu'à avoir des données réelles d'utilisateurs.
 
-**Référence** : `docs/plans/PLAN_2_OPTIMISATION_FLUX.md` Phase 1.
+**Action prise 28/04** : déploiement de l'instrumentation (commit `À venir`) :
+- Helper `_log_template_metric()` qui logge chaque issue de `/api/instant_reply` (HIT draft / preemptive / fixed.{name} / learned / MISS.{raison})
+- Logging des skip reasons côté `_extract_learned_template_post_send` (no_warmup_cache / pattern_too_weak / core_too_long / has_specifics / etc.)
+- Endpoint admin `GET /api/admin/templates_stats?days=N` qui agrège tout en JSON décision-ready avec verdict textuel
+
+**Reprise prévue** : quand 5-10 beta-testeurs auront 1-2 semaines d'usage. À ce moment, les stats permettront de décider rationnellement (assouplir un seuil ? élargir templates ? abandonner ?) sans coder à l'aveugle.
+
+**Référence** : `docs/plans/PLAN_2_OPTIMISATION_FLUX.md` Phase 1, `audit/rapports/2026-04-28_diagnostic_sujet_2_templates.md`.
 
 ---
 
@@ -297,6 +307,7 @@ Suite à l'audit exhaustif multi-angles du 21/04 (~60 anomalies, 15 corrigées i
 ### Session 28/04/2026
 - ✅ **Signature personnalisée par contact** (PLUS_TARD_VF #3) — colonne `contact_profiles.user_signature_for_contact` (nullable, fallback `settings.user_name`) + extension prompt `analyze_contact_profile` (nouveau champ + règle 6) + helper `_resolve_user_signature` + 6 sites de rendu mis à jour. Pipeline end-to-end validé. 115 profils existants conservés (rétrocompat). Audit kit Workflow 2 → 1 anomalie BASSE detected+fixed (defense-in-depth XSS).
 - ✅ **Wording transparent classement « pas de suggestion »** (PLUS_TARD_VF #4) — pivot produit Yvan : abandon du re-traitement BG (contraire à la philosophie « mail traité dès arrivée »), implémentation d'un wording explicite par catégorie de raison (auto_email / new_sender / unknown_domain / low_signal). Détection auto_email avant Claude (économie API). Audit kit Workflow 2 → 0 anomalie.
+- ✅ **Mesurabilité pipeline templates** (PLUS_TARD_VF #2 reformulé) — diagnostic révélant que tout le code Plan 2 Phase 1 est déjà implémenté MAIS l'usage réel est très faible (0 envoi/12j → carnet d'apprentissage vide ; mails Yvan trop longs → 1.8% match seulement). Décision : pas optimiser à l'aveugle pour le profil atypique d'Yvan, garder la feature pour la cible mondiale, mais préparer la mesurabilité. Implémenté : `_log_template_metric()` aux 4 retours `/api/instant_reply` + 7 skip reasons sur `_extract_learned_template_post_send` + endpoint `GET /api/admin/templates_stats` avec verdict textuel décision-ready. Validé end-to-end. Audit kit Workflow 2 → 0 anomalie.
 
 ### Session 27/04 PM
 - ✅ **Bouton BoosterMail New Outlook réparé** (`e2ba0e9`) — POST companion 503 supprimé, displayDialogAsync direct
