@@ -1,6 +1,6 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 28/04/2026 (sujet #3 « Signature personnalisée par contact » livré)
+> **Dernière mise à jour** : 28/04/2026 (sujets #3 « Signature personnalisée par contact » + #4 « Wording transparent classement none » livrés)
 
 ---
 
@@ -13,7 +13,6 @@ Si tu reviens sur ce doc au début d'une nouvelle session, voici **uniquement ce
 
 ### 🔥 Sujets ACTIFS (à traiter quand tu veux/peux)
 2. **Templates 45 fixes + appris** (Plan 2 historique) — 3-4 h, 20-40 % mails instantanés
-4. **Ré-évaluation classements `source='none'`** — 30 min (marginal, 3 mails seulement)
 5. **Optim Phase 2 filtrage par plat** — à revoir quand `folder_classifications` aura 6-12 mois d'historique (passif)
 6. **Améliorer détection forward dans summary/draft** — bug constaté (mail Vincent Hubert "Fwd: leonis" body Orange) — taille à estimer
 
@@ -126,15 +125,27 @@ Si tu reviens sur ce doc au début d'une nouvelle session, voici **uniquement ce
 
 ---
 
-### 6. Ré-évaluation périodique classements `source='none'` (26/04)
+### 6. ~~Ré-évaluation périodique classements `source='none'`~~ → ✅ FAIT 28/04 (autre approche)
 
-**Constat** : cache `mail_classement_cache` strictement idempotent. Si l'arborescence Outlook s'enrichit ou si Claude évolue, les classements `none` figés ne bénéficient jamais du nouveau contexte.
+✅ **Pivot produit Yvan 28/04** : la proposition d'origine (re-traiter à postériori tous les 30 jours) a été rejetée comme contraire à la philosophie BoosterMail (« le mail est traité dès qu'il arrive, pas une semaine après »). Solution de remplacement implémentée :
 
-**Stats au 26/04** : 3 mails seulement → pas urgent, mais à surveiller.
+- **4 catégories de raison « pas de suggestion »** stockées dans `mail_classement_cache.source` :
+  - `none_auto_email` : noreply / mailer-daemon / notifications@ → détecté AVANT Claude (économie API)
+  - `none_new_sender` : contact jamais vu mais domaine déjà classé
+  - `none_unknown_domain` : contact + domaine inconnus du carnet `folder_classifications`
+  - `none_low_signal` : mail trop court (body + subject < 100 chars)
+  - `none` (fallback générique) : signal correct mais Claude n'a rien suggéré
+- **Wording transparent** côté dialog (style 1 validé) :
+  - « Mail automatique — pas de dossier métier évident. »
+  - « Premier mail de ce contact — je m'inspirerai de ton classement. »
+  - « Domaine que je découvre — apprends-moi en classant. »
+  - « Mail trop court pour suggérer un dossier. »
+- **Pédagogie utilisateur** : transforme le « vide » en explication transparente, renforce la confiance, oriente vers l'action user (classer manuellement → l'IA apprend).
+- **Bonus économique** : détection mail automatique avant Claude → économie d'1 appel API par notification système.
 
-**Proposition** : thread BG `_classement_none_recheck_loop` qui purge tous les 30 jours les entries `source='none'` ET dont le mail correspond encore à un mail dans l'inbox active. Le cont-spec re-traite au prochain cycle.
+**Sites code** : `V2/database.py` (`count_classifications_for_contact/domain`), `V2/app_plugin.py:_prewarm_classement_for_mail` (détection auto + classification post-Claude), `V2/dialog.js:_applyMailPreview` (mapping `source` → wording), `V2/autorunshared.js` + `V2/dialog.html` (cache busting `v11` / `v16`).
 
-**Effort** : ~30 min code. **Coût API** : ~$0.025/mois pour 50 mails candidats. Marginal.
+**Validation** : 8/8 cas de détection auto_email passent en test in-process. Retrofit des 6 entries `source='none'` existantes : 1 reclassée en `none_unknown_domain` (OVH support), 2 restent `none` générique (Stéphane Dufau, signal correct mais pas tranchable), 3 entries dont l'email source a été purgé du cache.
 
 ---
 
@@ -284,7 +295,8 @@ Suite à l'audit exhaustif multi-angles du 21/04 (~60 anomalies, 15 corrigées i
 ## ✅ DÉJÀ FAIT (résumé court — pour ne pas se demander)
 
 ### Session 28/04/2026
-- ✅ **Signature personnalisée par contact** (PLUS_TARD_VF #3) — colonne `contact_profiles.user_signature_for_contact` (nullable, fallback `settings.user_name`) + extension prompt `analyze_contact_profile` (nouveau champ + règle 6) + helper `_resolve_user_signature` + 6 sites de rendu mis à jour. Pipeline end-to-end validé. 115 profils existants conservés (rétrocompat).
+- ✅ **Signature personnalisée par contact** (PLUS_TARD_VF #3) — colonne `contact_profiles.user_signature_for_contact` (nullable, fallback `settings.user_name`) + extension prompt `analyze_contact_profile` (nouveau champ + règle 6) + helper `_resolve_user_signature` + 6 sites de rendu mis à jour. Pipeline end-to-end validé. 115 profils existants conservés (rétrocompat). Audit kit Workflow 2 → 1 anomalie BASSE detected+fixed (defense-in-depth XSS).
+- ✅ **Wording transparent classement « pas de suggestion »** (PLUS_TARD_VF #4) — pivot produit Yvan : abandon du re-traitement BG (contraire à la philosophie « mail traité dès arrivée »), implémentation d'un wording explicite par catégorie de raison (auto_email / new_sender / unknown_domain / low_signal). Détection auto_email avant Claude (économie API). Audit kit Workflow 2 → 0 anomalie.
 
 ### Session 27/04 PM
 - ✅ **Bouton BoosterMail New Outlook réparé** (`e2ba0e9`) — POST companion 503 supprimé, displayDialogAsync direct

@@ -1934,6 +1934,30 @@ def _prewarm_classement_for_mail(mid, mail_data):
             })
             return
 
+        # [2 ter] Détection mail automatique AVANT Claude (PLUS_TARD_VF #4 — 28/04)
+        # Pour les expéditeurs noreply / donotreply / mailer-daemon / etc., Claude
+        # rendra presque toujours none. On économise l'appel API et on stocke
+        # directement la raison qui sera traduite côté UI en wording explicite.
+        # Patterns de detection (insensible a la casse, match dans la partie locale).
+        _AUTO_PATTERNS = (
+            'noreply', 'no-reply', 'no_reply',
+            'donotreply', 'do-not-reply', 'do_not_reply',
+            'nepasrepondre', 'ne-pas-repondre', 'ne_pas_repondre',
+            'mailer-daemon', 'postmaster',
+            'notifications@', 'notification@',
+            'newsletter@', 'mailing@',
+        )
+        if contact_email and any(p in contact_email for p in _AUTO_PATTERNS):
+            try:
+                _db.save_mail_classement(mid, None, 'none_auto_email')
+            except Exception as _e:
+                logger.debug(f"[prewarm-cls] save none_auto_email : {_e}")
+            _set_mail_preview(mid, 'classement', 'done', {
+                'suggestion': None, 'suggestions': [], 'source': 'none_auto_email',
+            })
+            logger.info(f"[prewarm-cls] mail automatique detecte ({contact_email}) → skip Claude")
+            return
+
         try:
             subject_kw = _extract_subject_keywords(subject)
         except Exception:
@@ -1992,15 +2016,44 @@ def _prewarm_classement_for_mail(mid, mail_data):
                 except Exception as _e:
                     logger.debug(f"[prewarm-cls] Claude fallback : {_e}")
 
-        # [4] Aucune suggestion → save 'none' (idempotent, plus jamais re-scanné)
+        # [4] Aucune suggestion → classifier la raison (PLUS_TARD_VF #4 — 28/04)
+        # Au lieu d'un 'none' générique, on tente d'identifier la raison du
+        # vide pour donner un wording explicite côté UI. Idempotent (next call
+        # = cache HIT direct, pas de recompute).
+        _none_source = 'none'  # fallback générique
         try:
-            _db.save_mail_classement(mid, None, 'none')
+            n_contact = _db.count_classifications_for_contact(contact_email)
+            n_domain = _db.count_classifications_for_domain(domain) if domain else 0
+            _has_profile = False
+            try:
+                _has_profile = bool(_db.get_contact_profile(contact_email))
+            except Exception:
+                pass
+            # Cas 1 : contact + domaine inconnus du carnet de classement → "domaine inconnu"
+            if n_contact == 0 and n_domain == 0 and not _has_profile:
+                _none_source = 'none_unknown_domain'
+            # Cas 2 : contact inconnu mais domaine déjà classé → "nouvel expéditeur"
+            elif n_contact == 0 and n_domain > 0:
+                _none_source = 'none_new_sender'
+            # Cas 3 : contact connu (profil ou historique) mais signal trop faible
+            else:
+                _body_len = len((mail_data.get('body_preview') or
+                                 (mail_data.get('body') or '')[:500]).strip())
+                _subject_len = len((subject or '').strip())
+                if _body_len + _subject_len < 100:
+                    _none_source = 'none_low_signal'
+                # Sinon : 'none' générique (signal présent mais Claude n'a rien suggéré)
         except Exception as _e:
-            logger.debug(f"[prewarm-cls] save none : {_e}")
+            logger.debug(f"[prewarm-cls] classify none reason : {_e}")
+
+        try:
+            _db.save_mail_classement(mid, None, _none_source)
+        except Exception as _e:
+            logger.debug(f"[prewarm-cls] save {_none_source} : {_e}")
         _set_mail_preview(mid, 'classement', 'done', {
             'suggestion': None,
             'suggestions': [],
-            'source': 'none',
+            'source': _none_source,
         })
     except Exception as e:
         logger.debug(f"[prewarm-cls] {e}")

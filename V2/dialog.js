@@ -1041,7 +1041,24 @@ function _applyMailPreview(preview) {
                 var folderPath = sugg.folder_path || sugg.folder_name || sugg.folder_id || 'Dossier suggéré';
                 clsEl.textContent = folderPath;
             } else {
-                clsEl.textContent = 'Néant';
+                // Sujet PLUS_TARD_VF #4 (28/04) — wording transparent selon
+                // la raison pour laquelle aucune suggestion n'est proposée.
+                // 'source' arrive du backend (mail_classement_cache.source) :
+                //   - 'none_auto_email'     : noreply / mailer-daemon
+                //   - 'none_new_sender'     : contact jamais vu (mais domaine connu)
+                //   - 'none_unknown_domain' : domaine + contact inconnus
+                //   - 'none_low_signal'     : signal trop faible (mail trop court)
+                //   - 'none' (fallback)     : pas de raison classifiée
+                //   - 'self'                : mail à soi-même
+                var clsSrc = (clsData && clsData.source) || 'none';
+                var clsMsgs = {
+                    'none_auto_email':     'Mail automatique — pas de dossier métier évident.',
+                    'none_new_sender':     "Premier mail de ce contact — je m'inspirerai de ton classement.",
+                    'none_unknown_domain': 'Domaine que je découvre — apprends-moi en classant.',
+                    'none_low_signal':     'Mail trop court pour suggérer un dossier.',
+                    'self':                'Mail envoyé à toi-même.',
+                };
+                clsEl.textContent = clsMsgs[clsSrc] || 'Néant';
             }
         }
     }

@@ -715,6 +715,27 @@ class Database:
         rows = c.fetchall()
         return [{'folder_path': r[0], 'contact': r[1], 'subject': r[2] or '', 'keywords': r[3] or '', 'date': r[4]} for r in rows]
 
+    def count_classifications_for_contact(self, contact_email):
+        """Sujet PLUS_TARD_VF #4 (28/04) — combien de fois ce contact a été classé.
+        Sert à détecter "nouvel expéditeur" (count == 0) pour wording transparent
+        quand Claude renvoie source='none'."""
+        if not contact_email:
+            return 0
+        c = self._conn().cursor()
+        c.execute("SELECT COUNT(*) FROM folder_classifications WHERE contact_email = ?",
+                  (contact_email.strip().lower(),))
+        return c.fetchone()[0] or 0
+
+    def count_classifications_for_domain(self, domain):
+        """Sujet PLUS_TARD_VF #4 (28/04) — combien de fois ce domaine a été classé.
+        Sert à détecter "domaine inconnu" (count == 0) pour wording transparent."""
+        if not domain:
+            return 0
+        c = self._conn().cursor()
+        c.execute("SELECT COUNT(*) FROM folder_classifications WHERE domain = ?",
+                  (domain.strip().lower(),))
+        return c.fetchone()[0] or 0
+
     def get_classification_stats(self):
         """Stats de classement pour la page Profil."""
         c = self._conn().cursor()
