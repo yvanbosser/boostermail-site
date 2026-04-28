@@ -979,6 +979,7 @@ Retourne un JSON structure avec EXACTEMENT ces champs (pas de texte avant/apres,
   "correction_patterns": ["patterns de correction recurrents"],
   "humor": "EXACTEMENT: oui OU non — {self.user_first_name} utilise-t-il de l'humour, ironie ou remarques decalees dans ses mails ENVOYES a ce correspondant ?",
   "humor_examples": ["si humor=oui, 1-2 citations exactes de traits humoristiques des mails ENVOYES. Si non, liste vide []"],
+  "user_signature_for_contact": "signature EXACTE qu'utilise {self.user_first_name} avec ce correspondant (ex: 'yvan' pour un proche tutoye, 'Yvan BOSSER (Groupe Bosser)' pour un contact pro vouvoye). Mettre null si pas detectable ou pas assez de donnees.",
   "summary": "2-3 phrases du style de {self.user_first_name} avec cette personne"
 }}
 
@@ -1022,6 +1023,20 @@ Analyser les mails ENVOYES :
 - court : < 50 mots en moyenne
 - moyen : 50-150 mots
 - detaille : > 150 mots
+
+## 6. USER_SIGNATURE_FOR_CONTACT — signature adaptee au registre
+Analyser EXCLUSIVEMENT les mails ENVOYES pour identifier le bloc de
+signature qu'utilise {self.user_first_name} avec CE correspondant precis.
+La signature est ce qui suit le closing (derniere ligne avant fin du mail).
+- Si tutoiement / proche : souvent prenom seul minuscule (ex: "yvan", "yv")
+- Si vouvoiement / pro : souvent prenom + nom + organisation
+  (ex: "Yvan BOSSER", "Yvan BOSSER (Groupe Bosser)", "Yvan BOSSER\\nGerant Groupe Bosser")
+- Extraire la signature EXACTE telle qu'elle apparait dans les mails envoyes
+  (respecter casse, ponctuation, parentheses, retours ligne)
+- Format : une seule string, max 100 caracteres, pas d'adresse email, pas de telephone
+- Si plusieurs variantes → prendre la PLUS FREQUENTE
+- Si pas de signature claire detectable OU pas assez de mails envoyes → mettre null
+- NE PAS deduire d'une signature theorique ; uniquement ce qui est observe
 
 # EXEMPLE DE PROFIL VALIDE :
 
@@ -1117,6 +1132,27 @@ Analyser les mails ENVOYES :
                     if len(closing) > 80:
                         closing = 'Cordialement,'
                     profile['closing'] = closing
+
+                    # Normaliser user_signature_for_contact (28/04 — sujet PLUS_TARD_VF #3)
+                    # Validation : nullable, ≤ 100 chars, pas de @ (= adresse mail),
+                    # pas plus de 3 lignes (signature mail standard).
+                    _sig_raw = profile.get('user_signature_for_contact', None)
+                    if _sig_raw is None or _sig_raw == '' or (isinstance(_sig_raw, str) and _sig_raw.strip().lower() in ('null', 'none', 'aucune', 'aucun')):
+                        profile['user_signature_for_contact'] = None
+                    else:
+                        try:
+                            _sig = str(_sig_raw).strip()
+                            if not _sig or len(_sig) > 100 or '@' in _sig:
+                                print(f"[profile] VALIDATION: user_signature_for_contact invalide ('{_sig[:50]}...') → null", flush=True)
+                                profile['user_signature_for_contact'] = None
+                            elif _sig.count('\n') > 2:
+                                # Limiter à 3 lignes max (sig mail typique)
+                                _sig = '\n'.join(_sig.split('\n')[:3])
+                                profile['user_signature_for_contact'] = _sig
+                            else:
+                                profile['user_signature_for_contact'] = _sig
+                        except Exception:
+                            profile['user_signature_for_contact'] = None
 
                     # --- COHERENCE CROISEE ---
                     formality = (profile.get('profile_json', {}) if isinstance(profile.get('profile_json'), dict) else {}).get('formality_level', profile.get('formality_level', 'moyenne'))

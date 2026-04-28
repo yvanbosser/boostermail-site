@@ -1,6 +1,6 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 27/04/2026 fin journée (post test kit fin de session — Workflow 7 validé en conditions réelles)
+> **Dernière mise à jour** : 28/04/2026 (sujet #3 « Signature personnalisée par contact » livré)
 
 ---
 
@@ -13,7 +13,6 @@ Si tu reviens sur ce doc au début d'une nouvelle session, voici **uniquement ce
 
 ### 🔥 Sujets ACTIFS (à traiter quand tu veux/peux)
 2. **Templates 45 fixes + appris** (Plan 2 historique) — 3-4 h, 20-40 % mails instantanés
-3. **Signature personnalisée par contact** — 30-45 min, gain UX fort registre
 4. **Ré-évaluation classements `source='none'`** — 30 min (marginal, 3 mails seulement)
 5. **Optim Phase 2 filtrage par plat** — à revoir quand `folder_classifications` aura 6-12 mois d'historique (passif)
 6. **Améliorer détection forward dans summary/draft** — bug constaté (mail Vincent Hubert "Fwd: leonis" body Orange) — taille à estimer
@@ -110,19 +109,20 @@ Si tu reviens sur ce doc au début d'une nouvelle session, voici **uniquement ce
 
 ---
 
-### 5. Signature personnalisée par contact (26/04)
+### 5. ~~Signature personnalisée par contact~~ ✅ FAIT 28/04/2026
 
-**Constat** : V2 a `contact_profiles.closing` (formule politesse par contact) + `settings.user_name` (signature globale). Manque : signature **adaptée au registre** (Yvan tutoie Ronan → signature « yvan » ; vouvoie Vincent banquier → « Yvan BOSSER (Groupe Bosser) »).
+✅ **Implémenté en autonomie le 28/04/2026** (PLUS_TARD_VF #3) :
 
-**Proposition** :
-- Ajout colonne `user_signature_for_contact` (nullable) dans `contact_profiles`
-- Si null → fallback `settings.user_name`
-- Sinon → utilise valeur spécifique
-- Apprentissage automatique via `analyze_contact_profile` (regarder pattern signatures dans mails ENVOYÉS par Yvan à ce contact)
+- **Migration DB** : ajout colonne `user_signature_for_contact TEXT` (nullable) dans `contact_profiles` (idempotent ALTER, comme `manually_edited`)
+- **Prompt étendu** dans `claude_ai.analyze_contact_profile` : nouveau champ JSON + règle dédiée « ## 6. USER_SIGNATURE_FOR_CONTACT » qui demande à Claude d'extraire la signature EXACTE qu'utilise Yvan dans les mails ENVOYÉS à ce contact (proche tutoyé → "yvan" minuscule ; pro vouvoyé → "Yvan BOSSER (Groupe Bosser)")
+- **Validation post-réception** : ≤ 100 chars, pas de @, max 3 lignes, sinon null
+- **Helper `_resolve_user_signature(contact_profile, fallback)`** dans `app_plugin.py` : retourne sig contact-spécifique si non-null, sinon fallback `settings.user_name`
+- **6 sites de rendu mis à jour** : BG template prefill (l. 4004), cache HIT preemptive (l. 7226), instant_reply template (l. 7367), api_match_template (l. 7506), pre-emptive cache stream (l. 7692), generate_sse principal (l. 8081 + 8166)
+- **Gardes anti-self-greeting préservées** : continuent d'utiliser `settings.user_name` (patronyme canonique) pour détecter les inversions greeting ↔ correspondant
 
-**Sites code** : `database.py` (migration), `claude_ai.py:analyze_contact_profile` (prompt), `app_plugin.py:7088+` + 3 autres sites (utilisation).
+**Validation pipeline** : test end-to-end sur Ronan (override manuel `user_signature_for_contact='yv'` → résolu = `'yv'` ; restorer NULL → fallback = `'Yvan BOSSER (Groupe Bosser)'`). Ronan + Julien re-analysés via `/api/analyze_contact` : Claude renvoie `null` pour Ronan (signature intégrée au closing `Cdlt yvan`, donc pas de bloc séparé détectable, comportement attendu).
 
-**Effort** : ~30-45 min. **Risque** : moyen (touche le rendu final visible user).
+**Rétrocompatibilité totale** : 115 profils existants ont `user_signature_for_contact = NULL` → fallback automatique vers `settings.user_name` → comportement identique avant/après. La signature contact-spécifique se remplit progressivement à chaque ré-analyse (`_maybe_analyze_contact` après ~3 mails entrants ou correction style).
 
 ---
 
@@ -283,7 +283,10 @@ Suite à l'audit exhaustif multi-angles du 21/04 (~60 anomalies, 15 corrigées i
 
 ## ✅ DÉJÀ FAIT (résumé court — pour ne pas se demander)
 
-### Session 27/04 PM (cette session)
+### Session 28/04/2026
+- ✅ **Signature personnalisée par contact** (PLUS_TARD_VF #3) — colonne `contact_profiles.user_signature_for_contact` (nullable, fallback `settings.user_name`) + extension prompt `analyze_contact_profile` (nouveau champ + règle 6) + helper `_resolve_user_signature` + 6 sites de rendu mis à jour. Pipeline end-to-end validé. 115 profils existants conservés (rétrocompat).
+
+### Session 27/04 PM
 - ✅ **Bouton BoosterMail New Outlook réparé** (`e2ba0e9`) — POST companion 503 supprimé, displayDialogAsync direct
 - ✅ **Pattern #18 cache WebView2 documenté** + `Cache-Control: no-store` HTML / `immutable 5 ans` JS-CSS (`0804a1d`)
 - ✅ **Interlignes serrés + filter Script error cross-origin** (`30eb683`)

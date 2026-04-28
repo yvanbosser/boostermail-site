@@ -1550,6 +1550,27 @@ def _is_user_modified(entry):
     return entry.get('source') == 'user_edit'
 
 
+def _resolve_user_signature(contact_profile, fallback_user_name):
+    """Retourne la signature à utiliser pour ce contact (28/04 — PLUS_TARD_VF #3).
+
+    Priorité : `contact_profile.user_signature_for_contact` (rempli automatiquement
+    par `analyze_contact_profile` à partir des mails ENVOYÉS) si présent et non-vide.
+    Sinon fallback vers `settings.user_name` (signature globale par défaut).
+
+    Permet à Yvan de signer "yvan" (proche tutoyé) vs "Yvan BOSSER (Groupe Bosser)"
+    (banquier vouvoyé) sans intervention manuelle. Les contacts sans le champ
+    rempli (profils antérieurs au 28/04 ou champ null) utilisent automatiquement
+    la signature globale → rétrocompatible.
+    """
+    if contact_profile and isinstance(contact_profile, dict):
+        sig = contact_profile.get('user_signature_for_contact')
+        if sig and isinstance(sig, str):
+            sig = sig.strip()
+            if sig:
+                return sig
+    return (fallback_user_name or '').strip()
+
+
 def _should_append_signature(closing, user_name, body=''):
     """Fix 24/04 + 26/04 — Évite la signature dupliquée en fin de mail.
 
@@ -4002,7 +4023,10 @@ def _start_speculative(mail_data):
             )
             if template:
                 user_name = _db.get_setting('user_name', '')
-                text = assemble_template(template, contact_profile, user_name)
+                # PLUS_TARD_VF #3 (28/04) — signature personnalisée par contact :
+                # utiliser la signature résolue (contact_profile override sinon fallback global)
+                signature = _resolve_user_signature(contact_profile, user_name)
+                text = assemble_template(template, contact_profile, signature)
                 # Chunks pour streaming progressif : plain text (évite casser
                 # les balises HTML quand le dialog reçoit un chunk au milieu
                 # d'un <p> ou <br>)
@@ -7224,6 +7248,10 @@ def api_instant_reply():
             greeting = ((contact_profile or {}).get('greeting', '') or 'Bonjour,')
             closing = ((contact_profile or {}).get('closing', '') or 'Cordialement,')
             user_name = _db.get_setting('user_name', '') or ''
+            # PLUS_TARD_VF #3 (28/04) — signature personnalisée par contact.
+            # `user_name` reste utilisé pour les gardes anti-self-greeting
+            # (extraction patronyme canonique), `signature` pour le rendu final.
+            signature = _resolve_user_signature(contact_profile, user_name)
             body = entry.get('text', '')
 
             # Fix 26/04 (Bug Vincent Lecou greeting) — garde-fou anti
@@ -7312,20 +7340,20 @@ def api_instant_reply():
             # Fix : closing skipé seulement si déjà dans body, MAIS signature
             # ajoutée si user_name absent du body (via _should_append_signature
             # Niveau B 26/04 qui scanne le body).
-            should_add_sig = _should_append_signature(closing, user_name,
+            should_add_sig = _should_append_signature(closing, signature,
                                                       body=_body_plain)
             if not has_closing:
                 # Pas de closing dans body → ajouter closing + signature dans
                 # un SEUL <p> avec <br> (convention email standard, évite
                 # interligne excessive de 2 <p> séparés).
                 sig_block = _html_mod.escape(closing, quote=False)
-                if should_add_sig:
-                    sig_block += '<br>' + _html_mod.escape(user_name, quote=False)
+                if should_add_sig and signature:
+                    sig_block += '<br>' + _html_mod.escape(signature, quote=False)
                 html_parts.append(f'<p>{sig_block}</p>')
-            elif should_add_sig:
+            elif should_add_sig and signature:
                 # Closing déjà dans body (Cdlt seul, etc.) MAIS pas de
-                # signature → ajouter user_name seul après.
-                html_parts.append(f'<p>{_html_mod.escape(user_name, quote=False)}</p>')
+                # signature → ajouter signature seule après.
+                html_parts.append(f'<p>{_html_mod.escape(signature, quote=False)}</p>')
 
             logger.info(f"[instant_reply] HIT source=preemptive msg={message_id[:30]}")
             return jsonify({
@@ -7365,10 +7393,12 @@ def api_instant_reply():
         except Exception:
             pass
         user_name = _db.get_setting('user_name', '') or ''
+        # PLUS_TARD_VF #3 (28/04) — signature résolue par contact
+        signature = _resolve_user_signature(contact_profile, user_name)
         if m['source'] == 'fixed':
-            text = assemble_template(m['template_dict'], contact_profile, user_name)
+            text = assemble_template(m['template_dict'], contact_profile, signature)
         else:
-            text = assemble_learned_template(m['learned'], contact_profile, user_name)
+            text = assemble_learned_template(m['learned'], contact_profile, signature)
         logger.info(f"[instant_reply] HIT source=template conf={m.get('confidence'):.2f} "
                     f"name={m.get('template_name')} msg={message_id[:30]}")
         # P0.5 : normaliser en HTML pour affichage direct côté dialog
@@ -7504,11 +7534,13 @@ def api_match_template():
         pass
 
     user_name = _db.get_setting('user_name', '') or ''
+    # PLUS_TARD_VF #3 (28/04) — signature résolue par contact
+    signature = _resolve_user_signature(contact_profile, user_name)
 
     if result['source'] == 'fixed':
-        text = assemble_template(result['template_dict'], contact_profile, user_name)
+        text = assemble_template(result['template_dict'], contact_profile, signature)
     else:
-        text = assemble_learned_template(result['learned'], contact_profile, user_name)
+        text = assemble_learned_template(result['learned'], contact_profile, signature)
 
     confidence = result['confidence']
     return jsonify({
@@ -7689,7 +7721,10 @@ def generate_reply():
                     _preemptive_greeting = "Bonjour,"
             if not _preemptive_closing:
                 _preemptive_closing = "Cordialement,"
-            _preemptive_sig = _db.get_setting('user_name', '')
+            # PLUS_TARD_VF #3 (28/04) — signature résolue par contact
+            # (override par contact_profile sinon settings.user_name).
+            _preemptive_sig = _resolve_user_signature(_preemptive_cp,
+                                                      _db.get_setting('user_name', ''))
 
             def stream_from_preemptive():
                 # Greeting (même structure que generate_sse)
@@ -8078,7 +8113,10 @@ INSTRUCTIONS ECHEANCES :
         closing = "Cordialement,"
 
     user_name = _db.get_setting('user_name', '')
-    signature = user_name if user_name else ''
+    # PLUS_TARD_VF #3 (28/04) — signature résolue par contact (override si profil
+    # le précise, sinon fallback `settings.user_name`). Utilisée pour le rendu
+    # final ; `user_name` reste pour les gardes anti-self-greeting (patronyme).
+    signature = _resolve_user_signature(contact_profile, user_name)
 
     # Vérifier template AVANT appel IA (< 100ms si match)
     try:
@@ -8091,7 +8129,7 @@ INSTRUCTIONS ECHEANCES :
             importance_override=importance_int,
         )
         if tpl:
-            tpl_text = assemble_template(tpl, contact_profile, user_name)
+            tpl_text = assemble_template(tpl, contact_profile, signature)
             logger.info(f"Template '{tpl_name}' pour {message_id[:20] if message_id else '?'}")
             # Annuler le thread spéculatif en cours s'il tourne encore (évite gaspillage)
             # ANOMALIE #9 fix : flag 'cancelled' au lieu de pop (le thread vérifie ce flag

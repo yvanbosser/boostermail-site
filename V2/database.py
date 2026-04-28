@@ -337,6 +337,19 @@ class Database:
             if "duplicate column" not in str(e).lower():
                 raise
 
+        # Migration 28/04/2026 — signature personnalisée par contact (PLUS_TARD_VF #3).
+        # Permet à Yvan de signer "yvan" (proche tutoyé) vs "Yvan BOSSER (Groupe Bosser)"
+        # (banquier vouvoyé) selon le profil du contact. Apprentissage automatique
+        # via analyze_contact_profile (lit la signature des mails ENVOYÉS).
+        # NULL par défaut → fallback vers settings.user_name (helper _resolve_user_signature
+        # côté app_plugin.py). Idempotent : ALTER ignoré si déjà présent.
+        try:
+            c.execute("ALTER TABLE contact_profiles ADD COLUMN user_signature_for_contact TEXT")
+            conn.commit()
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
+
         # Migration v3 (25/04) — email_cache : ajouter internet_message_id
         # I-DATA-11 (Pattern #14) : entry_id de email_cache est mixte
         # (Graph hex IDs hérités + Internet IDs depuis le fix 23/04).
@@ -1089,8 +1102,9 @@ class Database:
                 email, display_name, organization, category, domain,
                 register, tone, greeting, closing, typical_length,
                 power_dynamic, language, profile_text, profile_json,
-                sample_count, confidence, last_analysis, entry_ids, manually_edited, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                sample_count, confidence, last_analysis, entry_ids, manually_edited,
+                user_signature_for_contact, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(email) DO UPDATE SET
                 display_name=excluded.display_name,
                 organization=excluded.organization,
@@ -1110,6 +1124,7 @@ class Database:
                 last_analysis=excluded.last_analysis,
                 entry_ids=excluded.entry_ids,
                 manually_edited=excluded.manually_edited,
+                user_signature_for_contact=excluded.user_signature_for_contact,
                 updated_at=excluded.updated_at
         """, (
             email,
@@ -1131,6 +1146,7 @@ class Database:
             now,
             json.dumps(entry_ids, ensure_ascii=False),
             profile_data.get('manually_edited', 0),
+            profile_data.get('user_signature_for_contact'),
             now, now
         ))
             conn.commit()
