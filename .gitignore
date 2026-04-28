@@ -95,3 +95,22 @@ test_com_selection.py
 # Worktrees Claude Code
 .claude/worktrees/
 
+# Artefacts hors-scope BoosterMail (ajouté 28/04/2026)
+# - Logs de tests V2 standalone
+V2_stdout_test.log
+V2_stderr_test.log
+companion_stderr.log
+# - Backups DB pré-migration (gardés en local pour rollback ad-hoc)
+V2/boostermail.db.pre_migration_*
+drafts_v2.json.bak_*
+# - Notes perso Yvan (hors scope code)
+bloc note/
+audit/rapports/demander*.txt
+# - Artefacts blog/site Yvan (hors scope BoosterMail)
+*.zip
+inbox_graph_*.json
+# - Manifest copié à la racine (la version officielle est V2/manifest.xml)
+/manifest.xml
+# - Config Netlify (déploiement blog Yvan, hors scope)
+netlify.toml
+
