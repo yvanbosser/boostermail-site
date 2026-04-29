@@ -57,6 +57,9 @@ boostermail.db-shm
 boostermail.db-wal
 companion/.popup_pid
 
+# Settings locaux Claude Code (autorisations Bash, pas à committer)
+.claude/settings.local.json
+
 # Autres worktrees Claude (embedded git repos)
 .claude/worktrees/distracted-visvesvaraya-*
 .claude/worktrees/nifty-neumann-*

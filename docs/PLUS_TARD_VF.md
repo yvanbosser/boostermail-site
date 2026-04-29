@@ -1,6 +1,6 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 29/04/2026 fin de journée (BoosterMail SaaS 9/10 étapes prêtes — Étape 7 multi-tenant 100%, Étape 4 BG webhooks Graph POC déployé, welcome wizard #11+#12+#13 live, Auth JWT Bearer infra prête (Phase 4 activation différée à 2e compte test), 22 commits master ; sujet #14 PARTIELLEMENT IMPLÉMENTÉ — bandeau passif v20 OK)
+> **Dernière mise à jour** : 29/04/2026 fin de journée (BoosterMail SaaS 9/10 étapes prêtes — Étape 7 multi-tenant 100%, Étape 4 BG webhooks Graph POC déployé, welcome wizard #11+#12+#13 live, Auth JWT Bearer infra prête (Phase 4 activation différée à 2e compte test), 4 fixes pré-phase test #10+#11+#16+#15 livrés, 28 commits ce jour ; sujet #14 PARTIELLEMENT IMPLÉMENTÉ — bandeau passif v20 OK)
 
 ---
 

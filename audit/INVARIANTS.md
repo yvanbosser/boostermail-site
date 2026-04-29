@@ -1,6 +1,6 @@
 # Invariants V2 — règles absolues testables
 
-> **Dernière mise à jour** : 29/04/2026 fin de journée (BoosterMail SaaS quasi beta-ready : 22 commits master incluant Étape 7 multi-tenant 100%, Étape 4 BG webhooks Graph POC, welcome wizard #11+#12+#13, Auth JWT Bearer infra, saas_smoke.sh, 5 fixes logger.debug, 2 audits Pattern #17 + except: pass)
+> **Dernière mise à jour** : 29/04/2026 fin de journée (BoosterMail SaaS quasi beta-ready : 28 commits ce jour incluant Étape 7 multi-tenant 100%, Étape 4 BG webhooks Graph POC, welcome wizard #11+#12+#13, Auth JWT Bearer infra, saas_smoke.sh, 5 fixes logger.debug, 2 audits Pattern #17 + except: pass, 4 fixes pré-phase test #10+#11+#16+#15)
 > **Principe** : chaque invariant est testable mécaniquement par `smoke_test.ps1`. Une violation = anomalie, point final.
 
 ---
