@@ -329,6 +329,10 @@ from core.ai_provider import get_ai_provider, AIProvider
 # SANS faire d'appels API via cette instance (les appels passent par ai_provider)
 from claude_ai import ClaudeAssistant
 from claude_ai import _build_system_prompt, _style_profile, _clean_email_body
+# 29/04 PM audit constantes — modèles Claude centralisés (cf claude_ai.py:14-22)
+from claude_ai import MODEL as CLAUDE_MODEL_REPLY
+from claude_ai import MODEL_ANALYSIS as CLAUDE_MODEL_ANALYSIS
+from claude_ai import MODEL_HAIKU_FAST as CLAUDE_MODEL_HAIKU
 from templates_mail import (detect_template, assemble_template,
                              match_template_with_confidence, assemble_learned_template,
                              TEMPLATES as _FIXED_TEMPLATES)
@@ -5502,7 +5506,7 @@ def api_mail_summary_stream():
                     'from_email': mail_payload.get('from_email', ''),
                     'points': final_points,
                     'actions': final_actions,
-                    'model': 'claude-haiku-4-5',
+                    'model': CLAUDE_MODEL_HAIKU,
                 })
                 logger.info(f"[mail_summary_stream] SAVED msg={message_id[:30]} "
                             f"points={len(final_points)} actions={len(final_actions)}")
@@ -10525,7 +10529,7 @@ Applique les regles de ce niveau pour la regeneration des sections :
             try:
                 chunks = []
                 with _pb_recal.client.messages.stream(
-                    model="claude-sonnet-4-20250514", max_tokens=8000,
+                    model=CLAUDE_MODEL_ANALYSIS, max_tokens=8000,
                     system=recal_system,
                     messages=[{"role": "user", "content": prompt}]
                 ) as stream:

@@ -11,9 +11,17 @@ from datetime import datetime, timedelta
 import time
 import anthropic
 
-MODEL = "claude-sonnet-4-20250514"
-MODEL_CLASSIFY = "claude-sonnet-4-20250514"  # Sonnet pour qualité classement (pre-filtrage reduit les tokens)
-MODEL_ANALYSIS = "claude-sonnet-4-20250514"  # Pour les analyses de profil
+# 29/04 PM audit constantes — modèles Claude centralisés.
+# Avant : 9 sites hardcodaient 'claude-sonnet-4-20250514' / 'claude-haiku-4-5'
+# (5 dans claude_ai.py, 2 dans app_plugin.py, 1 dans core/claude_provider.py).
+# Migration de modèle (ex: vers Sonnet 4.6/4.7) demanderait 9 search/replace
+# avec risque d'oubli. Centralisation = 1 seule source de vérité.
+# Note 29/04 : claude-sonnet-4-20250514 est marqué deprecated par Anthropic
+# (end-of-life 2026-06-15). À migrer vers claude-sonnet-4-6 ou suivant.
+MODEL = "claude-sonnet-4-20250514"                 # Génération réponse (default)
+MODEL_CLASSIFY = "claude-sonnet-4-20250514"        # Sonnet pour qualité classement
+MODEL_ANALYSIS = "claude-sonnet-4-20250514"        # Analyses profil contact
+MODEL_HAIKU_FAST = "claude-haiku-4-5"              # Summarize batch + score interests
 MAX_TOKENS = 1200
 
 # 29/04 PM audit perf — patterns regex précompilés pour détection registre
@@ -194,7 +202,7 @@ class ClaudeAssistant:
         """OCR d'une page PDF scannée via Claude Vision. Retourne le texte extrait."""
         try:
             response = self.client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=MODEL_ANALYSIS,
                 max_tokens=4000,
                 messages=[{
                     "role": "user",
@@ -243,7 +251,7 @@ class ClaudeAssistant:
                         "Ne résume pas, ne commente pas. Retourne UNIQUEMENT le texte extrait."
             })
             response = self.client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=MODEL_ANALYSIS,
                 max_tokens=8000,
                 messages=[{"role": "user", "content": content}]
             )
@@ -1572,7 +1580,7 @@ Retourne UNIQUEMENT un JSON array (pas de markdown, pas de texte autour) :
             # trop serrée — risque de JSON tronqué à batch=10).
             response = self._create_with_retry(
                 _label='summaries',
-                model="claude-haiku-4-5",
+                model=MODEL_HAIKU_FAST,
                 max_tokens=min(250 * len(mail_index_to_id) + 300, 3000),
                 temperature=0.1,
                 messages=[{"role": "user", "content": prompt}],
@@ -1611,7 +1619,7 @@ Retourne UNIQUEMENT un JSON array (pas de markdown, pas de texte autour) :
                 output[msg_id] = {
                     'points': pts,
                     'actions': acts,
-                    'model': 'claude-haiku-4-5',
+                    'model': MODEL_HAIKU_FAST,
                 }
             return output
         except Exception as e:
@@ -1711,7 +1719,7 @@ Contenu :
 
         try:
             with self.client.messages.stream(
-                model="claude-haiku-4-5",
+                model=MODEL_HAIKU_FAST,
                 max_tokens=600,
                 temperature=0.1,
                 messages=[{"role": "user", "content": prompt}],
