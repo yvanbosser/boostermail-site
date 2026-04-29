@@ -60,6 +60,7 @@ var _isStandardMode = false;  // Détecté via /api/status au chargement
 var _sendStartTime = 0;       // Timestamp pour métrique duration
 var _receivedBody = '';        // Body du mail reçu (pour sauvegarde DB post-envoi + génération)
 var _mailBodyForGeneration = ''; // Body complet pour la génération IA
+var _summaryStatus = 'unknown';  // #16 'unknown' | 'success' | 'empty_body' | 'error' — drive le wording quand 0 points
 // _contactsCache supprime 27/04 PM — autocomplete passe par /api/contact_search debounced (cf _initAutocomplete)
 
 // (Phase 3) Mode standalone : ouvert dans QWebEngineView (PyQt) ou window.open (extension)
@@ -1263,6 +1264,7 @@ function _renderSummaryInstant(points, actions) {
     var pointsBox = document.getElementById('resumePoints');
     var actionsBox = document.getElementById('resumeActionsList');
     var spinner = document.getElementById('resumeSpinner');
+    _summaryStatus = 'success';  // #16 résumé reçu depuis cache DB (même si 0 points)
     _perfMonitor.mark('T4_summary_first_point', 'cache');
     if (pointsBox) {
         var title = pointsBox.querySelector('.resume-section-title');
@@ -1271,7 +1273,7 @@ function _renderSummaryInstant(points, actions) {
         if (points.length === 0) {
             var empty = document.createElement('div');
             empty.style.cssText = 'color:#999;font-size:10px;';
-            empty.textContent = 'Pas de points clés identifiés.';
+            empty.textContent = _getEmptyPointsMessage();  // #16 wording contextualisé
             pointsBox.appendChild(empty);
         } else {
             var ul = document.createElement('ul');
@@ -3199,6 +3201,31 @@ function _clearProgressPlaceholder() {
 }
 
 /**
+ * #16 Choix du wording selon le contexte quand `points.length === 0`.
+ *
+ * Avant : « Pas de points clés identifiés. » dans tous les cas → ambigu pour
+ * l'user qui ne sait pas distinguer (a) mail trivial (« Merci, c'est noté »)
+ * (b) mail sans body textuel (image-only, calendar invite) (c) résumé qui a
+ * échoué côté backend (Claude timeout, réseau, quota).
+ *
+ * Après : on distingue 4 cas via `_summaryStatus` + longueur de `_receivedBody`.
+ */
+function _getEmptyPointsMessage() {
+    var bodyLen = (_receivedBody || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().length;
+    if (_summaryStatus === 'error') {
+        return 'Résumé indisponible — vérifiez votre connexion ou réessayez.';
+    }
+    if (bodyLen === 0) {
+        return 'Mail sans contenu textuel (PJ uniquement ou invitation).';
+    }
+    if (bodyLen < 40) {
+        return 'Mail trop court pour un résumé.';
+    }
+    // Mail normal mais Claude n'a rien extrait (mail trivial type "Merci, c'est noté")
+    return 'Pas de points clés identifiés.';
+}
+
+/**
  * #11 Garde défensive : applique disabled/innerHTML sur btnSend uniquement
  * si l'élément existe encore dans le DOM. Si le dialog a été fermé entre
  * le clic envoi et l'arrivée de la réponse Graph (.then tardif), on
@@ -3419,7 +3446,7 @@ function _fetchMailSummary() {
             if (title) pointsBox.appendChild(title);
             var empty = document.createElement('div');
             empty.style.cssText = 'color:#999;font-size:10px;';
-            empty.textContent = 'Pas de points clés identifiés.';
+            empty.textContent = _getEmptyPointsMessage();  // #16 wording contextualisé
             pointsBox.appendChild(empty);
         }
         if (!hadActions && actionsBox && !actionsBox.querySelector('ul')) {
@@ -3441,7 +3468,7 @@ function _fetchMailSummary() {
             if (points.length === 0) {
                 var empty = document.createElement('div');
                 empty.style.cssText = 'color:#999;font-size:10px;';
-                empty.textContent = 'Pas de points clés identifiés.';
+                empty.textContent = _getEmptyPointsMessage();  // #16 wording contextualisé
                 pointsBox.appendChild(empty);
             } else {
                 var ul = document.createElement('ul');
@@ -3487,6 +3514,7 @@ function _fetchMailSummary() {
             _registerStream(_sseSource);
         } catch (e) {
             console.warn('[dialog] EventSource indisponible :', e);
+            _summaryStatus = 'error';  // #16 EventSource KO → afficher message d'erreur
             _finalize(false, false);
             return;
         }
@@ -3511,6 +3539,7 @@ function _fetchMailSummary() {
         _sseSource.addEventListener('done', function(ev) {
             try { _sseSource.close(); } catch (e) {}
             _sseSource = null;
+            _summaryStatus = 'success';  // #16 stream complet (même si 0 points → mail trivial)
             _finalize(hadPoints, hadActions);
             _perfMonitor.mark('T4_summary_done', 'stream');
         });
@@ -3520,6 +3549,8 @@ function _fetchMailSummary() {
             if (_sseSource && _sseSource.readyState === 2) {
                 console.info('[dialog] mail_summary_stream : flux fermé');
                 _sseSource = null;
+                // #16 Si on a déjà reçu des points/actions, on ne dégrade pas le status
+                if (!hadPoints && !hadActions) _summaryStatus = 'error';
                 _finalize(hadPoints, hadActions);
             }
         });
@@ -3534,6 +3565,7 @@ function _fetchMailSummary() {
             var actions = (data && data.actions) || [];
             if (status === 'done') {
                 // HIT cache → instant
+                _summaryStatus = 'success';  // #16 résumé reçu (même si 0 points)
                 _renderInstant(points, actions);
                 return;
             }
