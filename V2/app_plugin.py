@@ -2284,7 +2284,7 @@ def _prewarm_classement_for_mail(mid, mail_data):
             _set_mail_preview(mid, 'classement', 'done', {
                 'suggestion': None, 'suggestions': [], 'source': 'none_auto_email',
             })
-            logger.info(f"[prewarm-cls] mail automatique detecte ({contact_email}) → skip Claude")
+            logger.debug(f"[prewarm-cls] mail automatique detecte ({contact_email}) → skip Claude")
             return
 
         try:
@@ -2306,7 +2306,7 @@ def _prewarm_classement_for_mail(mid, mail_data):
                 'suggestions': [suggestion],
                 'source': 'rule',
             })
-            logger.info(f"[prewarm-cls] règle DB matche pour {mid[:30]}")
+            logger.debug(f"[prewarm-cls] règle DB matche pour {mid[:30]}")
             return
 
         # [3] Fallback Claude si aucune règle DB (P2 — 25/04)
@@ -2465,7 +2465,7 @@ def _prewarm_pj_classement_for_mail(mid, mail_data):
                 'suggestions': [suggestion],
                 'source': 'rule',
             })
-            logger.info(f"[prewarm-pj] règle DB matche pour {mid[:30]}")
+            logger.debug(f"[prewarm-pj] règle DB matche pour {mid[:30]}")
             return
 
         # [4] Fallback Claude si aucune règle DB et PJ présentes (P2 — 25/04)
@@ -4272,7 +4272,7 @@ def _run_prefetch(mail_data):
                     daemon=True
                 ).start()
             else:
-                logger.info(f"[speculative] Skip ({skip_reason}) pour {message_id[:20]}")
+                logger.debug(f"[speculative] Skip ({skip_reason}) pour {message_id[:20]}")
                 # Fix C (25/04) — Marquer 'filtered' pour éviter resoumission ∞.
                 # FIX P14 (25/04 soir) : NE PAS écraser un draft valide existant.
                 with _reply_lock:
@@ -5040,7 +5040,7 @@ def _start_speculative(mail_data):
                         'importance': importance_letter,
                         'source': 'template',
                     }
-                logger.info(f"Template '{template_name}' preemptif pour {message_id[:20]}")
+                logger.debug(f"Template '{template_name}' preemptif pour {message_id[:20]}")
                 _broadcast_sse('speculative_ready', {'message_id': message_id, 'source': 'template'})
                 # Draft prêt → déclencher preview (échéance + classement + PJ) immédiatement (25/04)
                 threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
@@ -5081,7 +5081,7 @@ def _start_speculative(mail_data):
                             for r in results
                         ]
                         pj_text_context = '\n\n'.join(pj_parts)
-                        logger.info(f"[speculative] PJ intégrées pour {message_id[:20]} "
+                        logger.debug(f"[speculative] PJ intégrées pour {message_id[:20]} "
                                     f"({len(results)} PJ, {len(pj_text_context)} chars)")
             except Exception as _e:
                 logger.debug(f"[speculative] pj extract échec : {_e}")
