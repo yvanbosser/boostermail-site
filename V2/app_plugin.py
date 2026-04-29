@@ -481,7 +481,16 @@ def api_detected_platform():
 
 # --- Warmup inbox (pre-chargement 10 mails au demarrage) ---
 
-_warmup_cache = {}  # Cache mails pre-charges {message_id: mail_data} — max 10 entrees (#7)
+# Étape 7 multi-tenant (29/04/2026) — _warmup_cache passe en UserScopedDict.
+# Cache des mails pré-chargés {message_id: mail_data} — max 10 entrees (#7).
+# Le warmup loop (BG sans Flask context) résout user_id via bridge DB →
+# écrit dans _warmup_cache['user_yvan']. Routes Flask de Yvan (via session)
+# résolvent vers le même user_id → HIT. En multi-user (futur), chaque user
+# aura son propre top 10 inbox (le BG devra alors iterate users).
+if _UserScopedDict is not None:
+    _warmup_cache = _UserScopedDict('warmup')
+else:
+    _warmup_cache = {}  # Fallback ultra-défensif si imports échouent
 _warmup_done = False
 _warmup_progress = {"status": "idle", "loaded": 0, "total": 0, "current_subject": ""}
 _warmup_lock = threading.Lock()  # #8 : protege _warmup_done et _warmup_progress
@@ -1427,7 +1436,14 @@ _current_mail_data = {}
 # État du compose courant (alimenté par OnNewMessageCompose)
 _current_compose_data = {}
 # Prefetch cache (contexte A+B+C + speculative)
-_prefetch_cache = {}
+# Étape 7 multi-tenant (29/04/2026) — _prefetch_cache passe en UserScopedDict.
+# Cache contexte A/B/C/profil par message_id, persistent disque (prefetch_cache_v2.json).
+# Format JSON disque migré v1 → v2 : {format_version: 2, entries_per_user: {uid: {mid: entry}}}.
+# BG cont-spec et routes Flask convergent via le bridge DB user_id (mono-user).
+if _UserScopedDict is not None:
+    _prefetch_cache = _UserScopedDict('prefetch')
+else:
+    _prefetch_cache = {}  # Fallback ultra-défensif
 _prefetch_lock = threading.Lock()
 
 # Cache prefetch persistant (fichier JSON) — portage proto
@@ -1437,83 +1453,194 @@ _PREFETCH_CACHE_TTL = 48 * 3600  # 48h en secondes
 
 def _save_prefetch_cache(inbox_ids=None):
     """Sauvegarde le _prefetch_cache V2 sur disque (JSON).
-    Appelé atexit et après warmup. Si inbox_ids fourni, ne sauve que les mails présents."""
+    Appelé atexit et après warmup. Si inbox_ids fourni, ne sauve que les mails présents.
+
+    Étape 7 multi-tenant (29/04/2026) — Format JSON disque v2 :
+        {
+          "format_version": 2,
+          "entries_per_user": {
+            "<user_id>": { "<message_id>": {entry_dict}, ... },
+            ...
+          }
+        }
+
+    Itère via iter_user_caches('prefetch') pour serialiser tous les users.
+    En mono-user (Yvan via bridge DB), 1 seul user → comportement identique
+    à avant. Compatible v1 lu par _load_prefetch_cache (migration legacy).
+    """
+    def _clean_for_json(obj):
+        if isinstance(obj, dict):
+            return {k: _clean_for_json(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [_clean_for_json(i) for i in obj if isinstance(i, (dict, str, int, float, bool, type(None)))]
+        elif isinstance(obj, (str, int, float, bool, type(None))):
+            return obj
+        else:
+            return str(obj)
+
     try:
-        with _prefetch_lock:
-            to_save = {}
-            for key, val in _prefetch_cache.items():
-                if not isinstance(val, dict) or val.get('status') != 'done':
-                    continue
-                # Filtrage inbox (si fourni)
-                if inbox_ids is not None and key not in inbox_ids:
-                    continue
-                # Ne garder que les champs essentiels + TTL
-                clean = {'status': 'done', 'timestamp': val.get('timestamp', time.time())}
-                for ctx_key in ('context_a', 'context_b', 'context_c', 'contact_profile', 'conversation_id'):
-                    if val.get(ctx_key):
-                        clean[ctx_key] = val[ctx_key]
-                if clean.get('context_a') or clean.get('context_b') or clean.get('context_c'):
-                    to_save[key] = clean
-        if to_save:
-            def _clean_for_json(obj):
-                if isinstance(obj, dict):
-                    return {k: _clean_for_json(v) for k, v in obj.items()}
-                elif isinstance(obj, list):
-                    return [_clean_for_json(i) for i in obj if isinstance(i, (dict, str, int, float, bool, type(None)))]
-                elif isinstance(obj, (str, int, float, bool, type(None))):
-                    return obj
-                else:
-                    return str(obj)
+        entries_per_user = {}
+        total = 0
+        if _iter_user_caches is not None:
+            with _prefetch_lock:
+                for user_id, sub_cache in _iter_user_caches('prefetch'):
+                    user_to_save = {}
+                    for key, val in sub_cache.items():
+                        if not isinstance(val, dict) or val.get('status') != 'done':
+                            continue
+                        if inbox_ids is not None and key not in inbox_ids:
+                            continue
+                        clean = {'status': 'done', 'timestamp': val.get('timestamp', time.time())}
+                        for ctx_key in ('context_a', 'context_b', 'context_c',
+                                        'contact_profile', 'conversation_id'):
+                            if val.get(ctx_key):
+                                clean[ctx_key] = val[ctx_key]
+                        if clean.get('context_a') or clean.get('context_b') or clean.get('context_c'):
+                            user_to_save[key] = clean
+                    if user_to_save:
+                        entries_per_user[user_id] = user_to_save
+                        total += len(user_to_save)
+        else:
+            # Fallback ultra-défensif (proxy/helpers indisponibles)
+            with _prefetch_lock:
+                fallback_save = {}
+                for key, val in _prefetch_cache.items():
+                    if not isinstance(val, dict) or val.get('status') != 'done':
+                        continue
+                    if inbox_ids is not None and key not in inbox_ids:
+                        continue
+                    clean = {'status': 'done', 'timestamp': val.get('timestamp', time.time())}
+                    for ctx_key in ('context_a', 'context_b', 'context_c',
+                                    'contact_profile', 'conversation_id'):
+                        if val.get(ctx_key):
+                            clean[ctx_key] = val[ctx_key]
+                    if clean.get('context_a') or clean.get('context_b') or clean.get('context_c'):
+                        fallback_save[key] = clean
+            if fallback_save:
+                entries_per_user['default'] = fallback_save
+                total = len(fallback_save)
+
+        if total:
+            payload = {
+                'format_version': 2,
+                'entries_per_user': entries_per_user,
+            }
             # Fix audit 22/04 : ecriture atomique (tmp + os.replace) pour eviter
-            # la corruption du fichier si V2 est kille pendant le write. Coherent
-            # avec le pattern deja utilise par _persist_reply_cache.
+            # la corruption du fichier si V2 est kille pendant le write.
             _tmp = _PREFETCH_CACHE_PATH + '.tmp'
             with open(_tmp, 'w', encoding='utf-8') as f:
-                json.dump(_clean_for_json(to_save), f, ensure_ascii=False)
+                json.dump(_clean_for_json(payload), f, ensure_ascii=False)
             os.replace(_tmp, _PREFETCH_CACHE_PATH)
-            logger.info(f"[cache] Prefetch V2 sauvegardé : {len(to_save)} entrées "
-                        f"({os.path.getsize(_PREFETCH_CACHE_PATH)//1024}KB)")
+            user_breakdown = ', '.join(f'{uid[:12]}={len(eds)}' for uid, eds in entries_per_user.items())
+            logger.info(
+                f"[cache] Prefetch V2 sauvegardé : {total} entrées sur "
+                f"{len(entries_per_user)} user(s) [{user_breakdown}] "
+                f"({os.path.getsize(_PREFETCH_CACHE_PATH)//1024}KB)"
+            )
     except Exception as e:
         logger.warning(f"[cache] Erreur sauvegarde prefetch V2 : {e}")
 
 def _load_prefetch_cache():
     """Charge le _prefetch_cache depuis disque. Appelé au démarrage.
-    Ignore les entrées dont le timestamp est > TTL (48h)."""
+    Ignore les entrées dont le timestamp est > TTL (48h).
+
+    Étape 7 multi-tenant (29/04/2026) — détecte automatiquement le format :
+    - Format v2 : ``{format_version: 2, entries_per_user: {uid: {mid: entry}}}``
+    - Format legacy v1 : ``{mid: entry}`` à plat → migré vers user_id 'default'
+      puis migré 'default' → user_id réel si DB en connaît un (mono-user).
+    """
     try:
         if not os.path.exists(_PREFETCH_CACHE_PATH):
             return 0
         with open(_PREFETCH_CACHE_PATH, 'r', encoding='utf-8') as f:
             data = json.load(f)
+
+        # Détection du format
+        if isinstance(data, dict) and data.get('format_version') == 2 and 'entries_per_user' in data:
+            entries_per_user = data.get('entries_per_user', {})
+        else:
+            # Format legacy v1 : tout dans 'default'
+            entries_per_user = {'default': data} if data else {}
+            if data:
+                logger.info(
+                    f"[cache] Prefetch V2 — Migration legacy v1→v2 : {len(data)} "
+                    f"entrée(s) déplacées vers user_id 'default'"
+                )
+
         now = time.time()
-        loaded = 0
-        skipped = 0
-        with _prefetch_lock:
-            for key, val in data.items():
+        clean_per_user = {}  # Structure finale {user_id: {mid: cleaned_entry}}
+        total_loaded = 0
+        total_skipped = 0
+
+        for user_id, user_entries in entries_per_user.items():
+            user_clean = {}
+            for key, val in user_entries.items():
                 if not isinstance(val, dict):
-                    skipped += 1
+                    total_skipped += 1
                     continue
                 # TTL : ignorer les entrées trop anciennes
                 if now - val.get('timestamp', 0) > _PREFETCH_CACHE_TTL:
-                    skipped += 1
-                    continue
-                if key in _prefetch_cache:
-                    skipped += 1
+                    total_skipped += 1
                     continue
                 cleaned = {'status': val.get('status', 'done'),
                            'timestamp': val.get('timestamp', now)}
-                for ctx_key in ('context_a', 'context_b', 'context_c', 'contact_profile', 'conversation_id'):
+                for ctx_key in ('context_a', 'context_b', 'context_c',
+                                'contact_profile', 'conversation_id'):
                     items = val.get(ctx_key)
                     if ctx_key in ('context_a', 'context_b', 'context_c'):
                         cleaned[ctx_key] = [m for m in (items or []) if isinstance(m, dict)]
                     elif items:
                         cleaned[ctx_key] = items
                 if cleaned.get('context_a') or cleaned.get('context_b') or cleaned.get('context_c'):
-                    _prefetch_cache[key] = cleaned
-                    loaded += 1
+                    user_clean[key] = cleaned
+                    total_loaded += 1
                 else:
-                    skipped += 1
-        logger.info(f"[cache] Prefetch V2 chargé depuis disque : {loaded} entrées ({skipped} ignorées)")
-        return loaded
+                    total_skipped += 1
+            if user_clean:
+                clean_per_user[user_id] = user_clean
+
+        # Étape 7 — Migration 'default' → user_id réel si DB connaît un user actif
+        # (cohérence BG cont-spec ↔ routes Flask en mono-user, cf user_context.py)
+        if 'default' in clean_per_user:
+            actual_user_id = ''
+            try:
+                if _get_current_user_id is not None:
+                    actual_user_id = _get_current_user_id() or ''
+            except Exception:
+                actual_user_id = ''
+            if actual_user_id and actual_user_id != 'default':
+                default_entries = clean_per_user.pop('default')
+                if actual_user_id in clean_per_user:
+                    clean_per_user[actual_user_id].update(default_entries)
+                else:
+                    clean_per_user[actual_user_id] = default_entries
+                logger.info(
+                    f"[cache] Prefetch V2 — Migration 'default' → '{actual_user_id[:12]}' : "
+                    f"{len(default_entries)} entrée(s) déplacée(s) "
+                    f"(alignement BG ↔ routes Flask en mono-user)"
+                )
+
+        # Installation atomique via replace_user_caches
+        if _replace_user_caches is not None:
+            with _prefetch_lock:
+                _replace_user_caches('prefetch', clean_per_user)
+        else:
+            # Fallback ultra-défensif : écriture directe (suppose dict standard)
+            with _prefetch_lock:
+                if isinstance(_prefetch_cache, dict):
+                    _prefetch_cache.clear()
+                    if 'default' in clean_per_user:
+                        _prefetch_cache.update(clean_per_user['default'])
+
+        if total_loaded:
+            user_breakdown = ', '.join(
+                f'{uid[:12]}={len(eds)}' for uid, eds in clean_per_user.items()
+            )
+            logger.info(
+                f"[cache] Prefetch V2 chargé depuis disque : {total_loaded} entrées sur "
+                f"{len(clean_per_user)} user(s) [{user_breakdown}] ({total_skipped} ignorées)"
+            )
+        return total_loaded
     except Exception as e:
         logger.warning(f"[cache] Erreur chargement prefetch V2 : {e}")
         try:
