@@ -210,6 +210,14 @@ from core.auth_base import (
 )
 from auth_microsoft import MicrosoftAuthProvider
 
+# Étape 4 SaaS — BG webhooks Graph pour pré-génération temps réel.
+# POC 29/04/2026 : code prêt, subscription à activer via route admin
+# /api/admin/graph_subscription/setup une fois Yvan authentifié.
+try:
+    import graph_webhooks as _gw
+except ImportError:
+    _gw = None
+
 # DB V2 autonome (Option B) — fichier séparé de celui du proto
 # Le proto utilise C:\EasyMail\boostermail.db
 # V2 utilise C:\EasyMail\V2\boostermail.db
@@ -3409,6 +3417,240 @@ def api_current_mail():
     return jsonify({"status": "ok", "mail": snapshot})
 
 
+# =============================================================================
+# Étape 4 SaaS — BG webhooks Graph (notifications nouveaux mails temps réel)
+# =============================================================================
+
+# URL HTTPS publique du receiver (configurée pour OVH api.boostermail.ai).
+_GRAPH_WEBHOOKS_NOTIFICATION_URL = 'https://api.boostermail.ai/api/webhooks/graph'
+
+
+@app.route('/api/webhooks/graph', methods=['POST'])
+def api_webhooks_graph():
+    """Receiver des notifications Microsoft Graph webhooks.
+
+    2 modes :
+    1. **Validation initiale** (au moment de la création de subscription) :
+       Microsoft envoie ?validationToken=XXX → on retourne XXX en text/plain
+       avec HTTP 200 dans les 10 secondes (sinon Microsoft refuse de créer
+       la subscription).
+    2. **Notifications de nouveau mail** : payload JSON
+       ``{"value": [{subscriptionId, clientState, resourceData: {id}, changeType}]}``.
+       On vérifie clientState (anti-spoofing) puis pour chaque mail créé,
+       on récupère le mail via Graph et déclenche _run_prefetch (pré-génération).
+
+    Public route — ne pas appliquer @require_auth (Microsoft n'envoie pas de
+    cookie de session, juste le body signé via clientState).
+    """
+    # Mode 1 — validation initiale
+    validation_token = request.args.get('validationToken')
+    if validation_token:
+        logger.info(f"[graph webhooks] validation challenge reçu : {validation_token[:20]}...")
+        return validation_token, 200, {'Content-Type': 'text/plain'}
+
+    # Mode 2 — notification réelle
+    if _gw is None:
+        logger.warning("[graph webhooks] module graph_webhooks indisponible, notif ignorée")
+        return jsonify({"status": "module_unavailable"}), 200
+
+    payload = request.get_json(silent=True) or {}
+    expected_cs = (_db.get_setting('graph_subscription_client_state') or '')
+    if not expected_cs:
+        logger.warning("[graph webhooks] pas de client_state stocké, notif ignorée")
+        return jsonify({"status": "no_subscription"}), 200
+
+    valid_ids = _gw.parse_notification_payload(payload, expected_cs)
+    if not valid_ids:
+        # Soit clientState mismatch (déjà loggé par parse_notification_payload),
+        # soit aucun changeType=created. Réponse 200 pour ne pas inciter
+        # Microsoft à retry inutilement.
+        return jsonify({"status": "ok", "processed": 0}), 200
+
+    # Pour chaque mail créé : récupérer via Graph + déclencher _run_prefetch
+    # (le pré-génération existant qui peuple _reply_cache + _prefetch_cache).
+    threading.Thread(
+        target=_handle_graph_webhook_notifications,
+        args=(valid_ids,),
+        daemon=True,
+        name='graph-webhook-handler',
+    ).start()
+
+    return jsonify({"status": "ok", "queued": len(valid_ids)}), 200
+
+
+def _handle_graph_webhook_notifications(message_ids):
+    """Traite une liste de Graph message IDs reçus via webhook.
+
+    Pour chaque ID : récupère le mail via Graph + lance _run_prefetch en BG.
+    Best-effort : log les erreurs sans crash.
+    """
+    graph = get_graph()
+    if not graph:
+        logger.warning(f"[graph webhooks handler] Graph indisponible, {len(message_ids)} mail(s) non traité(s)")
+        return
+    for mid in message_ids:
+        try:
+            # Récupérer le mail complet via Graph (le webhook ne donne que l'ID)
+            msg = graph.get_message(mid)
+            if not msg:
+                logger.debug(f"[graph webhooks handler] mail {mid[:20]}... introuvable via Graph")
+                continue
+            # Construire mail_data au format attendu par _run_prefetch
+            from_obj = msg.get('from') or {}
+            from_addr = from_obj.get('emailAddress') if isinstance(from_obj, dict) else {}
+            mail_data = {
+                'message_id': msg.get('id', ''),
+                'internet_message_id': msg.get('internetMessageId', ''),
+                'subject': msg.get('subject', ''),
+                'from_email': (from_addr.get('address', '') if isinstance(from_addr, dict) else '').lower(),
+                'from_name': (from_addr.get('name', '') if isinstance(from_addr, dict) else ''),
+                'body': msg.get('body', {}).get('content', '') if isinstance(msg.get('body'), dict) else '',
+                'conversation_id': msg.get('conversationId', ''),
+                'has_attachments': msg.get('hasAttachments', False),
+                'received_at': msg.get('receivedDateTime', ''),
+            }
+            logger.info(
+                f"[graph webhook] pré-génération déclenchée pour "
+                f"{mail_data['from_email']} / {mail_data['subject'][:40]}"
+            )
+            _run_prefetch(mail_data)
+        except Exception as e:
+            logger.warning(f"[graph webhooks handler] erreur traitement {mid[:20]}... : {e}")
+
+
+@app.route('/api/admin/graph_subscription/setup', methods=['POST'])
+@require_auth(get_auth_provider)
+def api_admin_graph_subscription_setup():
+    """Active une subscription Graph webhook pour le user authentifié.
+
+    À appeler UNE FOIS après le login OAuth pour démarrer les notifications
+    temps réel. Le subscription_id + expiration + client_state sont stockés
+    en DB settings, le thread BG renew_loop renouvelle automatiquement.
+
+    Sécurité : @require_auth — seul un user authentifié peut activer son
+    propre webhook (Graph utilise son token).
+    """
+    if _gw is None:
+        return jsonify({"error": "graph_webhooks module unavailable"}), 500
+    token = request.auth_token
+    if not token:
+        return jsonify({"error": "no_token"}), 401
+
+    # Si subscription déjà active, la supprimer d'abord (idempotence)
+    existing_id = _db.get_setting('graph_subscription_id')
+    if existing_id:
+        try:
+            _gw.delete_subscription(token, existing_id)
+        except Exception as e:
+            logger.warning(f"[graph webhooks] cleanup ancienne sub erreur : {e}")
+
+    client_state = _gw.generate_client_state()
+    try:
+        sub = _gw.create_subscription(
+            token, _GRAPH_WEBHOOKS_NOTIFICATION_URL, client_state
+        )
+    except Exception as e:
+        logger.error(f"[graph webhooks] create_subscription erreur : {e}")
+        return jsonify({"error": str(e)}), 500
+
+    _db.save_setting('graph_subscription_id', sub.get('id', ''))
+    _db.save_setting('graph_subscription_expiration', sub.get('expirationDateTime', ''))
+    _db.save_setting('graph_subscription_client_state', client_state)
+
+    return jsonify({
+        "status": "ok",
+        "subscription_id": sub.get('id', '')[:20] + '...',
+        "expiration": sub.get('expirationDateTime', ''),
+        "notification_url": _GRAPH_WEBHOOKS_NOTIFICATION_URL,
+    })
+
+
+@app.route('/api/admin/graph_subscription/status', methods=['GET'])
+def api_admin_graph_subscription_status():
+    """Retourne l'état de la subscription Graph stockée en DB."""
+    sub_id = _db.get_setting('graph_subscription_id') or ''
+    exp = _db.get_setting('graph_subscription_expiration') or ''
+    cs = _db.get_setting('graph_subscription_client_state') or ''
+    needs_renew = _gw.should_renew(exp) if (_gw and exp) else None
+    return jsonify({
+        "subscription_id": (sub_id[:20] + '...') if sub_id else None,
+        "expiration": exp or None,
+        "client_state_set": bool(cs),
+        "needs_renew_soon": needs_renew,
+    })
+
+
+@app.route('/api/admin/graph_subscription/delete', methods=['POST'])
+@require_auth(get_auth_provider)
+def api_admin_graph_subscription_delete():
+    """Supprime la subscription Graph active. À appeler avant un logout user."""
+    if _gw is None:
+        return jsonify({"error": "module unavailable"}), 500
+    sub_id = _db.get_setting('graph_subscription_id')
+    if not sub_id:
+        return jsonify({"status": "no_subscription"}), 200
+    try:
+        _gw.delete_subscription(request.auth_token, sub_id)
+    except Exception as e:
+        logger.warning(f"[graph webhooks] delete erreur : {e}")
+    _db.save_setting('graph_subscription_id', '')
+    _db.save_setting('graph_subscription_expiration', '')
+    _db.save_setting('graph_subscription_client_state', '')
+    return jsonify({"status": "deleted"})
+
+
+def _graph_webhooks_renew_loop():
+    """Thread BG qui renouvelle la subscription Graph 1× par 6h si elle expire dans < 24h.
+
+    Lit subscription_id + expiration depuis DB. Si renew nécessaire, récupère
+    le token Graph via l'auth provider (token user actif via bridge DB Étape 7)
+    et appelle _gw.renew_subscription. Met à jour DB.
+
+    Fail-safe : silent en cas d'erreur (la subscription expirera et devra être
+    re-créée manuellement via /api/admin/graph_subscription/setup au prochain
+    login user).
+    """
+    if _gw is None:
+        logger.info("[graph webhooks renew] module indisponible, thread skip")
+        return
+    # Premier scan après 5 min (laisser le système démarrer)
+    time.sleep(300)
+    while True:
+        try:
+            sub_id = _db.get_setting('graph_subscription_id') or ''
+            exp = _db.get_setting('graph_subscription_expiration') or ''
+            if not sub_id:
+                logger.debug("[graph webhooks renew] pas de subscription active, skip")
+            elif not _gw.should_renew(exp):
+                logger.debug(f"[graph webhooks renew] subscription valide jusqu'à {exp}, skip")
+            else:
+                # Renouveler — utilise l'auth provider pour obtenir le token user actif
+                provider = get_auth_provider() if 'get_auth_provider' in globals() else None
+                token = provider.get_access_token() if provider else None
+                if not token:
+                    logger.warning("[graph webhooks renew] pas de token, renouvellement reporté")
+                else:
+                    new_sub = _gw.renew_subscription(token, sub_id)
+                    _db.save_setting(
+                        'graph_subscription_expiration',
+                        new_sub.get('expirationDateTime', '')
+                    )
+                    logger.info(
+                        f"[graph webhooks renew] OK : nouvelle expiration "
+                        f"{new_sub.get('expirationDateTime', '?')}"
+                    )
+        except Exception as e:
+            logger.warning(f"[graph webhooks renew] erreur : {e}")
+        time.sleep(6 * 3600)  # 6h
+
+
+threading.Thread(
+    target=_graph_webhooks_renew_loop,
+    daemon=True,
+    name='graph-webhooks-renew',
+).start()
+
+
 # --- New compose (OnNewMessageCompose) ---------------------------------------
 
 @app.route('/api/event/new_compose', methods=['POST'])
@@ -5635,6 +5877,10 @@ _ALLOWED_SETTINGS = {
     'default_importance', 'user_name', 'pj_root_folder',
     'onedrive_root', 'theme', 'last_milestone',
     'setup_step', 'companion_installed', 'onboarding_done',
+    # Étape 4 SaaS — BG webhooks Graph subscription metadata (29/04/2026 PM)
+    'graph_subscription_id',
+    'graph_subscription_expiration',
+    'graph_subscription_client_state',
 }
 
 @app.route('/api/save_setting', methods=['POST'])
