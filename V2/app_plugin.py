@@ -164,6 +164,36 @@ def _perf_start_timer():
     except Exception:
         pass
 
+
+# =============================================================================
+# Étape 7 multi-tenant — Middleware @require_user global ABANDONNÉ 29/04 PM tardif
+# =============================================================================
+#
+# Tentative initiale : appliquer @require_user via before_request global avec
+# whitelist publique pour empêcher tout accès non-authentifié aux routes /api/.
+#
+# **Découverte 29/04 PM tardif** : la session Flask n'est PAS systématiquement
+# transmise depuis le popup BoosterMail (dialog Office.js iframe). Sur un test
+# Phase 1 (`@require_user` sur /api/perf_log seul), Yvan a reçu un 401 légitime
+# alors que `/api/dialog_init` (sans @require_user) a marché à 200 sec auparavant.
+# La cause probable : `keepalive=true` côté `dialog.js fetch('/api/perf_log')`
+# qui peut bloquer la transmission cookies cross-origin Office.js.
+#
+# Conclusion : `@require_user` global ferait 401 sur toutes les routes appelées
+# depuis le popup (instant_reply, dialog_init, refine_*, etc.) → BoosterMail
+# inutilisable.
+#
+# Solution alternative pour multi-user à terme :
+# - Token Bearer Authorization header (JWT?) injecté par autorunshared.js dans
+#   chaque fetch au lieu de cookie session → travaille en context cross-origin
+# - Mid-terme : isoler les caches via UserScopedDict + bridge DB (DÉJÀ FAIT,
+#   sécurité fonctionnelle assurée en prod, validée par 27 tests inline)
+#
+# Pour l'instant, le middleware n'est PAS activé. La sécurité repose sur :
+# 1. Proxy UserScopedDict + bridge DB user_id (isolation cross-user effective)
+# 2. CORS strict nginx + OAuth Microsoft + tokens chiffrés
+# 3. Routes admin sensibles avec @require_auth(get_auth_provider) (déjà actif)
+
 # --- Locks globaux (audit majeur thread safety) ----
 _mail_data_lock = threading.Lock()
 _init_lock = threading.Lock()
@@ -3251,15 +3281,23 @@ except Exception:
 _perf_log_lock = threading.Lock()
 
 @app.route('/api/perf_log', methods=['POST'])
-@require_user
 def api_perf_log():
     """Reçoit un snapshot timing du dialog et le stocke dans logs/perf/.
     Retourne 204 No Content (fire & forget côté client via keepalive).
 
-    Étape 7 multi-tenant — @require_user (29/04 PM) : route appelée depuis
-    dialog.js après login OAuth, donc session toujours active. Test progressif
-    de @require_user en commençant par cette route NON CRITIQUE (logs perf
-    perdus si 401 = pas grave, BoosterMail continue à fonctionner).
+    DÉCOUVERTE 29/04 PM tardif : `@require_user` testé sur cette route a
+    retourné 401 sur des appels legitimes de Yvan (depuis dialog.js dans
+    le popup Office.js). La session Flask n'est pas systématiquement
+    transmise dans le contexte popup add-in (iframe cross-origin Microsoft
+    avec keepalive=true qui peut bloquer les cookies).
+    Conséquence : `@require_user` global au niveau Flask casserait les
+    fetches du popup. Couches de sécurité existantes :
+    1. Proxy UserScopedDict + bridge DB user_id assurent l'isolation
+       cross-user en interne (validé en prod, 22/22 caches).
+    2. CORS strict côté nginx + auth Microsoft via OAuth + tokens chiffrés
+       côté DB (TokenStore).
+    À ressortir si on trouve une méthode d'auth compatible popup (token
+    Bearer dans header au lieu de cookie session ?).
     """
     try:
         payload = request.get_json(force=True, silent=True) or {}
@@ -3503,8 +3541,9 @@ def _handle_graph_webhook_notifications(message_ids):
         return
     for mid in message_ids:
         try:
-            # Récupérer le mail complet via Graph (le webhook ne donne que l'ID)
-            msg = graph.get_message(mid)
+            # Récupérer le mail complet via Graph (le webhook ne donne que l'ID).
+            # Méthode correcte = get_email_by_id (et non get_message qui n'existe pas).
+            msg = graph.get_email_by_id(mid)
             if not msg:
                 logger.debug(f"[graph webhooks handler] mail {mid[:20]}... introuvable via Graph")
                 continue
