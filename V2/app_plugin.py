@@ -442,6 +442,26 @@ def get_graph() -> GraphClient | None:
     return GraphClient(token)
 
 
+# 29/04 PM audit DRY — helpers email centralisés.
+# Avant : 11 sites dupliquaient `email.split('@')[-1]` ou `[1]` (incohérent).
+# 2 sites (l. 7451, 7533) utilisaient `[1]` qui diffère pour les emails
+# malformés (ex: "user@@domain" → [1] = "" vs [-1] = "domain"). Le [-1]
+# est plus robuste et donne le domaine TLD réel pour les emails atypiques.
+def _extract_email_domain(email: str) -> str:
+    """Extrait le domaine d'un email (ex: user@domain.com → domain.com).
+    Retourne '' si email invalide ou sans @. Utilise [-1] (plus robuste
+    que [1] pour les emails à plusieurs @)."""
+    if not email or '@' not in email:
+        return ''
+    return email.split('@')[-1]
+
+
+def _normalize_email(email: str) -> str:
+    """Normalise un email pour lookup DB/cache (lower + strip).
+    Retourne '' si input None/vide."""
+    return (email or '').strip().lower()
+
+
 def is_standard_mode() -> bool:
     """Vérifie si l'utilisateur est en Mode Standard (sans instancier GraphClient)."""
     auth = get_auth_provider()
@@ -2204,7 +2224,7 @@ def _prewarm_classement_for_mail(mid, mail_data):
         # [2] Pipeline règle DB (Tier 1 + domaine)
         contact_email = (mail_data.get('from_email', '') or '').lower()
         subject = mail_data.get('subject', '')
-        domain = contact_email.split('@')[-1] if '@' in contact_email else ''
+        domain = _extract_email_domain(contact_email)
 
         # [2 bis] Skip si mail de l'utilisateur à lui-même (Fix 2 — 25/04)
         # Classer un mail envoyé par soi-même n'a pas de sens.
@@ -2391,7 +2411,7 @@ def _prewarm_pj_classement_for_mail(mid, mail_data):
         # [3] Pipeline règle DB (Tier 1 contact + keywords)
         contact_email = (mail_data.get('from_email', '') or '').lower()
         subject = mail_data.get('subject', '')
-        domain = contact_email.split('@')[-1] if '@' in contact_email else ''
+        domain = _extract_email_domain(contact_email)
         try:
             subject_kw = _extract_subject_keywords(subject)
         except Exception:
@@ -6259,7 +6279,7 @@ def api_suggest_folder(message_id):
             return jsonify({"error": "Email introuvable"}), 404
 
         contact_email = email.get('from_email', '')
-        domain = contact_email.split('@')[-1] if '@' in contact_email else ''
+        domain = _extract_email_domain(contact_email)
         subject = email.get('subject', '')
         body_preview = email.get('body_preview', '')[:300]
         _subj_kw = _extract_subject_keywords(subject)
@@ -6540,7 +6560,7 @@ def api_classify_email():
         folder_name = data.get('folder_name', '')  # Nom du dossier (fourni par le frontend)
         if email:
             contact_email = email.get('from_email', '')
-            domain = contact_email.split('@')[-1] if '@' in contact_email else ''
+            domain = _extract_email_domain(contact_email)
             subject_kw = _extract_subject_keywords(email.get('subject', ''))
             _db.save_classification(
                 entry_id=new_id,
@@ -6934,7 +6954,7 @@ def api_classify_pj():
     # Fallback : récupérer le contact depuis le cache post-envoi si non fourni
     if not contact_email and message_id:
         contact_email = _post_send_cache.get(f'from_{message_id}', '')
-    domain = contact_email.split('@')[-1] if '@' in contact_email else ''
+    domain = _extract_email_domain(contact_email)
 
     # --- Niveau 1 : Companion filesystem ---
     if level == 1 or (level == 0 and file_content_b64):
@@ -7447,8 +7467,8 @@ def api_suggest_pj_folder(email_id):
         return jsonify({"status": "no_graph"})
 
     subject = request.args.get('subject', '')
-    from_email = request.args.get('from_email', '').strip().lower()
-    domain = from_email.split('@')[1] if '@' in from_email else ''
+    from_email = _normalize_email(request.args.get('from_email', ''))
+    domain = _extract_email_domain(from_email)
 
     folders = _get_windows_folders_cached()
     if not folders:
@@ -7528,9 +7548,9 @@ def api_suggest_pj_folder(email_id):
 @app.route('/api/smart_paperclip')
 def api_smart_paperclip():
     """Hint rapide : quel dossier Windows pour ce contact+sujet (sans liste PJ)."""
-    email_addr = request.args.get('email', '').strip().lower()
+    email_addr = _normalize_email(request.args.get('email', ''))
     subject = request.args.get('subject', '').strip()
-    domain = email_addr.split('@')[1] if '@' in email_addr else ''
+    domain = _extract_email_domain(email_addr)
     _pj_subj_kw = _extract_subject_keywords(subject)
 
     rule = _db.get_pj_folder_suggestion(email_addr, domain, subject_keywords=_pj_subj_kw)
@@ -10056,7 +10076,7 @@ def api_classification_post_send(message_id):
                     return
 
                 contact_email = email.get('from_email', '')
-                domain = contact_email.split('@')[-1] if '@' in contact_email else ''
+                domain = _extract_email_domain(contact_email)
                 subject = email.get('subject', '')
                 subject_kw = _extract_subject_keywords(subject)
 
@@ -10148,7 +10168,7 @@ def api_pj_classification_post_send(message_id):
                     return
 
                 from_email = _post_send_cache.get(f'from_{message_id}', '')
-                domain = from_email.split('@')[-1] if '@' in from_email else ''
+                domain = _extract_email_domain(from_email)
                 subject = _post_send_cache.get(f'subject_{message_id}', '')
 
                 # Suggestion de dossier PJ (DB d'abord)
