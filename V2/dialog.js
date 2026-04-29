@@ -2394,7 +2394,9 @@ function _sendViaGraph(body, to, cc, subject) {
         clientReqId = 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
     }
 
-    fetch(_backendUrl + '/send_reply', {
+    // #10 AbortController timeout 30s — protège contre micro-cuts réseau
+    // ou serveur Graph qui ne répond pas (sinon spinner infini côté user).
+    _fetchTimeout(_backendUrl + '/send_reply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2406,7 +2408,7 @@ function _sendViaGraph(body, to, cc, subject) {
             subject: subject,
             client_request_id: clientReqId,
         }),
-    }).then(function(r) {
+    }, 30000).then(function(r) {
         if (!r.ok && r.status !== 403) {
             throw new Error('Erreur serveur (' + r.status + ')');
         }
@@ -2435,7 +2437,11 @@ function _sendViaGraph(body, to, cc, subject) {
         }
     })
     .catch(function(err) {
-        alert('Erreur r\u00e9seau : ' + err.message);
+        // #10 D\u00e9tection AbortError = timeout 30s explicite (sinon msg "user aborted" cryptique)
+        var msg = (err && err.name === 'AbortError')
+            ? 'D\u00e9lai d\'envoi d\u00e9pass\u00e9 (30s). R\u00e9seau lent ou serveur indisponible. R\u00e9essayez.'
+            : 'Erreur r\u00e9seau : ' + (err && err.message ? err.message : 'inconnue');
+        alert(msg);
         btnSend.disabled = false;
         btnSend.innerHTML = '&#x1f4e4; Relire et envoyer';
     });
@@ -2478,7 +2484,9 @@ function _postSend(body, to, cc, subject) {
     var finalReply = editor.innerHTML;
 
     // Appeler le backend pour sauvegarder
-    fetch(_backendUrl + '/api/post_send', {
+    // #10 AbortController timeout 15s — non-bloquant : si timeout, le workflow
+    // post-send continue gracieusement via le .catch (_finalClose appelé).
+    _fetchTimeout(_backendUrl + '/api/post_send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2495,7 +2503,7 @@ function _postSend(body, to, cc, subject) {
             from_email: _fromEmail,
             from_name: _fromName,
         }),
-    }).then(function(r) {
+    }, 15000).then(function(r) {
         if (!r.ok) console.log('[dialog] post_send HTTP ' + r.status);
         return r.json();
     })
@@ -2649,14 +2657,16 @@ function doClassMail() {
     document.getElementById('btnClassMail').disabled = true;
     document.getElementById('btnClassMail').textContent = 'Classement...';
 
-    fetch(_backendUrl + '/api/classify_email', {
+    // #10 AbortController timeout 10s — fallback gracieux vers _startClassPJ
+    // si timeout (workflow non-bloquant, le mail est déjà envoyé).
+    _fetchTimeout(_backendUrl + '/api/classify_email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             message_id: _messageId,
             folder_id: _selectedFolderId,
         }),
-    }).then(function(r) { return r.json(); })
+    }, 10000).then(function(r) { return r.json(); })
     .then(function(data) {
         document.getElementById('popupClassMail').classList.remove('active');
         _startClassPJ();
@@ -2677,12 +2687,14 @@ function skipClassMail() {
 function _startClassPJ() {
     if (!_messageId) { _finalClose(); return; }
 
-    fetch(_backendUrl + '/api/pj_classification/post_send/' + encodeURIComponent(_messageId))
+    // #10 AbortController timeout 10s — workflow non-bloquant, fallback _finalClose si timeout.
+    _fetchTimeout(_backendUrl + '/api/pj_classification/post_send/' + encodeURIComponent(_messageId), null, 10000)
         .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(function(data) {
             if (data.status === 'scanning') {
                 setTimeout(function() {
-                    fetch(_backendUrl + '/api/pj_classification/post_send/' + encodeURIComponent(_messageId))
+                    // #10 timeout 10s aussi sur le retry
+                    _fetchTimeout(_backendUrl + '/api/pj_classification/post_send/' + encodeURIComponent(_messageId), null, 10000)
                         .then(function(r) { return r.json(); })
                         .then(function(data2) {
                             if (data2.status === 'done' && data2.pj_suggestions && data2.pj_suggestions.attachments && data2.pj_suggestions.attachments.length > 0) {
@@ -3602,7 +3614,8 @@ function _sendViaCompanion(body, to, cc, subject) {
 
     // 1. Graph first via /send_reply (route existante, enrichie 21/04 avec
     //    idempotence + conversion internet_id → Graph id + attachments).
-    fetch(_backendUrl + '/send_reply', {
+    // #10 AbortController timeout 30s — protège contre Graph qui ne répond pas.
+    _fetchTimeout(_backendUrl + '/send_reply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3614,7 +3627,7 @@ function _sendViaCompanion(body, to, cc, subject) {
             subject: subject || '',
             client_request_id: clientReqId,
         })
-    })
+    }, 30000)
     .then(function(r) {
         if (r.status === 403) {
             // Token Microsoft expire ou non disponible
@@ -3640,7 +3653,11 @@ function _sendViaCompanion(body, to, cc, subject) {
     })
     .catch(function(err) {
         // Erreur reseau ou exception JS : message clair user
-        console.warn('[dialog] Envoi Graph échoué : ' + err.message);
-        _onErrorUi('Erreur d\'envoi : ' + (err.message || 'inconnue') + '. Verifiez votre connexion et reessayez.');
+        console.warn('[dialog] Envoi Graph échoué : ' + (err && err.message ? err.message : 'inconnue'));
+        // #10 Détection AbortError = timeout 30s explicite
+        var msg = (err && err.name === 'AbortError')
+            ? 'Délai d\'envoi dépassé (30s). Réseau lent ou serveur indisponible. Réessayez.'
+            : 'Erreur d\'envoi : ' + (err && err.message ? err.message : 'inconnue') + '. Verifiez votre connexion et reessayez.';
+        _onErrorUi(msg);
     });
 }
