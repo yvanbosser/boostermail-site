@@ -21,6 +21,27 @@
 var _params = new URLSearchParams(window.location.search);
 // Audit B1 : URL de base du backend (robuste meme si le dialog est ouvert depuis un autre domaine)
 var _backendUrl = window.location.origin || 'https://localhost:3443';
+
+// Étape 7 finale (29/04/2026 PM) — Auth Token Bearer JWT reçu du shared
+// runtime via DialogParentMessageReceived (action: 'auth_token').
+// Stocké en mémoire JS pour injection dans Authorization: Bearer XXX.
+// Activation Phase 4 (future) : remplacer fetch() par _fetchWithBearer()
+// dans les routes critiques (instant_reply, dialog_init, etc.).
+var _bmAuthToken = '';
+var _bmAuthTokenTs = 0;
+var _bmAuthTokenTtl = 900;
+
+function _fetchWithBearer(url, opts) {
+    /* Wrapper fetch qui injecte Authorization: Bearer si token disponible.
+       Compatible avec le code fetch() existant : si token absent, équivalent
+       à fetch() classique (rétrocompat). */
+    opts = opts || {};
+    opts.headers = opts.headers || {};
+    if (_bmAuthToken) {
+        opts.headers['Authorization'] = 'Bearer ' + _bmAuthToken;
+    }
+    return fetch(url, opts);
+}
 var _mode = _params.get('mode') || 'reply';          // reply, reply_all, forward, new
 var _messageId = _params.get('messageId') || '';
 var _fromName = _params.get('fromName') || _params.get('from') || '';
@@ -2851,6 +2872,16 @@ function _listenParentMessages() {
                                 _fromEmail = data.from_email;
                             }
                             console.log('[dialog] Body recu du parent (' + _mailBodyForGeneration.length + ' chars)');
+
+                        } else if (data.action === 'auth_token') {
+                            // Étape 7 finale (29/04 PM) — JWT reçu du shared runtime
+                            // Stocké en mémoire JS, disponible pour _fetchWithBearer().
+                            // Le token expire dans data.expires_in secondes (typique 900 = 15 min).
+                            // Le shared runtime renouvelle toutes les 10 min et nous le re-pousse.
+                            _bmAuthToken = data.token || '';
+                            _bmAuthTokenTs = data.issued_at_ts || Date.now();
+                            _bmAuthTokenTtl = data.expires_in || 900;
+                            console.log('[dialog] auth_token recu (len=' + _bmAuthToken.length + ', ttl=' + _bmAuthTokenTtl + 's)');
 
                         } else if (data.action === 'compose_data') {
                             // Données compose reçues du parent (mode compose ouvert rapidement)

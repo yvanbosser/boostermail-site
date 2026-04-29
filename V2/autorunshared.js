@@ -35,8 +35,67 @@ function _debugLog(eventName, details) {
 
 // Marqueur de version : s'écrit dès le chargement du JS → permet de vérifier
 // en lisant addin_debug.log que Outlook a bien rechargé le nouveau fichier.
-var _ADDIN_VERSION = 'v20-banner-icone-29-04';
+var _ADDIN_VERSION = 'v21-jwt-bearer-29-04';
 _debugLog('js_loaded', { version: _ADDIN_VERSION });
+
+// =============================================================================
+// Étape 7 finale (29/04/2026 PM) — Auth Token Bearer JWT
+// =============================================================================
+// Le shared runtime fetch un JWT au boot (cookie session same-origin présent),
+// le stocke en mémoire JS, et le transmet au dialog popup via messageChild.
+// Le dialog l'injecte dans Authorization: Bearer XXX pour ses fetches
+// (cross-origin où les cookies ne passent pas).
+//
+// Refresh automatique toutes les 10 min (TTL JWT = 15 min côté serveur).
+// Fail-safe : si fetch échoue, le shared runtime continue sans token (les
+// routes restent permissives via cookie session si applicable).
+
+var _BM_TOKEN = '';            // JWT courant (string vide si non dispo)
+var _BM_TOKEN_TS = 0;          // timestamp issue (pour calcul refresh)
+var _BM_TOKEN_TTL = 900;       // secondes (15 min, mis à jour par /issue_token)
+
+function _fetchAuthToken() {
+    /* POST /api/auth/issue_token (avec cookie session same-origin) →
+       stocke le JWT en mémoire. Fail-safe : pas de retry agressif. */
+    try {
+        fetch(_backendUrl + '/api/auth/issue_token', {
+            method: 'POST',
+            credentials: 'include',
+        })
+        .then(function(resp) {
+            if (resp.status === 401) {
+                _debugLog('jwt_issue_no_session', {});
+                return null;
+            }
+            if (!resp.ok) {
+                _debugLog('jwt_issue_http_error', { status: resp.status });
+                return null;
+            }
+            return resp.json();
+        })
+        .then(function(data) {
+            if (data && data.token) {
+                _BM_TOKEN = data.token;
+                _BM_TOKEN_TS = Date.now();
+                _BM_TOKEN_TTL = data.expires_in || 900;
+                _debugLog('jwt_issued', {
+                    len: _BM_TOKEN.length,
+                    ttl: _BM_TOKEN_TTL,
+                });
+            }
+        })
+        .catch(function(err) {
+            _debugLog('jwt_issue_failed', { msg: String(err) });
+        });
+    } catch (e) {
+        _debugLog('jwt_issue_exception', { msg: String(e) });
+    }
+}
+
+function _scheduleTokenRefresh() {
+    /* Refresh JWT toutes les 10 min (5 min de marge avant TTL 15 min). */
+    setInterval(_fetchAuthToken, 10 * 60 * 1000);
+}
 
 // Safety net global (21/04 P3) : toute exception non catchée → log backend
 // (non bloquant). Évite qu'une erreur silencieuse casse les handlers suivants.
@@ -66,6 +125,12 @@ if (typeof window !== 'undefined') {
 Office.onReady(function (info) {
     _debugLog('office_ready', { host: (info && info.host) || '?' });
     if (info.host === Office.HostType.Outlook) {
+        // Étape 7 finale — fetch JWT immédiatement + scheduler refresh 10 min.
+        // Cookie session same-origin présent → token issued au shared runtime.
+        // Disponible ensuite pour le dialog popup via messageChild.
+        _fetchAuthToken();
+        _scheduleTokenRefresh();
+
         // Enregistrer ItemChanged pour alimenter la popup PyQt en continu
         // Le shared runtime persiste — pas besoin de taskpane
         try {
@@ -424,6 +489,27 @@ function _openViaDisplayDialog(item, dialogUrl, data, getMailBody, fromName, fro
             if (typeof onDialogOpen === 'function') {
                 onDialogOpen(dialog);
             }
+
+            // Étape 7 finale — Transmettre le JWT au dialog ASAP via messageChild
+            // (le dialog l'injectera dans Authorization: Bearer pour ses fetches).
+            // Tentatives à 200ms, 800ms, 1500ms (le dialog handler peut ne pas
+            // être prêt aux 200ms initiales selon platforme).
+            var _tokenDelays = [200, 800, 1500];
+            _tokenDelays.forEach(function(delay) {
+                setTimeout(function() {
+                    if (!_BM_TOKEN) return;
+                    try {
+                        dialog.messageChild(JSON.stringify({
+                            action: 'auth_token',
+                            token: _BM_TOKEN,
+                            expires_in: _BM_TOKEN_TTL,
+                            issued_at_ts: _BM_TOKEN_TS,
+                        }));
+                    } catch (e) {
+                        // Silencieux — le dialog peut ne pas être prêt
+                    }
+                }, delay);
+            });
 
             // Envoyer le body du mail au dialog (Mode Perf. Réduite, lecture uniquement)
             // Délai 1000ms : laisse le temps au dialog de charger + à getAsync de finir

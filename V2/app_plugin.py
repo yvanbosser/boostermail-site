@@ -254,6 +254,23 @@ try:
 except ImportError:
     _gw = None
 
+# Étape 7 finale (29/04/2026 PM) — Auth Token Bearer JWT pour popup Office.js
+# cross-origin. Cf V2/auth_jwt.py docstring pour le contexte complet.
+try:
+    from auth_jwt import (
+        generate_token as _jwt_generate_token,
+        decode_token as _jwt_decode_token,
+        require_bearer_token as _require_bearer_token,
+        require_session_or_bearer as _require_session_or_bearer,
+        JWT_TTL_SECONDS as _JWT_TTL_SECONDS,
+    )
+except ImportError:
+    _jwt_generate_token = None
+    _jwt_decode_token = None
+    _require_bearer_token = lambda f: f  # no-op fallback
+    _require_session_or_bearer = lambda f: f
+    _JWT_TTL_SECONDS = 900
+
 # DB V2 autonome (Option B) — fichier séparé de celui du proto
 # Le proto utilise C:\EasyMail\boostermail.db
 # V2 utilise C:\EasyMail\V2\boostermail.db
@@ -3466,6 +3483,50 @@ def api_current_mail():
         # le client recoit la version coherente capturee maintenant.
         snapshot = dict(_current_mail_data)
     return jsonify({"status": "ok", "mail": snapshot})
+
+
+# =============================================================================
+# Étape 7 finale — Auth Token Bearer JWT (compatibilité popup Office.js)
+# =============================================================================
+
+@app.route('/api/auth/issue_token', methods=['POST', 'GET'])
+def api_auth_issue_token():
+    """Émet un JWT pour le user authentifié via session cookie.
+
+    Le shared runtime (autorunshared.js, contexte same-origin avec cookie
+    session valide) appelle cette route au démarrage. Le JWT retourné est
+    ensuite injecté dans Authorization: Bearer XXX par le dialog popup
+    (cross-origin, où les cookies ne passent pas).
+
+    Endpoint PUBLIC au sens où on ne demande PAS @require_bearer_token
+    (chicken-and-egg). On lit directement session.auth_user_id (cookie).
+    Si session vide → 401 (user pas loggé via OAuth).
+
+    Réponse :
+        {
+            "token": "eyJhbGc...",
+            "expires_in": 900,
+            "token_type": "Bearer"
+        }
+    """
+    if _jwt_generate_token is None:
+        return jsonify({"error": "JWT module unavailable"}), 500
+    user_id = session.get('auth_user_id', '')
+    if not user_id:
+        return jsonify({
+            "error": "Session OAuth requise pour émettre un token",
+            "auth_required": True,
+        }), 401
+    try:
+        token = _jwt_generate_token(user_id, app.secret_key)
+    except Exception as e:
+        logger.warning(f"[auth/issue_token] erreur génération : {e}")
+        return jsonify({"error": "Erreur génération token"}), 500
+    return jsonify({
+        "token": token,
+        "expires_in": _JWT_TTL_SECONDS,
+        "token_type": "Bearer",
+    })
 
 
 # =============================================================================
