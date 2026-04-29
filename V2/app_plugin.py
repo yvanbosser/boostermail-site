@@ -5952,7 +5952,17 @@ def api_companion_proxy(subpath):
     """
     Proxy bi-directionnel vers le Companion HTTP (localhost:5051).
     Résout le problème Mixed Content : popup.html (HTTPS) ne peut pas fetch vers HTTP.
+
+    Mode SaaS pur (depuis pivot 27/04 PM + commit 108e208) : pas de
+    Companion local. La variable d'env BOOSTERMAIL_HAS_COMPANION=0
+    (ou non définie) court-circuite directement vers 503, économise
+    les 3s de timeout TCP à chaque requête legacy frontend.
+    Pour réactiver localement (dev) : BOOSTERMAIL_HAS_COMPANION=1.
     """
+    # 29/04 PM audit cleanup #31 — short-circuit en mode SaaS pur
+    if os.environ.get('BOOSTERMAIL_HAS_COMPANION', '0') != '1':
+        return jsonify({"status": "error", "reason": "companion_not_available_in_saas_mode"}), 503
+
     # #7 audit : valider le subpath contre une whitelist
     base_path = subpath.split('/')[0].split('?')[0]
     if base_path not in _COMPANION_ALLOWED:
