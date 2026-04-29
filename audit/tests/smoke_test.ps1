@@ -50,11 +50,34 @@ function Check-Invariant {
 # ==========================================================================
 # Category 1 - Infrastructure reseau
 # ==========================================================================
+#
+# Mode SaaS pur (depuis pivot 27/04 PM + commit 108e208 du 29/04 PM) :
+# Yvan utilise BoosterMail via OVH (api.boostermail.ai). Le V2 local +
+# Companion local sont desactives par defaut (ENABLE_LOCAL_BACKENDS=False
+# dans boostermail_service.py:42). I-RES-01 et I-RES-02 skippes en mode
+# SaaS pur (pas d'erreur, juste un environnement different).
+# Detection : variable env BOOSTERMAIL_LOCAL_BACKENDS=1 OU port 3443 listener.
 
 Write-Host ""
 Write-Host "=== Category 1 : Infrastructure reseau ===" -ForegroundColor Cyan
 
+# Detection mode local vs SaaS pur (29/04 PM)
+$script:LocalBackendsActive = $false
+if ($env:BOOSTERMAIL_LOCAL_BACKENDS -eq '1') {
+    $script:LocalBackendsActive = $true
+} else {
+    # Heuristique fallback : si port 3443 a un listener, on suppose mode local
+    $script:LocalBackendsActive = ($null -ne (Get-NetTCPConnection -LocalPort 3443 -State Listen -ErrorAction SilentlyContinue))
+}
+if (-not $script:LocalBackendsActive) {
+    Write-Host "  (Mode SaaS pur detecte - V2/Companion locaux non lances - I-RES-01/02 skippes)" -ForegroundColor DarkGray
+}
+
 Check-Invariant "I-RES-01" "V2 ecoute sur 127.0.0.1 ET ::1 (port 3443)" {
+    if (-not $script:LocalBackendsActive) {
+        $script:Skipped += "I-RES-01 : Mode SaaS pur - V2 local non lance - skip"
+        return $true
+    }
     $listeners = Get-NetTCPConnection -LocalPort 3443 -State Listen -ErrorAction SilentlyContinue
     if (-not $listeners) { return $false }
     $addrs = $listeners.LocalAddress | Sort-Object -Unique
@@ -62,6 +85,10 @@ Check-Invariant "I-RES-01" "V2 ecoute sur 127.0.0.1 ET ::1 (port 3443)" {
 }
 
 Check-Invariant "I-RES-02" "Companion ecoute sur 127.0.0.1:5051" {
+    if (-not $script:LocalBackendsActive) {
+        $script:Skipped += "I-RES-02 : Mode SaaS pur - Companion local non lance - skip"
+        return $true
+    }
     $r = try { Invoke-WebRequest "http://127.0.0.1:5051/status" -TimeoutSec 3 -UseBasicParsing } catch { $null }
     return ($r -and $r.StatusCode -eq 200)
 }
