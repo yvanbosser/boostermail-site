@@ -1090,8 +1090,8 @@ def _parallel_prefetch_batch(mails, max_workers=8, tag='batch', check_pause=True
         try:
             if _db.is_treated(mid):
                 continue
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[_db.is_treated] silent error mid={mid[:30]}... : {e}")
         with _prefetch_lock:
             pf_status = _prefetch_cache.get(mid, {}).get('status')
         # Fix I-CX-01 (24/04 P6) : ne skiper que 'running' (en cours).
@@ -1218,8 +1218,8 @@ def _continuous_speculation_loop():
                     if _db.is_treated(mid):
                         _skip_treated += 1
                         continue  # Purge événementielle (6.5)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[_db.is_treated] silent error mid={mid[:30]}... : {e}")
                 with _reply_lock:
                     entry = _reply_cache.get(mid, {})
                 if entry.get('status') in ('running', 'done'):
@@ -4723,8 +4723,8 @@ def _should_speculate(mail_data):
     try:
         if message_id and _db.is_treated(message_id):
             return False, 'mail déjà traité'
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[_db.is_treated] silent error message_id={message_id[:30]}... : {e}")
 
     # Filtre 3 : expéditeur automatique (no-reply / newsletter / postmaster / ...)
     if any(p in from_email for p in _SPEC_NOREPLY_PATTERNS):
@@ -9902,8 +9902,8 @@ def api_echeances_post_send(message_id):
                     for ech in (detected or []):
                         try:
                             _db.save_echeance(ech)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[_db.save_echeance] silent error : {e}")
                     _cache_set(cache_key, detected or [])
                 except Exception as e:
                     logger.warning(f"Erreur scan échéances: {e}")
@@ -10210,8 +10210,8 @@ def api_post_send():
                                 _pdata['register'] = 'tutoiement'
                                 _db.save_contact_profile(_contact, _pdata)
                                 logger.info(f"[learning] {_contact} → forcé tutoiement")
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[_db.save_contact_profile] silent error : {e}")
 
             # Correction greeting/closing → forcer re-analyse contact
             if 'modifier_ouverture' in (categories or '') or 'modifier_cloture' in (categories or ''):
