@@ -1901,7 +1901,12 @@ _POST_SEND_CACHE_TTL = 5 * 60  # 5 min (constante conservee, peut etre utilisee 
 #     'echeance':   {'status': 'running'|'done'|'error', 'data': list|None, 'ts': float},
 #     'classement': {'status': ..., 'data': {suggestion, source}|None, 'ts': float},
 #   }
-_mail_preview_cache = {}
+# Étape 7 multi-tenant — _mail_preview_cache via UserScopedDict (BG cont-spec
+# écrit, routes Flask lisent ; bridge DB user_id assure cohérence en mono-user).
+if _UserScopedDict is not None:
+    _mail_preview_cache = _UserScopedDict('mail_preview')
+else:
+    _mail_preview_cache = {}
 _mail_preview_lock = threading.Lock()
 _MAIL_PREVIEW_TTL = 3600  # 1h
 _MAIL_PREVIEW_MAX = 100
@@ -4009,7 +4014,11 @@ def _normalize_context_c(items, source='unknown', correspondent_email='', my_ema
 # Plan 2 Phase 7 (post-audit) — Cache C keywords 24h (porté depuis proto app.py:391)
 # Évite les re-hits Graph/Companion pour des keywords déjà recherchés dans la journée.
 # Thread-safe via _c_keyword_lock. TTL 24h, cap 200 entries (trim le plus ancien).
-_c_keyword_cache = {}     # keyword_lower.strip() → {'items': [normalized], 'ts': float, 'src': str}
+# Étape 7 multi-tenant — _c_keyword_cache via UserScopedDict (cache contacts par keyword).
+if _UserScopedDict is not None:
+    _c_keyword_cache = _UserScopedDict('c_keyword')  # keyword_lower.strip() → {'items', 'ts', 'src'}
+else:
+    _c_keyword_cache = {}
 _c_keyword_lock = threading.Lock()
 _C_KEYWORD_CACHE_TTL = 24 * 3600
 _C_KEYWORD_CACHE_MAX = 200
@@ -4227,7 +4236,11 @@ _SPEC_NOREPLY_PATTERNS = (
 
 # Filtre #5 : compteur d'ouvertures par mail (RAM). Incrémenté à chaque fois
 # que le mail devient `_current_mail_data` via le polling companion.
-_mail_open_counter = {}
+# Étape 7 multi-tenant — _mail_open_counter via UserScopedDict (Smart Speculative).
+if _UserScopedDict is not None:
+    _mail_open_counter = _UserScopedDict('mail_open_counter')
+else:
+    _mail_open_counter = {}
 _mail_open_counter_lock = threading.Lock()
 
 
@@ -7077,14 +7090,22 @@ def api_search():
 # ROUTES API — GÉNÉRATION IA
 # =============================================================================
 
-_last_generate_times = {}   # {message_id: timestamp} — rate limiting par mail (pas global)
+# Étape 7 multi-tenant — _last_generate_times via UserScopedDict (rate limiting).
+if _UserScopedDict is not None:
+    _last_generate_times = _UserScopedDict('last_generate_times')
+else:
+    _last_generate_times = {}   # {message_id: timestamp} — rate limiting par mail
 _last_generate_lock = threading.Lock()
 
 # --- Classement mail ---------------------------------------------------------
 _classify_momentum = {}  # {'folder_name': str, 'folder_id': str, 'ts': float}
 
 # --- Échéances (pre-filtre heuristique, $0) ----------------------------------
-_echeance_pre_scan_cache = {}   # scan_key → {'status': 'running'|'done', 'echeances': [...], 'ts': float}
+# Étape 7 multi-tenant — _echeance_pre_scan_cache via UserScopedDict.
+if _UserScopedDict is not None:
+    _echeance_pre_scan_cache = _UserScopedDict('echeance_pre_scan')   # scan_key → {'status', 'echeances', 'ts'}
+else:
+    _echeance_pre_scan_cache = {}
 _echeance_pre_scan_lock = threading.Lock()  # Audit : protège _echeance_pre_scan_cache
 _ECHEANCE_DATE_PATTERNS = re.compile(
     r'(?:'
@@ -7175,7 +7196,11 @@ def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids
 
 
 # --- PJ extraction & upload ---------------------------------------------------
-_pj_text_cache = {}        # email_id → {'status': 'running'|'done', 'results': [...], 'ts': float}
+# Étape 7 multi-tenant — _pj_text_cache via UserScopedDict (textes PJ par email).
+if _UserScopedDict is not None:
+    _pj_text_cache = _UserScopedDict('pj_text')   # email_id → {'status', 'results', 'ts'}
+else:
+    _pj_text_cache = {}
 _pj_text_cache_lock = threading.Lock()   # Audit : protège _pj_text_cache (race condition BG vs main)
 _PDF_EXTS = {'.pdf'}
 _MAX_PRE_OCR_PDFS = 3      # Max 3 PDF pré-extraits par mail (limite coût + temps)
@@ -9584,7 +9609,11 @@ def api_pj_classification_post_send(message_id):
 # =============================================================================
 
 # Stockage temporaire du dernier mail proposé (pour diff apprentissage)
-_last_proposed = {}  # {message_id: html_text}
+# Étape 7 multi-tenant — _last_proposed via UserScopedDict (propositions par mail).
+if _UserScopedDict is not None:
+    _last_proposed = _UserScopedDict('last_proposed')  # {message_id: html_text}
+else:
+    _last_proposed = {}
 _proposed_lock = threading.Lock()
 
 def _store_proposed(message_id, html):
