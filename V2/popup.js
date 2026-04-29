@@ -236,6 +236,14 @@ function _initConsumerMode() {
 }
 
 function _connectSSE() {
+    // Fix audit ULTRA 29/04 PM tardif (A2) : fermer l'ancien EventSource
+    // avant d'en ouvrir un nouveau. Sans ça, plusieurs callbacks s'accumulaient
+    // en cas d'appel multiple (polling fallback ou reconnect manuel) → updates
+    // UI dupliquées + double consommation TCP socket OVH.
+    if (_sseSource) {
+        try { _sseSource.close(); } catch (e) {}
+        _sseSource = null;
+    }
     try {
         _sseSource = new EventSource(_backendUrl + '/api/events/stream');
 
