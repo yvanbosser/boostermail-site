@@ -466,6 +466,18 @@ def _normalize_email(email: str) -> str:
     return (email or '').strip().lower()
 
 
+# 29/04 PM audit constantes — timeouts centralisés (extrait des plus
+# critiques). 13 timeouts hardcodés au total identifiés. Ceux-ci sont
+# les + structurants (touchent perf + stabilité). Les autres peuvent
+# rester locaux car contextuels.
+# Override possible via env vars pour tuning prod sans rebuild.
+TIMEOUT_COMPANION_PROXY = int(os.environ.get('BM_TIMEOUT_COMPANION', '3'))   # secondes — proxy /api/companion/*
+TIMEOUT_GRAPH_HTTP = int(os.environ.get('BM_TIMEOUT_GRAPH', '30'))           # secondes — Graph API request
+TIMEOUT_DIALOG_INIT = int(os.environ.get('BM_TIMEOUT_DIALOG_INIT', '8'))     # secondes — dialog_init bundle
+TIMEOUT_PREFETCH_FUTURE = int(os.environ.get('BM_TIMEOUT_PREFETCH', '15'))   # secondes — prefetch futures result
+TIMEOUT_SEMAPHORE_SPECULATE = int(os.environ.get('BM_TIMEOUT_SPECULATE', '120'))  # secondes — semaphore BG generate
+
+
 # 29/04 PM audit perf — regex HTML strip précompilées (Hotspot #3).
 # Avant : 4 sites (1899, 5129, 8368, 9413) recompilaient 3 patterns
 # à chaque appel sur des bodies de 5-10 KB. ~10-25 ms gaspillés par
@@ -4062,7 +4074,7 @@ def _run_prefetch(mail_data):
             ok_spec, skip_reason = _should_speculate(mail_data)
             if ok_spec:
                 def _speculate_ws_done(md):
-                    acq = _ai_speculative_semaphore.acquire(blocking=True, timeout=120)
+                    acq = _ai_speculative_semaphore.acquire(blocking=True, timeout=TIMEOUT_SEMAPHORE_SPECULATE)
                     if not acq:
                         return
                     try:
@@ -4256,7 +4268,7 @@ def _run_prefetch(mail_data):
                 # spéculation quand prefetch déjà 'done' → pas retenté).
                 def _speculate_with_semaphore(md):
                     acquired = _ai_speculative_semaphore.acquire(
-                        blocking=True, timeout=120)
+                        blocking=True, timeout=TIMEOUT_SEMAPHORE_SPECULATE)
                     if not acquired:
                         logger.warning(
                             f"[speculative] Skip sémaphore saturé >120s "
