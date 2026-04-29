@@ -75,11 +75,16 @@ Si tu reviens sur ce doc au début d'une nouvelle session, voici **uniquement ce
 - ❌ Double json.loads `database.py:1098/1110` : 2 sources différentes (input vs DB), pas de double parse
 - ❌ HTTP 200 sur webhooks Graph : intentionnel (commentaire l. 3588) pour éviter retry Microsoft
 
-**Items écartés / false positives** (audits ont over-flaggé) :
-- ❌ Deadlock `_start_speculative` (audit error-handling) : ré-acquisition flaggée à tort, ce sont des `with` séquentiels, pas imbriqués
-- ❌ XSS sur barre PJ (audit sécu) : `_escapeHtml` utilise `textContent`, sécurisé natif
-- ❌ Double json.loads `database.py:1098/1110` : 2 sources différentes (input vs DB), pas de double parse
-- ❌ HTTP 200 sur webhooks Graph : intentionnel (commentaire l. 3588) pour éviter retry Microsoft
+### 🔧 Tech debt — bugs UI/cache détectés post-test Yvan (29/04 PM tardif post-dîner)
+
+**Items résolus dans la même fenêtre** :
+35. ✅ **Bug popup « Mail envoyé ! » bloquée** (commit `42d2c15`) — `autorunshared.js` `DialogMessageReceived` ne traitait que `action: 'send_via_outlook'`, ignorait `action: 'close'` envoyé par dialog après 2.5s d'overlay → dialog ne se fermait jamais. Handler ajouté + `_ADDIN_VERSION` v22.
+36. ✅ **Bug Phase 2 popup classement absente** (commit `570c9b2`) — `/api/{classification,pj_classification}/post_send` re-cherchait from scratch au lieu de réutiliser le cache Phase 1 (`_mail_preview_cache` + DB persistent). 2 routes décorrélées → suggestion null en Phase 2 → frontend skip popup. Fix : Phase 2 appelle `_fetch_single_preview_plate` en priorité.
+37. ✅ **Bug couverture BG 14 mails invisibles** (commit `2f6ba08`) — `_execute_warmup` chargait `limit=50` mails alors que Yvan avait 64 inbox. Fix : 50→200 sur 3 sites. Couverture passée de 22/36 (61%) → **35/36 (97%)** drafts éligibles, **100%** résumés/classements.
+
+**Items à programmer post-Étape 4 webhooks Graph activés** :
+38. **Réduire le warmup à preload DB seul (~1s)** — l'activation des webhooks Graph (Étape 4 SaaS, code prêt commit `6d25576`, pas encore POST `/api/admin/graph_subscription/setup`) rendra le pull Graph du warmup redondant : Microsoft pushera les nouveaux mails à OVH, et `_continuous_speculation_loop` traitera. Le warmup pourra être ramené à un simple `_db.get_recent_email_cache(limit=200)` qui populate `_warmup_cache` en RAM (~1s) sans appel Graph. **Déclencheur** : webhooks Graph activés et stables 7+ jours en prod.
+39. **Diagnostic 1 mail éligible sans draft (`jules.martinez@step-avocats.com`)** — sur les 36 éligibles, 35 ont un draft (97%), reste 1 mail spécifique. Cause probable : filtre heuristique `_should_speculate` (body court une fois nettoyé HTML, ou autre). À investiguer en cas de régression sur ce profil.
 
 ---
 >
