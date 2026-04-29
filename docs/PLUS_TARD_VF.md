@@ -1,6 +1,6 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 29/04/2026 fin de matinée (sujet #14 PARTIELLEMENT IMPLÉMENTÉ — bandeau passif v20 sur OVH, auto-ouverture popup techniquement IMPOSSIBLE confirmé sur 3 limitations Microsoft cumulées ; pivot stratégique vers Étape 7 multi-tenant)
+> **Dernière mise à jour** : 29/04/2026 PM tardif (Étape 7 SaaS multi-tenant **TERMINÉE 22/22 caches (100%)** ; sujet #14 PARTIELLEMENT IMPLÉMENTÉ pour mémoire — bandeau passif v20 sur OVH, auto-ouverture popup techniquement IMPOSSIBLE confirmé sur 3 limitations Microsoft cumulées)
 
 ---
 
@@ -20,12 +20,12 @@ Si tu reviens sur ce doc au début d'une nouvelle session, voici **uniquement ce
 ### ✅ SaaS multi-tenant Étape 7 — TERMINÉ 29/04 PM tardif (22/22 caches migrés, 100%)
 7. **✅✅ Chantier migration multi-tenant 100% TERMINÉ le 29/04 PM tardif**. Helper `V2/user_scoped_cache.py` (UserScopedDict + iter_user_caches + purge_user_caches) + `V2/user_context.py` (get_current_user_id avec bridge DB + @require_user) + 11 commits atomiques. Cleanup BG périodique purge users inactifs > 30j en place. Validation prod OVH sans perte. **Reste sessions futures (~1h)** : décorateur `@require_user` à appliquer aux routes sensibles (~20 routes, code prêt mais nécessite 2e compte Microsoft pour tester sans casser Yvan) + tests bout-en-bout simultanés. Cf `audit/INVARIANTS.md` invariant I-MT-01 et `audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md`.
 
-### 🚨 Avant Étape 8 Beta gratuite (5-10 testeurs externes)
-> **Stratégie consolidée** : les 3 sujets ci-dessous (#11, #12, #13) seront tous traités dans une **session dédiée** où on construira la **page Welcome (`api.boostermail.ai/welcome`)** comme un **wizard en 3 étapes guidées**. Cohérence UX maximale, l'utilisateur est accompagné une fois pour toutes pour configurer son BoosterMail proprement.
+### ✅ Avant Étape 8 Beta gratuite — welcome wizard LIVRÉ 29/04 PM tardif
+> **Stratégie consolidée** : page **Welcome wizard 3 étapes guidées** déployée sur `https://install.boostermail.ai/welcome.html` (commit `672ef12`). Couvre les 3 sujets #11+#12+#13 en une seule UX cohérente.
 
-11. **Popup BoosterMail bloquée par Edge au 1er clic chez les beta-testeurs Outlook Web** — fix « fallback intelligent » (1-2 h). Détail section 11 ci-dessous. → **Étape 1 du welcome : autoriser les popups**
-12. **Placement intelligent de la popup BoosterMail (multi-écrans, centrage parfait)** — Window Management API demandée pendant le Welcome sur `api.boostermail.ai/welcome` (5-6 h). Détail section 12 ci-dessous. → **Étape 2 du welcome : activer le placement intelligent**
-13. **Bouton BoosterMail relégué au launcher d'apps Outlook Web par Microsoft (politique sideload)** — instructions de pinning intégrées au welcome (1 h). Détail section 13 ci-dessous. → **Étape 3 du welcome : épingler BoosterMail dans la barre d'actions**
+11. **✅ Popup BoosterMail bloquée par Edge** — Étape 1 du welcome : test popup + guide d'autorisation par browser. Si bloqué, instructions Edge/Chrome/Firefox/Safari dans `<details>`.
+12. **✅ Placement intelligent multi-écrans** — Étape 2 du welcome : appel `window.getScreenDetails()` (Window Management API) avec fallback gracieux si non supportée.
+13. **✅ Pinning bouton Outlook** — Étape 3 du welcome : instructions textuelles + visuel ASCII de la barre d'actions + confirmation manuelle. Note explicite que Microsoft ne permet pas l'automatisation (politique sideload, audit pinning 29/04 PM).
 
 ### 🟡 Audits profonds reportés (sessions dédiées 1-2 h)
 8. **Audit #1 Pattern #17 backend approfondi** — 38 closures Python à auditer
