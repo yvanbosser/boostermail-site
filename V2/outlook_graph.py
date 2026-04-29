@@ -82,6 +82,37 @@ class GraphClient(EmailProvider):
             'Accept': 'application/json',
         })
 
+    # 29/04 PM audit resource leaks — close session explicite + context manager.
+    # GraphClient est instancié à chaque requête Flask (cf get_graph() factory
+    # app_plugin.py:430). Sans fermeture, les sessions HTTP s'accumulent en
+    # connexions TIME_WAIT (30-60s par socket). Pas critique en mono-user
+    # mais avoir close() permet d'être plus propre et facilite le multi-tenant.
+    def close(self):
+        """Ferme la session HTTP sous-jacente (libère les pools de connexions)."""
+        try:
+            if self._session is not None:
+                self._session.close()
+        except Exception:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
+    def __del__(self):
+        # Filet de sécurité GC : si oubli de close() explicite, on ferme
+        # quand l'objet est garbage-collected. Pas une excuse pour ne pas
+        # close(), juste un fallback. Le `try` évite les erreurs durant
+        # l'interpreter shutdown (où requests peut être déjà partiellement
+        # déchargé).
+        try:
+            self.close()
+        except Exception:
+            pass
+
     # =========================================================================
     # HELPERS PRIVÉS
     # =========================================================================
