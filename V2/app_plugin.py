@@ -466,6 +466,25 @@ def _normalize_email(email: str) -> str:
     return (email or '').strip().lower()
 
 
+# 29/04 PM audit constantes #29 — status caches en classe (rétro-compat
+# avec sites comparant à strings 'done', 'running', etc.). Pas Enum
+# strict pour ne pas casser les égalités existantes.
+# Migration progressive : nouveaux sites utilisent CacheStatus.DONE,
+# anciens restent tolérés ('done' == CacheStatus.DONE).
+class CacheStatus:
+    """Statuts standards des caches BG. Valeurs str stables (rétro-compat)."""
+    RUNNING = 'running'
+    DONE = 'done'
+    ERROR = 'error'
+    CANCELLED = 'cancelled'
+    FILTERED = 'filtered'
+
+    # Set des statuts terminaux (frozenset = immutable + lookups O(1))
+    TERMINAL = frozenset({'done', 'error', 'cancelled'})
+    # Statuts indiquant une terminaison avec résultat (sans cancelled)
+    COMPLETED = frozenset({'done', 'error'})
+
+
 # 29/04 PM audit constantes — timeouts centralisés (extrait des plus
 # critiques). 13 timeouts hardcodés au total identifiés. Ceux-ci sont
 # les + structurants (touchent perf + stabilité). Les autres peuvent
@@ -4980,7 +4999,7 @@ def _start_speculative(mail_data):
                     return
             with _prefetch_lock:
                 prefetch_status = _prefetch_cache.get(cache_key, {}).get('status', 'none')
-            if prefetch_status in ('done', 'error'):
+            if prefetch_status in CacheStatus.COMPLETED:
                 break
             time.sleep(0.2)
 
@@ -5083,7 +5102,7 @@ def _start_speculative(mail_data):
                 while time.time() - _pj_wait_start < 10:
                     with _pj_text_cache_lock:
                         pj_entry = _pj_text_cache.get(message_id, {})
-                    if pj_entry.get('status') in ('done', 'error'):
+                    if pj_entry.get('status') in CacheStatus.COMPLETED:
                         break
                     time.sleep(0.3)
                 with _pj_text_cache_lock:
@@ -8345,7 +8364,7 @@ def api_instant_reply():
                 time.sleep(_delay_ms / 1000.0)
                 with _reply_lock:
                     entry = _reply_cache.get(message_id, {})
-                if entry.get('status') in ('done', 'error', 'cancelled'):
+                if entry.get('status') in CacheStatus.TERMINAL:
                     break
         if (entry.get('source') in ('bg_speculation', 'template')
                 and entry.get('status') == 'done'
