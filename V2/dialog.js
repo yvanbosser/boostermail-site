@@ -921,6 +921,8 @@ function _loadDialogBundle() {
             if (email && email.error === 'auth_required') {
                 document.getElementById('mailBody').innerHTML =
                     '<p style="color:#999; font-size:11px;">Reconnexion Microsoft requise.</p>';
+                // #15 bandeau in-dialog avec bouton Se reconnecter
+                _showReauthBanner('Session Microsoft expirée. Reconnectez-vous pour charger le mail.');
                 _bs();
             } else if (email) {
                 _renderMailBody(email);
@@ -2019,6 +2021,8 @@ function _fetchGenerateReply(body) {
                                 editor.innerHTML = '<p style="color:#c00;">' + _escapeHtml(_errMsg) + '</p>';
                                 if (data.auth_required) {
                                     document.getElementById('headerStatus').textContent = 'Session expiree — reconnectez-vous';
+                                    // #15 bandeau in-dialog avec bouton Se reconnecter
+                                    _showReauthBanner('Session Microsoft expirée. Reconnectez-vous pour générer la réponse.');
                                 } else if (data.error === 'quota_exceeded') {
                                     document.getElementById('headerStatus').textContent = 'Quota quotidien atteint';
                                 }
@@ -2435,7 +2439,8 @@ function _sendViaGraph(body, to, cc, subject) {
             _postSend(body, to, cc, subject);
         } else if (data.auth_required) {
             // Token expiré
-            alert('Session expir\u00e9e. Reconnectez-vous via Profil > Mode Standard.');
+            // #15 bandeau in-dialog avec bouton Se reconnecter (vs alert + nav manuelle)
+            _showReauthBanner('Session Microsoft expir\u00e9e. Reconnectez-vous pour envoyer.');
             _safeSetSendBtn({ html: '&#x1f4e4; Relire et envoyer', disabled: false });
         } else {
             alert('Erreur envoi : ' + (data.error || 'inconnue'));
@@ -3201,6 +3206,71 @@ function _clearProgressPlaceholder() {
 }
 
 /**
+ * #15 Affiche un bandeau in-dialog "Session expirée" avec bouton intégré
+ * « Se reconnecter » qui ouvre la page profil dans une fenêtre détachée.
+ *
+ * Avant : alert() bloquant + demande de navigation manuelle vers
+ * Profil > Mode Standard → friction UX inacceptable, surtout en plein
+ * envoi de mail.
+ *
+ * Après : bandeau orange non-bloquant en haut du dialog avec bouton qui
+ * ouvre `/profile` dans une popup (500×600), idempotent (un seul bandeau
+ * à la fois — re-appel = remplace le contenu). Garde anti-spam :
+ * disparaît au clic « Se reconnecter » et au close manuel via X.
+ */
+function _showReauthBanner(message) {
+    // Idempotent : si bandeau déjà présent, on met à jour le message et on s'arrête
+    var existing = document.getElementById('reauthBanner');
+    if (existing) {
+        var msgEl = existing.querySelector('.reauth-banner-msg');
+        if (msgEl) msgEl.textContent = message || 'Session Microsoft expirée.';
+        return;
+    }
+    var banner = document.createElement('div');
+    banner.id = 'reauthBanner';
+    banner.style.cssText =
+        'position:fixed;top:0;left:0;right:0;z-index:9999;' +
+        'background:#fff3cd;border-bottom:1px solid #f0c674;' +
+        'padding:8px 12px;display:flex;align-items:center;gap:10px;' +
+        'font-size:12px;font-family:Segoe UI,Arial,sans-serif;' +
+        'box-shadow:0 1px 3px rgba(0,0,0,0.08);';
+    var icon = document.createElement('span');
+    icon.textContent = '⚠️';
+    icon.style.cssText = 'font-size:14px;flex-shrink:0;';
+    var msg = document.createElement('span');
+    msg.className = 'reauth-banner-msg';
+    msg.textContent = message || 'Session Microsoft expirée.';
+    msg.style.cssText = 'flex:1;color:#7d5a00;';
+    var btnReauth = document.createElement('button');
+    btnReauth.textContent = 'Se reconnecter';
+    btnReauth.style.cssText =
+        'background:#0F6CBD;color:#fff;border:none;padding:5px 12px;' +
+        'border-radius:3px;cursor:pointer;font-size:12px;flex-shrink:0;';
+    btnReauth.onclick = function() {
+        try {
+            window.open(_backendUrl + '/profile', 'BoosterMailReauth',
+                        'width=520,height=640,resizable=yes,scrollbars=yes');
+        } catch(_) {
+            // Fallback si popup bloquée : redirige le dialog lui-même
+            window.location.href = _backendUrl + '/profile';
+        }
+        // Le bandeau reste visible — disparaît au refresh ou retry envoi
+    };
+    var btnClose = document.createElement('button');
+    btnClose.textContent = '✕';
+    btnClose.title = 'Masquer';
+    btnClose.style.cssText =
+        'background:transparent;color:#7d5a00;border:none;cursor:pointer;' +
+        'font-size:14px;padding:0 4px;flex-shrink:0;';
+    btnClose.onclick = function() { try { banner.remove(); } catch(_) {} };
+    banner.appendChild(icon);
+    banner.appendChild(msg);
+    banner.appendChild(btnReauth);
+    banner.appendChild(btnClose);
+    document.body.appendChild(banner);
+}
+
+/**
  * #16 Choix du wording selon le contexte quand `points.length === 0`.
  *
  * Avant : « Pas de points clés identifiés. » dans tous les cas → ambigu pour
@@ -3688,8 +3758,10 @@ function _sendViaCompanion(body, to, cc, subject) {
     }, 30000)
     .then(function(r) {
         if (r.status === 403) {
-            // Token Microsoft expire ou non disponible
-            _onErrorUi('Session Microsoft expiree. Reconnectez-vous via Profil > Mode Standard, puis reessayez.');
+            // Token Microsoft expiré ou non disponible
+            // #15 bandeau in-dialog avec bouton Se reconnecter (vs alert + nav manuelle)
+            _showReauthBanner('Session Microsoft expirée. Reconnectez-vous pour envoyer.');
+            _safeSetSendBtn({ html: '&#x1f4e4; Envoyer', disabled: false });
             return null;
         }
         if (!r.ok) {
@@ -3704,7 +3776,9 @@ function _sendViaCompanion(body, to, cc, subject) {
         if (data.success) {
             _onSuccessUi('graph');
         } else if (data.auth_required) {
-            _onErrorUi('Session expirée. Reconnectez-vous via Profil > Mode Standard.');
+            // #15 bandeau in-dialog avec bouton Se reconnecter (au lieu de alert via _onErrorUi)
+            _showReauthBanner('Session Microsoft expirée. Reconnectez-vous pour envoyer.');
+            _safeSetSendBtn({ html: '&#x1f4e4; Envoyer', disabled: false });
         } else {
             _onErrorUi('Erreur envoi : ' + (data.error || data.reason || 'inconnue'));
         }
