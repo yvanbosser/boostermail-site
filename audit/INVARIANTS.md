@@ -531,6 +531,31 @@ Tous les chiffres « N commits master » mentionnés dans les docs vivants (PROM
 - **Recommandation** : préférer une formulation **relative** (« ~30 commits ») ou un hash (`89e6524+`) plutôt qu'un chiffre figé qui devient faux au commit suivant
 - **Action si violé** : harmoniser tous les docs vivants à la même valeur OU passer en formulation relative
 
+## Catégorie 15 — Conventions code V2 (ajout 29/04/2026 PM tardif post-audit stabilisation)
+
+### I-CODE-MODELS-01 : Modèles Claude centralisés (pas de hardcode)
+Les noms de modèles `claude-*` ne doivent apparaître hardcodés que dans les constantes module-level de `V2/claude_ai.py:21-24` (MODEL, MODEL_CLASSIFY, MODEL_ANALYSIS, MODEL_HAIKU_FAST). Les autres sites doivent référencer ces constantes (importables depuis `app_plugin.py` via `CLAUDE_MODEL_*`).
+- **Test** : `grep -rn '"claude-sonnet-4\|"claude-haiku-4' V2/*.py | grep -v 'claude_ai.py:1[7-9]\|claude_ai.py:2[0-9]' | wc -l` → doit retourner 0 (sauf core/claude_provider.py:DEFAULT_MODEL volontairement isolé)
+- **Pourquoi** : `claude-sonnet-4-20250514` est marqué deprecated par Anthropic (EOL 15/06/2026). Migration future doit être 1 seul changement.
+- **Action si violé** : refactorer le site pour utiliser la constante centralisée
+
+### I-CODE-EMAIL-NORM-01 : Lookup email DB toujours via `_normalize_email()`
+Les sites qui font un lookup DB ou cache sur un email utilisateur (correspondant, from_email, to_email) doivent passer par `_normalize_email(value)` au lieu de `(value or '').strip().lower()` répliqué.
+- **Test** : `grep -nE "(correspondant|from_email|to_email|contact_email|sender|email_addr)\s*=\s*\(" V2/app_plugin.py | grep "strip()\.lower()"` → doit retourner ≤ 5 (sites text/heuristique acceptables)
+- **Pourquoi** : convergence DB lookup. Si on change un jour la stratégie (NFKC, accent strip), 1 seul endroit à modifier.
+- **Action si violé** : migrer le site vers `_normalize_email(...)`
+
+### I-CODE-DOMAIN-EXTRACT-01 : Extraction domaine via `_extract_email_domain()`
+Pas de `email.split('@')[-1]` ou `[1]` directement. Utiliser le helper centralisé qui prend [-1] (robuste pour emails malformés).
+- **Test** : `grep -nE "split\('@'\)\[(1|-1)\]" V2/app_plugin.py` → doit retourner 0 (le helper fait son split en interne)
+- **Pourquoi** : 2 bugs latents `[1]` au lieu de `[-1]` ont été corrigés le 29/04 PM. Convergence préventive.
+
+### I-CODE-REGEX-PRECOMP-01 : Regex hot path précompilées
+Les regex utilisées dans des fonctions appelées >10×/seconde (génération réponse, classification, registre tu/vous, HTML strip) doivent être compilées au module-level (`_RE_XXX = re.compile(...)`).
+- **Test** : grep `re\.compile\(` dans des fonctions vs `re\.match|re\.search|re\.findall|re\.sub` → repérer les patterns recompilés en boucle
+- **Pourquoi** : audit perf 29/04 PM a mesuré 20-40 ms gaspillés par génération sur les regex non précompilées
+- **Action si violé** : précompiler en module-level avec un nom `_RE_XXX_DESCRIPTIF`
+
 ---
 
 ## Mise à jour
