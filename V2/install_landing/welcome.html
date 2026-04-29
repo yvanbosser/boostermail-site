@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BoosterMail — Configurer en 2 minutes</title>
+    <meta name="description" content="Configurez BoosterMail en 3 étapes guidées : autoriser les popups, activer le placement intelligent, épingler le bouton.">
+    <link rel="icon" type="image/png" href="/assets/icon-32.png">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; color: #333; background: #f5f8fc; line-height: 1.5; -webkit-font-smoothing: antialiased; min-height: 100vh; }
+        a { color: #0F6CBD; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        /* Header */
+        .topbar { background: #0F6CBD; color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 10px; }
+        .topbar-logo { width: 28px; height: 28px; }
+        .topbar-title { font-weight: 700; font-size: 18px; letter-spacing: 0.2px; }
+
+        /* Hero */
+        .hero { max-width: 760px; margin: 40px auto 16px; padding: 0 24px; text-align: center; }
+        .hero h1 { font-size: 32px; font-weight: 700; color: #1a1a1a; margin-bottom: 12px; line-height: 1.2; }
+        .hero p.tagline { font-size: 16px; color: #555; max-width: 540px; margin: 0 auto 24px; }
+
+        /* Progress bar */
+        .progress { max-width: 600px; margin: 0 auto 32px; padding: 0 24px; }
+        .progress-track { background: #e0e6ed; height: 6px; border-radius: 3px; overflow: hidden; }
+        .progress-fill { background: #0F6CBD; height: 100%; transition: width 0.3s ease; width: 33%; }
+        .progress-steps { display: flex; justify-content: space-between; margin-top: 10px; font-size: 12px; color: #888; }
+        .progress-steps .step-label { padding: 0 8px; transition: color 0.3s; }
+        .progress-steps .step-label.active { color: #0F6CBD; font-weight: 600; }
+        .progress-steps .step-label.done { color: #1f7a3a; }
+
+        /* Step card */
+        .step-card { max-width: 720px; margin: 0 auto; padding: 0 24px 32px; }
+        .step-content { background: #fff; border: 1px solid #e0e6ed; border-radius: 12px; padding: 32px; box-shadow: 0 2px 12px rgba(15, 108, 189, 0.06); }
+        .step-content[hidden] { display: none; }
+        .step-num-badge { display: inline-block; padding: 4px 12px; background: #f0f7ff; color: #0F6CBD; font-weight: 700; font-size: 12px; border-radius: 12px; margin-bottom: 12px; letter-spacing: 0.5px; }
+        .step-content h2 { font-size: 24px; font-weight: 700; color: #1a1a1a; margin-bottom: 12px; line-height: 1.3; }
+        .step-content > p { font-size: 15px; color: #555; margin-bottom: 20px; }
+        .step-content .why-box { background: #f0f7ff; border-left: 3px solid #0F6CBD; padding: 12px 16px; border-radius: 6px; margin-bottom: 24px; font-size: 14px; color: #444; }
+        .step-content .why-box strong { color: #0F6CBD; }
+        .step-content ol, .step-content ul { padding-left: 24px; margin-bottom: 20px; }
+        .step-content ol li, .step-content ul li { margin-bottom: 10px; font-size: 14px; color: #444; }
+        .step-content code { background: #f0f7ff; padding: 2px 8px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 13px; color: #0F6CBD; }
+        .step-content kbd { background: #fff; border: 1px solid #c7d2dc; border-bottom-width: 2px; padding: 2px 6px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 12px; color: #333; }
+
+        /* Action area */
+        .action-area { background: #f8fafc; border: 1px dashed #c7d2dc; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center; }
+        .action-area p { font-size: 14px; color: #555; margin-bottom: 14px; }
+        .action-btn { display: inline-block; padding: 12px 24px; background: #0F6CBD; color: #fff; border: none; border-radius: 8px; font-weight: 600; font-size: 15px; cursor: pointer; transition: background 0.15s; font-family: inherit; }
+        .action-btn:hover { background: #0a5599; }
+        .action-btn:focus { outline: 3px solid rgba(15,108,189,0.3); }
+        .action-btn[disabled] { background: #b0c4d8; cursor: not-allowed; }
+        .action-btn.success { background: #4caf50; }
+        .action-status { display: block; margin-top: 12px; font-size: 13px; }
+        .action-status.success { color: #1f7a3a; font-weight: 600; }
+        .action-status.warning { color: #8a5a00; }
+        .action-status.error { color: #a02828; }
+
+        /* Visual aids */
+        .visual-aid { background: #fafbfc; border: 1px solid #e0e6ed; border-radius: 8px; padding: 16px; margin: 16px 0; font-size: 13px; }
+        .visual-aid-title { font-weight: 600; color: #555; margin-bottom: 8px; font-size: 13px; }
+        .ascii-mock { font-family: 'Consolas', monospace; font-size: 11px; color: #444; line-height: 1.4; white-space: pre; overflow-x: auto; }
+
+        /* Nav buttons */
+        .nav-row { display: flex; justify-content: space-between; align-items: center; margin-top: 28px; gap: 12px; }
+        .nav-btn { padding: 10px 20px; border: 1px solid #c7d2dc; background: #fff; color: #555; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.15s; font-family: inherit; }
+        .nav-btn:hover:not(:disabled) { border-color: #0F6CBD; color: #0F6CBD; }
+        .nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .nav-btn.primary { background: #0F6CBD; color: #fff; border-color: #0F6CBD; }
+        .nav-btn.primary:hover:not(:disabled) { background: #0a5599; color: #fff; }
+        .skip-link { color: #888; font-size: 13px; cursor: pointer; background: none; border: none; padding: 4px 8px; font-family: inherit; }
+        .skip-link:hover { color: #555; text-decoration: underline; }
+
+        /* Final */
+        .final-message { text-align: center; padding: 32px; }
+        .final-message h2 { font-size: 28px; color: #1a1a1a; margin-bottom: 14px; }
+        .final-message p { font-size: 16px; color: #555; margin-bottom: 24px; }
+        .final-emoji { font-size: 56px; margin-bottom: 16px; line-height: 1; }
+
+        @media (max-width: 600px) {
+            .hero h1 { font-size: 26px; }
+            .step-content { padding: 24px 18px; }
+            .step-content h2 { font-size: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <header class="topbar" role="banner">
+        <img src="/assets/icon-32.png" alt="" class="topbar-logo">
+        <span class="topbar-title">BoosterMail</span>
+    </header>
+
+    <main role="main">
+        <section class="hero">
+            <h1>Configurez BoosterMail en 2 minutes</h1>
+            <p class="tagline">3 étapes guidées pour profiter pleinement de votre assistant IA dans Outlook.</p>
+        </section>
+
+        <div class="progress" role="progressbar" aria-valuemin="1" aria-valuemax="3" aria-valuenow="1" id="progressBar">
+            <div class="progress-track">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-steps">
+                <span class="step-label active" data-step="1">1 · Autoriser les popups</span>
+                <span class="step-label" data-step="2">2 · Placement intelligent</span>
+                <span class="step-label" data-step="3">3 · Épingler le bouton</span>
+            </div>
+        </div>
+
+        <div class="step-card">
+            <!-- Étape 1 — Autoriser les popups Edge -->
+            <article class="step-content" id="step1">
+                <span class="step-num-badge">ÉTAPE 1 · 30 SECONDES</span>
+                <h2>Autoriser les popups depuis BoosterMail</h2>
+                <p>BoosterMail s'ouvre dans une popup pour générer vos réponses. Sur certains navigateurs (Edge, Chrome), il faut l'autoriser explicitement la première fois.</p>
+
+                <div class="why-box">
+                    <strong>Pourquoi c'est important :</strong> sans cette autorisation, votre clic sur le bouton BoosterMail ne fait rien (la popup est silencieusement bloquée par le navigateur).
+                </div>
+
+                <div class="action-area">
+                    <p>Cliquez sur le bouton ci-dessous pour tester. Si une popup apparaît, c'est OK ! Sinon, votre navigateur la bloque.</p>
+                    <button type="button" class="action-btn" id="popupTestBtn">Tester l'ouverture popup</button>
+                    <span class="action-status" id="popupStatus" aria-live="polite"></span>
+                </div>
+
+                <details>
+                    <summary style="cursor:pointer; color:#0F6CBD; font-size:14px; margin-top:8px;">Comment autoriser les popups si bloquées ?</summary>
+                    <ol style="margin-top:12px;">
+                        <li><strong>Microsoft Edge / Chrome</strong> : cliquez sur l'icône en bout de barre d'adresse (souvent un cadenas ou un mini-écran avec ❌). Choisissez « Toujours autoriser les pop-ups » depuis ce site.</li>
+                        <li><strong>Firefox</strong> : cliquez sur le bandeau jaune en haut de la page → « Autoriser les pop-ups ».</li>
+                        <li><strong>Safari</strong> : Préférences → Sites web → Pop-up → Autoriser pour ce domaine.</li>
+                        <li>Revenez ici puis re-cliquez sur « Tester l'ouverture popup ».</li>
+                    </ol>
+                </details>
+
+                <div class="nav-row">
+                    <span></span>
+                    <div>
+                        <button type="button" class="skip-link" data-action="skip">Passer cette étape</button>
+                        <button type="button" class="nav-btn primary" data-action="next">Suivant →</button>
+                    </div>
+                </div>
+            </article>
+
+            <!-- Étape 2 — Placement intelligent multi-écrans -->
+            <article class="step-content" id="step2" hidden>
+                <span class="step-num-badge">ÉTAPE 2 · 30 SECONDES</span>
+                <h2>Activer le placement intelligent (multi-écrans)</h2>
+                <p>Si vous avez plusieurs écrans, BoosterMail peut s'ouvrir automatiquement sur le bon écran (à côté d'Outlook). Cette permission s'appelle <code>window-management</code> côté navigateur.</p>
+
+                <div class="why-box">
+                    <strong>Pourquoi c'est utile :</strong> sans cette permission, la popup BoosterMail s'ouvre toujours sur l'écran principal, même si Outlook est sur un autre écran. Avec, elle suit Outlook automatiquement.
+                </div>
+
+                <div class="action-area">
+                    <p>Cliquez sur le bouton ci-dessous puis répondez « Autoriser » dans la popup du navigateur.</p>
+                    <button type="button" class="action-btn" id="windowMgmtBtn">Activer le placement intelligent</button>
+                    <span class="action-status" id="windowMgmtStatus" aria-live="polite"></span>
+                </div>
+
+                <details>
+                    <summary style="cursor:pointer; color:#0F6CBD; font-size:14px; margin-top:8px;">Vous avez un seul écran ? Cette étape est optionnelle</summary>
+                    <p style="margin-top:12px; font-size:14px; color:#555;">Si vous travaillez sur un seul écran, BoosterMail s'ouvrira correctement sans cette permission. Vous pouvez passer cette étape en toute sécurité.</p>
+                </details>
+
+                <div class="nav-row">
+                    <button type="button" class="nav-btn" data-action="prev">← Précédent</button>
+                    <div>
+                        <button type="button" class="skip-link" data-action="skip">Passer cette étape</button>
+                        <button type="button" class="nav-btn primary" data-action="next">Suivant →</button>
+                    </div>
+                </div>
+            </article>
+
+            <!-- Étape 3 — Épingler le bouton -->
+            <article class="step-content" id="step3" hidden>
+                <span class="step-num-badge">ÉTAPE 3 · 1 MINUTE</span>
+                <h2>Épingler le bouton BoosterMail dans Outlook</h2>
+                <p>Microsoft Outlook range les add-ins comme BoosterMail dans un menu secondaire <strong>« Plus d'apps »</strong> (le petit carré avec 4 points dans la barre d'actions). Pour le voir tout le temps, il faut l'épingler.</p>
+
+                <div class="why-box">
+                    <strong>Pourquoi c'est important :</strong> si BoosterMail n'est pas épinglé, vous devez cliquer 2 fois pour l'ouvrir (Plus d'apps → BoosterMail). Une fois épinglé, c'est 1 seul clic.
+                </div>
+
+                <h3 style="font-size:16px; color:#1a1a1a; margin: 20px 0 10px;">Comment faire :</h3>
+                <ol>
+                    <li>Dans Outlook (web ou New Outlook desktop), <strong>ouvrez n'importe quel mail</strong>.</li>
+                    <li>En haut à droite, cliquez sur l'icône <strong>« Plus d'apps »</strong> ou <strong>« Apps »</strong> (le carré avec 4 points).</li>
+                    <li>Trouvez <strong>BoosterMail</strong> dans la liste qui s'ouvre.</li>
+                    <li>Faites <strong>clic-droit</strong> sur BoosterMail.</li>
+                    <li>Choisissez <strong>« Épingler »</strong> (ou « Pin »).</li>
+                </ol>
+
+                <div class="visual-aid">
+                    <div class="visual-aid-title">Aperçu schématique de la barre d'actions Outlook :</div>
+                    <pre class="ascii-mock">┌────────────────────────────────────────────────────┐
+│  📩 Mail ouvert                                    │
+├────────────────────────────────────────────────────┤
+│  [↩ Répondre]  [↩↩ Rép. tous]  [→ Transférer]     │
+│  [⌫ Supprimer]  [🗂 Archiver]  [⊞ Plus d'apps] ←──┘
+│                                                    │
+│  Cliquez sur ⊞ Plus d'apps                         │
+│       ↓                                            │
+│  ┌──────────────┐                                  │
+│  │ BoosterMail ←─── Clic-droit → « Épingler »     │
+│  │ Autre app    │                                  │
+│  └──────────────┘                                  │
+│                                                    │
+│  Une fois épinglé, BoosterMail apparaît            │
+│  directement dans la barre principale :            │
+│                                                    │
+│  [↩][↩↩][→][⌫][🗂][⚡ BoosterMail][⊞]              │
+└────────────────────────────────────────────────────┘</pre>
+                </div>
+
+                <div class="why-box" style="background:#fff8e6; border-left-color:#f5a623;">
+                    <strong>Note :</strong> cette étape est <strong>manuelle</strong> (Microsoft ne nous laisse pas l'automatiser). Vous ne la ferez qu'une seule fois — Outlook se souvient de votre choix.
+                </div>
+
+                <div class="action-area">
+                    <p>Une fois fait, cliquez ci-dessous pour valider.</p>
+                    <button type="button" class="action-btn" id="pinDoneBtn">C'est fait, j'ai épinglé BoosterMail</button>
+                    <span class="action-status" id="pinStatus" aria-live="polite"></span>
+                </div>
+
+                <div class="nav-row">
+                    <button type="button" class="nav-btn" data-action="prev">← Précédent</button>
+                    <button type="button" class="nav-btn primary" data-action="finish">Terminer</button>
+                </div>
+            </article>
+
+            <!-- Final -->
+            <article class="step-content" id="stepFinal" hidden>
+                <div class="final-message">
+                    <div class="final-emoji">🚀</div>
+                    <h2>Vous êtes prêt !</h2>
+                    <p>BoosterMail est maintenant configuré pour fonctionner au mieux dans Outlook.</p>
+                    <p style="margin-top:8px; font-size:14px; color:#888;">Vous pouvez fermer cet onglet et retourner dans Outlook.</p>
+                    <button type="button" class="action-btn" onclick="window.close()" style="margin-top:14px;">Fermer cet onglet</button>
+                </div>
+            </article>
+        </div>
+    </main>
+
+    <footer style="text-align:center; padding: 32px 24px; color:#888; font-size: 13px;">
+        <a href="/">← Retour à la page d'installation</a> ·
+        <a href="/privacy.html">Confidentialité</a> ·
+        <a href="/terms.html">CGU</a>
+    </footer>
+
+    <script>
+        (function() {
+            'use strict';
+            var currentStep = 1;
+            var totalSteps = 3;
+            var state = { popup: null, windowMgmt: null, pin: null };
+
+            function show(stepId) {
+                document.querySelectorAll('.step-content').forEach(function(el) { el.hidden = true; });
+                var target = document.getElementById(stepId);
+                if (target) target.hidden = false;
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+
+            function updateProgress() {
+                var pct = (currentStep / totalSteps) * 100;
+                document.getElementById('progressFill').style.width = pct + '%';
+                document.querySelectorAll('.step-label').forEach(function(el) {
+                    var n = parseInt(el.getAttribute('data-step'), 10);
+                    el.classList.remove('active', 'done');
+                    if (n < currentStep) el.classList.add('done');
+                    else if (n === currentStep) el.classList.add('active');
+                });
+                document.getElementById('progressBar').setAttribute('aria-valuenow', currentStep);
+            }
+
+            function goNext() {
+                if (currentStep < totalSteps) {
+                    currentStep++;
+                    show('step' + currentStep);
+                    updateProgress();
+                }
+            }
+
+            function goPrev() {
+                if (currentStep > 1) {
+                    currentStep--;
+                    show('step' + currentStep);
+                    updateProgress();
+                }
+            }
+
+            function finish() {
+                show('stepFinal');
+                document.getElementById('progressFill').style.width = '100%';
+                document.querySelectorAll('.step-label').forEach(function(el) {
+                    el.classList.remove('active');
+                    el.classList.add('done');
+                });
+                // Logger côté serveur (optionnel, fail silent)
+                try {
+                    fetch('https://api.boostermail.ai/api/event/welcome_completed', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ state: state, ts: Date.now() }),
+                        keepalive: true,
+                    }).catch(function() {});
+                } catch (e) {}
+            }
+
+            // Délégation événements (robuste, évite addEventListener multiples)
+            document.addEventListener('click', function(ev) {
+                var act = ev.target.getAttribute('data-action');
+                if (act === 'next') goNext();
+                else if (act === 'prev') goPrev();
+                else if (act === 'skip') goNext();
+                else if (act === 'finish') finish();
+            });
+
+            // Étape 1 : test popup
+            document.getElementById('popupTestBtn').addEventListener('click', function() {
+                var status = document.getElementById('popupStatus');
+                var btn = this;
+                var popup = window.open('', 'bm_popup_test', 'width=320,height=200,left=' + (screen.width / 2 - 160) + ',top=' + (screen.height / 2 - 100));
+                if (popup && !popup.closed && typeof popup.closed !== 'undefined') {
+                    try {
+                        popup.document.write('<html><head><title>Test BoosterMail</title><style>body{font-family:Segoe UI,sans-serif;text-align:center;padding:30px;background:#f5f8fc;color:#333;}h1{color:#4caf50;margin-bottom:10px;}p{font-size:14px;color:#555;}</style></head><body><h1>✅ Popup OK !</h1><p>Vous pouvez fermer cette fenêtre et continuer.</p></body></html>');
+                        popup.document.close();
+                    } catch (e) {}
+                    setTimeout(function() { try { popup.close(); } catch (e) {} }, 2000);
+                    state.popup = 'allowed';
+                    btn.classList.add('success');
+                    btn.textContent = '✓ Popup autorisée';
+                    btn.disabled = true;
+                    status.textContent = 'Parfait ! Les popups sont autorisées.';
+                    status.className = 'action-status success';
+                } else {
+                    state.popup = 'blocked';
+                    status.textContent = '⚠ La popup a été bloquée. Autorisez-la dans votre navigateur (voir aide ci-dessus), puis ré-essayez.';
+                    status.className = 'action-status warning';
+                }
+            });
+
+            // Étape 2 : Window Management API
+            document.getElementById('windowMgmtBtn').addEventListener('click', function() {
+                var status = document.getElementById('windowMgmtStatus');
+                var btn = this;
+                if (!('getScreenDetails' in window)) {
+                    state.windowMgmt = 'unsupported';
+                    btn.textContent = 'Non supporté par votre navigateur';
+                    btn.disabled = true;
+                    status.textContent = 'Votre navigateur ne supporte pas cette fonctionnalité (mais BoosterMail fonctionnera quand même). Passez à l\'étape suivante.';
+                    status.className = 'action-status warning';
+                    return;
+                }
+                window.getScreenDetails().then(function(details) {
+                    state.windowMgmt = 'granted';
+                    btn.classList.add('success');
+                    btn.textContent = '✓ Placement intelligent activé';
+                    btn.disabled = true;
+                    var screenCount = details.screens ? details.screens.length : 1;
+                    status.textContent = 'Parfait ! ' + screenCount + ' écran' + (screenCount > 1 ? 's détectés' : ' détecté') + '. BoosterMail s\'ouvrira sur le bon écran.';
+                    status.className = 'action-status success';
+                }).catch(function(err) {
+                    state.windowMgmt = 'denied';
+                    status.textContent = '⚠ Permission refusée. Pas grave : BoosterMail fonctionnera sans, juste sur l\'écran principal. Passez à l\'étape suivante.';
+                    status.className = 'action-status warning';
+                });
+            });
+
+            // Étape 3 : confirmation manuelle
+            document.getElementById('pinDoneBtn').addEventListener('click', function() {
+                state.pin = 'confirmed';
+                this.classList.add('success');
+                this.textContent = '✓ Bouton épinglé';
+                this.disabled = true;
+                var status = document.getElementById('pinStatus');
+                status.textContent = 'Excellent ! BoosterMail sera maintenant facilement accessible dans Outlook.';
+                status.className = 'action-status success';
+            });
+
+            updateProgress();
+        })();
+    </script>
+</body>
+</html>
