@@ -3903,8 +3903,12 @@ def summarize_mails_to_db(mails, chunk_size=10):
             if _db.has_mail_summary(msg_id):
                 skipped += 1
                 continue
-        except Exception:
-            pass
+        except Exception as _e_dup:
+            # Audit error handling 29/04 PM (Pattern #3 récidive) :
+            # avant `except: pass` silencieux → si DB plante, le mail
+            # est ré-summarisé à chaque cycle BG (coût Claude répété).
+            # Maintenant : log debug pour traçabilité sans casser le flow.
+            logger.debug(f"[summary] has_mail_summary({msg_id[:30]}) DB fail : {_e_dup}")
         # Phase 2 — Filtre unifié
         try:
             ok_spec, _reason = _should_speculate(m)
