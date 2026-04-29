@@ -44,15 +44,33 @@ var _companionAvailable = false;
     _btn('btnTransferer', function () { _handleAction('forward'); });
     _btn('btnClasser', function () { alert('Classement — a implementer'); });
 
-    // Navigation — #13 : guard null
-    _btn('navEcheances', function () { alert('Page Echeances — a implementer'); });
-    _btn('navContacts', function () { alert('Page Contacts — a implementer'); });
-    _btn('navProfil', function () { _showProfilSection(); });
+    // Navigation — Tableau de bord (29/04 PM tardif) :
+    // les 3 vues Profil/Contacts/Échéances sont des pages séparées
+    // /plugin/profile, /plugin/contacts, /plugin/echeances (port du proto).
+    // Navigation in-place : on remplace la page actuelle (overlay PyQt
+    // ou iframe dialog) par la page demandée.
+    _btn('navEcheances', function () { window.location.href = _backendUrl + '/plugin/echeances'; });
+    _btn('navContacts', function () { window.location.href = _backendUrl + '/plugin/contacts'; });
+    _btn('navProfil', function () { window.location.href = _backendUrl + '/plugin/profile'; });
 
     // Navigation FIXE en haut (Audit 20/04) — même handlers
-    _btn('navEcheancesFixed', function () { alert('Page Echeances — a implementer'); });
-    _btn('navContactsFixed', function () { alert('Page Contacts — a implementer'); });
-    _btn('navProfilFixed', function () { _showProfilSection(); });
+    _btn('navEcheancesFixed', function () { window.location.href = _backendUrl + '/plugin/echeances'; });
+    _btn('navContactsFixed', function () { window.location.href = _backendUrl + '/plugin/contacts'; });
+    _btn('navProfilFixed', function () { window.location.href = _backendUrl + '/plugin/profile'; });
+
+    // Logique ?view=X — démarrer directement sur la vue demandée si param URL.
+    // Permet à dialog.html d'ouvrir popup.html?view=profil et de tomber
+    // direct sur la page Profil sans passer par le menu intermédiaire.
+    try {
+        var _viewParam = new URLSearchParams(window.location.search).get('view');
+        if (_viewParam === 'profil' || _viewParam === 'profile') {
+            window.location.href = _backendUrl + '/plugin/profile';
+        } else if (_viewParam === 'contacts') {
+            window.location.href = _backendUrl + '/plugin/contacts';
+        } else if (_viewParam === 'echeances') {
+            window.location.href = _backendUrl + '/plugin/echeances';
+        }
+    } catch (e) { /* URLSearchParams indispo : fallback silencieux */ }
 
     // Afficher la nav fixe + section scrollable dès que overlay
     if (_container === 'pyqt' || _container === 'extension') {

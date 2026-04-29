@@ -897,10 +897,10 @@ class EasyMailPopup(QMainWindow):
         self._stack.setCurrentIndex(1)
         # Fix définitif 21/04 v3 : verrou Qt dur (setFixedSize). La fenêtre
         # ne peut PHYSIQUEMENT plus être redimensionnée tant qu'on est en overlay.
-        # Demande utilisateur 21/04 : par défaut l'overlay s'affiche REPLIÉ
-        # (juste header + barre nav, ~80 px) — moins intrusif à l'écran.
-        # L'user peut déplier en cliquant sur la flèche du header.
-        self._lock_overlay_size(folded=True)
+        # Cleanup 29/04 PM tardif : ancienne logique fold/déplie supprimée
+        # (zone obsolète post-pivot SaaS, décision Yvan). L'overlay s'affiche
+        # désormais TOUJOURS à la taille canonique avec les 3 boutons visibles.
+        self._lock_overlay_size()
         self.move(self._screen.width() - self._overlay_w, 48)
 
         # Le dialog sera chargé au premier clic du bouton BM
@@ -934,7 +934,11 @@ class EasyMailPopup(QMainWindow):
         elif path == 'close-dialog':
             self._close_dialog()
         elif path == 'minimize':
-            self._toggle_overlay_fold()
+            # Cleanup 29/04 PM tardif : zone fold supprimée (obsolète post-
+            # pivot SaaS). L'action minimize devient no-op pour rétro-compat
+            # — le chevron HTML qui appelait cette URL a été retiré côté
+            # popup.html. Aucun appel attendu en runtime normal.
+            logger.debug('[popup] easymail://minimize/ ignoré (fold supprimé)')
         elif path == 'close-overlay':
             self.hide()
         elif path == 'dialog-minimize':
@@ -962,51 +966,29 @@ class EasyMailPopup(QMainWindow):
             self._drag_offset = None
 
     # =========================================================================
-    # GESTION DE LA TAILLE — FIX DÉFINITIF OVERLAY (21/04 v3)
+    # GESTION DE LA TAILLE — OVERLAY À TAILLE FIXE
     # =========================================================================
     # Principe : l'overlay est une fenêtre à taille FIXE (setFixedSize). Qt
     # empêche alors TOUT redimensionnement : drag user, Aero Snap, restore
-    # depuis maximized, ou resize() avec une valeur erronée. Le bug récurrent
-    # "overlay gigantesque" venait d'une variable héritée (_overlay_unfolded_h)
-    # qui stockait une taille corrompue réinjectée au unfold. On la supprime.
+    # depuis maximized, ou resize() avec une valeur erronée.
+    # Cleanup 29/04 PM tardif : ancienne logique fold/déplie supprimée
+    # (zone obsolète post-pivot SaaS, décision Yvan). _FOLDED_H et
+    # _toggle_overlay_fold retirés. L'overlay reste à la taille canonique
+    # (self._overlay_h) qui contient les 3 boutons Profil/Contacts/Échéances.
     # =========================================================================
 
-    # Fix audit 22/04 : 80 px sur-dimensionne de ~8 px → affichait un bout
-    # blanc (debut de .tp-content) sous la barre nav. Mesure CSS reelle :
-    # .tp-header (height 36) + .tp-fixed-nav (padding 6+6 + content ~22 +
-    # border-bottom 1) = 71-72 px. On fixe a 72 pour matcher pile le header
-    # + nav sans debordement visible du contenu scroll.
-    _FOLDED_H = 72
-
-    def _lock_overlay_size(self, folded=False):
+    def _lock_overlay_size(self):
         """Verrouille la fenêtre à la taille overlay canonique (fixe).
         setFixedSize crée une contrainte Qt dure : width + height immuables
         jusqu'au prochain _unlock_size(). Aucune action user ni code ne peut
         forcer une taille différente."""
-        h = self._FOLDED_H if folded else self._overlay_h
-        self.setFixedSize(self._overlay_w, h)
+        self.setFixedSize(self._overlay_w, self._overlay_h)
 
     def _unlock_size(self):
         """Libère la contrainte fixe (pour passer en dialog 80% ou marketing
         où une taille différente est nécessaire)."""
         self.setMinimumSize(0, 0)
         self.setMaximumSize(16777215, 16777215)  # QWIDGETSIZE_MAX
-
-    def _toggle_overlay_fold(self):
-        """Replie/déplie l'overlay.
-        Plié   = header + nav fixe visibles → 80 px (self._FOLDED_H)
-        Déplié = taille overlay canonique   → self._overlay_h
-
-        Plus de variable `_overlay_unfolded_h` — le unfold revient TOUJOURS à
-        la taille canonique, impossible de hériter d'une valeur corrompue."""
-        current_h = self.size().height()
-        logger.info(f"[popup] fold toggle appelé, h={current_h}")
-        if current_h > self._FOLDED_H + 20:
-            self._lock_overlay_size(folded=True)
-            logger.info(f"[popup] folded to {self._FOLDED_H}")
-        else:
-            self._lock_overlay_size(folded=False)
-            logger.info(f"[popup] unfolded to {self._overlay_h} (canonical)")
 
     def _open_dialog(self, mode='reply'):
         logger.info(f"Ouverture dialog mode={mode}")
@@ -1047,9 +1029,9 @@ class EasyMailPopup(QMainWindow):
         wanted = Qt.WindowState.WindowNoState
         if self.windowState() != wanted:
             self.setWindowState(wanted)
-        # 2. Verrou taille overlay REPLIÉ par défaut (cohérence avec _show_overlay
-        #    — demande utilisateur 21/04 : overlay non intrusif au retour du dialog).
-        self._lock_overlay_size(folded=True)
+        # 2. Verrou taille overlay canonique (cleanup 29/04 PM tardif :
+        #    fold supprimé, l'overlay reste toujours à _overlay_h).
+        self._lock_overlay_size()
         self.move(self._screen.width() - self._overlay_w, 48)
 
     def _close_dialog(self):

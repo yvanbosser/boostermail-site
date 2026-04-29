@@ -19,7 +19,7 @@ import traceback
 from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
 
-from flask import Flask, send_from_directory, jsonify, request
+from flask import Flask, send_from_directory, jsonify, request, render_template
 
 # --- Paths -------------------------------------------------------------------
 
@@ -11404,6 +11404,163 @@ def api_apply_update():
             return jsonify({"success": False, "message": f"Echec: {_r.stderr[:200]}"})
     except Exception as e:
         return jsonify({"success": False, "message": _safe_err(e)})
+
+
+# =============================================================================
+# TABLEAU DE BORD — pages portées du proto (29/04 PM tardif post-dîner)
+# 3 vues : Profil / Contacts / Échéances
+# Servies via render_template depuis V2/templates/, accessibles depuis le
+# post-it BoosterMail (overlay PyQt) et l'overlay iframe interne du dialog.
+# =============================================================================
+
+@app.route('/plugin/profile')
+def page_profile():
+    """Tableau de bord — vue Profil. Port du proto app.py:4315."""
+    style_path = os.path.join(EASYMAIL_DIR, 'style_profile.txt')
+    style_content = ''
+    style_date = ''
+    if os.path.exists(style_path):
+        try:
+            with open(style_path, 'r', encoding='utf-8') as f:
+                style_content = f.read()
+            style_date = datetime.fromtimestamp(os.path.getmtime(style_path)).strftime('%d/%m/%Y à %H:%M')
+        except Exception:
+            pass
+    try:
+        default_importance = int(_db.get_setting('default_importance', '2') or 2)
+    except Exception:
+        default_importance = 2
+    user_name = _db.get_setting('user_name') or ''
+    user_email = _get_my_email() or ''
+    pj_root = _db.get_setting('pj_root_folder', 'C:\\Documents')
+    mail_count = _db.get_setting('onboarding_mail_count', '800')
+    show_sig = _db.get_setting('show_marketing_signature', '1') == '1'
+    return render_template('profile.html',
+                           style=style_content, style_date=style_date,
+                           user_name=user_name, user_email=user_email,
+                           default_importance=default_importance,
+                           pj_root_folder=pj_root, mail_count=mail_count,
+                           show_marketing_signature=show_sig)
+
+
+@app.route('/plugin/contacts')
+def page_contacts():
+    """Tableau de bord — vue Contacts. Port du proto app.py:4932."""
+    profiles = _db.get_all_contact_profiles() or []
+    return render_template('contacts.html', profiles=profiles)
+
+
+@app.route('/plugin/echeances')
+def page_echeances():
+    """Tableau de bord — vue Échéances. Port du proto app.py:3573."""
+    return render_template('echeances.html')
+
+
+# --- Stubs des 6 routes API manquantes (porting depuis proto) ----------------
+
+@app.route('/api/style_status')
+def api_style_status():
+    """Stub V2 — port du proto app.py:3539. Style toujours prêt en SaaS
+    (style_profile.txt déjà présent ou onboarding désactivé en SaaS pur)."""
+    style_path = os.path.join(EASYMAIL_DIR, 'style_profile.txt')
+    has_style = os.path.exists(style_path)
+    return jsonify({
+        'ready': has_style,
+        'analyzing': False,
+        'has_style': has_style,
+        'needs_setup': not has_style,
+        'step': 'done' if has_style else 'idle',
+        'chunks': 0,
+        'detected_name': (_db.get_setting('user_name') or '').split(' ')[0] if _db.get_setting('user_name') else '',
+    })
+
+
+@app.route('/api/reanalyze_style', methods=['POST'])
+def api_reanalyze_style():
+    """Stub V2 — port du proto app.py:4365. Re-analyse style désactivée
+    en SaaS (l'utilisateur ne fournit pas un volume contrôlable de mails)."""
+    return jsonify({'status': 'unavailable', 'reason': 'Réanalyse désactivée en SaaS — utilisez Recalibrer les contacts'})
+
+
+@app.route('/api/stop_style_analysis', methods=['POST'])
+def api_stop_style_analysis():
+    """Stub V2 — port du proto app.py:4405."""
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/api/add_contact_keyword', methods=['POST'])
+def api_add_contact_keyword():
+    """Stub V2 — port du proto app.py:4903. Ajoute un mot-clé au profil contact."""
+    data = request.get_json(silent=True) or {}
+    email = _normalize_email(data.get('email'))
+    keyword = (data.get('keyword') or '').strip()
+    if not email or not keyword:
+        return jsonify({'status': 'error', 'reason': 'email + keyword requis'}), 400
+    try:
+        profile = _db.get_contact_profile(email)
+        if not profile:
+            return jsonify({'status': 'error', 'reason': 'profil introuvable'}), 404
+        # Stocker en specific_vocabulary du profile_json
+        pj = profile.get('profile_json', '{}')
+        if isinstance(pj, str):
+            try:
+                pj = json.loads(pj)
+            except Exception:
+                pj = {}
+        if not isinstance(pj, dict):
+            pj = {}
+        vocab = pj.get('specific_vocabulary', []) or []
+        if keyword not in vocab:
+            vocab.append(keyword)
+            pj['specific_vocabulary'] = vocab
+            profile['profile_json'] = json.dumps(pj, ensure_ascii=False)
+            _db.save_contact_profile(email, profile)
+        return jsonify({'status': 'ok', 'vocabulary': vocab})
+    except Exception as e:
+        logger.warning(f"[add_contact_keyword] {email}: {e}")
+        return jsonify({'status': 'error', 'reason': str(e)[:200]}), 500
+
+
+@app.route('/api/echeances/<int:echeance_id>/relance')
+def api_echeance_relance(echeance_id):
+    """Stub V2 — port du proto app.py:3599. Génère un mail de relance
+    pour une échéance. En V2 SaaS : retourne juste les infos minimales,
+    le frontend dialog.js gère la composition."""
+    try:
+        ech = _db.get_echeance_by_id(echeance_id) if hasattr(_db, 'get_echeance_by_id') else None
+        if not ech:
+            # Fallback : chercher dans la liste complète
+            allech = _db.get_echeances() or []
+            ech = next((e for e in allech if e.get('id') == echeance_id), None)
+        if not ech:
+            return jsonify({'status': 'error', 'reason': 'echeance introuvable'}), 404
+        return jsonify({
+            'status': 'ok',
+            'echeance': ech,
+            'subject_prefilled': f"Relance — {ech.get('description', '')[:50]}",
+        })
+    except Exception as e:
+        logger.warning(f"[echeance_relance/{echeance_id}] {e}")
+        return jsonify({'status': 'error', 'reason': str(e)[:200]}), 500
+
+
+@app.route('/api/echeances/<int:echeance_id>/mail')
+def api_echeance_mail(echeance_id):
+    """Stub V2 — port du proto app.py:3688. Redirige vers le mail original
+    associé à l'échéance (ouvre dans Outlook)."""
+    try:
+        allech = _db.get_echeances() or []
+        ech = next((e for e in allech if e.get('id') == echeance_id), None)
+        if not ech:
+            return jsonify({'status': 'error', 'reason': 'echeance introuvable'}), 404
+        return jsonify({
+            'status': 'ok',
+            'message_id': ech.get('source_message_id', ''),
+            'subject': ech.get('source_subject', ''),
+        })
+    except Exception as e:
+        logger.warning(f"[echeance_mail/{echeance_id}] {e}")
+        return jsonify({'status': 'error', 'reason': str(e)[:200]}), 500
 
 
 # --- Démarrage ---------------------------------------------------------------

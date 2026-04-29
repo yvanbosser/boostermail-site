@@ -2937,6 +2937,44 @@ function _showSuccessOverlay() {
 
 
 // =============================================================================
+// TABLEAU DE BORD — overlay iframe interne (29/04 PM tardif)
+// =============================================================================
+// Les 3 boutons header (Profil/Contacts/Échéances) ouvrent les pages
+// correspondantes en surimpression dans la fenêtre BoosterMail actuelle.
+// Le brouillon en cours est préservé (overlay z-index:200 par-dessus).
+
+function _openDashboard(view) {
+    /** Affiche l'overlay tableau de bord avec la vue demandée.
+     * view ∈ {'profile', 'contacts', 'echeances'} */
+    var titles = {
+        'profile':   '👤 Profil',
+        'contacts':  '📑 Contacts',
+        'echeances': '⏰ Échéances',
+    };
+    var titleEl = document.getElementById('dashboardTitle');
+    if (titleEl) titleEl.textContent = titles[view] || 'Tableau de bord';
+
+    var frame = document.getElementById('dashboardFrame');
+    var overlay = document.getElementById('dashboardOverlay');
+    if (!frame || !overlay) return;
+
+    // Charge la page V2 correspondante (pas de cache busting nécessaire,
+    // backend OVH renvoie déjà no-store sur les routes /plugin/*)
+    frame.src = _backendUrl + '/plugin/' + view;
+    overlay.style.display = 'block';
+}
+
+function _closeDashboard() {
+    /** Ferme l'overlay tableau de bord et libère l'iframe. */
+    var overlay = document.getElementById('dashboardOverlay');
+    var frame = document.getElementById('dashboardFrame');
+    if (overlay) overlay.style.display = 'none';
+    // Libérer l'iframe pour que le prochain ouvrir reload frais
+    if (frame) frame.src = 'about:blank';
+}
+
+
+// =============================================================================
 // COMMUNICATION DIALOG ↔ OUTLOOK
 // =============================================================================
 

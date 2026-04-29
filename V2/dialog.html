@@ -69,9 +69,9 @@
             <div class="em-header-spacer"></div>
             <div class="em-status" id="headerStatus"></div>
             <div class="em-header-actions">
-                <button class="em-hdr-btn" id="btnNavProfil" onclick="window.open(_backendUrl+'/plugin/popup.html?container=extension&view=profil','_blank','width=600,height=500')" title="Profil">&#x1f464;</button>
-                <button class="em-hdr-btn" id="btnNavContacts" onclick="window.open(_backendUrl+'/plugin/popup.html?container=extension&view=contacts','_blank','width=600,height=500')" title="Contacts">&#x1f4d1;</button>
-                <button class="em-hdr-btn" id="btnNavEcheances" onclick="window.open(_backendUrl+'/plugin/popup.html?container=extension&view=echeances','_blank','width=600,height=500')" title="Echeances">&#x23f0;</button>
+                <button class="em-hdr-btn" id="btnNavProfil" onclick="_openDashboard('profile')" title="Profil">&#x1f464;</button>
+                <button class="em-hdr-btn" id="btnNavContacts" onclick="_openDashboard('contacts')" title="Contacts">&#x1f4d1;</button>
+                <button class="em-hdr-btn" id="btnNavEcheances" onclick="_openDashboard('echeances')" title="Echeances">&#x23f0;</button>
                 <!-- Fix UX 22/04 : bouton "Retour Outlook" rouge remplace la croix + minimize supprime -->
                 <button class="em-hdr-btn em-hdr-return" id="btnClose" title="Retour Outlook">Retour Outlook</button>
             </div>
@@ -444,6 +444,21 @@
         </div>
     </div>
 
-    <script defer src="dialog.js?v=v24-pj-progress-29-04"></script>
+    <!-- ============================================================ -->
+    <!-- OVERLAY TABLEAU DE BORD (29/04 PM tardif)                   -->
+    <!-- Affichage in-place du Profil/Contacts/Échéances par-dessus  -->
+    <!-- la fenêtre BoosterMail. Préserve le brouillon en cours.     -->
+    <!-- ============================================================ -->
+    <div id="dashboardOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:200;background:rgba(0,0,0,0.4);">
+        <div style="position:absolute;top:8px;left:8px;right:8px;bottom:8px;background:#fff;border-radius:8px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+            <div style="padding:6px 12px;background:#0F6CBD;color:#fff;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+                <span style="font-size:13px;font-weight:600;" id="dashboardTitle">Tableau de bord</span>
+                <button onclick="_closeDashboard()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:13px;cursor:pointer;padding:3px 10px;border-radius:4px;">&#x2715;&nbsp;Fermer</button>
+            </div>
+            <iframe id="dashboardFrame" src="about:blank" style="flex:1;width:100%;border:none;background:#fff;"></iframe>
+        </div>
+    </div>
+
+    <script defer src="dialog.js?v=v25-dashboard-overlay-29-04"></script>
 </body>
 </html>
