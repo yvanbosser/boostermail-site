@@ -26,6 +26,15 @@ class Database:
     def __init__(self, db_path):
         self.db_path = db_path
         self._local = threading.local()
+        # 29/04 PM audit resource leaks #26 — set des connections ouvertes
+        # cross-thread pour cleanup propre au shutdown (atexit). Avant :
+        # connections persistaient sans close, OS faisait le cleanup mais
+        # SQLite WAL pouvait laisser des -wal/-shm orphelins.
+        # On garde le pattern persistent par thread (perf : evite open/close
+        # à chaque requête, raison commentaire l. 31). On ajoute juste un
+        # tracker pour le shutdown clean.
+        self._all_conns = []  # list[sqlite3.Connection]
+        self._all_conns_lock = threading.Lock()
 
     def _conn(self):
         """Connection persistante par thread (evite open/close a chaque requete)."""
@@ -37,7 +46,21 @@ class Database:
             conn.execute("PRAGMA busy_timeout=5000")  # audit I4 : 5s avant erreur locked
             conn.row_factory = sqlite3.Row
             self._local.conn = conn
+            with self._all_conns_lock:
+                self._all_conns.append(conn)
         return self._local.conn
+
+    def close_all_threads(self):
+        """Ferme TOUTES les connections (tous threads). Pour atexit/shutdown.
+        Préserve le pattern persistent en runtime — appelée uniquement au
+        shutdown du process via atexit.register dans app_plugin.py."""
+        with self._all_conns_lock:
+            for conn in self._all_conns:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._all_conns = []
 
     def init(self):
         conn = sqlite3.connect(self.db_path)

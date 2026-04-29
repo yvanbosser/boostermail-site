@@ -1812,6 +1812,10 @@ def _load_prefetch_cache():
 
 import atexit
 atexit.register(_save_prefetch_cache)
+# 29/04 PM audit resource leaks #26 — close DB connections cross-thread
+# au shutdown. Évite les fichiers WAL/SHM orphelins après un kill brutal.
+# En runtime normal, les conns restent persistent pour la perf.
+atexit.register(_db.close_all_threads)
 
 # Cache UNIFIÉ des réponses (Plan 3 §9.1 — fusion spéculation + ex-brouillon).
 # _reply_cache[message_id] = {
