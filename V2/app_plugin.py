@@ -1922,8 +1922,10 @@ _MAIL_PREVIEW_MAX = 100
 
 # Cache partagé arborescence Outlook (évite les 429 quand 30+ threads prewarm
 # appellent get_all_folders() en parallèle — Fix 25/04)
-_outlook_folders_cache: list = []
-_outlook_folders_cache_ts: float = 0.0
+# Étape 7 multi-tenant — _outlook_folders_cache via UserScopedDict.
+# Cache TTL 5min de l'arborescence Outlook par user. Stocke {list, ts} dans
+# le sub-cache user. Lock dédié _outlook_folders_lock conservé pour double-check.
+# Suppression des globals list+float qui ne supportaient qu'un user.
 _outlook_folders_lock = threading.Lock()
 _OUTLOOK_FOLDERS_TTL = 300  # 5 minutes
 
@@ -2035,21 +2037,33 @@ def _prewarm_echeance_for_mail(mid, mail_data):
 
 
 def _get_outlook_folders_cached() -> list:
-    """Retourne l'arborescence Outlook (cache session 5 min).
+    """Retourne l'arborescence Outlook (cache session 5 min, user-scoped).
 
     Évite que les 30+ threads prewarm appellent get_all_folders() simultanément
     et déclenchent le rate-limiting Graph 429 (Fix — 25/04).
     Pattern identique à _get_windows_folders_cached().
+
+    Étape 7 multi-tenant (29/04/2026) — sub-cache user-scoped via
+    get_user_cache('outlook_folders', user_id) qui contient {list, ts}.
+    Chaque user a sa propre arborescence (Graph API retourne les dossiers
+    de la mailbox du user authentifié).
     """
-    global _outlook_folders_cache, _outlook_folders_cache_ts
+    # Résolution sub-cache user-scoped (bridge DB en BG, session en route Flask).
+    if _get_user_cache is not None and _get_current_user_id is not None:
+        user_id = _get_current_user_id() or 'default'
+        cache = _get_user_cache('outlook_folders', user_id)
+    else:
+        # Fallback ultra-défensif si imports échouent
+        cache = {}
+
     _now = time.time()
     # Lecture rapide sans lock (double-check pattern)
-    if _outlook_folders_cache and (_now - _outlook_folders_cache_ts) < _OUTLOOK_FOLDERS_TTL:
-        return _outlook_folders_cache
+    if cache.get('list') and (_now - cache.get('ts', 0)) < _OUTLOOK_FOLDERS_TTL:
+        return cache['list']
     with _outlook_folders_lock:
         # Re-vérifier sous le lock (un autre thread a pu remplir entre les deux)
-        if _outlook_folders_cache and (_now - _outlook_folders_cache_ts) < _OUTLOOK_FOLDERS_TTL:
-            return _outlook_folders_cache
+        if cache.get('list') and (_now - cache.get('ts', 0)) < _OUTLOOK_FOLDERS_TTL:
+            return cache['list']
         try:
             _graph = get_graph()
             _folders = _graph.get_all_folders() if _graph else []
@@ -2057,10 +2071,10 @@ def _get_outlook_folders_cached() -> list:
             logger.debug(f"[outlook-folders] get_all_folders erreur : {_e}")
             _folders = []
         if _folders:
-            _outlook_folders_cache = _folders
-            _outlook_folders_cache_ts = _now
+            cache['list'] = _folders
+            cache['ts'] = _now
             logger.info(f"[outlook-folders] cache rechargé ({len(_folders)} dossiers)")
-        return _outlook_folders_cache
+        return cache.get('list', [])
 
 
 def _prewarm_classement_for_mail(mid, mail_data):
