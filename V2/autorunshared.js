@@ -35,7 +35,7 @@ function _debugLog(eventName, details) {
 
 // Marqueur de version : s'écrit dès le chargement du JS → permet de vérifier
 // en lisant addin_debug.log que Outlook a bien rechargé le nouveau fichier.
-var _ADDIN_VERSION = 'v21-jwt-bearer-29-04';
+var _ADDIN_VERSION = 'v22-dialog-close-fix-29-04';
 _debugLog('js_loaded', { version: _ADDIN_VERSION });
 
 // =============================================================================
@@ -535,6 +535,18 @@ function _openViaDisplayDialog(item, dialogUrl, data, getMailBody, fromName, fro
                     var message = JSON.parse(arg.message);
                     if (message.action === 'send_via_outlook') {
                         _sendViaOutlook(item, message);
+                    } else if (message.action === 'close') {
+                        // 29/04 PM bug fix — Yvan a signalé : popup "Mail envoyé !"
+                        // restait bloquée car le parent ne traitait pas `close`.
+                        // Le dialog appelle `_messageParent({action:'close'})` après
+                        // 2.5s d'overlay succès. On ferme le dialog ici.
+                        try { dialog.close(); }
+                        catch (e) { console.log('EasyMail: dialog.close() failed:', e); }
+                    } else if (message.action === 'sent') {
+                        // Notification informative — le mail a été envoyé via Graph,
+                        // dialog va se fermer dans 2.5s via action:'close'. Pas
+                        // d'action requise côté parent pour l'instant.
+                        _debugLog('dialog_sent_via_graph', {});
                     }
                 } catch (e) {
                     console.error('EasyMail: erreur traitement message dialog', e);
