@@ -43,19 +43,36 @@
       --faint:#475569;
       --grad:linear-gradient(135deg,#6366f1 0%,#8b5cf6 55%,#06b6d4 100%)
     }
+    html.light-mode {
+      --bg:#f5f5f7;
+      --bg2:#ffffff;
+      --card:rgba(0,0,0,0.05);
+      --border:rgba(0,0,0,0.12);
+      --text:#0f0f1e;
+      --muted:#5a5a7a;
+      --faint:#d0d0e0;
+    }
     * { margin:0; padding:0; box-sizing:border-box }
     html { scroll-behavior:smooth }
-    body { font-family:'Inter',-apple-system,sans-serif; color:var(--text); background:var(--bg); overflow-x:hidden }
-    nav { position:fixed; top:0; width:100%; z-index:100; padding:20px 48px; display:flex; align-items:center; justify-content:space-between; background:rgba(6,9,20,.95); backdrop-filter:blur(20px); border-bottom:1px solid var(--border) }
+    body { font-family:'Inter',-apple-system,sans-serif; color:var(--text); background:var(--bg); overflow-x:hidden; transition:background .3s, color .3s }
+    nav { position:fixed; top:0; width:100%; z-index:100; padding:20px 48px; display:flex; align-items:center; justify-content:space-between; background:rgba(6,9,20,.95); backdrop-filter:blur(20px); border-bottom:1px solid var(--border); transition:background .3s, border-color .3s }
+    html.light-mode nav { background:rgba(255,255,255,.98); border-bottom-color:#e0e0e8 }
+    html.light-mode .nav-links a { color:#5a5a7a }
+    html.light-mode .nav-links a:hover { color:#0f0f1e }
+    html.light-mode .nav-cta { box-shadow:0 0 15px rgba(99,102,241,0.2)!important }
     .nav-logo { font-family:'Space Grotesk',sans-serif; font-size:21px; font-weight:700; text-decoration:none; display:flex; align-items:center; gap:9px; background:var(--grad); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text }
     .nav-links { display:flex; gap:28px; align-items:center }
     .nav-links a { text-decoration:none; color:var(--muted); font-size:14px; font-weight:500; transition:color .2s }
     .nav-links a:hover { color:var(--text) }
+    .theme-toggle { background:none; border:none; color:var(--muted); font-size:18px; cursor:pointer; transition:all .3s; padding:0; width:32px; height:32px; display:flex; align-items:center; justify-content:center; border-radius:6px }
+    .theme-toggle:hover { color:var(--text); background:rgba(99,102,241,0.1) }
+    .theme-toggle:active { transform:scale(0.95) }
     .nav-cta { background:var(--grad)!important; color:white!important; padding:9px 22px; border-radius:8px; font-weight:600!important; box-shadow:0 0 20px rgba(99,102,241,.3); transition:all .3s!important }
-    footer { padding:36px 48px; border-top:1px solid var(--border); text-align:center; font-size:12px; color:var(--muted) }
+    footer { padding:36px 48px; border-top:1px solid var(--border); text-align:center; font-size:12px; color:var(--muted); transition:border-color .3s }
     @media(max-width:768px) {
       nav { padding:14px 20px }
       footer { padding:20px }
+      .nav-links { gap:16px }
     }
   </style>
 
@@ -68,6 +85,7 @@
     .blog-grid{max-width:1000px;margin:0 auto;padding:60px 48px;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:32px}
     .blog-card{background:var(--card);border:1px solid var(--border);padding:32px;border-radius:12px;transition:all .3s}
     .blog-card:hover{transform:translateY(-4px);border-color:var(--pl)}
+    .blog-card-emoji{font-size:48px;line-height:1;margin-bottom:16px;display:block}
     .blog-tag{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--pl);background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);padding:5px 12px;border-radius:16px;margin-bottom:12px}
     .blog-card h3{font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700;margin-bottom:12px;color:var(--text)}
     .blog-card p{font-size:14px;line-height:1.6;color:var(--muted);margin-bottom:20px}
@@ -75,10 +93,15 @@
     .blog-meta span{color:var(--text);font-size:14px;font-weight:500;display:inline-flex;align-items:center;gap:4px}
     .blog-card a{display:inline-flex;align-items:center;gap:8px;color:var(--pl);text-decoration:none;font-weight:600;transition:all .2s}
     .blog-card a:hover{gap:12px}
+    html.light-mode .blog-hero{background:#ffffff;border-bottom-color:#e0e0e8}
+    html.light-mode .blog-card{background:#f9f9fb;border-color:#e0e0e8}
+    html.light-mode .blog-card:hover{border-color:var(--pl)}
+    html.light-mode .blog-tag{background:rgba(99,102,241,0.08);border-color:rgba(99,102,241,0.3)}
     @media(max-width:768px){
       .blog-hero{padding:60px 20px 40px}
       .blog-grid{padding:40px 20px}
       h1{font-size:28px}
+      .blog-card-emoji{font-size:36px}
     }
   </style>
 
@@ -91,9 +114,43 @@
     <a href="index.html#features">Funktionen</a>
     <a href="index.html#pricing">Preise</a>
     <a href="blog-de.html" style="color:var(--pl)">Blog</a>
+    <button id="themeToggle" class="theme-toggle" title="Toggle dark/light mode">🌙</button>
     <a href="index.html#waitlist" class="nav-cta">Kostenlos testen</a>
   </div>
 </nav>
+
+<script>
+  // Initialize theme on page load
+  document.addEventListener('DOMContentLoaded', function() {
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    const html = document.documentElement;
+    const themeBtn = document.getElementById('themeToggle');
+
+    // Apply saved theme
+    if (savedTheme === 'light') {
+      html.classList.add('light-mode');
+      themeBtn.textContent = '🌙';
+    } else {
+      html.classList.remove('light-mode');
+      themeBtn.textContent = '☀️';
+    }
+
+    // Toggle theme on button click
+    themeBtn.addEventListener('click', function() {
+      const isLight = html.classList.contains('light-mode');
+
+      if (isLight) {
+        html.classList.remove('light-mode');
+        localStorage.setItem('theme', 'dark');
+        themeBtn.textContent = '☀️';
+      } else {
+        html.classList.add('light-mode');
+        localStorage.setItem('theme', 'light');
+        themeBtn.textContent = '🌙';
+      }
+    });
+  });
+</script>
 
 
 <section class="blog-hero">
@@ -106,9 +163,10 @@
 <div class="blog-grid">
 
   <div class="blog-card">
-    <span class="blog-tag">Cas d&#39;Usage</span>
-    <h3>10 Cas d&#39;Usage Pratiques de BoosterMail : Exemples Réels | BoosterMail</h3>
-    <p>10 cas d&#39;usage réels : commerciaux, RH, support, direction... Comment BoosterMail transforme chaque rôle. Exemples concrets et gains mesurés....</p>
+    <div class="blog-card-emoji">📊</div>
+    <span class="blog-tag">Anwendungsfälle</span>
+    <h3>10 Praktische Anwendungsfälle von BoosterMail: Reale Beispiele | BoosterMail</h3>
+    <p>10 reale Anwendungsfälle: Vertrieb, HR, Support, Geschäftsführung... Wie BoosterMail jede Rolle transformiert. Konkrete Beispiele und messbare Erfolge...</p>
     <div class="blog-meta">
       <span>📊 22 avril 2026</span>
       <span>⏱️ 9 min</span>
@@ -119,9 +177,10 @@
   </div>
 
   <div class="blog-card">
-    <span class="blog-tag">Productivité</span>
-    <h3>5 Erreurs Qui Ralentissent Votre Réponse aux Emails | BoosterMail</h3>
-    <p>5 erreurs courantes ralentissent votre productivité email. Comment les éviter et économiser 2h/jour sur la rédaction d&#39;emails. Guide complet avec solu...</p>
+    <div class="blog-card-emoji">⚠️</div>
+    <span class="blog-tag">Produktivität</span>
+    <h3>5 Fehler, die Ihre E-Mail-Antworten verlangsamen | BoosterMail</h3>
+    <p>5 häufige Fehler verlangsamen Ihre E-Mail-Produktivität. Wie Sie diese vermeiden und täglich 2 Stunden beim Schreiben von E-Mails sparen. Vollständige...</p>
     <div class="blog-meta">
       <span>⚠️ 22 avril 2026</span>
       <span>⏱️ 7 min</span>
@@ -132,9 +191,10 @@
   </div>
 
   <div class="blog-card">
+    <div class="blog-card-emoji">📈</div>
     <span class="blog-tag">Benchmark</span>
-    <h3>Pourquoi 87% des Emails Générés par IA Échouent (et Comment Réussir) | BoosterMail</h3>
-    <p>87% des emails générés par IA générique sont rejetés. Raisons : manque de personnalisation, contexte ignoré, ton générique. Comment éviter ces pièges ...</p>
+    <h3>Warum 87% der KI-generierten E-Mails scheitern (und wie man erfolgreich ist) | BoosterMail</h3>
+    <p>87% der generischen KI-generierten E-Mails werden abgelehnt. Gründe: fehlende Personalisierung, ignorierter Kontext, generischer Ton. Wie vermeidet ma...</p>
     <div class="blog-meta">
       <span>📈 22 avril 2026</span>
       <span>⏱️ 8 min</span>
@@ -145,9 +205,10 @@
   </div>
 
   <div class="blog-card">
+    <div class="blog-card-emoji">🧠</div>
     <span class="blog-tag">Machine Learning</span>
-    <h3>Comment l&#39;IA Apprend Votre Style d&#39;Écriture : Guide Complet | BoosterMail</h3>
-    <p>Guide complet : comment fonctionne l&#39;apprentissage automatique du style d&#39;écriture ? Machine learning, algorithmes, données. Tout ce que vous devez sa...</p>
+    <h3>Wie KI Ihren Schreibstil erlernt: Vollständiger Leitfaden | BoosterMail</h3>
+    <p>Vollständiger Leitfaden: Wie funktioniert das maschinelle Lernen des Schreibstils? Machine Learning, Algorithmen, Daten. Alles, was Sie über KI-Person...</p>
     <div class="blog-meta">
       <span>🧠 22 avril 2026</span>
       <span>⏱️ 10 min</span>
@@ -158,9 +219,10 @@
   </div>
 
   <div class="blog-card">
-    <span class="blog-tag">Comparaison</span>
-    <h3>Claude vs ChatGPT pour les Emails : Quel Moteur IA Choisir ? | BoosterMail</h3>
-    <p>Claude vs ChatGPT vs Gemini pour générer des emails. Comparatif complet : qualité, vitesse, coût, confidentialité. Quel moteur IA choisir pour Outlook...</p>
+    <div class="blog-card-emoji">⚙️</div>
+    <span class="blog-tag">Vergleich</span>
+    <h3>Claude vs ChatGPT für E-Mails: Welche KI-Engine wählen? | BoosterMail</h3>
+    <p>Claude vs ChatGPT vs Gemini für die E-Mail-Generierung. Vollständiger Vergleich: Qualität, Geschwindigkeit, Kosten, Datenschutz. Welche KI-Engine für ...</p>
     <div class="blog-meta">
       <span>⚙️ 22 avril 2026</span>
       <span>⏱️ 9 min</span>
@@ -171,9 +233,10 @@
   </div>
 
   <div class="blog-card">
+    <div class="blog-card-emoji">⚡</div>
     <span class="blog-tag">Performance</span>
-    <h3>Email en 4 Secondes : Mythe ou Réalité ? Test Complet | BoosterMail</h3>
-    <p>BoosterMail promet email en 4 sec. Est-ce réel ? Benchmark détaillé : spéculation streaming, pré-génération, optimisations. Comment atteindre 4 second...</p>
+    <h3>E-Mail in 4 Sekunden: Mythos oder Realität? Vollständiger Test | BoosterMail</h3>
+    <p>BoosterMail verspricht E-Mail in 4 Sek. Ist das real? Detaillierter Benchmark: Streaming-Spekulation, Vorgenerierung, Optimierungen. Wie man 4 Sekunde...</p>
     <div class="blog-meta">
       <span>⚡ 22 avril 2026</span>
       <span>⏱️ 7 min</span>
@@ -184,9 +247,10 @@
   </div>
 
   <div class="blog-card">
-    <span class="blog-tag">IA &amp; Rédaction</span>
-    <h3>Rédiger des emails professionnels avec l&#39;IA en 2026 — Guide complet — BoosterMail</h3>
-    <p>GPT, Claude, Gemini… Comment utiliser l&#39;IA pour rédiger vos emails professionnels ? Guide complet pour choisir le bon outil et l&#39;intégrer dans Outlook...</p>
+    <div class="blog-card-emoji">🖊️</div>
+    <span class="blog-tag">KI &amp; Texterstellung</span>
+    <h3>Professionelle E-Mails mit KI verfassen 2026 — Vollständiger Leitfaden — BoosterMail</h3>
+    <p>GPT, Claude, Gemini… Wie nutzen Sie KI zum Verfassen Ihrer professionellen E-Mails? Vollständiger Leitfaden zur Auswahl des richtigen Tools und Integr...</p>
     <div class="blog-meta">
       <span>🖊️ 18 avril 2026</span>
       <span>⏱️ 8 min</span>
@@ -197,9 +261,10 @@
   </div>
 
   <div class="blog-card">
-    <span class="blog-tag">Productivité</span>
-    <h3>Gain de Temps Email : Mesurer le Vrai Impact de l&#39;IA | BoosterMail</h3>
-    <p>Combien de temps l&#39;IA économise vraiment ? 2h/jour ? Étude complète : temps écriture, édition, relecture, procrastination. ROI calculé pour vous....</p>
+    <div class="blog-card-emoji">⏱️</div>
+    <span class="blog-tag">Produktivität</span>
+    <h3>E-Mail-Zeitersparnis: Die wahre Auswirkung von KI messen | BoosterMail</h3>
+    <p>Wie viel Zeit spart KI wirklich? 2 Std./Tag? Umfassende Studie: Schreibzeit, Bearbeitung, Korrekturlesen, Prokrastination. ROI für Sie berechnet....</p>
     <div class="blog-meta">
       <span>⏱️ 22 avril 2026</span>
       <span>⏱️ 8 min</span>
@@ -210,9 +275,10 @@
   </div>
 
   <div class="blog-card">
-    <span class="blog-tag">Sécurité</span>
-    <h3>Intelligence Artificielle et Confidentialité : Garder le Contrôle | BoosterMail</h3>
-    <p>IA et confidentialité : vos données sont-elles sûres ? Chiffrement, RGPD, stockage. Tout ce que vous devez savoir pour générer des emails en confiance...</p>
+    <div class="blog-card-emoji">🔒</div>
+    <span class="blog-tag">Sicherheit</span>
+    <h3>Künstliche Intelligenz und Datenschutz: Die Kontrolle behalten | BoosterMail</h3>
+    <p>KI und Datenschutz: Sind Ihre Daten sicher? Verschlüsselung, DSGVO, Speicherung. Alles, was Sie wissen müssen, um E-Mails vertrauensvoll zu generieren...</p>
     <div class="blog-meta">
       <span>🔒 22 avril 2026</span>
       <span>⏱️ 7 min</span>
@@ -223,9 +289,10 @@
   </div>
 
   <div class="blog-card">
-    <span class="blog-tag">Intégration</span>
-    <h3>Outlook Web vs Plugin : Quelle Solution IA pour Générer des Emails ? | BoosterMail</h3>
-    <p>Outlook Web ou Plugin Outlook ? Lequel pour générer des emails avec l&#39;IA ? Comparatif : facilité, fonctionnalités, performance. Quel choix pour vous....</p>
+    <div class="blog-card-emoji">💻</div>
+    <span class="blog-tag">Integration</span>
+    <h3>Outlook Web vs Plugin: Welche KI-Lösung für die E-Mail-Generierung? | BoosterMail</h3>
+    <p>Outlook Web oder Outlook-Plugin? Welche Lösung für KI-generierte E-Mails? Vergleich: Benutzerfreundlichkeit, Funktionen, Leistung. Die richtige Wahl f...</p>
     <div class="blog-meta">
       <span>💻 22 avril 2026</span>
       <span>⏱️ 6 min</span>
@@ -236,9 +303,10 @@
   </div>
 
   <div class="blog-card">
-    <span class="blog-tag">Intégration</span>
-    <h3>Plugin Outlook IA : répondez à vos emails 3X plus vite — BoosterMail</h3>
-    <p>30% de votre journée part dans les emails. Un plugin Outlook IA vous permet de répondre 3 fois plus vite, dans votre propre style. Découvrez comment B...</p>
+    <div class="blog-card-emoji">🔌</div>
+    <span class="blog-tag">Integration</span>
+    <h3>Outlook KI-Plugin: Antworten Sie 3X schneller auf Ihre E-Mails — BoosterMail</h3>
+    <p>30% Ihres Tages gehen für E-Mails drauf. Ein Outlook KI-Plugin ermöglicht es Ihnen, 3-mal schneller zu antworten, in Ihrem eigenen Stil. Entdecken Sie...</p>
     <div class="blog-meta">
       <span>🔌 21 avril 2026</span>
       <span>⏱️ 5 min</span>
@@ -249,9 +317,10 @@
   </div>
 
   <div class="blog-card">
-    <span class="blog-tag">Analyse Contexte</span>
-    <h3>Profil Contact Automatique : Analyser Chaque Personne en 3 Secondes | BoosterMail</h3>
-    <p>Découvrez le système de profil contact automatique. Comment BoosterMail analyse chaque destinataire en 3 secondes pour adapter sa réponse. Contexte re...</p>
+    <div class="blog-card-emoji">👤</div>
+    <span class="blog-tag">Kontextanalyse</span>
+    <h3>Automatisches Kontaktprofil: Jede Person in 3 Sekunden analysieren | BoosterMail</h3>
+    <p>Entdecken Sie das automatische Kontaktprofil-System. Wie BoosterMail jeden Empfänger in 3 Sekunden analysiert, um seine Antwort anzupassen. Beziehungs...</p>
     <div class="blog-meta">
       <span>👤 22 avril 2026</span>
       <span>⏱️ 8 min</span>
@@ -262,9 +331,10 @@
   </div>
 
   <div class="blog-card">
-    <span class="blog-tag">Conformité</span>
-    <h3>RGPD et IA : Tout Ce Que Vous Devez Savoir | BoosterMail</h3>
-    <p>RGPD et intelligence artificielle : conformité, droits utilisateurs, stockage données. Guide complet pour utiliser l&#39;IA légalement en Europe. Mistral ...</p>
+    <div class="blog-card-emoji">⚖️</div>
+    <span class="blog-tag">Compliance</span>
+    <h3>DSGVO und KI: Alles, Was Sie Wissen Müssen | BoosterMail</h3>
+    <p>DSGVO und künstliche Intelligenz: Compliance, Nutzerrechte, Datenspeicherung. Vollständiger Leitfaden für die rechtskonforme Nutzung von KI in Europa....</p>
     <div class="blog-meta">
       <span>⚖️ 22 avril 2026</span>
       <span>⏱️ 8 min</span>
@@ -275,9 +345,10 @@
   </div>
 
   <div class="blog-card">
-    <span class="blog-tag">Productivité IA</span>
-    <h3>Scoring Rédactionnel IA : Emails Notés 0-100 | BoosterMail</h3>
-    <p>Découvrez le scoring rédactionnel BoosterMail : 0-100 sur 5 critères. Comprenez pourquoi vos emails doivent noter 80+ pour maximiser l&#39;impact professi...</p>
+    <div class="blog-card-emoji">📊</div>
+    <span class="blog-tag">KI-Produktivität</span>
+    <h3>KI-Bewertung für Texte: E-Mails von 0-100 bewertet | BoosterMail</h3>
+    <p>Entdecken Sie die BoosterMail-Textbewertung: 0-100 nach 5 Kriterien. Verstehen Sie, warum Ihre E-Mails 80+ erreichen müssen, um die professionelle Wir...</p>
     <div class="blog-meta">
       <span>📊 22 avril 2026</span>
       <span>⏱️ 8 min</span>

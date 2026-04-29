@@ -28,6 +28,7 @@
     .blog-grid{max-width:1000px;margin:0 auto;padding:60px 48px;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:32px}
     .blog-card{background:var(--card);border:1px solid var(--border);padding:32px;border-radius:12px;transition:all .3s}
     .blog-card:hover{transform:translateY(-4px);border-color:var(--pl)}
+    .blog-card-emoji{font-size:48px;line-height:1;margin-bottom:16px;display:block}
     .blog-tag{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--pl);background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);padding:5px 12px;border-radius:16px;margin-bottom:12px}
     .blog-card h3{font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700;margin-bottom:12px;color:var(--text)}
     .blog-card p{font-size:14px;line-height:1.6;color:var(--muted);margin-bottom:20px}
@@ -35,10 +36,15 @@
     .blog-meta span{color:var(--text);font-size:14px;font-weight:500;display:inline-flex;align-items:center;gap:4px}
     .blog-card a{display:inline-flex;align-items:center;gap:8px;color:var(--pl);text-decoration:none;font-weight:600;transition:all .2s}
     .blog-card a:hover{gap:12px}
+    html.light-mode .blog-hero{background:#ffffff;border-bottom-color:#e0e0e8}
+    html.light-mode .blog-card{background:#f9f9fb;border-color:#e0e0e8}
+    html.light-mode .blog-card:hover{border-color:var(--pl)}
+    html.light-mode .blog-tag{background:rgba(99,102,241,0.08);border-color:rgba(99,102,241,0.3)}
     @media(max-width:768px){
       .blog-hero{padding:60px 20px 40px}
       .blog-grid{padding:40px 20px}
       h1{font-size:28px}
+      .blog-card-emoji{font-size:36px}
     }
   </style>
 {% endblock %}
@@ -54,6 +60,7 @@
 <div class="blog-grid">
 {% for article in articles %}
   <div class="blog-card">
+    <div class="blog-card-emoji">{{ article.emoji }}</div>
     <span class="blog-tag">{{ article.category }}</span>
     <h3>{{ article.title }}</h3>
     <p>{{ article.description[:150] }}...</p>

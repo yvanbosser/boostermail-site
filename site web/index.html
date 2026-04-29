@@ -437,6 +437,47 @@
       footer{padding-bottom:max(36px,env(safe-area-inset-bottom))}
     }
   </style>
+  <style>
+    html.light-mode {
+      --bg:#f5f5f7; --bg2:#ffffff; --card:rgba(0,0,0,0.05);
+      --border:rgba(0,0,0,0.12); --text:#0f0f1e; --muted:#5a5a7a; --faint:#d0d0e0;
+    }
+    body { transition:background .3s, color .3s }
+    .theme-toggle { background:none; border:none; color:var(--muted); font-size:18px; cursor:pointer; transition:all .3s; padding:0; width:32px; height:32px; display:flex; align-items:center; justify-content:center; border-radius:6px }
+    .theme-toggle:hover { color:var(--text); background:rgba(99,102,241,0.1) }
+    .theme-toggle:active { transform:scale(0.95) }
+    html.light-mode nav { background:rgba(255,255,255,.98); border-bottom-color:#e0e0e8 }
+    html.light-mode nav.scrolled { background:rgba(255,255,255,.98) }
+    html.light-mode .nav-links a { color:#5a5a7a }
+    html.light-mode .nav-links a:hover { color:#0f0f1e }
+  </style>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const savedTheme = localStorage.getItem('theme') || 'dark';
+      const html = document.documentElement;
+      const themeBtn = document.getElementById('themeToggle');
+      if (!themeBtn) return;
+      if (savedTheme === 'light') {
+        html.classList.add('light-mode');
+        themeBtn.textContent = '🌙';
+      } else {
+        html.classList.remove('light-mode');
+        themeBtn.textContent = '☀️';
+      }
+      themeBtn.addEventListener('click', function() {
+        const isLight = html.classList.contains('light-mode');
+        if (isLight) {
+          html.classList.remove('light-mode');
+          localStorage.setItem('theme', 'dark');
+          themeBtn.textContent = '☀️';
+        } else {
+          html.classList.add('light-mode');
+          localStorage.setItem('theme', 'light');
+          themeBtn.textContent = '🌙';
+        }
+      });
+    });
+  </script>
 </head>
 <body>
 
@@ -450,6 +491,7 @@
     <a href="#features" data-i18n="nav_feat">Fonctionnalités</a>
     <a href="#pricing" data-i18n="nav_price">Tarifs</a>
     <a href="blog.html" data-i18n="nav_blog">Blog</a>
+    <button id="themeToggle" class="theme-toggle" title="Toggle dark/light mode">🌙</button>
     <a href="#waitlist" class="nav-cta" data-i18n="nav_cta">Essayer gratuitement</a>
     <div class="lang-switcher">
       <button class="lang-btn" onclick="setLang('fr')">FR</button>

@@ -1,50 +1,260 @@
 {
   "en": {
-    "10-cas-usage": {},
-    "5-erreurs": {},
-    "87-pourcent": {},
-    "apprentissage-style": {},
-    "claude-vs-chatgpt": {},
-    "email-4-secondes": {},
-    "email-ia": {},
-    "gain-temps": {},
-    "ia-confidentialite": {},
-    "outlook-web-vs-plugin": {},
-    "plugin-outlook-ia": {},
-    "profil-contact": {},
-    "rgpd-ia": {},
-    "scoring-redactionnel": {}
+    "10-cas-usage": {
+      "title": "10 Practical BoosterMail Use Cases: Real Examples | BoosterMail",
+      "description": "10 real use cases: sales, HR, support, management... How BoosterMail transforms every role. Concrete examples and measured gains.",
+      "keywords": "",
+      "category": "Use Cases"
+    },
+    "5-erreurs": {
+      "title": "5 Mistakes That Slow Down Your Email Responses | BoosterMail",
+      "description": "5 common mistakes slow down your email productivity. How to avoid them and save 2h/day on email writing. Complete guide with AI solutions.",
+      "keywords": "",
+      "category": "Productivity"
+    },
+    "87-pourcent": {
+      "title": "Why 87% of AI-Generated Emails Fail (and How to Succeed) | BoosterMail",
+      "description": "87% of generic AI-generated emails are rejected. Reasons: lack of personalization, ignored context, generic tone. How to avoid these pitfalls?",
+      "keywords": "",
+      "category": "Benchmark"
+    },
+    "apprentissage-style": {
+      "title": "How AI Learns Your Writing Style: Complete Guide | BoosterMail",
+      "description": "Complete guide: how does automatic writing style learning work? Machine learning, algorithms, data. Everything you need to know about AI personalization.",
+      "keywords": "",
+      "category": "Machine Learning"
+    },
+    "claude-vs-chatgpt": {
+      "title": "Claude vs ChatGPT for Emails: Which AI Engine to Choose? | BoosterMail",
+      "description": "Claude vs ChatGPT vs Gemini for email generation. Complete comparison: quality, speed, cost, privacy. Which AI engine to choose for Outlook?",
+      "keywords": "",
+      "category": "Comparison"
+    },
+    "email-4-secondes": {
+      "title": "Email in 4 Seconds: Myth or Reality? Complete Test | BoosterMail",
+      "description": "BoosterMail promises email in 4 sec. Is it real? Detailed benchmark: streaming speculation, pre-generation, optimizations. How to achieve 4 seconds.",
+      "keywords": "",
+      "category": "Performance"
+    },
+    "email-ia": {
+      "title": "Writing Professional Emails with AI in 2026 — Complete Guide — BoosterMail",
+      "description": "GPT, Claude, Gemini... How to use AI to write your professional emails? Complete guide to choosing the right tool and integrating it into Outlook without changing your habits.",
+      "keywords": "write professional email AI, automatic email generation, AI email assistant, AI email outlook, claude email, GPT professional email, automatic email writing",
+      "category": "AI & Writing"
+    },
+    "gain-temps": {
+      "title": "Email Time Savings: Measuring the Real Impact of AI | BoosterMail",
+      "description": "How much time does AI really save? 2h/day? Complete study: writing time, editing, proofreading, procrastination. ROI calculated for you.",
+      "keywords": "",
+      "category": "Productivity"
+    },
+    "ia-confidentialite": {
+      "title": "Artificial Intelligence and Privacy: Staying in Control | BoosterMail",
+      "description": "AI and privacy: is your data safe? Encryption, GDPR, storage. Everything you need to know to generate emails with confidence.",
+      "keywords": "",
+      "category": "Security"
+    },
+    "outlook-web-vs-plugin": {
+      "title": "Outlook Web vs Plugin: Which AI Solution for Email Generation? | BoosterMail",
+      "description": "Outlook Web or Outlook Plugin? Which one for generating emails with AI? Comparison: ease of use, features, performance. Which choice for you.",
+      "keywords": "",
+      "category": "Integration"
+    },
+    "plugin-outlook-ia": {
+      "title": "AI Outlook Plugin: Reply to Your Emails 3X Faster — BoosterMail",
+      "description": "30% of your day goes to emails. An AI Outlook plugin lets you reply 3 times faster, in your own style. Discover how BoosterMail concretely changes your daily routine.",
+      "keywords": "AI outlook plugin, save email time, artificial intelligence email assistant, outlook productivity, reply email automatically, windows outlook plugin",
+      "category": "Integration"
+    },
+    "profil-contact": {
+      "title": "Automatic Contact Profile: Analyze Each Person in 3 Seconds | BoosterMail",
+      "description": "Discover the automatic contact profile system. How BoosterMail analyzes each recipient in 3 seconds to adapt its response. Relationship context, exchange history.",
+      "keywords": "",
+      "category": "Context Analysis"
+    },
+    "rgpd-ia": {
+      "title": "GDPR and AI: Everything You Need to Know | BoosterMail",
+      "description": "GDPR and artificial intelligence: compliance, user rights, data storage. Complete guide to using AI legally in Europe. Mistral vs Claude vs ChatGPT.",
+      "keywords": "",
+      "category": "Compliance"
+    },
+    "scoring-redactionnel": {
+      "title": "AI Writing Score: Emails Rated 0-100 | BoosterMail",
+      "description": "Discover BoosterMail's writing score: 0-100 on 5 criteria. Understand why your emails should score 80+ to maximize professional impact.",
+      "keywords": "",
+      "category": "AI Productivity"
+    }
   },
   "de": {
-    "10-cas-usage": {},
-    "5-erreurs": {},
-    "87-pourcent": {},
-    "apprentissage-style": {},
-    "claude-vs-chatgpt": {},
-    "email-4-secondes": {},
-    "email-ia": {},
-    "gain-temps": {},
-    "ia-confidentialite": {},
-    "outlook-web-vs-plugin": {},
-    "plugin-outlook-ia": {},
-    "profil-contact": {},
-    "rgpd-ia": {},
-    "scoring-redactionnel": {}
+    "10-cas-usage": {
+      "title": "10 Praktische Anwendungsfälle von BoosterMail: Reale Beispiele | BoosterMail",
+      "description": "10 reale Anwendungsfälle: Vertrieb, HR, Support, Geschäftsführung... Wie BoosterMail jede Rolle transformiert. Konkrete Beispiele und messbare Erfolge.",
+      "keywords": "",
+      "category": "Anwendungsfälle"
+    },
+    "5-erreurs": {
+      "title": "5 Fehler, die Ihre E-Mail-Antworten verlangsamen | BoosterMail",
+      "description": "5 häufige Fehler verlangsamen Ihre E-Mail-Produktivität. Wie Sie diese vermeiden und täglich 2 Stunden beim Schreiben von E-Mails sparen. Vollständiger Leitfaden mit KI-Lösungen.",
+      "keywords": "",
+      "category": "Produktivität"
+    },
+    "87-pourcent": {
+      "title": "Warum 87% der KI-generierten E-Mails scheitern (und wie man erfolgreich ist) | BoosterMail",
+      "description": "87% der generischen KI-generierten E-Mails werden abgelehnt. Gründe: fehlende Personalisierung, ignorierter Kontext, generischer Ton. Wie vermeidet man diese Fallen?",
+      "keywords": "",
+      "category": "Benchmark"
+    },
+    "apprentissage-style": {
+      "title": "Wie KI Ihren Schreibstil erlernt: Vollständiger Leitfaden | BoosterMail",
+      "description": "Vollständiger Leitfaden: Wie funktioniert das maschinelle Lernen des Schreibstils? Machine Learning, Algorithmen, Daten. Alles, was Sie über KI-Personalisierung wissen müssen.",
+      "keywords": "",
+      "category": "Machine Learning"
+    },
+    "claude-vs-chatgpt": {
+      "title": "Claude vs ChatGPT für E-Mails: Welche KI-Engine wählen? | BoosterMail",
+      "description": "Claude vs ChatGPT vs Gemini für die E-Mail-Generierung. Vollständiger Vergleich: Qualität, Geschwindigkeit, Kosten, Datenschutz. Welche KI-Engine für Outlook wählen?",
+      "keywords": "",
+      "category": "Vergleich"
+    },
+    "email-4-secondes": {
+      "title": "E-Mail in 4 Sekunden: Mythos oder Realität? Vollständiger Test | BoosterMail",
+      "description": "BoosterMail verspricht E-Mail in 4 Sek. Ist das real? Detaillierter Benchmark: Streaming-Spekulation, Vorgenerierung, Optimierungen. Wie man 4 Sekunden erreicht.",
+      "keywords": "",
+      "category": "Performance"
+    },
+    "email-ia": {
+      "title": "Professionelle E-Mails mit KI verfassen 2026 — Vollständiger Leitfaden — BoosterMail",
+      "description": "GPT, Claude, Gemini… Wie nutzen Sie KI zum Verfassen Ihrer professionellen E-Mails? Vollständiger Leitfaden zur Auswahl des richtigen Tools und Integration in Outlook ohne Ihre Gewohnheiten zu ändern.",
+      "keywords": "professionelle E-Mail KI verfassen, automatische E-Mail-Generierung, KI E-Mail-Assistent, E-Mail KI Outlook, Claude E-Mail, GPT professionelle E-Mail, automatisches E-Mail-Verfassen",
+      "category": "KI & Texterstellung"
+    },
+    "gain-temps": {
+      "title": "E-Mail-Zeitersparnis: Die wahre Auswirkung von KI messen | BoosterMail",
+      "description": "Wie viel Zeit spart KI wirklich? 2 Std./Tag? Umfassende Studie: Schreibzeit, Bearbeitung, Korrekturlesen, Prokrastination. ROI für Sie berechnet.",
+      "keywords": "",
+      "category": "Produktivität"
+    },
+    "ia-confidentialite": {
+      "title": "Künstliche Intelligenz und Datenschutz: Die Kontrolle behalten | BoosterMail",
+      "description": "KI und Datenschutz: Sind Ihre Daten sicher? Verschlüsselung, DSGVO, Speicherung. Alles, was Sie wissen müssen, um E-Mails vertrauensvoll zu generieren.",
+      "keywords": "",
+      "category": "Sicherheit"
+    },
+    "outlook-web-vs-plugin": {
+      "title": "Outlook Web vs Plugin: Welche KI-Lösung für die E-Mail-Generierung? | BoosterMail",
+      "description": "Outlook Web oder Outlook-Plugin? Welche Lösung für KI-generierte E-Mails? Vergleich: Benutzerfreundlichkeit, Funktionen, Leistung. Die richtige Wahl für Sie.",
+      "keywords": "",
+      "category": "Integration"
+    },
+    "plugin-outlook-ia": {
+      "title": "Outlook KI-Plugin: Antworten Sie 3X schneller auf Ihre E-Mails — BoosterMail",
+      "description": "30% Ihres Tages gehen für E-Mails drauf. Ein Outlook KI-Plugin ermöglicht es Ihnen, 3-mal schneller zu antworten, in Ihrem eigenen Stil. Entdecken Sie, wie BoosterMail Ihren Alltag konkret verändert.",
+      "keywords": "outlook ki plugin, zeit sparen email, email assistent künstliche intelligenz, outlook produktivität, email automatisch beantworten, outlook plugin windows",
+      "category": "Integration"
+    },
+    "profil-contact": {
+      "title": "Automatisches Kontaktprofil: Jede Person in 3 Sekunden analysieren | BoosterMail",
+      "description": "Entdecken Sie das automatische Kontaktprofil-System. Wie BoosterMail jeden Empfänger in 3 Sekunden analysiert, um seine Antwort anzupassen. Beziehungskontext, Kommunikationsverlauf.",
+      "keywords": "",
+      "category": "Kontextanalyse"
+    },
+    "rgpd-ia": {
+      "title": "DSGVO und KI: Alles, Was Sie Wissen Müssen | BoosterMail",
+      "description": "DSGVO und künstliche Intelligenz: Compliance, Nutzerrechte, Datenspeicherung. Vollständiger Leitfaden für die rechtskonforme Nutzung von KI in Europa. Mistral vs Claude vs ChatGPT.",
+      "keywords": "",
+      "category": "Compliance"
+    },
+    "scoring-redactionnel": {
+      "title": "KI-Bewertung für Texte: E-Mails von 0-100 bewertet | BoosterMail",
+      "description": "Entdecken Sie die BoosterMail-Textbewertung: 0-100 nach 5 Kriterien. Verstehen Sie, warum Ihre E-Mails 80+ erreichen müssen, um die professionelle Wirkung zu maximieren.",
+      "keywords": "",
+      "category": "KI-Produktivität"
+    }
   },
   "es": {
-    "10-cas-usage": {},
-    "5-erreurs": {},
-    "87-pourcent": {},
-    "apprentissage-style": {},
-    "claude-vs-chatgpt": {},
-    "email-4-secondes": {},
-    "email-ia": {},
-    "gain-temps": {},
-    "ia-confidentialite": {},
-    "outlook-web-vs-plugin": {},
-    "plugin-outlook-ia": {},
-    "profil-contact": {},
-    "rgpd-ia": {},
-    "scoring-redactionnel": {}
+    "10-cas-usage": {
+      "title": "10 Casos de Uso Prácticos de BoosterMail: Ejemplos Reales | BoosterMail",
+      "description": "10 casos de uso reales: comerciales, RRHH, soporte, dirección... Cómo BoosterMail transforma cada rol. Ejemplos concretos y beneficios medidos.",
+      "keywords": "",
+      "category": "Casos de Uso"
+    },
+    "5-erreurs": {
+      "title": "5 Errores Que Ralentizan Tu Respuesta a los Emails | BoosterMail",
+      "description": "5 errores comunes ralentizan tu productividad con el email. Cómo evitarlos y ahorrar 2h/día en la redacción de emails. Guía completa con soluciones IA.",
+      "keywords": "",
+      "category": "Productividad"
+    },
+    "87-pourcent": {
+      "title": "Por Qué el 87% de los Emails Generados por IA Fracasan (y Cómo Tener Éxito) | BoosterMail",
+      "description": "El 87% de los emails generados por IA genérica son rechazados. Razones: falta de personalización, contexto ignorado, tono genérico. ¿Cómo evitar estas trampas?",
+      "keywords": "",
+      "category": "Benchmark"
+    },
+    "apprentissage-style": {
+      "title": "Cómo la IA Aprende Tu Estilo de Escritura: Guía Completa | BoosterMail",
+      "description": "Guía completa: ¿cómo funciona el aprendizaje automático del estilo de escritura? Machine learning, algoritmos, datos. Todo lo que debes saber sobre la personalización IA.",
+      "keywords": "",
+      "category": "Machine Learning"
+    },
+    "claude-vs-chatgpt": {
+      "title": "Claude vs ChatGPT para Emails: ¿Qué Motor IA Elegir? | BoosterMail",
+      "description": "Claude vs ChatGPT vs Gemini para generar emails. Comparativa completa: calidad, velocidad, coste, confidencialidad. ¿Qué motor IA elegir para Outlook?",
+      "keywords": "",
+      "category": "Comparación"
+    },
+    "email-4-secondes": {
+      "title": "Email en 4 Segundos: ¿Mito o Realidad? Prueba Completa | BoosterMail",
+      "description": "BoosterMail promete email en 4 seg. ¿Es real? Benchmark detallado: especulación streaming, pre-generación, optimizaciones. Cómo alcanzar 4 segundos.",
+      "keywords": "",
+      "category": "Rendimiento"
+    },
+    "email-ia": {
+      "title": "Redactar emails profesionales con IA en 2026 — Guía completa — BoosterMail",
+      "description": "GPT, Claude, Gemini… ¿Cómo utilizar la IA para redactar sus emails profesionales? Guía completa para elegir la herramienta adecuada e integrarla en Outlook sin cambiar sus hábitos.",
+      "keywords": "redactar email profesional IA, generación email automática, asistente email IA, email IA outlook, claude email, GPT email profesional, redacción automática email",
+      "category": "IA y Redacción"
+    },
+    "gain-temps": {
+      "title": "Ahorro de Tiempo en Email: Medir el Verdadero Impacto de la IA | BoosterMail",
+      "description": "¿Cuánto tiempo ahorra realmente la IA? ¿2h/día? Estudio completo: tiempo de escritura, edición, revisión, procrastinación. ROI calculado para ti.",
+      "keywords": "",
+      "category": "Productividad"
+    },
+    "ia-confidentialite": {
+      "title": "Inteligencia Artificial y Confidencialidad: Mantener el Control | BoosterMail",
+      "description": "IA y confidencialidad: ¿están seguros tus datos? Cifrado, RGPD, almacenamiento. Todo lo que necesitas saber para generar emails con confianza.",
+      "keywords": "",
+      "category": "Seguridad"
+    },
+    "outlook-web-vs-plugin": {
+      "title": "Outlook Web vs Plugin: ¿Qué Solución IA para Generar Correos? | BoosterMail",
+      "description": "¿Outlook Web o Plugin de Outlook? ¿Cuál para generar correos con IA? Comparativa: facilidad, funcionalidades, rendimiento. Qué elección para usted.",
+      "keywords": "",
+      "category": "Integración"
+    },
+    "plugin-outlook-ia": {
+      "title": "Plugin Outlook IA: responda a sus correos 3X más rápido — BoosterMail",
+      "description": "El 30% de su jornada se va en los correos. Un plugin Outlook IA le permite responder 3 veces más rápido, con su propio estilo. Descubra cómo BoosterMail cambia concretamente su día a día.",
+      "keywords": "plugin outlook IA, ahorrar tiempo correo, asistente correo inteligencia artificial, outlook productividad, responder correo automáticamente, plugin outlook windows",
+      "category": "Integración"
+    },
+    "profil-contact": {
+      "title": "Perfil de Contacto Automático: Analizar Cada Persona en 3 Segundos | BoosterMail",
+      "description": "Descubra el sistema de perfil de contacto automático. Cómo BoosterMail analiza cada destinatario en 3 segundos para adaptar su respuesta. Contexto relacional, historial de intercambios.",
+      "keywords": "",
+      "category": "Análisis de Contexto"
+    },
+    "rgpd-ia": {
+      "title": "RGPD e IA: Todo Lo Que Necesita Saber | BoosterMail",
+      "description": "RGPD e inteligencia artificial: conformidad, derechos de usuarios, almacenamiento de datos. Guía completa para usar la IA legalmente en Europa. Mistral vs Claude vs ChatGPT.",
+      "keywords": "",
+      "category": "Conformidad"
+    },
+    "scoring-redactionnel": {
+      "title": "Puntuación de Redacción IA: Emails Calificados 0-100 | BoosterMail",
+      "description": "Descubra la puntuación de redacción BoosterMail: 0-100 sobre 5 criterios. Comprenda por qué sus emails deben puntuar 80+ para maximizar el impacto profesional.",
+      "keywords": "",
+      "category": "Productividad IA"
+    }
   }
 }
