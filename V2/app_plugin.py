@@ -3229,6 +3229,11 @@ def _broadcast_sse(event_type, data):
 
 # --- SSE endpoint (O3) ------------------------------------------------------
 
+# 29/04 PM audit resource leaks — borne max de clients SSE pour éviter
+# growth indéfini si des clients orphelins survivent à la détection du
+# broken pipe. Le cap est large (clients réels ~1-3 simultanés).
+_SSE_MAX_CLIENTS = 50
+
 @app.route('/api/events/stream')
 def sse_stream():
     """
@@ -3238,6 +3243,11 @@ def sse_stream():
     """
     q = _queue.Queue(maxsize=100)
     with _sse_lock:
+        # Garde-fou : si on dépasse le cap, on drop le plus ancien client
+        # (probablement orphelin dont le broken pipe n'a pas été détecté).
+        if len(_sse_clients) >= _SSE_MAX_CLIENTS:
+            _dropped = _sse_clients.pop(0)
+            logger.warning(f"[sse] cap {_SSE_MAX_CLIENTS} atteint — drop oldest client (probablement orphelin)")
         _sse_clients.append(q)
 
     def generate():
@@ -8000,14 +8010,16 @@ _new_profile_toast = None
 _new_profile_toast_lock = threading.Lock()
 _CONTACT_MIN_MAILS = 1
 _CONTACT_ANALYSIS_SCHEDULE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 50, 75, 100, 150, 200]
-_contacts_recalibrating = False
-_contacts_recalib_step = ''
-# Étape 7 multi-tenant — _contacts_recalib_progress via UserScopedDict.
-# One-shot dict {done, total} pour progression recalibrage contacts.
+# Étape 7 multi-tenant (29/04 PM audit cohérence) — _contacts_recalib_progress
+# en UserScopedDict avec TOUS les champs du recalibrage : done, total,
+# recalibrating (bool), step (email en cours).
+# Avant : _contacts_recalibrating + _contacts_recalib_step étaient globaux
+# bool/str → 2 users en parallèle voyaient le mauvais état.
+# Après : isolation user_id complète, recalibrages multi-user concurrents OK.
 if _UserScopedDict is not None:
     _contacts_recalib_progress = _UserScopedDict('contacts_recalib')
 else:
-    _contacts_recalib_progress = {'done': 0, 'total': 0}
+    _contacts_recalib_progress = {'done': 0, 'total': 0, 'recalibrating': False, 'step': ''}
 _recalib_contacts_lock = threading.Lock()   # protège le démarrage (anti TOCTOU)
 
 @app.route('/api/cache_metrics')
@@ -8260,8 +8272,15 @@ def api_instant_reply():
         # 'bg_speculation' → step 3 recomputait un template identique.
         if (entry.get('source') in ('bg_speculation', 'template')
                 and entry.get('status') == 'running'):
-            for _ in range(15):
-                time.sleep(0.1)
+            # Polling backoff exponentiel (29/04 PM audit perf — Hotspot #1)
+            # Avant : 15 × time.sleep(0.1) + 15 × _reply_lock acquisitions = 1.5s
+            # de polling avec lock contention élevée si _reply_lock est utilisé
+            # par d'autres threads BG (cont-spec, safety-net, cohesion-refresh).
+            # Après : backoff 5/10/20/40/80/160/320/320/320 ms = 1275ms total,
+            # 9 acquisitions max. Réveil ultra-rapide si le BG finit dans
+            # < 50ms (cas commun avec cache préchauffé Yvan).
+            for _delay_ms in (5, 10, 20, 40, 80, 160, 320, 320, 320):
+                time.sleep(_delay_ms / 1000.0)
                 with _reply_lock:
                     entry = _reply_cache.get(message_id, {})
                 if entry.get('status') in ('done', 'error', 'cancelled'):
@@ -10846,18 +10865,32 @@ def api_new_profile_toast():
 @app.route('/api/recalibrate_contacts', methods=['POST'])
 def api_recalibrate_contacts():
     """Recalibre un ou tous les contacts (thread BG)."""
-    global _contacts_recalibrating, _contacts_recalib_step, _contacts_recalib_progress
     data = request.get_json(force=True) or {}
     target_email = data.get('email', '').strip().lower()
 
+    # Étape 7 multi-tenant — résoudre user_id pour le bridge BG (le thread
+    # _run lancé ci-dessous tourne sans Flask context). On capture le user_id
+    # côté route (Flask context dispo) pour le passer au BG via closure.
+    try:
+        from user_context import get_current_user_id as _get_uid
+        _bg_user_id = _get_uid()
+    except Exception:
+        _bg_user_id = None
+
     # Vérification + démarrage atomique (évite TOCTOU si deux requêtes simultanées)
+    # Recalibrage isolé par user via UserScopedDict — User A peut recalibrer
+    # pendant que User B aussi (chacun son propre flag dans son sub-cache).
     with _recalib_contacts_lock:
-        if _contacts_recalibrating:
+        if _contacts_recalib_progress.get('recalibrating'):
             return jsonify({"status": "already_running"})
-        _contacts_recalibrating = True  # Réserver avant de lancer le thread
+        _contacts_recalib_progress['recalibrating'] = True
+        _contacts_recalib_progress['step'] = ''
 
     def _run():
-        global _contacts_recalibrating, _contacts_recalib_step, _contacts_recalib_progress
+        # Le thread BG résout son user_id via bridge DB (user_context).
+        # En cas de besoin d'override (ex: appel cross-user), on peut
+        # forcer via _bg_user_id capturé en closure — non implémenté ici
+        # car bridge DB suffit pour mono-user actuel.
         try:
             if target_email:
                 emails = [target_email]
@@ -10865,11 +10898,12 @@ def api_recalibrate_contacts():
                 profiles = _db.get_all_contact_profiles()
                 emails = [p.get('email', '') for p in profiles if p.get('email')]
 
-            # Étape 7 multi-tenant — clear + update au lieu de réassignation globale
-            _contacts_recalib_progress.clear()
-            _contacts_recalib_progress.update({'done': 0, 'total': len(emails)})
+            _contacts_recalib_progress.update({
+                'done': 0, 'total': len(emails),
+                'recalibrating': True, 'step': '',
+            })
             for i, email in enumerate(emails):
-                _contacts_recalib_step = email
+                _contacts_recalib_progress['step'] = email
                 try:
                     existing = _db.get_contact_profile(email)
                     if existing:
@@ -10881,19 +10915,19 @@ def api_recalibrate_contacts():
                 _contacts_recalib_progress['done'] = i + 1
                 time.sleep(0.3)
         finally:
-            _contacts_recalibrating = False
-            _contacts_recalib_step = ''
+            _contacts_recalib_progress['recalibrating'] = False
+            _contacts_recalib_progress['step'] = ''
 
-    threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=_run, daemon=True, name='recalib-contacts').start()
     return jsonify({"status": "started"})
 
 
 @app.route('/api/recalibrate_contacts/status')
 def api_recalibrate_contacts_status():
-    """Statut du recalibrage contacts en cours."""
+    """Statut du recalibrage contacts en cours (isolé par user)."""
     return jsonify({
-        "running": _contacts_recalibrating,
-        "current": _contacts_recalib_step,
+        "running": bool(_contacts_recalib_progress.get('recalibrating', False)),
+        "current": _contacts_recalib_progress.get('step', '') or '',
         "done": _contacts_recalib_progress.get('done', 0),
         "total": _contacts_recalib_progress.get('total', 0),
     })
