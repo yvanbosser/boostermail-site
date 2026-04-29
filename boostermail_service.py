@@ -33,12 +33,21 @@ POPUP_SCRIPT = os.path.join(EASYMAIL_DIR, 'companion', 'popup_pyqt.py')
 _NW = 0x08000000  # CREATE_NO_WINDOW
 _MUTEX_HANDLE = None  # Handle mutex Windows (eviter GC)
 
+# Pivot SaaS 27/04 PM — mode SaaS pur :
+# Yvan utilise le backend OVH (https://api.boostermail.ai) au quotidien.
+# Le V2 local (port 3443) + Companion local (port 5051) sont devenus
+# inutiles ET instables (28 commits 29/04 → V2 local saturé, boucle
+# 'mort détecté'). On les désactive par défaut.
+# Pour réactiver en mode dev (V2 local) : BOOSTERMAIL_LOCAL_BACKENDS=1.
+ENABLE_LOCAL_BACKENDS = os.environ.get('BOOSTERMAIL_LOCAL_BACKENDS', '0') == '1'
+BACKEND_URL = os.environ.get('BOOSTERMAIL_BACKEND_URL', 'https://api.boostermail.ai')
+
 PROCESSES = [
     # Audit 20/04 : delay=0 sur les deux — pas de dépendance entre Companion
     # et V2 (ports/DB différents). Démarrage réellement parallèle, gain ~1 s.
     {'name': 'Companion',  'script': os.path.join(EASYMAIL_DIR, 'companion', 'companion.py'),  'port': 5051, 'delay': 0},
     {'name': 'Backend V2', 'script': os.path.join(EASYMAIL_DIR, 'V2', 'app_plugin.py'),        'port': 3443, 'delay': 0},
-]
+] if ENABLE_LOCAL_BACKENDS else []
 
 # Proto + Tray : DESACTIVES (decision 18/04/2026)
 # Depuis que V2 est autonome, le proto n'a plus besoin de tourner en parallele.
@@ -486,14 +495,21 @@ def _should_show_popup_now():
     """
     try:
         import urllib.request, ssl as _ssl
-        ctx = _ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = _ssl.CERT_NONE
+        # OVH = cert Let's Encrypt valide → ctx par défaut. Pour fallback
+        # localhost (mode dev) on garde la possibilité d'un cert relaxé.
+        if BACKEND_URL.startswith('https://localhost') or BACKEND_URL.startswith('https://127.'):
+            ctx = _ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = _ssl.CERT_NONE
+        else:
+            ctx = _ssl.create_default_context()
+        # Timeout 2.5s : OVH ajoute ~100-300ms de latence réseau, on garde
+        # une marge confortable pour ne pas timeout sous charge.
         req = urllib.request.Request(
-            'https://localhost:3443/api/activation_status',
+            f'{BACKEND_URL}/api/activation_status',
             headers={'Accept': 'application/json'},
         )
-        with urllib.request.urlopen(req, timeout=1.5, context=ctx) as resp:
+        with urllib.request.urlopen(req, timeout=2.5, context=ctx) as resp:
             body = json.loads(resp.read().decode('utf-8'))
         return bool(body.get('should_show_popup', True))
     except Exception as e:
@@ -792,25 +808,32 @@ def run_supervisor(first_launch=True):
     # s'arrêtent 30 min après la fermeture d'Outlook (économie RAM).
     # =========================================================
     managers = []
-    logger.info("Lancement backends au logon (pas d'attente Outlook)...")
-    for proc in PROCESSES:
-        if proc['delay'] > 0:
-            time.sleep(proc['delay'])
-        mgr = ProcessManager(proc['name'], proc['script'], proc['port'], pythonw)
-        mgr.start()
-        managers.append(mgr)
-    write_pid_file(os.getpid(), [m.pid for m in managers if m.pid])
+    if PROCESSES:
+        logger.info("Lancement backends au logon (pas d'attente Outlook)...")
+        for proc in PROCESSES:
+            if proc['delay'] > 0:
+                time.sleep(proc['delay'])
+            mgr = ProcessManager(proc['name'], proc['script'], proc['port'], pythonw)
+            mgr.start()
+            managers.append(mgr)
+        write_pid_file(os.getpid(), [m.pid for m in managers if m.pid])
 
-    # Attendre que V2 soit prêt (port 3443)
-    logger.info("Attente de V2 (port 3443)...")
-    for _ in range(30):
-        if is_port_listening(3443):
-            break
-        if os.path.exists(STOP_FILE):
-            cleanup()
-            return False
-        time.sleep(1)
-    logger.info("Backends prêts — en veille jusqu'à ouverture Outlook")
+        # Attendre que V2 soit prêt (port 3443)
+        logger.info("Attente de V2 (port 3443)...")
+        for _ in range(30):
+            if is_port_listening(3443):
+                break
+            if os.path.exists(STOP_FILE):
+                cleanup()
+                return False
+            time.sleep(1)
+        logger.info("Backends prêts — en veille jusqu'à ouverture Outlook")
+    else:
+        # Mode SaaS pur (ENABLE_LOCAL_BACKENDS=False, défaut depuis pivot
+        # 27/04 PM). Backend = OVH. Le superviseur surveille uniquement
+        # Outlook pour déclencher la popup PyQt locale.
+        logger.info(f"Mode SaaS pur — pas de backend local. Backend = {BACKEND_URL}")
+        write_pid_file(os.getpid(), [])
 
     # Pre-warm 24/04 : lance popup_pyqt --pre-warm dès que V2 est ready
     # (même si Outlook pas encore ouvert). Charge Qt + QtWebEngine en
@@ -912,8 +935,8 @@ def run_supervisor(first_launch=True):
         if running and not _was_running:
             logger.info("Outlook ré-ouvert — popup si applicable")
             _closed_since = None
-            # Si backends stoppés pendant idle → respawn
-            if not managers or not managers[0].is_alive():
+            # Si backends stoppés pendant idle → respawn (mode local seulement)
+            if PROCESSES and (not managers or not managers[0].is_alive()):
                 logger.info("Respawn backends après idle...")
                 managers = []
                 for proc in PROCESSES:

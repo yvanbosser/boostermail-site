@@ -49,9 +49,29 @@ try:
 except Exception as _e:
     pass
 
-BACKEND_URL = 'https://localhost:3443'
+# Pivot SaaS 27/04 PM — option B (29/04 PM) :
+# popup_pyqt locale ping désormais le backend OVH au lieu du V2 local.
+# V2 local devient inutile (Yvan utilise OVH au quotidien depuis le pivot)
+# et il était devenu instable (28 commits le 29/04 → boucle 'mort détecté').
+# Cert OVH = Let's Encrypt valide → pas besoin du handler self-signed
+# pour ce host (mais le handler reste actif pour localhost si jamais
+# le V2 local tourne en parallèle pour debug).
+BACKEND_URL = os.environ.get('BOOSTERMAIL_BACKEND_URL', 'https://api.boostermail.ai')
 POPUP_URL = f'{BACKEND_URL}/plugin/popup.html?container=pyqt'
 DIALOG_URL = f'{BACKEND_URL}/plugin/dialog.html?standalone=1'
+
+# Hosts considérés comme "internes" (navigation enfant + cert auto-signé
+# accepté). En mode SaaS pur, seul OVH ; en mode dev local, on garde
+# localhost pour fallback. Extrait du host de BACKEND_URL pour rester
+# cohérent si BOOSTERMAIL_BACKEND_URL est overridé.
+def _backend_host():
+    try:
+        from urllib.parse import urlparse
+        return urlparse(BACKEND_URL).hostname or ''
+    except Exception:
+        return ''
+_BACKEND_HOST = _backend_host()
+_INTERNAL_HOSTS = {'localhost', '127.0.0.1', '', _BACKEND_HOST}
 
 
 # =============================================================================
@@ -98,14 +118,14 @@ class _ChildPopupPage(QWebEnginePage):
 
     def _on_certificate_error(self, error):
         u = error.url()
-        if u.host() in ('localhost', '127.0.0.1'):
+        if u.host() in _INTERNAL_HOSTS:
             error.acceptCertificate()
         else:
             error.rejectCertificate()
 
     def acceptNavigationRequest(self, url, nav_type, is_main_frame):
         # URL interne → créer la fenêtre au 1er main-frame load
-        if url.host() in ('localhost', '127.0.0.1', ''):
+        if url.host() in _INTERNAL_HOSTS:
             if self._child_view is None and is_main_frame:
                 v = QWebEngineView()
                 v.setPage(self)
@@ -138,7 +158,7 @@ class LocalhostPage(QWebEnginePage):
 
     def _on_certificate_error(self, error):
         url = error.url()
-        if url.host() in ('localhost', '127.0.0.1'):
+        if url.host() in _INTERNAL_HOSTS:
             error.acceptCertificate()
             return
         error.rejectCertificate()
