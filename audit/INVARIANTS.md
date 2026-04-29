@@ -1,6 +1,6 @@
 # Invariants V2 — règles absolues testables
 
-> **Dernière mise à jour** : 29/04/2026 PM tardif (Étape 7 multi-tenant TERMINÉE — 22/22 caches migrés (100%) + cleanup BG périodique users inactifs en place)
+> **Dernière mise à jour** : 29/04/2026 fin de journée (BoosterMail SaaS quasi beta-ready : 22 commits master incluant Étape 7 multi-tenant 100%, Étape 4 BG webhooks Graph POC, welcome wizard #11+#12+#13, Auth JWT Bearer infra, saas_smoke.sh, 5 fixes logger.debug, 2 audits Pattern #17 + except: pass)
 > **Principe** : chaque invariant est testable mécaniquement par `smoke_test.ps1`. Une violation = anomalie, point final.
 
 ---
@@ -487,6 +487,33 @@ plutôt qu'un dict global ``{}``.
   bloc (9 commits atomiques, validation prod OVH sans perte ni régression).
   Cf rapport ``audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md``
   pour la liste exhaustive des caches initiaux.
+
+### I-AUTH-JWT-01 : Token Bearer JWT signé HS256, TTL 15 min, dérivé de flask_secret_key
+
+Tout JWT émis par BoosterMail (V2/auth_jwt.py) DOIT respecter :
+- **Algorithme** : ``HS256`` (HMAC-SHA256, symétrique)
+- **TTL** : 15 minutes (``JWT_TTL_SECONDS = 900``)
+- **Issuer** : ``"boostermail"``
+- **Payload** : ``{sub: user_id, iat, exp, iss}``
+- **Secret** : dérivé de ``flask_secret_key`` (config.json) via PBKDF2-SHA256
+  100 000 iterations + sel ``"boostermail-jwt-v1"``
+
+- **Test** : grep dans ``V2/auth_jwt.py`` les constantes ``JWT_ALGORITHM``,
+  ``JWT_TTL_SECONDS``, ``JWT_ISSUER`` doivent matcher ces valeurs ;
+  ``python V2/auth_jwt.py`` retourne 13/13 tests OK (round-trip,
+  mauvais secret rejeté, token forgé rejeté, expiration, etc.)
+- **Pourquoi** : couche d'auth supplémentaire compatible popup Office.js
+  cross-origin (où les cookies session ne sont pas systématiquement
+  transmis). Court-vivant pour limiter le risque de vol.
+- **Architecture** : autorunshared.js fetch ``/api/auth/issue_token`` au
+  boot (cookie session same-origin valide), stocke le JWT en mémoire,
+  le transmet au dialog popup via ``messageChild()``. Le dialog injecte
+  ``Authorization: Bearer XXX`` via le helper ``_fetchWithBearer()``.
+  Refresh automatique toutes les 10 min côté shared runtime.
+- **Action si violé** : refuser de générer le token (``ValueError``) ou
+  refuser au décodage (``decode_token`` retourne ``None``). Tests
+  inline défensifs valident (``test_secret_vide``, ``test_user_id_vide``,
+  ``test_token_forgé``, ``test_token_expiré``).
 
 ### I-EVENT-02 : `notificationMessages` actionable button cadenassé sur ShowTaskPane
 
