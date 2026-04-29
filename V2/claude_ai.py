@@ -18,10 +18,10 @@ import anthropic
 # avec risque d'oubli. Centralisation = 1 seule source de vérité.
 # Note 29/04 : claude-sonnet-4-20250514 est marqué deprecated par Anthropic
 # (end-of-life 2026-06-15). À migrer vers claude-sonnet-4-6 ou suivant.
-MODEL = "claude-sonnet-4-20250514"                 # Génération réponse (default)
-MODEL_CLASSIFY = "claude-sonnet-4-20250514"        # Sonnet pour qualité classement
-MODEL_ANALYSIS = "claude-sonnet-4-20250514"        # Analyses profil contact
-MODEL_HAIKU_FAST = "claude-haiku-4-5"              # Summarize batch + score interests
+MODEL = "claude-sonnet-4-6"                        # Génération réponse (default) — migré 29/04 PM
+MODEL_CLASSIFY = "claude-sonnet-4-6"               # Sonnet pour qualité classement — migré 29/04 PM
+MODEL_ANALYSIS = "claude-sonnet-4-6"               # Analyses profil contact — migré 29/04 PM
+MODEL_HAIKU_FAST = "claude-haiku-4-5"              # Summarize batch + score interests (déjà à jour)
 MAX_TOKENS = 1200
 
 # 29/04 PM audit perf — patterns regex précompilés pour détection registre
