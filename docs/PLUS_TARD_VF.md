@@ -1,6 +1,6 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 29/04/2026 PM tardif post-audit V2 (12 commits supplémentaires de stabilisation autonome pendant absence Yvan : fix _build_prompt triple-désérialisation + popup OVH-only + barre PJ portée du proto + 9 fixes audit V2 ; 11 items tech debt identifiés section dédiée ci-dessous)
+> **Dernière mise à jour** : 29/04/2026 PM tardif post-dîner Yvan (10 commits supplémentaires : tech debt #24/26/27/28/29/30/31/33/34 résolus + #32 SKIP justifié ; cumul session 28+10 ≈ 38 commits ce jour ; tech debt résiduelle V2 → 0 item bloquant)
 
 ---
 
@@ -51,25 +51,29 @@ Si tu reviens sur ce doc au début d'une nouvelle session, voici **uniquement ce
 ### 💤 Long terme
 23. Inbox web standalone V2 — différé (décision V2 = plugin Outlook, pas web app)
 
-### 🔧 Tech debt — audit V2 stabilisation 29/04 PM tardif (autonomie ~2h30)
+### ✅ Tech debt — audit V2 stabilisation 29/04 PM tardif (autonomie ~2h30 + ~1h30 post-dîner)
 
 > **Source** : `audit/rapports/2026-04-29_PM_audit_stabilisation_v2_autonome.md`
-> 7 sub-agents Explore + audits manuels. ~50 findings, 12 fixés ce soir, 11 documentés ici, 4 false positives écartés.
+> 7 sub-agents Explore + audits manuels. ~50 findings, **9/11 items résolus, 1 SKIP justifié, 1 fait partiellement (déjà résolu commit 5204043)**, 4 false positives écartés.
 
-**À fixer prochainement (impact réel)** :
-24. **smoke_test.ps1 dual-mode** — depuis fix popup OVH-only (commit `108e208`), I-RES-01/02 (V2 sur 3443 + Companion sur 5051) vont fail en mode SaaS pur. Ajouter check `ENABLE_LOCAL_BACKENDS` + skip ces invariants. ~30 min.
-25. **Subprocess Popen sans wait()** `app_plugin.py:11193` (/api/update_git) — orphelin si parent crash avant `os._exit(0)`. ~15 min.
-26. **Database._conn() jamais cleanup** — connection thread-local sans close, repose sur GC. Implémenter teardown Flask `@app.teardown_appcontext`. ~30 min.
-27. **40+ `print()` à upgrader en `logger.xxx`** — 27.5% du logging sort sur stdout au lieu de journalctl. ~1h30.
-28. **Migration modèle Claude vers Sonnet 4.6/4.7** — actuel `claude-sonnet-4-20250514` deprecated end-of-life **15/06/2026** par Anthropic (warning dans logs OVH). Centralisation faite (commit `3ccdb9e`), il suffit de changer 4 constantes dans `claude_ai.py:21-24`. Tester en staging avant deadline. ~30 min + tests.
+**✅ Résolus 29/04 PM tardif post-dîner (10 commits supplémentaires)** :
+24. ✅ **smoke_test.ps1 dual-mode** (commit `8e3fa2e`) — détection `BOOSTERMAIL_LOCAL_BACKENDS` + heuristique port 3443. I-RES-01/02 SKIP en mode SaaS pur.
+25. ✅ **Subprocess Popen sans wait()** (commit `5204043` du soir précédent) — DETACHED_PROCESS Windows / start_new_session Unix dans /api/update_git.
+26. ✅ **Database._conn() cleanup** (commit `1c84013`) — `close_all_threads()` + `atexit.register(_db.close_all_threads)`. Pattern persistent runtime conservé (perf), close au shutdown.
+27. ✅ **`print()` → `logger`** (commit `e17c60f`) — 48 prints claude_ai.py + 23 prints app_plugin.py métier migrés via regex `\bprint\(` word-boundary safe. 17 prints banner boot conservés (légitimes CLI).
+28. ✅ **Migration Sonnet 4 → Sonnet 4.6** (commit `a217ef1`) — 4 constantes dans `claude_ai.py:21-24`. Validé via API directe : `claude-sonnet-4-6` répond OK, plus de warning deprecated.
+29. ✅ **CacheStatus + frozensets TERMINAL/COMPLETED** (commit `3ab8357`) — classe avec strings stables (rétro-compat 100%), 3 sites migrés en POC.
+30. ✅ **Constantes timeouts étendues** (commit `0bf5b46`) — 10 sites supplémentaires migrés (prefetch/dialog_init/companion proxy) vers les 5 TIMEOUT_* env-overridables.
+31. ✅ **Short-circuit api_companion_proxy** (commit `aaa6d71`) — env `BOOSTERMAIL_HAS_COMPANION` ≠ '1' → 503 immédiat (économie 3s timeout TCP par appel legacy).
+32. ⏭️ **SKIP routes SSE legacy** — `/api/events/stream` est encore utilisé par `popup.js` en mode dev hybride Option B (popup_pyqt locale). Risque cleanup > bénéfice. À reconsidérer après abandon total mode dev hybride.
+33. ✅ **DRY _normalize_email étendu** (commit `b675dad`) — 5 sites supplémentaires migrés (cumul : 18 sites).
+34. ✅ **DRY _purge_message_caches helper** (commit `b675dad`) — 3 sites dupliqués factorisés en 1 helper thread-safe.
 
-**Tech debt mineure** :
-29. **CacheStatus enum** — magic strings `'done'/'running'/'error'/'cancelled'/'filtered'` partout. Risque typo. ~30 min.
-30. **Constantes timeouts/TTL centralisées** — 13 timeouts + 5 TTL hardcodés. Recommandé : module `V2/constants.py` + env override. ~1h.
-31. **Cleanup proxy Companion** `app_plugin.py:5893-5950` — code legacy proto, 60 lignes mortes en mode SaaS. ~30 min.
-32. **Cleanup routes SSE legacy** — `/api/events/stream` non utilisé en SaaS pur. ~1h.
-33. **DRY normalize_email étendu** — helper `_normalize_email()` créé (commit `868e9ec`) mais 18+ sites n'en bénéficient pas encore. ~30 min.
-34. **DRY purge_message_caches helper** — 3 sites dupliquent `with _reply_lock + with _prefetch_lock`. ~30 min.
+**Items écartés / false positives** (audits ont over-flaggé) :
+- ❌ Deadlock `_start_speculative` (audit error-handling) : ré-acquisition flaggée à tort, ce sont des `with` séquentiels, pas imbriqués
+- ❌ XSS sur barre PJ (audit sécu) : `_escapeHtml` utilise `textContent`, sécurisé natif
+- ❌ Double json.loads `database.py:1098/1110` : 2 sources différentes (input vs DB), pas de double parse
+- ❌ HTTP 200 sur webhooks Graph : intentionnel (commentaire l. 3588) pour éviter retry Microsoft
 
 **Items écartés / false positives** (audits ont over-flaggé) :
 - ❌ Deadlock `_start_speculative` (audit error-handling) : ré-acquisition flaggée à tort, ce sont des `with` séquentiels, pas imbriqués
