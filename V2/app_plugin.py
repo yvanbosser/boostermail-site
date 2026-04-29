@@ -1432,9 +1432,18 @@ import queue as _queue
 import concurrent.futures
 
 # État du mail courant (alimenté par autorunshared.js ou Companion)
-_current_mail_data = {}
+# Étape 7 multi-tenant — _current_mail_data via UserScopedDict.
+# Slot mail courant (BG poll loop écrit, routes Flask lisent).
+if _UserScopedDict is not None:
+    _current_mail_data = _UserScopedDict('current_mail_data')
+else:
+    _current_mail_data = {}
 # État du compose courant (alimenté par OnNewMessageCompose)
-_current_compose_data = {}
+# Étape 7 multi-tenant — _current_compose_data via UserScopedDict.
+if _UserScopedDict is not None:
+    _current_compose_data = _UserScopedDict('current_compose_data')
+else:
+    _current_compose_data = {}
 # Prefetch cache (contexte A+B+C + speculative)
 # Étape 7 multi-tenant (29/04/2026) — _prefetch_cache passe en UserScopedDict.
 # Cache contexte A/B/C/profil par message_id, persistent disque (prefetch_cache_v2.json).
@@ -3009,7 +3018,9 @@ def _poll_companion_loop():
                         'timestamp': time.time()
                     }
                     with _mail_data_lock:
-                        _current_mail_data = new_data
+                        # Étape 7 multi-tenant — clear + update au lieu de réassignation
+                        _current_mail_data.clear()
+                        _current_mail_data.update(new_data)
                     _sse_data = {k: v for k, v in new_data.items() if k != 'body'}
                     _broadcast_sse('mail_changed', _sse_data)
                     logger.info(f"Mail changé → {from_email} / {subject[:40]}")
@@ -3185,7 +3196,9 @@ def api_event_message_read():
         if _current_mail_data:
             _prev_mid = _current_mail_data.get('message_id', '')
             _prev_ts = _current_mail_data.get('timestamp', 0)
-        _current_mail_data = new_data
+        # Étape 7 multi-tenant — clear + update au lieu de réassignation globale
+        _current_mail_data.clear()
+        _current_mail_data.update(new_data)
     _skip_prefetch = (
         new_data.get('message_id')
         and new_data.get('message_id') == _prev_mid
@@ -3291,16 +3304,18 @@ def api_event_new_compose():
     Reçoit la notification d'ouverture d'un compose (Répondre/Transférer/Nouveau).
     Déclenché par OnNewMessageCompose dans autorunshared.js.
     """
-    global _current_compose_data
     data = request.get_json(silent=True) or {}
-    _current_compose_data = {
+    # Étape 7 multi-tenant — clear + update au lieu de réassignation globale
+    _current_compose_data.clear()
+    _current_compose_data.update({
         'subject': data.get('subject', ''),
         'mode': data.get('mode', 'new'),
         'timestamp': time.time()
-    }
+    })
 
     # Broadcast SSE — la popup PyQt/extension détecte le compose immédiatement
-    _broadcast_sse('compose_detected', _current_compose_data)
+    # Snapshot dict() pour éviter résolution proxy multiple côté SSE clients.
+    _broadcast_sse('compose_detected', dict(_current_compose_data))
 
     return jsonify({"status": "ok"})
 
@@ -6028,8 +6043,15 @@ def api_classify_email():
                 subject_keywords=subject_kw,
             )
             # Momentum : mémoriser ce dossier pour les 30 prochaines minutes
-            global _classify_momentum
-            _classify_momentum = {'folder_id': folder_id, 'folder_name': folder_name, 'ts': time.time()}
+            # Étape 7 multi-tenant — clear + update au lieu de réassignation
+            # globale (sinon on remplace le proxy UserScopedDict par un dict simple
+            # et on perd l'isolation user-scoped pour les accès suivants).
+            _classify_momentum.clear()
+            _classify_momentum.update({
+                'folder_id': folder_id,
+                'folder_name': folder_name,
+                'ts': time.time(),
+            })
 
         # Nettoyer les caches (mail classé = traité, plus besoin du prefetch ni de la réponse pré-générée)
         with _reply_lock:
@@ -7098,7 +7120,13 @@ else:
 _last_generate_lock = threading.Lock()
 
 # --- Classement mail ---------------------------------------------------------
-_classify_momentum = {}  # {'folder_name': str, 'folder_id': str, 'ts': float}
+# Étape 7 multi-tenant — _classify_momentum via UserScopedDict (one-shot dict).
+# Stocke le dernier classement choisi par l'user pour suggestion #3 boost.
+# {'folder_name': str, 'folder_id': str, 'ts': float}
+if _UserScopedDict is not None:
+    _classify_momentum = _UserScopedDict('classify_momentum')
+else:
+    _classify_momentum = {}
 
 # --- Échéances (pre-filtre heuristique, $0) ----------------------------------
 # Étape 7 multi-tenant — _echeance_pre_scan_cache via UserScopedDict.
@@ -7460,7 +7488,13 @@ def _check_git_updates():
 _sends_since_recal = 0
 _has_correction_since_recal = False
 _recal_lock = threading.Lock()          # protège les compteurs de recalibrage
-_learning_priorities_cache = {'time': 0, 'value': None}
+# Étape 7 multi-tenant — _learning_priorities_cache via UserScopedDict.
+# One-shot dict {time, value} pour cache 5min des priorités d'apprentissage.
+# Sub-cache user vide initialement → utiliser .get('time', 0) côté lecture.
+if _UserScopedDict is not None:
+    _learning_priorities_cache = _UserScopedDict('learning_priorities')
+else:
+    _learning_priorities_cache = {'time': 0, 'value': None}
 
 # --- Profils contacts ---------------------------------------------------------
 _new_profile_toast = None
@@ -7469,7 +7503,12 @@ _CONTACT_MIN_MAILS = 1
 _CONTACT_ANALYSIS_SCHEDULE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 50, 75, 100, 150, 200]
 _contacts_recalibrating = False
 _contacts_recalib_step = ''
-_contacts_recalib_progress = {'done': 0, 'total': 0}
+# Étape 7 multi-tenant — _contacts_recalib_progress via UserScopedDict.
+# One-shot dict {done, total} pour progression recalibrage contacts.
+if _UserScopedDict is not None:
+    _contacts_recalib_progress = _UserScopedDict('contacts_recalib')
+else:
+    _contacts_recalib_progress = {'done': 0, 'total': 0}
 _recalib_contacts_lock = threading.Lock()   # protège le démarrage (anti TOCTOU)
 
 @app.route('/api/cache_metrics')
@@ -9202,7 +9241,11 @@ def _extract_learned_template_post_send(message_id, sent_raw_body, mode):
 # mail. Registre mémoire des client_request_id ayant abouti. TTL 5 min =
 # couvre les retries, bien < délai entre 2 envois intentionnels de l'user.
 # =============================================================================
-_sent_requests = {}
+# Étape 7 multi-tenant — _sent_requests via UserScopedDict (idempotence requêtes).
+if _UserScopedDict is not None:
+    _sent_requests = _UserScopedDict('sent_requests')
+else:
+    _sent_requests = {}
 _sent_requests_lock = threading.Lock()
 _SENT_REQUESTS_TTL = 300  # 5 minutes
 
@@ -9371,8 +9414,13 @@ def send_reply():
 _time = time  # Alias rétrocompatible pour le code Phase 2 ci-dessous
 
 # Cache des scans post-envoi en cours (résultats temporaires)
-_post_send_cache = {}
-_post_send_timestamps = {}  # TTL tracking
+# Étape 7 multi-tenant — _post_send_cache + _post_send_timestamps via UserScopedDict.
+if _UserScopedDict is not None:
+    _post_send_cache = _UserScopedDict('post_send')
+    _post_send_timestamps = _UserScopedDict('post_send_ts')  # TTL tracking
+else:
+    _post_send_cache = {}
+    _post_send_timestamps = {}
 _post_send_lock = threading.RLock()  # RLock (reentrant) — _cache_set est appele depuis des blocs with _post_send_lock
 
 def _cache_set(key, value):
@@ -10029,8 +10077,10 @@ Applique les regles de ce niveau pour la regeneration des sections :
 
 def _get_cached_learning_priorities():
     """Version cachée (5 min) des priorités d'apprentissage."""
-    if time.time() - _learning_priorities_cache['time'] < 300:
-        return _learning_priorities_cache['value']
+    # Étape 7 multi-tenant — utilise .get() avec default car sub-cache
+    # user-scoped initialement vide (pas de pré-init {'time': 0, 'value': None}).
+    if time.time() - _learning_priorities_cache.get('time', 0) < 300:
+        return _learning_priorities_cache.get('value')
     result = _get_learning_priorities()
     _learning_priorities_cache['value'] = result
     _learning_priorities_cache['time'] = time.time()
@@ -10316,7 +10366,9 @@ def api_recalibrate_contacts():
                 profiles = _db.get_all_contact_profiles()
                 emails = [p.get('email', '') for p in profiles if p.get('email')]
 
-            _contacts_recalib_progress = {'done': 0, 'total': len(emails)}
+            # Étape 7 multi-tenant — clear + update au lieu de réassignation globale
+            _contacts_recalib_progress.clear()
+            _contacts_recalib_progress.update({'done': 0, 'total': len(emails)})
             for i, email in enumerate(emails):
                 _contacts_recalib_step = email
                 try:
