@@ -76,10 +76,20 @@ except ImportError:
 # Cf audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md pour le plan.
 # Migration progressive cache par cache, fallback 'default' pendant transition.
 try:
-    from user_scoped_cache import get_user_cache as _get_user_cache
+    from user_scoped_cache import (
+        get_user_cache as _get_user_cache,
+        UserScopedDict as _UserScopedDict,
+        iter_user_caches as _iter_user_caches,
+        get_all_user_ids as _get_all_user_ids,
+        replace_user_caches as _replace_user_caches,
+    )
     from user_context import get_current_user_id as _get_current_user_id
 except ImportError:
     _get_user_cache = None
+    _UserScopedDict = None
+    _iter_user_caches = None
+    _get_all_user_ids = None
+    _replace_user_caches = None
     _get_current_user_id = None
 
 
@@ -1527,7 +1537,23 @@ atexit.register(_save_prefetch_cache)
 # }
 # Purge purement événementielle (classify/send/delete/archive/consume/cohesion)
 # + safety net 4 semaines (Plan 3 §9.1). Plus de TTL 30 min en lecture.
-_reply_cache = {}
+#
+# Étape 7 SaaS multi-tenant (29/04/2026) — `_reply_cache` est désormais un
+# proxy UserScopedDict qui résout dynamiquement le user_id à chaque accès
+# via Flask context. Les ~95 call-sites (lecture/écriture dict) continuent
+# de fonctionner tels quels grâce à l'interface dict transparente du proxy.
+# Fallback 'default' pendant la transition mono-user → multi-tenant complet
+# (BG threads sans Flask context utilisent 'default').
+#
+# CRITIQUE : c'est le cache le plus sensible (drafts pré-générés). Sans
+# isolation par user_id, user A pourrait voir les drafts de user B.
+# Voir audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md.
+if _UserScopedDict is not None:
+    _reply_cache = _UserScopedDict('reply')
+else:
+    # Fallback ultra-défensif si import échoue (jamais en prod, mais évite
+    # un crash brutal en dev sans le module). Comportement mono-user d'avant.
+    _reply_cache = {}
 
 
 # =============================================================================
@@ -2338,19 +2364,49 @@ def _reply_cache_cohesion_refresh():
 
         # Purger les orphelins (sauf entrées modifiées par user — gardées par safety net 4 semaines)
         # Refactor 23/04 : helper _is_user_modified() remplace le check source=='user_edit'.
-        purged = 0
-        with _reply_lock:
-            for mid in list(_reply_cache.keys()):
-                if mid in inbox_ids:
-                    continue
-                entry = _reply_cache[mid]
-                if _is_user_modified(entry):
-                    continue  # entrées user_modified : safety net 4 semaines seulement
-                _reply_cache.pop(mid, None)
-                purged += 1
-        if purged:
-            logger.info(f"[reply_cache cohesion] {purged} entrée(s) orpheline(s) purgée(s)")
-            _reply_metric_inc('purges_cohesion', purged)
+        #
+        # Étape 7 multi-tenant (29/04/2026) : iterate sur tous les sub-caches user.
+        # En mono-user (Yvan, BG threads sans Flask context) → seul user_id 'default'
+        # est peuplé, comportement identique à avant. En multi-user (futur), chaque
+        # sub-cache user est purgé indépendamment.
+        # NB : `inbox_ids` reste mono-user pour l'instant (warmup_cache global).
+        # Quand `_warmup_cache` sera migré aussi, la cohésion deviendra strictement
+        # cross-user-safe. Pour l'instant : compatibilité mono-user garantie.
+        purged_total = 0
+        if _iter_user_caches is not None:
+            with _reply_lock:
+                for user_id, sub_cache in _iter_user_caches('reply'):
+                    purged_user = 0
+                    for mid in list(sub_cache.keys()):
+                        if mid in inbox_ids:
+                            continue
+                        entry = sub_cache.get(mid, {})
+                        if _is_user_modified(entry):
+                            continue  # entrées user_modified : safety net 4 semaines seulement
+                        sub_cache.pop(mid, None)
+                        purged_user += 1
+                    if purged_user:
+                        logger.info(
+                            f"[reply_cache cohesion] {purged_user} entrée(s) orpheline(s) "
+                            f"purgée(s) pour user {user_id[:12]}"
+                        )
+                        purged_total += purged_user
+        else:
+            # Fallback ultra-défensif : ancien comportement mono-user direct.
+            with _reply_lock:
+                for mid in list(_reply_cache.keys()):
+                    if mid in inbox_ids:
+                        continue
+                    entry = _reply_cache[mid]
+                    if _is_user_modified(entry):
+                        continue
+                    _reply_cache.pop(mid, None)
+                    purged_total += 1
+            if purged_total:
+                logger.info(f"[reply_cache cohesion] {purged_total} entrée(s) orpheline(s) purgée(s)")
+
+        if purged_total:
+            _reply_metric_inc('purges_cohesion', purged_total)
     except Exception as e:
         logger.warning(f"[reply_cache cohesion] erreur : {e}")
 
@@ -2410,31 +2466,80 @@ def _persist_reply_cache():
     2-3 min à continuous_speculation_loop pour les re-générer → gâchis API
     (chaque pré-gen = ~0.03 $) et cache vide pendant la reconstruction.
 
+    Étape 7 multi-tenant (29/04/2026) — Format JSON disque :
+        {
+          "saved_at": "2026-04-29T...",
+          "format_version": 2,
+          "entries_per_user": {
+            "<user_id>": { "<message_id>": {entry_dict}, ... },
+            ...
+          }
+        }
+
+    Pour rétro-compatibilité, l'ancien format (`entries: {mid: entry}` à
+    plat) reste lisible par `_load_reply_cache` qui migre vers user_id
+    'default' transparently. Voir _load_reply_cache pour le code de
+    détection du format.
+
     Appelé à l'exit + après save_draft + après chaque bg_speculation générée.
     Purge à la lecture (_load_reply_cache) via safety net 4 semaines.
     """
     try:
-        with _reply_lock:
-            # Persister toutes les entrées 'done' — user_edit ET bg_speculation.
-            # On exclut les 'running' (transitoires) et 'cancelled'.
-            entries = {k: v for k, v in _reply_cache.items()
-                       if v.get('status') == 'done'
-                       and v.get('source') in ('user_edit', 'bg_speculation', 'preemptive')}
+        # Étape 7 — Iterate sur tous les users qui ont des entrées dans le cache.
+        # En mono-user (Yvan seul, BG threads), tout est dans 'default'.
+        # En multi-user (futur), iterate cross-user donne tous les drafts à persister.
+        entries_per_user = {}
+        total = 0
+        if _iter_user_caches is not None:
+            with _reply_lock:
+                for user_id, sub_cache in _iter_user_caches('reply'):
+                    user_entries = {
+                        k: v for k, v in sub_cache.items()
+                        if v.get('status') == 'done'
+                        and v.get('source') in ('user_edit', 'bg_speculation', 'preemptive')
+                    }
+                    if user_entries:
+                        entries_per_user[user_id] = user_entries
+                        total += len(user_entries)
+        else:
+            # Fallback si helpers non chargés (dev sans modules) — ancien comportement
+            with _reply_lock:
+                fallback_entries = {
+                    k: v for k, v in _reply_cache.items()
+                    if v.get('status') == 'done'
+                    and v.get('source') in ('user_edit', 'bg_speculation', 'preemptive')
+                }
+            if fallback_entries:
+                entries_per_user['default'] = fallback_entries
+                total = len(fallback_entries)
+
         payload = {
             'saved_at': datetime.now().isoformat(timespec='seconds'),
-            'entries': entries,
+            'format_version': 2,
+            'entries_per_user': entries_per_user,
         }
         tmp = _DRAFTS_CACHE_PATH + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
         os.replace(tmp, _DRAFTS_CACHE_PATH)
-        # Log détaillé par type pour observabilité
-        by_source = {}
-        for v in entries.values():
-            s = v.get('source', '?')
-            by_source[s] = by_source.get(s, 0) + 1
-        breakdown = ', '.join(f'{k}={v}' for k, v in sorted(by_source.items()))
-        logger.info(f"[reply_cache] Persist {len(entries)} entrée(s) → drafts_v2.json ({breakdown})")
+
+        # Log détaillé par user et par source pour observabilité multi-tenant
+        if total:
+            user_breakdown = ', '.join(
+                f'{uid[:12]}={len(eds)}' for uid, eds in entries_per_user.items()
+            )
+            by_source = {}
+            for user_entries in entries_per_user.values():
+                for v in user_entries.values():
+                    s = v.get('source', '?')
+                    by_source[s] = by_source.get(s, 0) + 1
+            source_breakdown = ', '.join(f'{k}={v}' for k, v in sorted(by_source.items()))
+            logger.info(
+                f"[reply_cache] Persist {total} entrée(s) sur {len(entries_per_user)} user(s) "
+                f"→ drafts_v2.json [users: {user_breakdown}] [sources: {source_breakdown}]"
+            )
+        else:
+            logger.info("[reply_cache] Persist 0 entrée (cache vide)")
     except Exception as e:
         logger.warning(f"[reply_cache] Échec persist : {e}")
 
@@ -2449,21 +2554,42 @@ def _load_reply_cache():
     Auto-clean 23/04 (option B) : purge les "faux brouillons" legacy créés
     par le bug pré-refactor 1-source — entrées `source='user_edit'` sans flag
     `user_modified` (pré-gen Claude sauvées par erreur au `beforeunload`).
-    Le nouveau `save_draft` pose toujours `user_modified=True`, donc son
-    absence = entrée suspecte → purgée + disque ré-écrit.
+
+    Étape 7 multi-tenant (29/04/2026) — détecte automatiquement le format :
+    - Format v2 : ``{format_version: 2, entries_per_user: {user_id: {mid: entry}}}``
+    - Format legacy : ``{entries: {mid: entry}}`` → migré transparently
+      vers user_id ``'default'``.
     """
     try:
         if not os.path.exists(_DRAFTS_CACHE_PATH):
             return
         with open(_DRAFTS_CACHE_PATH, 'r', encoding='utf-8') as f:
             payload = json.load(f)
-        entries = payload.get('entries', {})
+
+        # Détection du format (multi-tenant v2 vs legacy mono-user)
+        format_version = payload.get('format_version', 1)
+        if format_version >= 2 and 'entries_per_user' in payload:
+            entries_per_user = payload.get('entries_per_user', {})
+        else:
+            # Migration legacy : tout dans le user_id 'default'
+            legacy_entries = payload.get('entries', {})
+            entries_per_user = {'default': legacy_entries} if legacy_entries else {}
+            if legacy_entries:
+                logger.info(
+                    f"[reply_cache] Migration legacy v1→v2 : {len(legacy_entries)} "
+                    f"entrée(s) déplacées vers user_id 'default'"
+                )
+
         now = time.time()
-        loaded = {'user_edit': 0, 'bg_speculation': 0, 'preemptive': 0}
+        loaded_per_user = {}  # user_id → {source: count}
         legacy_fake_drafts_purged = 0
         legacy_entry_id_keys_purged = 0
-        with _reply_lock:
-            for mid, entry in entries.items():
+        clean_data = {}  # Structure finale propre {user_id: {mid: entry}}
+
+        for user_id, user_entries in entries_per_user.items():
+            user_clean = {}
+            user_loaded = {'user_edit': 0, 'bg_speculation': 0, 'preemptive': 0}
+            for mid, entry in user_entries.items():
                 ts = entry.get('timestamp', 0)
                 # Safety net : ignorer les entrées > 4 semaines
                 if now - ts > _REPLY_CACHE_SAFETY_NET:
@@ -2491,13 +2617,46 @@ def _load_reply_cache():
                 # Forcer status='done' (les 'running'/'cancelled' n'auraient
                 # pas dû être persistés, mais protection contre fichier corrompu)
                 entry['status'] = 'done'
-                _reply_cache[mid] = entry
-                loaded[src] = loaded.get(src, 0) + 1
-        total = sum(loaded.values())
-        breakdown = ', '.join(f'{k}={v}' for k, v in loaded.items() if v > 0)
+                user_clean[mid] = entry
+                user_loaded[src] = user_loaded.get(src, 0) + 1
+            if user_clean:
+                clean_data[user_id] = user_clean
+                loaded_per_user[user_id] = user_loaded
+
+        # Installation atomique dans le storage central via replace_user_caches.
+        # En mono-thread au démarrage : pas de risque de race avec mutations
+        # concurrentes. _reply_lock pour cohérence avec les autres opérations.
+        if _replace_user_caches is not None:
+            with _reply_lock:
+                _replace_user_caches('reply', clean_data)
+        else:
+            # Fallback ultra-défensif : écriture directe dans _reply_cache
+            # (suppose que _reply_cache est un dict standard, donc en mode
+            # fallback du proxy qui n'a pas pu être chargé)
+            with _reply_lock:
+                if isinstance(_reply_cache, dict):
+                    _reply_cache.clear()
+                    if 'default' in clean_data:
+                        _reply_cache.update(clean_data['default'])
+
+        # Logs observabilité multi-tenant
+        total = sum(sum(v.values()) for v in loaded_per_user.values())
         if total:
-            logger.info(f"[reply_cache] {total} entrée(s) restaurée(s) depuis disque "
-                        f"({breakdown})")
+            user_breakdown = ', '.join(
+                f"{uid[:12]}={sum(s.values())}"
+                for uid, s in loaded_per_user.items()
+            )
+            global_sources = {}
+            for s in loaded_per_user.values():
+                for src, count in s.items():
+                    if count > 0:
+                        global_sources[src] = global_sources.get(src, 0) + count
+            source_breakdown = ', '.join(f'{k}={v}' for k, v in sorted(global_sources.items()))
+            logger.info(
+                f"[reply_cache] {total} entrée(s) restaurée(s) depuis disque "
+                f"sur {len(loaded_per_user)} user(s) [users: {user_breakdown}] "
+                f"[sources: {source_breakdown}]"
+            )
         if legacy_fake_drafts_purged:
             logger.info(
                 f"[reply_cache AUTO-CLEAN] {legacy_fake_drafts_purged} faux "
@@ -2511,25 +2670,41 @@ def _load_reply_cache():
                 f"AQMkAD... — jamais matchée par Office.js qui envoie "
                 f"internetMessageId, cf. I-DATA-11)"
             )
-        if legacy_fake_drafts_purged or legacy_entry_id_keys_purged:
+        if legacy_fake_drafts_purged or legacy_entry_id_keys_purged or format_version < 2:
             # Re-persiste pour que les zombies ne reviennent pas au prochain load
+            # ET pour migrer le fichier vers le nouveau format v2.
             _persist_reply_cache()
     except Exception as e:
         logger.warning(f"[reply_cache] Échec chargement : {e}")
 
 
 def _reply_cache_safety_net_loop():
-    """Thread BG qui purge les entrées > 4 semaines. Scan 1× toutes les 6h."""
+    """Thread BG qui purge les entrées > 4 semaines. Scan 1× toutes les 6h.
+
+    Étape 7 multi-tenant (29/04/2026) : itère sur tous les sub-caches user.
+    Le critère « > 4 semaines » est universel (timestamp-based), donc s'applique
+    identiquement quel que soit le user.
+    """
     while True:
         try:
             now = time.time()
             purged = 0
-            with _reply_lock:
-                stale = [k for k, v in _reply_cache.items()
-                         if now - v.get('timestamp', 0) > _REPLY_CACHE_SAFETY_NET]
-                for k in stale:
-                    _reply_cache.pop(k, None)
-                    purged += 1
+            if _iter_user_caches is not None:
+                with _reply_lock:
+                    for user_id, sub_cache in _iter_user_caches('reply'):
+                        stale = [k for k, v in sub_cache.items()
+                                 if now - v.get('timestamp', 0) > _REPLY_CACHE_SAFETY_NET]
+                        for k in stale:
+                            sub_cache.pop(k, None)
+                            purged += 1
+            else:
+                # Fallback ultra-défensif : ancien comportement direct.
+                with _reply_lock:
+                    stale = [k for k, v in _reply_cache.items()
+                             if now - v.get('timestamp', 0) > _REPLY_CACHE_SAFETY_NET]
+                    for k in stale:
+                        _reply_cache.pop(k, None)
+                        purged += 1
             if purged:
                 logger.info(f"[reply_cache safety net] {purged} entrée(s) > 4 semaines purgée(s)")
                 _reply_metric_inc('purges_safety', purged)

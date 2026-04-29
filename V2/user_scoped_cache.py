@@ -146,6 +146,198 @@ def reset_all_caches() -> None:
 
 
 # ============================================================================
+# Iterators pour threads BG (sans Flask context)
+# ============================================================================
+
+def iter_user_caches(cache_name: str):
+    """
+    Itère sur ``(user_id, sub_cache)`` pour tous les users d'un cache.
+
+    Utile pour les threads BG qui doivent faire une opération transversale
+    sur tous les caches users (ex: ``_reply_cache_safety_net_loop``,
+    ``_reply_cache_cohesion_refresh``, ``_reply_cache_metrics_report_loop``).
+
+    Yields
+    ------
+    tuple
+        ``(user_id, sub_cache_dict)`` pour chaque user ayant des données.
+
+    Notes
+    -----
+    Le snapshot des clés est pris sous lock pour éviter une race condition
+    avec les mutations concurrentes. Les sub_caches retournés sont les
+    références live (les mutations se voient dans le storage central).
+    """
+    with _user_caches_lock:
+        if cache_name not in _user_caches_root:
+            return
+        snapshot = list(_user_caches_root[cache_name].items())
+    for user_id, sub_cache in snapshot:
+        yield user_id, sub_cache
+
+
+def get_all_user_ids(cache_name: str) -> list:
+    """
+    Retourne la liste des user_id ayant un sub-cache pour ce cache_name.
+
+    Returns
+    -------
+    list[str]
+        Liste (snapshot) des user_id. Vide si le cache n'a jamais été
+        utilisé.
+    """
+    with _user_caches_lock:
+        if cache_name not in _user_caches_root:
+            return []
+        return list(_user_caches_root[cache_name].keys())
+
+
+def replace_user_caches(cache_name: str, data: Dict[str, Dict[str, Any]]) -> None:
+    """
+    Remplace ATOMIQUEMENT toutes les données d'un cache (tous users) par
+    un nouveau payload. Utile pour ``_load_reply_cache`` au démarrage qui
+    charge la structure complète depuis disque.
+
+    Parameters
+    ----------
+    cache_name : str
+        Nom du cache à remplacer (ex: ``'reply'``).
+    data : dict
+        Structure ``{user_id: {key: value}}`` à installer.
+
+    Notes
+    -----
+    Pas de merge avec l'existant — l'ancien contenu du cache_name est
+    intégralement écrasé. À utiliser SEULEMENT lors du chargement initial
+    (avant que le BG/routes commencent à mutuer le cache).
+    """
+    with _user_caches_lock:
+        _user_caches_root[cache_name] = data
+
+
+# ============================================================================
+# Proxy UserScopedDict — interface dict transparente, résout user_id
+# dynamiquement via Flask context à chaque accès
+# ============================================================================
+
+class UserScopedDict:
+    """
+    Proxy dict transparent pour la migration multi-tenant des caches existants.
+
+    Comportement : à chaque accès dict (``[]``, ``get``, ``pop``, ``items``,
+    etc.), résout le ``user_id`` courant via ``user_context.get_current_user_id()``
+    et redirige l'opération vers ``get_user_cache(cache_name, user_id)``.
+
+    Cas d'usage : remplacer un global ``_reply_cache = {}`` par
+    ``_reply_cache = UserScopedDict('reply')`` sans modifier les ~95 call-sites
+    qui utilisent l'API dict standard.
+
+    FALLBACK
+    --------
+    Si pas de Flask context (BG thread, atexit hook, script CLI), le proxy
+    redirige vers ``user_id = fallback_user_id`` (default ``'default'``).
+    Pendant la transition mono-user → multi-tenant, c'est le comportement
+    voulu : Yvan utilise le sub-cache 'default' partout.
+
+    POUR LES THREADS BG QUI DOIVENT ITERER TOUS LES USERS
+    -----------------------------------------------------
+    Ne pas utiliser ce proxy. Utiliser ``iter_user_caches(cache_name)``
+    qui itère sur tous les users sans dépendre de Flask context.
+
+    LIMITATIONS
+    -----------
+    - Pas de support pour ``copy()`` qui retournerait un dict — utilise
+      ``dict(proxy)`` qui passe par ``__iter__`` + ``__getitem__``.
+    - ``__eq__`` redirige vers le sub-cache courant (test d'égalité avec
+      un dict standard fonctionne dans le contexte du user courant).
+    - L'object n'est pas sérialisable (json.dumps direct ne marche pas).
+      Pour persister : utiliser ``iter_user_caches(cache_name)`` et
+      construire la structure complète à sérialiser.
+    """
+
+    __slots__ = ('_cache_name', '_fallback_user_id')
+
+    def __init__(self, cache_name: str, fallback_user_id: str = 'default'):
+        self._cache_name = cache_name
+        self._fallback_user_id = fallback_user_id
+
+    def _resolve(self) -> Dict[str, Any]:
+        """Résout le sub-cache user-scoped courant. Import lazy de user_context
+        pour éviter une dépendance circulaire au chargement du module."""
+        try:
+            from user_context import get_current_user_id
+            user_id = get_current_user_id() or self._fallback_user_id
+        except ImportError:
+            user_id = self._fallback_user_id
+        return get_user_cache(self._cache_name, user_id)
+
+    # Accès dict standards
+    def __getitem__(self, key: str) -> Any:
+        return self._resolve()[key]
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self._resolve()[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        del self._resolve()[key]
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._resolve()
+
+    def __iter__(self):
+        return iter(self._resolve())
+
+    def __len__(self) -> int:
+        return len(self._resolve())
+
+    def __bool__(self) -> bool:
+        return bool(self._resolve())
+
+    def __eq__(self, other: Any) -> bool:
+        return self._resolve() == other
+
+    def __repr__(self) -> str:
+        try:
+            from user_context import get_current_user_id
+            uid = get_current_user_id() or self._fallback_user_id
+        except ImportError:
+            uid = self._fallback_user_id
+        return f"UserScopedDict(cache_name={self._cache_name!r}, current_user={uid!r})"
+
+    # Méthodes dict standards
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._resolve().get(key, default)
+
+    def pop(self, key: str, *args) -> Any:
+        return self._resolve().pop(key, *args)
+
+    def popitem(self):
+        return self._resolve().popitem()
+
+    def keys(self):
+        return self._resolve().keys()
+
+    def items(self):
+        return self._resolve().items()
+
+    def values(self):
+        return self._resolve().values()
+
+    def update(self, *args, **kwargs) -> None:
+        self._resolve().update(*args, **kwargs)
+
+    def clear(self) -> None:
+        self._resolve().clear()
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        return self._resolve().setdefault(key, default)
+
+    def copy(self) -> Dict[str, Any]:
+        """Retourne un dict standard (copie shallow) du sub-cache courant."""
+        return dict(self._resolve())
+
+
+# ============================================================================
 # Tests inline (smoke test exécutables si script lancé directement)
 # ============================================================================
 
@@ -217,6 +409,146 @@ if __name__ == '__main__':
         for by_user in final_metrics.values()
     ) == 50, "perte d'entrées en accès concurrent"
     print(f"Test 7 OK : 50 écritures concurrentes, total entrées = 50")
+
+    reset_all_caches()
+
+    # ========================================================================
+    # Tests iter_user_caches + get_all_user_ids + replace_user_caches
+    # ========================================================================
+
+    # Test 8 : iter_user_caches sur cache vide
+    iterations = list(iter_user_caches('inexistant'))
+    assert iterations == [], f"attendu [], got {iterations}"
+    print("Test 8 OK : iter_user_caches sur cache vide retourne []")
+
+    # Test 9 : iter_user_caches itère sur tous les users
+    cache_x = get_user_cache('reply', 'user-x')
+    cache_y = get_user_cache('reply', 'user-y')
+    cache_z = get_user_cache('reply', 'user-z')
+    cache_x['msg-x'] = {'text': 'X'}
+    cache_y['msg-y'] = {'text': 'Y'}
+    cache_z['msg-z'] = {'text': 'Z'}
+
+    found_users = set()
+    for user_id, sub_cache in iter_user_caches('reply'):
+        found_users.add(user_id)
+        assert isinstance(sub_cache, dict)
+    assert found_users == {'user-x', 'user-y', 'user-z'}, f"got {found_users}"
+    print("Test 9 OK : iter_user_caches itère sur 3 users")
+
+    # Test 10 : get_all_user_ids
+    user_ids = sorted(get_all_user_ids('reply'))
+    assert user_ids == ['user-x', 'user-y', 'user-z'], f"got {user_ids}"
+    print("Test 10 OK : get_all_user_ids retourne la liste correcte")
+
+    # Test 11 : replace_user_caches écrase tout
+    replace_user_caches('reply', {
+        'user-new': {'msg-new': {'text': 'NEW'}},
+    })
+    user_ids = get_all_user_ids('reply')
+    assert user_ids == ['user-new'], f"got {user_ids}"
+    cache_new = get_user_cache('reply', 'user-new')
+    assert cache_new['msg-new'] == {'text': 'NEW'}
+    print("Test 11 OK : replace_user_caches écrase correctement")
+
+    reset_all_caches()
+
+    # ========================================================================
+    # Tests UserScopedDict (proxy transparent)
+    # ========================================================================
+
+    # Test 12 : proxy fallback 'default' hors Flask context
+    proxy = UserScopedDict('test_proxy')
+    proxy['key1'] = 'value1'
+    assert proxy['key1'] == 'value1'
+    assert 'key1' in proxy
+    assert proxy.get('key1') == 'value1'
+    assert proxy.get('inexistant') is None
+    assert proxy.get('inexistant', 'fallback') == 'fallback'
+    print("Test 12 OK : proxy __getitem__/__setitem__/__contains__/get")
+
+    # Test 13 : proxy iteration et len
+    proxy['key2'] = 'value2'
+    assert len(proxy) == 2
+    keys = sorted(proxy.keys())
+    assert keys == ['key1', 'key2']
+    items = sorted(proxy.items())
+    assert items == [('key1', 'value1'), ('key2', 'value2')]
+    print("Test 13 OK : proxy keys/items/len/__iter__")
+
+    # Test 14 : proxy pop
+    popped = proxy.pop('key1')
+    assert popped == 'value1'
+    assert 'key1' not in proxy
+    pop_default = proxy.pop('inexistant', 'fallback')
+    assert pop_default == 'fallback'
+    print("Test 14 OK : proxy pop avec et sans default")
+
+    # Test 15 : proxy update + clear
+    proxy.update({'k3': 'v3', 'k4': 'v4'})
+    assert proxy['k3'] == 'v3'
+    assert proxy['k4'] == 'v4'
+    proxy.clear()
+    assert len(proxy) == 0
+    print("Test 15 OK : proxy update/clear")
+
+    # Test 16 : proxy setdefault
+    proxy.setdefault('k5', 'v5_initial')
+    assert proxy['k5'] == 'v5_initial'
+    proxy.setdefault('k5', 'v5_replaced')  # ne doit PAS écraser
+    assert proxy['k5'] == 'v5_initial'
+    print("Test 16 OK : proxy setdefault")
+
+    # Test 17 : proxy copy retourne dict standard
+    proxy['k6'] = 'v6'
+    snapshot = proxy.copy()
+    assert isinstance(snapshot, dict)
+    assert snapshot == {'k5': 'v5_initial', 'k6': 'v6'}
+    snapshot['k7'] = 'v7'  # mutation snapshot ne touche pas proxy
+    assert 'k7' not in proxy
+    print("Test 17 OK : proxy copy retourne dict indépendant")
+
+    # Test 18 : proxy __bool__
+    assert bool(proxy) is True
+    proxy.clear()
+    assert bool(proxy) is False
+    print("Test 18 OK : proxy __bool__")
+
+    # Test 19 : proxy __delitem__
+    proxy['k8'] = 'v8'
+    del proxy['k8']
+    assert 'k8' not in proxy
+    print("Test 19 OK : proxy __delitem__")
+
+    # Test 20 : proxy avec Flask context (résout vers user_id correct)
+    try:
+        from flask import Flask
+    except ImportError:
+        print("Test 20 SKIP : Flask non installé")
+    else:
+        app = Flask(__name__)
+        app.secret_key = 'test-key'
+
+        with app.test_request_context('/'):
+            from flask import request
+            request.auth_user_id = 'user-flask-A'
+            proxy_a = UserScopedDict('test_flask_proxy')
+            proxy_a['data'] = 'A'
+            assert proxy_a['data'] == 'A'
+
+        with app.test_request_context('/'):
+            from flask import request
+            request.auth_user_id = 'user-flask-B'
+            proxy_b = UserScopedDict('test_flask_proxy')
+            assert 'data' not in proxy_b, "fuite cross-user via proxy !"
+            proxy_b['data'] = 'B'
+
+        # Vérification post-Flask : les 2 sub-caches existent et sont isolés
+        a_cache = get_user_cache('test_flask_proxy', 'user-flask-A')
+        b_cache = get_user_cache('test_flask_proxy', 'user-flask-B')
+        assert a_cache['data'] == 'A'
+        assert b_cache['data'] == 'B'
+        print("Test 20 OK : proxy isole correctement les 2 users via Flask context")
 
     reset_all_caches()
     print("\nTous les tests passent.")
