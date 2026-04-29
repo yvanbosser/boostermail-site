@@ -84,7 +84,10 @@ try:
         replace_user_caches as _replace_user_caches,
         purge_user_caches as _purge_user_caches,
     )
-    from user_context import get_current_user_id as _get_current_user_id
+    from user_context import (
+        get_current_user_id as _get_current_user_id,
+        require_user,
+    )
 except ImportError:
     _get_user_cache = None
     _UserScopedDict = None
@@ -93,6 +96,9 @@ except ImportError:
     _replace_user_caches = None
     _purge_user_caches = None
     _get_current_user_id = None
+    # Fallback no-op si user_context indisponible : décorateur transparent
+    def require_user(f):
+        return f
 
 
 if _QuotaExceeded is not None:
@@ -3245,9 +3251,16 @@ except Exception:
 _perf_log_lock = threading.Lock()
 
 @app.route('/api/perf_log', methods=['POST'])
+@require_user
 def api_perf_log():
     """Reçoit un snapshot timing du dialog et le stocke dans logs/perf/.
-    Retourne 204 No Content (fire & forget côté client via keepalive)."""
+    Retourne 204 No Content (fire & forget côté client via keepalive).
+
+    Étape 7 multi-tenant — @require_user (29/04 PM) : route appelée depuis
+    dialog.js après login OAuth, donc session toujours active. Test progressif
+    de @require_user en commençant par cette route NON CRITIQUE (logs perf
+    perdus si 401 = pas grave, BoosterMail continue à fonctionner).
+    """
     try:
         payload = request.get_json(force=True, silent=True) or {}
         ts = datetime.now().strftime('%Y%m%dT%H%M%S_%f')
