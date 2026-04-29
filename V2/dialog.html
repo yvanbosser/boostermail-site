@@ -326,23 +326,41 @@
     </div>
 
     <!-- ============================================================ -->
-    <!-- POPUP SÉLECTION PJ AVANT GÉNÉRATION (comme le proto)        -->
+    <!-- POPUP ANALYSE PJ — 2 phases (sélection + barre progression) -->
+    <!-- Portage proto 29/04 PM (Écart 4 PLUS_TARD_VF)                -->
     <!-- ============================================================ -->
     <div class="em-popup-overlay" id="popupPjAnalysis">
         <div class="em-popup">
-            <div class="em-popup-title">&#x1f4ce; Analyser les pieces jointes ?</div>
-            <div class="em-popup-body">
-                <p style="margin-bottom:8px;font-size:11px;color:#666;">Selectionnez les PJ a analyser pour enrichir la reponse :</p>
-                <div id="pjAnalysisList"></div>
-                <div class="em-popup-actions" style="margin-top:8px;margin-bottom:0;">
-                    <a href="#" style="font-size:10px;color:#0F6CBD;" onclick="event.preventDefault();pjSelectAll(true);">Tout cocher</a>
-                    <a href="#" style="font-size:10px;color:#0F6CBD;margin-left:8px;" onclick="event.preventDefault();pjSelectAll(false);">Tout decocher</a>
+            <div class="em-popup-title" id="pjPopupTitle">&#x1f4ce; Analyser les pieces jointes ?</div>
+
+            <!-- Phase 1 : sélection des PJ -->
+            <div id="pj-phase-select">
+                <div class="em-popup-body">
+                    <p style="margin-bottom:8px;font-size:11px;color:#666;">Selectionnez les PJ a analyser pour enrichir la reponse :</p>
+                    <div id="pjAnalysisList"></div>
+                    <div class="em-popup-actions" style="margin-top:8px;margin-bottom:0;">
+                        <a href="#" style="font-size:10px;color:#0F6CBD;" onclick="event.preventDefault();pjSelectAll(true);">Tout cocher</a>
+                        <a href="#" style="font-size:10px;color:#0F6CBD;margin-left:8px;" onclick="event.preventDefault();pjSelectAll(false);">Tout decocher</a>
+                    </div>
+                </div>
+                <div class="em-popup-actions">
+                    <button class="em-popup-btn" onclick="skipPjAnalysis()">Ignorer les PJ</button>
+                    <button class="em-popup-btn primary" onclick="acceptPjAnalysis()">Analyser et generer</button>
                 </div>
             </div>
-            <div class="em-popup-actions">
-                <button class="em-popup-btn" onclick="skipPjAnalysis()">Ignorer les PJ</button>
-                <button class="em-popup-btn primary" onclick="acceptPjAnalysis()">Analyser et generer</button>
+
+            <!-- Phase 2 : barre de progression analyse en cours -->
+            <div id="pj-phase-loading" style="display:none;text-align:center;padding:16px 0;">
+                <div style="font-size:24px;margin-bottom:10px;">&#x1f50d;</div>
+                <div style="font-size:13px;font-weight:600;color:#1a1a2e;margin-bottom:8px;">Analyse des pieces jointes en cours</div>
+                <div id="pj-progress-list" style="text-align:left;width:90%;margin:8px auto;max-height:160px;overflow-y:auto;"></div>
+                <div style="width:90%;margin:8px auto;background:#e0e0e0;border-radius:10px;height:8px;overflow:hidden;">
+                    <div id="pj-progress-bar" style="width:0%;height:100%;background:linear-gradient(90deg,#0078d4,#00a4ef);border-radius:10px;transition:width 0.4s ease;"></div>
+                </div>
+                <div id="pj-progress-pct" style="font-size:11px;color:#999;margin-bottom:6px;">0%</div>
             </div>
+
+            <style>@keyframes pj-spin { to { transform: rotate(360deg); } }</style>
         </div>
     </div>
 
@@ -426,6 +444,6 @@
         </div>
     </div>
 
-    <script defer src="dialog.js?v=v23-reauth-banner-29-04"></script>
+    <script defer src="dialog.js?v=v24-pj-progress-29-04"></script>
 </body>
 </html>

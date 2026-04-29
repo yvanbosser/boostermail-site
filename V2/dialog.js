@@ -694,47 +694,160 @@ function pjSelectAll(state) {
     });
 }
 
+function _closePjOverlay() {
+    /** Helper portage proto 29/04 PM — reset des 2 phases avant fermeture. */
+    document.getElementById('popupPjAnalysis').classList.remove('active');
+    document.getElementById('pj-phase-select').style.display = 'block';
+    document.getElementById('pj-phase-loading').style.display = 'none';
+    var _residualRow = document.getElementById('pj-validate-row');
+    if (_residualRow) _residualRow.remove();
+}
+
 function skipPjAnalysis() {
     _pjChoiceMade = true;
     _extractedPjContext = '';
-    document.getElementById('popupPjAnalysis').classList.remove('active');
+    _closePjOverlay();
     // Continuer la génération
     generateReply();
 }
 
-function acceptPjAnalysis() {
+async function acceptPjAnalysis() {
+    /** Portage exact proto 29/04 PM (Écart 4 PLUS_TARD_VF) — barre de
+     * progression PJ par PJ avec spinner / OK / erreur, batch de 3
+     * extractions parallèles, alerte si PJ trop volumineuse, bouton
+     * « Valider et générer » à la fin. */
     _pjChoiceMade = true;
-    _pjSelectedIndices = [];
+    var selected = [];
     document.querySelectorAll('.pj-analysis-cb:checked').forEach(function(cb) {
-        _pjSelectedIndices.push(parseInt(cb.getAttribute('data-index'), 10));
+        var idx = parseInt(cb.getAttribute('data-index'), 10);
+        var att = _attachmentsList[idx] || {};
+        selected.push({ index: idx, name: att.name || 'PJ' });
     });
-    document.getElementById('popupPjAnalysis').classList.remove('active');
+    _pjSelectedIndices = selected.map(function(s) { return s.index; });
 
-    if (_pjSelectedIndices.length === 0) {
-        // Aucune PJ sélectionnée → générer sans
+    if (selected.length === 0) {
+        _closePjOverlay();
         generateReply();
         return;
     }
 
-    // Extraire le texte des PJ sélectionnées via le backend
-    document.getElementById('headerStatus').textContent = 'Analyse des pieces jointes...';
-    fetch(_backendUrl + '/api/extract_attachments/' + encodeURIComponent(_messageId), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ indices: _pjSelectedIndices }),
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-        if (data.text) {
-            _extractedPjContext = data.text;
-        }
-        // Lancer la génération avec le contexte PJ
-        generateReply();
-    })
-    .catch(function(err) {
-        console.log('[dialog] Erreur extraction PJ:', err.message);
-        generateReply();
+    // Phase 2 : switcher la popup vers la barre de progression
+    document.getElementById('pj-phase-select').style.display = 'none';
+    document.getElementById('pj-phase-loading').style.display = 'block';
+    var progressList = document.getElementById('pj-progress-list');
+    progressList.innerHTML = '';
+    selected.forEach(function(s) {
+        progressList.innerHTML += '<div id="pj-item-' + s.index + '" style="display:flex;align-items:center;gap:8px;padding:5px 8px;margin-bottom:4px;border-radius:6px;font-size:12px;color:#999;background:#f8f8f8;">'
+            + '<span class="pj-status-icon" style="font-size:14px;">⏳</span>'
+            + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _escapeHtml(s.name) + '</span>'
+            + '</div>';
     });
+    document.getElementById('pj-progress-bar').style.width = '0%';
+    document.getElementById('pj-progress-pct').textContent = '0 / ' + selected.length;
+
+    var allContexts = [];
+    var _failedPjNames = [];
+    var _doneCount = 0;
+    var BATCH_SIZE = 3;
+
+    function _markPjSpinning(s) {
+        var itemEl = document.getElementById('pj-item-' + s.index);
+        if (!itemEl) return;
+        itemEl.style.color = '#333';
+        itemEl.style.background = '#e8f4fd';
+        var icon = itemEl.querySelector('.pj-status-icon');
+        if (icon) icon.innerHTML = '<div style="width:12px;height:12px;border:2px solid #e0e0e0;border-top-color:#0078d4;border-radius:50%;animation:pj-spin 0.6s linear infinite;display:inline-block;"></div>';
+    }
+    function _updatePjBar() {
+        _doneCount++;
+        var pct = Math.round((_doneCount / selected.length) * 100);
+        document.getElementById('pj-progress-bar').style.width = pct + '%';
+        document.getElementById('pj-progress-pct').textContent = _doneCount + ' / ' + selected.length;
+    }
+    async function _extractOnePj(s) {
+        _markPjSpinning(s);
+        var itemEl = document.getElementById('pj-item-' + s.index);
+        try {
+            var res = await fetch(_backendUrl + '/api/extract_attachments/' + encodeURIComponent(_messageId), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ indices: [s.index] }),
+            });
+            var data = await res.json();
+            if (data.ok && data.pj_context) {
+                allContexts.push(data.pj_context);
+                if (itemEl) {
+                    itemEl.style.color = '#2e7d32';
+                    itemEl.style.background = '#e8f5e9';
+                    var icon = itemEl.querySelector('.pj-status-icon');
+                    if (icon) icon.textContent = '✅';
+                    if (data.warnings && data.warnings.length > 0) {
+                        data.warnings.forEach(function(w) {
+                            itemEl.insertAdjacentHTML('afterend', '<div style="font-size:10px;color:#e65100;background:#fff3e0;padding:3px 8px;border-radius:4px;margin:2px 0 4px 24px;">' + _escapeHtml(w) + '</div>');
+                        });
+                    }
+                }
+            } else {
+                _failedPjNames.push(s.name);
+                var _ext = (s.name.split('.').pop() || '').toLowerCase();
+                var _reason = 'contenu non extractible';
+                if (['png','jpg','jpeg','gif','bmp','svg','webp'].indexOf(_ext) >= 0) _reason = 'format image non analysable';
+                else if (_ext === 'pdf') _reason = 'PDF scanné (sans texte exploitable)';
+                else if (['zip','rar','7z'].indexOf(_ext) >= 0) _reason = 'archive non analysable';
+                if (itemEl) {
+                    itemEl.style.color = '#999';
+                    itemEl.style.background = '#f5f5f5';
+                    var icon = itemEl.querySelector('.pj-status-icon');
+                    if (icon) icon.textContent = '⚠️';
+                    itemEl.insertAdjacentHTML('beforeend', '<span style="font-size:10px;color:#c57600;margin-left:4px;">— ' + _escapeHtml(_reason) + '</span>');
+                }
+            }
+        } catch(e) {
+            _failedPjNames.push(s.name);
+            if (itemEl) {
+                itemEl.style.color = '#c62828';
+                itemEl.style.background = '#ffebee';
+                var icon = itemEl.querySelector('.pj-status-icon');
+                if (icon) icon.textContent = '❌';
+                itemEl.insertAdjacentHTML('beforeend', '<span style="font-size:10px;color:#c62828;margin-left:4px;">— erreur d\'extraction</span>');
+            }
+        }
+        _updatePjBar();
+    }
+
+    // Lancer par batch de BATCH_SIZE en parallèle
+    for (var bStart = 0; bStart < selected.length; bStart += BATCH_SIZE) {
+        var batch = selected.slice(bStart, bStart + BATCH_SIZE);
+        await Promise.all(batch.map(function(s) { return _extractOnePj(s); }));
+    }
+
+    _extractedPjContext = allContexts.join('\n\n');
+
+    // Note interne pour Claude : ignorer les PJ qui ont échoué
+    if (_failedPjNames.length > 0 && allContexts.length > 0) {
+        _extractedPjContext += '\n\n[NOTE INTERNE : Certaines pieces jointes n\'ont pas pu etre analysees automatiquement (' + _failedPjNames.join(', ') + '). NE PAS mentionner ce probleme dans le mail. NE PAS dire que tu n\'as pas pu consulter ou analyser un document. L\'utilisateur les a consultees lui-meme. Concentre-toi uniquement sur les PJ analysees ci-dessus.]';
+    } else if (_failedPjNames.length > 0 && allContexts.length === 0) {
+        _extractedPjContext = '';
+    }
+
+    // Résumé + bouton « Valider et générer »
+    var summaryText = allContexts.length + ' PJ analysee(s) avec succes';
+    if (_failedPjNames.length > 0) summaryText += ' — ' + _failedPjNames.length + ' non analysable(s)';
+    document.getElementById('pj-progress-pct').textContent = summaryText;
+    var _oldValidateRow = document.getElementById('pj-validate-row');
+    if (_oldValidateRow) _oldValidateRow.remove();
+    document.getElementById('pj-progress-pct').insertAdjacentHTML('afterend',
+        '<div id="pj-validate-row" style="text-align:center;margin-top:12px;">'
+        + '<button id="btn-pj-validate" onclick="_onPjValidate()" class="em-popup-btn primary">Valider et generer la reponse</button>'
+        + '</div>');
+}
+
+function _onPjValidate() {
+    /** Clic « Valider et générer » : ferme la popup et lance generate. */
+    var validateRow = document.getElementById('pj-validate-row');
+    if (validateRow) validateRow.remove();
+    _closePjOverlay();
+    generateReply();
 }
 
 
