@@ -4177,20 +4177,20 @@ def _run_prefetch(mail_data):
 
                 if future_a:
                     try:
-                        context_a = future_a.result(timeout=15)
+                        context_a = future_a.result(timeout=TIMEOUT_PREFETCH_FUTURE)
                     except Exception as e:
                         future_a.cancel()
                         logger.warning(f"Prefetch A error: {e}")
 
                 try:
-                    context_b = future_b.result(timeout=15)
+                    context_b = future_b.result(timeout=TIMEOUT_PREFETCH_FUTURE)
                 except Exception as e:
                     future_b.cancel()
                     logger.warning(f"Prefetch B error: {e}")
 
                 if future_c:
                     try:
-                        context_c = future_c.result(timeout=15)
+                        context_c = future_c.result(timeout=TIMEOUT_PREFETCH_FUTURE)
                     except Exception as e:
                         future_c.cancel()
                         logger.warning(f"Prefetch C error: {e}")
@@ -4233,7 +4233,7 @@ def _run_prefetch(mail_data):
                     fc = pool.submit(_prefetch_context_c_with_table, kw, None,
                                      from_email, _my_email_deg) if kw else None
                     try:
-                        resp_b = fb.result(timeout=15)
+                        resp_b = fb.result(timeout=TIMEOUT_PREFETCH_FUTURE)
                         if resp_b.status_code == 200:
                             context_b = resp_b.json().get('results', [])
                     except Exception:
@@ -4242,7 +4242,7 @@ def _run_prefetch(mail_data):
                     _bodies_enriched.set()
                     if fc:
                         try:
-                            context_c = fc.result(timeout=15) or []
+                            context_c = fc.result(timeout=TIMEOUT_PREFETCH_FUTURE) or []
                         except Exception as e:
                             logger.debug(f"Prefetch C (Mode Dégradé) : échec {e}")
                     # Phase B (21/04) — Mode Dégradé : signal C prêt (même si
@@ -5851,7 +5851,7 @@ def api_dialog_init():
         for name, fut in futs.items():
             try:
                 # Plafond 8s pour éviter un blocage total (Graph peut traîner)
-                result[name] = fut.result(timeout=8)
+                result[name] = fut.result(timeout=TIMEOUT_DIALOG_INIT)
             except Exception as e:
                 logger.warning(f"[dialog_init] {name} futur échec : {e}")
                 result[name] = None
@@ -5971,13 +5971,13 @@ def api_companion_proxy(subpath):
         # réponse d'erreur rapidement et pourra afficher un message propre
         # au lieu d'un freeze UI de 10 s.
         if request.method == 'GET':
-            resp = _requests.get(companion_url, params=request.args, timeout=3)
+            resp = _requests.get(companion_url, params=request.args, timeout=TIMEOUT_COMPANION_PROXY)
         elif request.method == 'POST':
-            resp = _requests.post(companion_url, json=request.get_json(silent=True), timeout=3)
+            resp = _requests.post(companion_url, json=request.get_json(silent=True), timeout=TIMEOUT_COMPANION_PROXY)
         elif request.method == 'PUT':
-            resp = _requests.put(companion_url, json=request.get_json(silent=True), timeout=3)
+            resp = _requests.put(companion_url, json=request.get_json(silent=True), timeout=TIMEOUT_COMPANION_PROXY)
         elif request.method == 'DELETE':
-            resp = _requests.delete(companion_url, params=request.args, timeout=3)
+            resp = _requests.delete(companion_url, params=request.args, timeout=TIMEOUT_COMPANION_PROXY)
         else:
             return jsonify({"status": "error", "reason": "method_not_supported"}), 405
 
