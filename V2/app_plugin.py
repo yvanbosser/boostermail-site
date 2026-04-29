@@ -10130,10 +10130,31 @@ def api_classification_post_send(message_id):
     Suggestion de classement mail post-envoi.
     Retourne le dossier suggéré (règle DB ou IA fallback).
     Mode Standard uniquement.
+
+    Fix 29/04 PM (bug Yvan test phase 2) : réutilise en priorité le
+    cache Phase 1 (_mail_preview_cache + DB get_mail_classement) via
+    _fetch_single_preview_plate, AVANT de retomber sur la recherche
+    from scratch. Avant : la Phase 2 ignorait la suggestion "Archive"
+    déjà trouvée par le BG en Phase 1, retournait suggestion=null,
+    et la popup classement n'apparaissait jamais.
     """
     graph = get_graph()
     if not graph:
         return jsonify({"status": "unavailable", "reason": "Mode Standard requis"})
+
+    # 1) Réutiliser cache Phase 1 (BG warmup + DB persistent)
+    plate_result = _fetch_single_preview_plate(message_id, 'classement')
+    if plate_result.get('status') == 'done':
+        plate_data = plate_result.get('data') or {}
+        if plate_data.get('suggestion'):
+            return jsonify({
+                "status": "done",
+                "suggestion": {
+                    "suggestion": plate_data.get('suggestion'),
+                    "source": plate_data.get('source', 'rule'),
+                    "folders": [],
+                },
+            })
 
     _cache_cleanup()
     cache_key = f'cls_{message_id}'
@@ -10218,8 +10239,35 @@ def api_pj_classification_post_send(message_id):
     """
     Suggestion de classement PJ post-envoi.
     Retourne les PJ à classer avec dossier suggéré.
+
+    Fix 29/04 PM (bug Yvan test phase 2) : réutilise en priorité le
+    cache Phase 1 (_mail_preview_cache + DB get_mail_pj_classement)
+    via _fetch_single_preview_plate, AVANT de retomber sur la recherche
+    from scratch. Cohérent avec api_classification_post_send.
     """
     graph = get_graph()
+
+    # 1) Réutiliser cache Phase 1 (BG warmup + DB persistent)
+    plate_result = _fetch_single_preview_plate(message_id, 'pj_classement')
+    if plate_result.get('status') == 'done':
+        plate_data = plate_result.get('data') or {}
+        if plate_data.get('suggestion'):
+            # Recharger les PJ via Graph (la suggestion seule ne contient
+            # pas la liste des fichiers, juste le dossier cible)
+            attachments = []
+            if graph:
+                try:
+                    attachments = graph.get_attachments(message_id)
+                except Exception:
+                    pass
+            doc_attachments = [a for a in attachments if not a.get('is_inline', False)]
+            return jsonify({
+                "status": "done",
+                "pj_suggestions": {
+                    "attachments": doc_attachments,
+                    "suggestion": plate_data.get('suggestion'),
+                },
+            })
 
     _cache_cleanup()
     cache_key = f'pj_{message_id}'
