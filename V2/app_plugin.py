@@ -2623,6 +2623,37 @@ def _load_reply_cache():
                 clean_data[user_id] = user_clean
                 loaded_per_user[user_id] = user_loaded
 
+        # Étape 7 multi-tenant — migration 'default' → user_id réel.
+        #
+        # Si la DB connaît un user actif (auth_user_id en settings, posé par
+        # auth_base.py au login OAuth), on migre les entrées 'default' vers
+        # ce user_id. Garantit que :
+        # - BG cont-spec écrira dans _reply_cache['user_yvan'] (via bridge DB)
+        # - Routes Flask de Yvan liront dans _reply_cache['user_yvan'] (via session)
+        # - Les 59 entrées 'default' ne sont pas perdues, juste déplacées
+        #
+        # En mono-user (Yvan seul), cette migration aligne tous les écrits/lectures
+        # sur le même user_id. Multi-user (futur) → 'default' restera utilisé par
+        # les BG sans mapping user, pas de migration cumulée vers 1 seul user.
+        if 'default' in clean_data:
+            actual_user_id = ''
+            try:
+                if _get_current_user_id is not None:
+                    actual_user_id = _get_current_user_id() or ''
+            except Exception:
+                actual_user_id = ''
+            if actual_user_id and actual_user_id != 'default':
+                default_entries = clean_data.pop('default')
+                if actual_user_id in clean_data:
+                    clean_data[actual_user_id].update(default_entries)
+                else:
+                    clean_data[actual_user_id] = default_entries
+                logger.info(
+                    f"[reply_cache] Migration 'default' → '{actual_user_id[:12]}' : "
+                    f"{len(default_entries)} entrée(s) déplacée(s) "
+                    f"(alignement BG ↔ routes Flask en mode mono-user)"
+                )
+
         # Installation atomique dans le storage central via replace_user_caches.
         # En mono-thread au démarrage : pas de risque de race avec mutations
         # concurrentes. _reply_lock pour cohérence avec les autres opérations.

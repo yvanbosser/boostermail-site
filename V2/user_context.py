@@ -50,56 +50,125 @@ la liste des 22 caches mono-user à migrer + plan détaillé.
 """
 
 import functools
+import os
+import time
 from typing import Callable, Any
 
 
-def get_current_user_id() -> str:
-    """
-    Retourne l'user_id du user courant via Flask context.
+# Cache 60 sec du user_id DB pour éviter SQLite hits massifs en BG threads.
+# La DB n'est mise à jour qu'au login/logout (rare), donc 60s est OK.
+_db_user_id_cache: str = ''
+_db_user_id_cache_ts: float = 0.0
+_DB_USER_ID_CACHE_TTL: float = 60.0
+
+
+def _get_user_id_from_db() -> str:
+    """Bridge mono-user pour les BG threads sans Flask context.
+
+    Lit ``auth_user_id`` depuis ``settings`` table (peuplé par auth_base.py
+    au moment du login OAuth). Permet aux BG threads (cont-spec, cohesion,
+    safety net, atexit hooks) de résoudre vers le **MÊME** user_id que les
+    routes Flask de Yvan, garantissant la cohérence cache writes (BG)
+    ↔ cache reads (route).
+
+    Cache 60 sec en mémoire pour éviter SQLite hits massifs.
 
     Returns
     -------
     str
-        L'user_id (chaîne non vide) si un Flask request context est actif
-        ET qu'un user est authentifié. Sinon ``''``.
+        ``auth_user_id`` du user actif si DB accessible, sinon ``''``.
 
     Notes
     -----
-    Préférences (par ordre) :
+    - **Limite mono-user** : présuppose UN seul user authentifié en DB.
+      Quand BoosterMail aura plusieurs users simultanés, le BG devra
+      iterate sur la liste des users actifs (refonte ultérieure).
+    - **Fail-safe** : retourne ``''`` silencieusement si DB indisponible
+      (l'appelant fera son fallback ``or 'default'``).
+    """
+    global _db_user_id_cache, _db_user_id_cache_ts
+    now = time.time()
+    if _db_user_id_cache and now - _db_user_id_cache_ts < _DB_USER_ID_CACHE_TTL:
+        return _db_user_id_cache
+    try:
+        # Import lazy de Database (évite cycle d'imports au load du module)
+        from database import Database
+        db_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), 'boostermail.db'
+        )
+        if not os.path.exists(db_path):
+            return ''
+        db = Database(db_path)
+        user_id = (db.get_setting('auth_user_id') or '').strip()
+        _db_user_id_cache = user_id
+        _db_user_id_cache_ts = now
+        return user_id
+    except Exception:
+        return ''
+
+
+def invalidate_db_user_id_cache() -> None:
+    """Force le re-fetch DB du user_id au prochain appel (login/logout)."""
+    global _db_user_id_cache, _db_user_id_cache_ts
+    _db_user_id_cache = ''
+    _db_user_id_cache_ts = 0.0
+
+
+def get_current_user_id() -> str:
+    """
+    Retourne l'user_id du user courant avec 3 niveaux de fallback.
+
+    Returns
+    -------
+    str
+        L'user_id (chaîne non vide) si trouvé. Sinon ``''``.
+
+    Notes
+    -----
+    Niveaux de fallback (par ordre) :
+
     1. ``request.auth_user_id`` (posé par le décorateur ``@require_auth``
        de ``auth_base.py`` ou par ``@require_user`` ci-dessous)
     2. ``session.get('auth_user_id')`` (route sans décorateur mais user
        déjà loggé via OAuth)
+    3. **Bridge mono-user DB** (``settings.auth_user_id``) — pour les
+       BG threads, atexit hooks, scripts CLI sans Flask context. Garantit
+       la cohérence routes Flask ↔ BG en mode mono-user (Yvan).
 
-    Fallback ``''`` (string vide) si aucun des deux n'est dispo. Utilisé
-    en BG thread, script CLI, ``atexit`` hook, ou pendant les premiers
-    chargements de modules (avant initialisation Flask). L'appelant
-    choisit alors son fallback :
+    Le niveau 3 est crucial : sans lui, le BG cont-spec écrirait dans
+    ``_reply_cache['default']`` mais les routes Flask de Yvan (qui ont
+    ``auth_user_id`` en session) liraient ``_reply_cache['user_yvan']``
+    → MISS systématique. Avec le bridge DB, BG et routes convergent
+    vers le même user_id.
 
-    - ``user_id = get_current_user_id() or 'default'`` — comportement
-      mono-user partagé (recommandé pendant la migration).
-    - ``if not user_id: raise NoUserContextError(...)`` — strict, pour
-      les caches contenant des données sensibles cross-user.
+    Le bridge DB sera supprimé quand BoosterMail passera en multi-user
+    actif simultané (le BG devra alors iterate users).
+
+    L'appelant peut faire ``user_id = get_current_user_id() or 'default'``
+    pour avoir un fallback ultime si la DB elle-même n'est pas accessible.
     """
+    # Priorité 1+2 : Flask context
     try:
         from flask import has_request_context, request, session
     except ImportError:
-        return ''
+        return _get_user_id_from_db()
 
-    if not has_request_context():
-        return ''
+    if has_request_context():
+        # Préférence 1 : posé par un décorateur (request-scoped)
+        user_id = getattr(request, 'auth_user_id', None)
+        if user_id:
+            return user_id
 
-    # Préférence 1 : posé par un décorateur (request-scoped)
-    user_id = getattr(request, 'auth_user_id', None)
-    if user_id:
-        return user_id
+        # Préférence 2 : session directe (route sans décorateur mais user loggé)
+        try:
+            session_uid = session.get('auth_user_id', '') or ''
+            if session_uid:
+                return session_uid
+        except RuntimeError:
+            pass
 
-    # Préférence 2 : session directe (route sans décorateur mais user loggé)
-    try:
-        return session.get('auth_user_id', '') or ''
-    except RuntimeError:
-        # Edge case : has_request_context True mais session inaccessible
-        return ''
+    # Priorité 3 : bridge DB (BG thread, atexit, etc.)
+    return _get_user_id_from_db()
 
 
 def require_user(f: Callable) -> Callable:
