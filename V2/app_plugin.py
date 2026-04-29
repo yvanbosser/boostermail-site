@@ -462,6 +462,28 @@ def _normalize_email(email: str) -> str:
     return (email or '').strip().lower()
 
 
+# 29/04 PM audit perf — regex HTML strip précompilées (Hotspot #3).
+# Avant : 4 sites (1899, 5129, 8368, 9413) recompilaient 3 patterns
+# à chaque appel sur des bodies de 5-10 KB. ~10-25 ms gaspillés par
+# generate_reply / mail_summary.
+# Après : 3 patterns module-level + helper _html_to_plain_text.
+_HTML_BR_RE = re.compile(r'<br\s*/?>', re.IGNORECASE)
+_HTML_P_BREAK_RE = re.compile(r'</p>\s*<p[^>]*>', re.IGNORECASE)
+_HTML_TAG_RE = re.compile(r'<[^>]+>')
+
+
+def _html_to_plain_text(html: str, paragraph_break: str = '\n\n') -> str:
+    """Convertit du HTML en texte brut (3 passes) avec regex précompilées.
+    paragraph_break = '\n' ou '\n\n' selon le rendu attendu.
+    Retourne '' si html None/vide."""
+    if not html:
+        return ''
+    out = _HTML_BR_RE.sub('\n', html)
+    out = _HTML_P_BREAK_RE.sub(paragraph_break, out)
+    out = _HTML_TAG_RE.sub('', out)
+    return out
+
+
 def is_standard_mode() -> bool:
     """Vérifie si l'utilisateur est en Mode Standard (sans instancier GraphClient)."""
     auth = get_auth_provider()
@@ -1896,9 +1918,7 @@ def _should_append_signature(closing, user_name, body=''):
     # Niveau 2 — body contient déjà signature inline (prénom OU user_name complet)
     if body:
         # Strip HTML pour analyse plain text (cohérent avec instant_reply step 2)
-        body_plain = re.sub(r'<br\s*/?>', '\n', body, flags=re.IGNORECASE)
-        body_plain = re.sub(r'</p>\s*<p[^>]*>', '\n', body_plain, flags=re.IGNORECASE)
-        body_plain = re.sub(r'<[^>]+>', '', body_plain)
+        body_plain = _html_to_plain_text(body, paragraph_break='\n')
         last_lines = [ln.strip().lower() for ln in body_plain.split('\n') if ln.strip()][-3:]
         last_block = ' '.join(last_lines)
         # Match prénom comme mot entier (évite faux positif sur "Yvanovich")
@@ -5126,9 +5146,7 @@ def _start_speculative(mail_data):
         # full_text pour la normalisation HTML finale du cache.
         _full_plain = full_text
         if '<' in _full_plain:
-            _full_plain = re.sub(r'<br\s*/?>', '\n', _full_plain, flags=re.IGNORECASE)
-            _full_plain = re.sub(r'</p>\s*<p[^>]*>', '\n\n', _full_plain, flags=re.IGNORECASE)
-            _full_plain = re.sub(r'<[^>]+>', '', _full_plain)
+            _full_plain = _html_to_plain_text(_full_plain, paragraph_break='\n\n')
             import html as _html_mod_spec
             _full_plain = _html_mod_spec.unescape(_full_plain).strip()
 
@@ -8365,9 +8383,7 @@ def api_instant_reply():
             # `startswith('bonjour')` échouait car la 1ère lettre est `<`.
             # → Extraire plain text avant détection (strip HTML + entités).
             import html as _html_mod_check
-            _body_plain = re.sub(r'<br\s*/?>', '\n', body, flags=re.IGNORECASE)
-            _body_plain = re.sub(r'</p>\s*<p[^>]*>', '\n\n', _body_plain, flags=re.IGNORECASE)
-            _body_plain = re.sub(r'<[^>]+>', '', _body_plain)
+            _body_plain = _html_to_plain_text(body, paragraph_break='\n\n')
             _body_plain = _html_mod_check.unescape(_body_plain)
             _body_stripped = _body_plain.strip()
             _body_lower = _body_stripped.lower()

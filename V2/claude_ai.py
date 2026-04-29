@@ -16,6 +16,21 @@ MODEL_CLASSIFY = "claude-sonnet-4-20250514"  # Sonnet pour qualité classement (
 MODEL_ANALYSIS = "claude-sonnet-4-20250514"  # Pour les analyses de profil
 MAX_TOKENS = 1200
 
+# 29/04 PM audit perf — patterns regex précompilés pour détection registre
+# (tu/vous). Avant : 4 sites compilaient à chaque appel via `re.findall(...)`
+# ou `import re as _re_reg; _re_reg.compile(...)` dans une fonction →
+# 15-30 ms gaspillés par contexte de génération.
+_RE_TU_MARKERS_LONG = re.compile(
+    r'\b(tu |te |ton |ta |tes |toi |toi,|peux-tu|dis-moi|envoie-moi|fais-moi)\b',
+    re.IGNORECASE)
+_RE_VOUS_MARKERS_LONG = re.compile(
+    r'\b(vous |votre |vos |pourriez-vous|pouvez-vous|veuillez)\b',
+    re.IGNORECASE)
+_RE_TU_MARKERS_SHORT = re.compile(
+    r'\b(tu |te |ton |ta |tes |toi |stp\b|peux-tu)')
+_RE_VOUS_MARKERS_SHORT = re.compile(
+    r'\b(vous |votre |vos |svp\b|pourriez-vous)')
+
 # Niveau redactionnel (mis a jour par reload_style)
 _writing_level = None
 
@@ -469,15 +484,12 @@ Resume : {cp.get('profile_text', '')}{extras}{_humor_block}{confidence_note}
             if sender_history:
                 _sent_mails = [m for m in sender_history if m.get('direction') == 'sent']
                 if _sent_mails:
-                    import re as _re_reg
-                    _tu_markers = _re_reg.compile(r'\b(tu |te |ton |ta |tes |toi |toi,|peux-tu|dis-moi|envoie-moi|fais-moi)\b', _re_reg.IGNORECASE)
-                    _vous_markers = _re_reg.compile(r'\b(vous |votre |vos |pourriez-vous|pouvez-vous|veuillez)\b', _re_reg.IGNORECASE)
                     _tu_total = 0
                     _vous_total = 0
                     for _m in _sent_mails:
                         _body = (_m.get('body', '') or '')[:1500]
-                        _tu_total += len(_tu_markers.findall(_body))
-                        _vous_total += len(_vous_markers.findall(_body))
+                        _tu_total += len(_RE_TU_MARKERS_LONG.findall(_body))
+                        _vous_total += len(_RE_VOUS_MARKERS_LONG.findall(_body))
                     # Tutoiement uniquement si TOUS les marqueurs sont tu (100%) et au moins 3 marqueurs
                     if _tu_total >= 3 and _vous_total == 0:
                         _b_register = 'tutoiement'
@@ -825,8 +837,9 @@ Retourne uniquement le mail, sans objet ni commentaire."""
             cp = contact_profile
             register = cp.get('register', 'vouvoiement')
             # Détecter le registre RÉEL du current_reply (priorité sur le profil)
-            _tu_count = len(re.findall(r'\b(tu |te |ton |ta |tes |toi |stp\b|peux-tu)', current_reply.lower()))
-            _vous_count = len(re.findall(r'\b(vous |votre |vos |svp\b|pourriez-vous)', current_reply.lower()))
+            _cr_lower = current_reply.lower()
+            _tu_count = len(_RE_TU_MARKERS_SHORT.findall(_cr_lower))
+            _vous_count = len(_RE_VOUS_MARKERS_SHORT.findall(_cr_lower))
             if _tu_count > _vous_count and _tu_count >= 2:
                 register = 'tutoiement'
             elif _vous_count > _tu_count and _vous_count >= 2:
