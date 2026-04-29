@@ -280,6 +280,23 @@ class ClaudeAssistant:
     ) -> str:
         """Construit le prompt complet pour Claude."""
 
+        # Défense en profondeur (29/04 PM) — sanitize les list params : ne garder
+        # que les items dict (sinon m.get(...) plante avec
+        # 'str' object has no attribute 'get'). Protège tous les call-sites,
+        # y compris _build_prompt importé depuis claude_ai.py:765 (kwargs).
+        def _only_dicts(v):
+            if not v:
+                return v
+            try:
+                return [x for x in v if isinstance(x, dict)]
+            except Exception:
+                return []
+        conversation_history = _only_dicts(conversation_history)
+        sender_history = _only_dicts(sender_history)
+        keyword_context = _only_dicts(keyword_context)
+        recent_corrections = _only_dicts(recent_corrections)
+        # learning_priorities = list[str], pas filtrée
+
         # -- Construction des blocs de contexte — ordre : D -> B -> A -> C -> D2 -> E --
         # D en premier (synthese relationnelle), B ensuite (exemples concrets a imiter)
         blocks = []
@@ -320,17 +337,21 @@ class ClaudeAssistant:
         if cp:
             # Extraire vocabulaire et sujets
             pj = cp.get('profile_json', '{}')
-            # Double-désérialisation si nécessaire (profile_json parfois doublement sérialisé en DB)
-            if isinstance(pj, str):
+            # Boucle de désérialisation (29/04 PM — root cause du crash
+            # 'str' object has no attribute 'get'). profile_json peut être
+            # doublement OU triplement sérialisé selon l'historique des
+            # migrations DB. Audit OVH 29/04 : 9/55 profils en triple.
+            # On déroule tant qu'on a un str (max 4 itérations = paranoia).
+            # Si à la fin pj n'est pas dict → fallback vide (n'écrase pas D).
+            _max_iter = 4
+            while isinstance(pj, str) and _max_iter > 0:
                 try:
                     pj = json.loads(pj)
                 except Exception:
-                    pj = {}
-            if isinstance(pj, str):
-                try:
-                    pj = json.loads(pj)
-                except Exception:
-                    pj = {}
+                    break
+                _max_iter -= 1
+            if not isinstance(pj, dict):
+                pj = {}
             topics = pj.get('recurring_topics', [])
             vocab = pj.get('specific_vocabulary', [])
 

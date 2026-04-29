@@ -15,6 +15,7 @@ import tempfile
 import hashlib
 import subprocess
 import shutil
+import traceback
 from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
 
@@ -4363,6 +4364,11 @@ def _item_key(m):
     Le fallback utilise la date COMPLÈTE (pas tronquée) pour éviter les collisions
     entre mails reçus à la même seconde.
     """
+    # Défense en profondeur (29/04 PM) — items non-dict en amont (filter dans
+    # _dedup_and_truncate_contexts) mais on garde un isinstance ici au cas où
+    # _item_key est appelé depuis un autre site sans filtre.
+    if not isinstance(m, dict):
+        return ('non-dict', type(m).__name__, repr(m)[:80])
     if m.get('id'):
         return ('id', m['id'])
     if m.get('internet_message_id'):
@@ -4427,9 +4433,30 @@ def _dedup_and_truncate_contexts(context_a, context_b, context_c):
             result.append(m_copy)
         return result
 
-    a = list(context_a or [])
-    b = list(context_b or [])
-    c = list(context_c or [])
+    # Défense en profondeur (29/04 PM) — filtrer les items non-dict.
+    # Le pipeline aval (_item_key, _build_prompt) appelle .get() sur chaque item ;
+    # un seul str glissé dans la liste suffit à crasher tout le prompt
+    # ('str' object has no attribute 'get'). On filtre + on logge pour
+    # observabilité plutôt que de propager l'erreur.
+    def _filter_dict_items(items, name):
+        if not items:
+            return []
+        clean = [m for m in items if isinstance(m, dict)]
+        dropped = len(items) - len(clean)
+        if dropped:
+            try:
+                _bad_types = sorted({type(x).__name__ for x in items if not isinstance(x, dict)})
+                logger.warning(
+                    f"[ctx-filter] {name} : {dropped}/{len(items)} item(s) non-dict ignoré(s) "
+                    f"(types={_bad_types})"
+                )
+            except Exception:
+                pass
+        return clean
+
+    a = _filter_dict_items(context_a or [], 'context_a')
+    b = _filter_dict_items(context_b or [], 'context_b')
+    c = _filter_dict_items(context_c or [], 'context_c')
 
     # Étape 1 : dédup interne par liste (au cas où)
     a = _dedup_list(a)
@@ -5047,7 +5074,7 @@ def _start_speculative(mail_data):
                 "La mise en forme HTML est appliquée automatiquement côté affichage."
             )
         except Exception as e:
-            logger.error(f"Speculative prompt error: {e}")
+            logger.error(f"Speculative prompt error: {e}\n{traceback.format_exc()}")
             with _reply_lock:
                 _reply_cache.pop(message_id, None)
             return
@@ -9221,7 +9248,7 @@ INSTRUCTIONS ECHEANCES :
                 "La mise en forme HTML est appliquée automatiquement côté affichage."
             )
         except Exception as e:
-            logger.error(f"Erreur construction prompt: {e}")
+            logger.error(f"Erreur construction prompt: {e}\n{traceback.format_exc()}")
             system_prompt = "Tu es un assistant email professionnel."
             user_prompt = f"Brief : {brief}\nMail reçu de {from_name} ({from_email})\nObjet: {subject}"
     else:
