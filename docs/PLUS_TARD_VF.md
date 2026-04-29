@@ -1,6 +1,6 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 28/04/2026 fin de session 3 (sujets #11/#12/#13/#14 ajoutés — welcome wizard 3 étapes avant beta + auto-ouverture OnMessageCompose débloqué post-migration Coaxis, à attaquer en session dédiée demain)
+> **Dernière mise à jour** : 29/04/2026 fin de matinée (sujet #14 PARTIELLEMENT IMPLÉMENTÉ — bandeau passif v20 sur OVH, auto-ouverture popup techniquement IMPOSSIBLE confirmé sur 3 limitations Microsoft cumulées ; pivot stratégique vers Étape 7 multi-tenant)
 
 ---
 
@@ -15,7 +15,7 @@ Si tu reviens sur ce doc au début d'une nouvelle session, voici **uniquement ce
 2. **Templates — optimisation post-beta** (différé jusqu'à beta-testeurs actifs, instrumentation déjà déployée 28/04 — voir `audit/rapports/2026-04-28_diagnostic_sujet_2_templates.md`)
 5. **Optim Phase 2 filtrage par plat** — à revoir quand `folder_classifications` aura 6-12 mois d'historique (passif)
 6. **Améliorer détection forward dans summary/draft** — bug constaté (mail Vincent Hubert "Fwd: leonis" body Orange) — taille à estimer
-14. **🔥 PROCHAINE SESSION — Auto-ouverture popup BoosterMail au clic Répondre Outlook (OnMessageCompose)** — débloqué post-migration Coaxis 28/04 PM (mailbox passée sur Microsoft 365 cloud). Effet WOW majeur : l'user clique « Répondre » dans Outlook → BoosterMail s'ouvre automatiquement sans cliquer le bouton add-in. Effort 6-7 h en session dédiée. Détail section 14 ci-dessous.
+14. **⚠️ PARTIELLEMENT IMPLÉMENTÉ — Bandeau passif au clic Répondre (auto-ouverture popup IMPOSSIBLE)** — déployé v20 sur OVH le 29/04 matin. 3 limitations Microsoft cumulées (`displayDialogAsync` bloqué + `actionType` cadenassé sur ShowTaskPane + cold start runtime event-based 5-15s). Bandeau « 🚀 BoosterMail : votre réponse est prête — cliquez sur l'icône BoosterMail » au compose. Pas de gain de clic vs bouton ruban, juste plus de visibilité. Détail section 14 ci-dessous + invariants I-EVENT-01/02 + Pattern #20.
 
 ### 🚨 Avant SaaS multi-tenant Étape 7
 7. **Chantier migration multi-tenant** — 1.5 jour. **Plan ready** dans `audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md` (helper `get_user_cache`, 22 caches à isoler, ordre migration).
@@ -552,9 +552,58 @@ Quand on attaquera (en même temps que #11 et #12) :
 
 ---
 
-### 14. 🔥 PROCHAINE SESSION — Auto-ouverture popup BoosterMail au clic Répondre Outlook (OnMessageCompose)
+### 14. ⚠️ PARTIELLEMENT IMPLÉMENTÉ — Bandeau passif au clic Répondre (OnMessageCompose)
 
-> **Statut au 28/04/2026 fin de session 3** : DÉBLOQUÉ post-migration Coaxis (mailbox Yvan passée définitivement sur Microsoft 365 cloud le 28/04 PM). Le code handler existe déjà mais sert un usage périmé (notify backend pour popup PyQt locale, supprimée au pivot SaaS 27/04). À adapter pour ouvrir directement la popup BoosterMail. **Premier point à attaquer en session du 29/04.**
+> **Statut au 29/04/2026 mi-journée** : **PARTIELLEMENT IMPLÉMENTÉ — vision originale auto-ouverture popup techniquement IMPOSSIBLE.**
+>
+> **Ce qui a été livré 29/04 matin** : v20-banner-icone-29-04 sur OVH. Bandeau passif `InformationalMessage` non-persistent au clic Répondre, dirige vers le bouton ruban BoosterMail. Wording : « 🚀 BoosterMail : votre réponse est prête — cliquez sur l'icône BoosterMail ». Aucun gain de clic vs bouton ruban classique, juste plus de visibilité produit.
+>
+> **3 blockers Microsoft confirmés** (sources doc Microsoft Learn, mises à jour 21-24/04/2026) :
+> 1. `displayDialogAsync` listée dans **Unsupported APIs** des event-based handlers Outlook (issue OfficeDev/office-js#3085 ouverte depuis 2023, jamais corrigée → décision Microsoft « by design »)
+> 2. Pour `notificationMessages` actionable button : `actionType` ne peut **QUE** valoir `ShowTaskPane` (Office.MailboxEnums.ActionType n'a qu'un seul field, vérifié sur Mailbox 1.10 → 1.15)
+> 3. **Cold start runtime event-based** : 5-15 secondes sur le 1er trigger d'une session Outlook (instantané ensuite). Inhérent à l'architecture Microsoft, pas de moyen de pré-chauffer.
+>
+> Combiné à l'interdiction taskpane (`feedback_taskpane_interdit.md`), **aucune voie technique ne permet l'auto-ouverture popup à 0 clic**. Voir Pattern #20 dans `audit/ANOMALIES_RECURRENTES.md` + invariants `I-EVENT-01` + `I-EVENT-02` dans `audit/INVARIANTS.md`.
+>
+> **Code Phase 2 toggle settings** (v21) écarté. La whitelist Flask et le handler avec safety timeout sont documentés dans `audit/rapports/2026-04-29_bilan_intermediaire_oncompose_banner.md` au cas où on voudrait les ressortir plus tard (effort ~1h pour réintégrer).
+>
+> **À retraiter quand** : pendant la session welcome wizard (#11+#12+#13) → ajouter mention dans le wizard expliquant le cold start (« le 1er Répondre du jour peut prendre quelques secondes »). Ou rollback complet (état v17, sans bandeau) si retours beta-testeurs négatifs.
+
+#### Historique de la décision
+
+- **28/04/2026 fin de session 3** : sujet ajouté avec vision « auto-ouverture popup à 0 clic ». Plan estimé 6-7h.
+- **29/04/2026 matin (audit pré-code)** : découverte du blocker `displayDialogAsync` bloqué dans event-based handlers (doc Microsoft Learn 21/04/2026). Pivot vers Option A (InsightMessage actionable).
+- **29/04/2026 matin (Phase 0 doc check)** : découverte du 2e blocker — `actionType` cadenassé sur `ShowTaskPane`. Combiné avec interdiction taskpane → pivot vers **Option A2** (bandeau passif sans bouton actionable).
+- **29/04/2026 matin (déploiement Phase 1)** : v18 → v19 → v20 itérations wording avec Yvan. v20 « cliquez sur l'icône BoosterMail » validée visuellement.
+- **29/04/2026 mi-journée (test perf)** : cold start ~10s sur 1er Répondre confirmé. Délai 65s observé un moment, attribué à un état temporaire PC Yvan (résolu côté Yvan). Délai inhérent Microsoft pas réductible.
+- **29/04/2026 mi-journée (pivot stratégique)** : Yvan tranche — sujet bandeau « fini », bascule sur Étape 7 multi-tenant. v20 reste sur OVH (visibilité produit). Code v21 toggle écarté.
+
+#### Vision originale (gardée pour archive)
+
+**Effet WOW ultime visé** : l'utilisateur ne clique plus sur le bouton BoosterMail dans la barre d'actions. Il **clique simplement « Répondre »** comme dans n'importe quel client mail, et **BoosterMail s'ouvre automatiquement** avec la réponse pré-générée. Aucune friction, aucune étape supplémentaire.
+
+**Analogie cuisine** : aujourd'hui, le client doit appeler le serveur en levant la main pour qu'il vienne prendre sa commande. Demain, dès que le client s'assoit, le serveur arrive **avec un menu personnalisé déjà prêt** correspondant à ses goûts habituels. C'est ça la différence.
+
+→ Vision **non atteignable** sur Outlook desktop/Web sideloaded sans validation AppSource, à cause des 3 blockers Microsoft. Reste possible en théorie via une **extension Chrome custom** sur Outlook Web uniquement (effort 30-50h, jugé hors ROI au 29/04).
+
+#### État technique post-implémentation
+
+**`onNewMessageComposeHandler`** dans `V2/autorunshared.js` ligne ~497 :
+- Pose un `InformationalMessage` non-persistent avec `notificationMessages.addAsync`
+- Icon resid manifest `icon16` (custom display sur Classic Outlook seulement, info Microsoft sur New Outlook desktop + Web)
+- `event.completed()` dans le callback async
+- Try/catch défensif
+
+**Manifest XML** : `<LaunchEvent Type="OnMessageCompose" FunctionName="onNewMessageComposeHandler"/>` ligne 180, runtime déclaré ligne 119-122.
+
+**Côté UX user** : flux inchangé par rapport au pré-#14 :
+1. User clique Répondre dans Outlook → fenêtre compose s'ouvre
+2. Bandeau apparaît au-dessus du body : « 🚀 BoosterMail : votre réponse est prête — cliquez sur l'icône BoosterMail »
+3. User clique sur l'icône BoosterMail (dans le ruban du compose, ou via « Plus d'apps » sur New Outlook/Web où Microsoft relègue les add-ins sideloadés — cf #13)
+4. Popup BoosterMail s'ouvre comme avant (dialog 80×80, displayInIframe: true)
+5. User génère / refine / envoie
+
+#### Architecture cible visée — non atteignable, archivée pour mémoire
 
 #### Vision produit
 

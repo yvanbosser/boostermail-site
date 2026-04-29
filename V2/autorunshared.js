@@ -35,7 +35,7 @@ function _debugLog(eventName, details) {
 
 // Marqueur de version : s'écrit dès le chargement du JS → permet de vérifier
 // en lisant addin_debug.log que Outlook a bien rechargé le nouveau fichier.
-var _ADDIN_VERSION = 'v17-iframe-80x80-compact-28-04';
+var _ADDIN_VERSION = 'v20-banner-icone-29-04';
 _debugLog('js_loaded', { version: _ADDIN_VERSION });
 
 // Safety net global (21/04 P3) : toute exception non catchée → log backend
@@ -468,49 +468,75 @@ function _openViaDisplayDialog(item, dialogUrl, data, getMailBody, fromName, fro
 }
 
 // ============================================================================
-// HANDLER — EVENT-BASED OnNewMessageCompose (#19)
+// HANDLER — EVENT-BASED OnNewMessageCompose (sujet #14 PLUS_TARD_VF)
 // ============================================================================
 
 /**
- * Déclenché automatiquement quand l'utilisateur clique Répondre / Rép. tous / Transférer.
- * Ne peut PAS appeler displayDialogAsync ni showAsTaskpane (APIs bloquées dans les event handlers Outlook).
- * Se contente de notifier le backend via POST /api/event/new_compose.
- * C'est la popup PyQt (desktop) ou l'extension #12 (Web) qui détecte le compose via SSE
- * et ouvre le dialog en QWebEngineView ou window.open.
+ * Déclenché automatiquement quand l'utilisateur clique Répondre / Rép. tous /
+ * Transférer / Nouveau message dans Outlook.
+ *
+ * Implémentation Option A2 (29/04/2026) — bandeau passif.
+ *
+ * Microsoft impose 2 contraintes infranchissables (doc Microsoft Learn,
+ * mise à jour 24/04/2026) :
+ *   1. displayDialogAsync est dans la liste "Unsupported APIs" des
+ *      event-based handlers Outlook (issue OfficeDev/office-js#3085 ouverte
+ *      depuis 2023, jamais corrigée).
+ *   2. Pour notificationMessages avec actionable button : actionType ne
+ *      peut QUE valoir ShowTaskPane (cf MailboxEnums.ActionType, un seul
+ *      field). Ouvrir un dialog depuis ce bouton est IMPOSSIBLE.
+ *
+ * Combiné à l'interdiction taskpane (consigne Yvan 29/04, mémoire feedback
+ * `feedback_taskpane_interdit.md`), la seule voie viable est un bandeau
+ * informational SANS bouton actionable. L'user voit le bandeau et clique
+ * sur le bouton BoosterMail dans le ruban pour ouvrir la popup.
+ *
+ * Cf audit/rapports/2026-04-29_audit_approche_OnMessageCompose_InsightMessage.md
+ * pour le détail complet de l'audit pré-code.
  */
 function onNewMessageComposeHandler(event) {
     var item = Office.context.mailbox.item;
 
     if (!item) {
+        _debugLog('compose_handler_no_item', {});
         event.completed();
         return;
     }
 
-    // Lire le sujet (compose = propriétés async via getAsync)
-    item.subject.getAsync(function(subjectResult) {
-        var subject = '';
-        if (subjectResult.status === Office.AsyncResultStatus.Succeeded) {
-            subject = subjectResult.value || '';
-        }
+    _debugLog('compose_handler_fired', {});
 
-        // Déterminer le mode depuis le sujet
-        var mode = 'new';
-        var subjectLower = subject.toLowerCase();
-        if (subjectLower.indexOf('re:') === 0 || subjectLower.indexOf('re :') === 0) {
-            mode = 'reply';
-        } else if (subjectLower.indexOf('fw:') === 0 || subjectLower.indexOf('fwd:') === 0 ||
-                   subjectLower.indexOf('tr:') === 0 || subjectLower.indexOf('tr :') === 0) {
-            mode = 'forward';
-        }
+    // InformationalMessage non-persistent : disparaît automatiquement quand
+    // user navigue vers un autre item. Suffit pour notre cas (le bandeau ne
+    // sert qu'à inviter à cliquer le bouton ruban pendant la rédaction).
+    //
+    // Icon "icon16" = resid manifest. Note Microsoft : l'icône custom n'est
+    // affichée qu'en classic Outlook on Windows ; sur New Outlook desktop +
+    // Web, c'est l'icône info Microsoft par défaut (limitation documentée).
+    // C'est pourquoi on met aussi 🚀 directement dans le texte.
+    var notifKey = 'boostermail_compose_banner';
+    var notifDetails = {
+        type: Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage,
+        message: "🚀 BoosterMail : votre réponse est prête — cliquez sur l'icône BoosterMail",
+        icon: 'icon16',
+        persistent: false
+    };
 
-        // Notifier le backend — la popup PyQt/extension détectera le compose via SSE
-        _notifyBackend('/api/event/new_compose', {
-            subject: subject,
-            mode: mode
+    try {
+        item.notificationMessages.addAsync(notifKey, notifDetails, function(result) {
+            if (result.status === Office.AsyncResultStatus.Failed) {
+                _debugLog('compose_banner_failed', {
+                    code: (result.error && result.error.code) || 0,
+                    msg: (result.error && result.error.message) || 'unknown'
+                });
+            } else {
+                _debugLog('compose_banner_added', { key: notifKey });
+            }
+            event.completed();
         });
-
+    } catch (e) {
+        _debugLog('compose_banner_exception', { msg: String(e) });
         event.completed();
-    });
+    }
 }
 
 // ============================================================================

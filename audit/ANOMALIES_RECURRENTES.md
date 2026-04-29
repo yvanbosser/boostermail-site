@@ -736,6 +736,78 @@ Conséquences observées le 28/04/2026 sur le build `OneOutlook/1.2026.420.300`
 
 ---
 
+## Pattern #20 — OnMessageCompose handler : 3 limitations Microsoft cumulées
+
+**Contexte** : projet de fonctionnalité auto-ouverture popup add-in au clic Répondre / Compose user (sujet #14 PLUS_TARD_VF). Tentative d'utiliser le `LaunchEvent OnMessageCompose` event-based d'Outlook pour déclencher l'ouverture automatique d'une UI riche.
+
+**Historique** :
+- 28/04/2026 fin session 3 : sujet #14 ajouté avec vision « auto-ouverture popup à 0 clic ». Plan estimé 6-7h.
+- 29/04/2026 matin : audit pré-code via kit audit Workflow 4. **Découverte de 3 limitations Microsoft cumulées** rendant la vision originale techniquement impossible :
+
+**Limitation 1 — `displayDialogAsync` bloquée** (doc Microsoft Learn, mise à jour 21/04/2026)
+> The following Office.js APIs aren't supported in event-based add-ins:
+> `Office.context.ui.displayDialogAsync`, `Office.context.ui.messageParent`, `Office.context.mailbox.displayAppointmentForm`, ...
+
+Issue OfficeDev/office-js#3085 ouverte depuis 2023 sans correctif Microsoft. Décision « by design » pour empêcher les add-ins de polluer Outlook avec des UI flottantes sans clic explicite.
+
+**Limitation 2 — `actionType` cadenassé sur `ShowTaskPane`** (doc Microsoft Learn `Office.MailboxEnums.ActionType`, mise à jour 24/04/2026)
+> ## Fields
+> | ShowTaskPane = "showTaskPane" | The `showTaskPane` action. |
+
+Un seul field dans tout l'enum, valable de Mailbox 1.10 à 1.15. Le bouton actionable d'un `InsightMessage` ne peut **QUE** ouvrir un taskpane add-in. Pas d'`executeFunction`, pas de `OpenDialog`, pas de fonction custom.
+
+**Limitation 3 — Cold start runtime event-based** (observé 29/04/2026, confirmé par doc « Configure shared runtime »)
+> Event-based add-ins use a separate JavaScript runtime that is initialized the first time an event is triggered. Subsequent triggers reuse the warm runtime.
+
+→ 1er trigger après chargement add-in (matin, ou après reboot Outlook) : 5-15 secondes de délai d'apparition de l'UI. Triggers suivants : instantanés.
+
+**Symptôme générique** :
+- Project « auto-ouverture UI riche au clic Répondre » → bloqué
+- Toute tentative `displayDialogAsync` depuis le handler échoue silencieusement
+- Toute tentative `executeFunction` ou autre `actionType` lance une exception runtime
+- Délai d'apparition variable selon état warm/cold du runtime, perçu comme bug par l'utilisateur
+
+**Cause racine** :
+Microsoft impose des restrictions strictes aux event-based runtimes pour préserver l'UX Outlook (pas d'UI flottante non sollicitée). Ces restrictions sont **cumulatives et imbriquées** : même si on contourne une limitation, on tombe sur la suivante.
+
+**Voies alternatives explorées (toutes inacceptables ou bloquantes)** :
+
+| # | Voie | Verdict |
+|---|---|---|
+| 1 | Hack via shared runtime persistant + redirection user-gesture | **Non faisable** : runtimes JS isolés, pas de propagation de gesture |
+| 2 | Mailbox 1.16 / 1.17 (versions futures) | Toujours bloqué au 1.16, pas de roadmap de levée |
+| 3 | Smart Alerts au compose | Réservé à `OnMessageSend`, pas `OnMessageCompose` |
+| 4 | Custom URL Protocol Handler | Pas faisable en SaaS pur (nécessite installeur local) |
+| 5 | Microsoft 365 Roadmap | Pas de signal d'une feature débloquante à 12-18 mois |
+| 6 | Extension Chrome/Edge custom | **Faisable mais Outlook Web SEULEMENT**, 30-50h MVP, hors ROI |
+| 7 | Auto-clic InsightMessage actionable | Non faisable : bouton rendu en UI native, pas de handle JS |
+| 8 | GitHub OfficeDev hacks récents | Aucun hack vivant, contournements `messageParent` bouchés 2023-2024 |
+| 9 | Stratégie « anticipation » (popup minimisée) | Pas concluant : pas de mode background pour `displayDialogAsync` |
+| 10 | InsightMessage + deeplink web (ouvre onglet browser) | **Faisable** mais 1 clic + perte contexte Outlook, jugé inacceptable |
+
+**Stratégie validée chez nous** (29/04/2026) : Option A2 = bandeau passif `InformationalMessage` sans bouton actionable. v20 sur OVH. Pas de gain de clic, juste plus de visibilité produit. Le user clique le bouton ruban BoosterMail comme avant.
+
+**Test de non-régression** :
+- I-EVENT-01 : `displayDialogAsync` interdite dans event-based handlers (cf `audit/INVARIANTS.md`)
+- I-EVENT-02 : `actionType` cadenassé sur `ShowTaskPane` (idem)
+
+**Signaux d'alerte** :
+- Quelqu'un propose une feature « auto-ouverture UI au compose » → arrêt immédiat, ressortir ce Pattern et les 2 invariants
+- Tentative de toggle `displayDialogAsync` dans un handler `OnMessageXxx` → audit pré-code obligatoire
+
+**Action si récidive** :
+- Avant de réinvestir du temps sur une voie de contournement : re-vérifier les pages Microsoft Learn (peut-être Microsoft a-t-il levé la restriction ? rare mais possible)
+- Si non levé : abandonner ou pivoter vers la **validation AppSource** (Étape 6 SaaS) ou **Centralized Deployment admin** (clients enterprise) qui sont les 2 seules voies officielles pour une UX add-in premium
+
+**Surveillance passive** : ~30 min/trimestre, vérifier les release notes Mailbox 1.16+ et le Microsoft 365 Roadmap (filtre "Outlook" + "Add-ins" + "In development").
+
+**Sources** :
+- [Activate add-ins with events — Microsoft Learn (21/04/2026)](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/event-based-activation)
+- [Office.MailboxEnums.ActionType enum — Microsoft Learn (24/04/2026)](https://learn.microsoft.com/en-us/javascript/api/outlook/office.mailboxenums.actiontype)
+- [Issue #3085 — Dialog API does not work in Outlook event-based Add-In](https://github.com/OfficeDev/office-js/issues/3085)
+
+---
+
 ## Patterns "rayés" (résolus définitivement)
 
 Aucun pour l'instant — tous les patterns ci-dessus sont "vivants" au sens où ils peuvent récidiver si on n'est pas vigilant.

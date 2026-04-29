@@ -1,6 +1,6 @@
 # Invariants V2 — règles absolues testables
 
-> **Dernière mise à jour** : 27/04/2026 PM (ajout I-CACHE-01 — convention cache busting WebView2)
+> **Dernière mise à jour** : 29/04/2026 mi-journée (ajout I-EVENT-01/02 — limitations Microsoft event-based runtime, suite audit sujet #14)
 > **Principe** : chaque invariant est testable mécaniquement par `smoke_test.ps1`. Une violation = anomalie, point final.
 
 ---
@@ -424,6 +424,24 @@ Le hash mentionné dans `PROMPT_REPRISE_NEW_OUTLOOK.md` (section "test git log d
 - **Test** : extraire hash du PROMPT, vérifier `git log --oneline -5` le contient
 - **Pourquoi** : si désync, la prochaine session démarre avec un état décrit qui ne match pas la réalité Git
 - **Action si violé** : MAJ le hash dans le PROMPT, recommiter
+
+### I-EVENT-01 : `displayDialogAsync` interdite dans event-based handlers Outlook
+
+Aucune fonction enregistrée comme `FunctionName` d'un `<LaunchEvent>` du manifest XML (ex: `OnMessageCompose`, `OnMessageSend`, `OnNewAppointmentOrganizer`) ne doit appeler `Office.context.ui.displayDialogAsync`.
+
+- **Test** : grep `displayDialogAsync` dans tout fichier JS source d'un runtime event-based (référencé via `<Runtime resid="...">` dans `<Hosts xsi:type="MailHost"/>` du manifest), audit manuel des call sites pour vérifier qu'ils ne sont pas dans la chaîne d'appel d'un handler `<LaunchEvent>`.
+- **Pourquoi** : Microsoft cadenasse cette API dans les event-based runtimes (cf doc Microsoft Learn « Activate add-ins with events », mise à jour 21/04/2026, table « Unsupported APIs »). Tout appel échoue silencieusement et le handler ne pose aucune UI. Issue OfficeDev/office-js#3085 ouverte depuis 2023, jamais corrigée — décision Microsoft « by design » pour raisons de sécurité/UX.
+- **Historique** : 29/04/2026 — sujet #14 PLUS_TARD_VF (auto-ouverture popup au clic Répondre) abandonné après découverte de cette limitation. Voir `audit/rapports/2026-04-29_audit_approche_OnMessageCompose_InsightMessage.md`.
+- **Action si violé** : refondre l'approche (pas de contournement officiel disponible). Voir Pattern #20 dans `ANOMALIES_RECURRENTES.md` pour les voies alternatives explorées (toutes inacceptables).
+
+### I-EVENT-02 : `notificationMessages` actionable button cadenassé sur ShowTaskPane
+
+Si `actions` est utilisé dans un `notificationMessages.addAsync` (de type `InsightMessage`), `actionType` doit exclusivement valoir `Office.MailboxEnums.ActionType.ShowTaskPane`. Toute autre valeur lance une exception runtime.
+
+- **Test** : grep `actionType` dans le code V2/, vérifier que la seule valeur utilisée est `Office.MailboxEnums.ActionType.ShowTaskPane` (ou la string `"showTaskPane"`).
+- **Pourquoi** : `Office.MailboxEnums.ActionType` n'a qu'**un seul field** (vérifié sur les pages Microsoft Learn de Mailbox 1.10 à 1.15 le 24/04/2026). Aucun moyen de pointer vers une fonction custom, un dialog, ou autre.
+- **Historique** : 29/04/2026 — pivot sujet #14 forcé vers Option A2 (bandeau passif sans `actions`) car BoosterMail interdit le taskpane (`feedback_taskpane_interdit.md`).
+- **Action si violé** : soit accepter de pointer vers un taskpane (potentiellement interdit selon le projet), soit retirer la propriété `actions` (= bandeau passif sans bouton actionable).
 
 ### I-SESS-04 : Chiffres dynamiques (commits, audits) cohérents entre docs vivants
 Tous les chiffres « N commits master » mentionnés dans les docs vivants (PROMPT_REPRISE, ONBOARDING section L, BILAN session, SOMMAIRE_DETAILLE entrée, HISTORIQUE_DECISIONS entrée du jour) doivent être identiques OU absents.
