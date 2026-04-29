@@ -72,6 +72,16 @@ try:
 except ImportError:
     _QuotaExceeded = None
 
+# Étape 7 SaaS multi-tenant (29/04/2026) — helpers user-scoped caches.
+# Cf audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md pour le plan.
+# Migration progressive cache par cache, fallback 'default' pendant transition.
+try:
+    from user_scoped_cache import get_user_cache as _get_user_cache
+    from user_context import get_current_user_id as _get_current_user_id
+except ImportError:
+    _get_user_cache = None
+    _get_current_user_id = None
+
 
 if _QuotaExceeded is not None:
     @app.errorhandler(_QuotaExceeded)
@@ -3428,24 +3438,42 @@ def _prefetch_context_a(graph, conversation_id):
 
 
 # Phase 2.1 — Cache session de l'email utilisateur courant (évite appel /me répété)
-_my_email_cache = {'email': '', 'timestamp': 0.0}
+#
+# Étape 7 SaaS multi-tenant (29/04/2026) — POC migration vers user-scoped cache.
+# Le cache est désormais isolé par user_id : `dict[user_id, {email, timestamp}]`.
+# Si pas de Flask context (BG thread) ou pas de user authentifié → fallback
+# 'default' pour conserver le comportement mono-user pendant la transition.
+# Le lock _my_email_lock reste global et protège les sub-caches.
 _my_email_lock = threading.Lock()
 
 
 def _get_my_email():
-    """Retourne l'email de l'utilisateur authentifié (cache 1h).
-    Utilisé pour déterminer direction (received/sent) dans les items contexte."""
+    """Retourne l'email de l'utilisateur authentifié (cache 1h, user-scoped).
+
+    Utilisé pour déterminer direction (received/sent) dans les items contexte.
+    En multi-tenant : chaque user a son propre cache (isolation cross-user).
+    """
+    # Multi-tenant : sub-cache propre au user courant (fallback 'default'
+    # pendant la transition mono-user → multi-tenant Étape 7).
+    if _get_user_cache is not None and _get_current_user_id is not None:
+        user_id = _get_current_user_id() or 'default'
+        cache = _get_user_cache('my_email', user_id)
+    else:
+        # Fallback mono-user si imports échouent (jamais en prod, mais
+        # garantit la continuité en dev / tests isolés).
+        cache = {}
+
     with _my_email_lock:
-        if _my_email_cache['email'] and time.time() - _my_email_cache['timestamp'] < 3600:
-            return _my_email_cache['email']
+        if cache.get('email') and time.time() - cache.get('timestamp', 0.0) < 3600:
+            return cache['email']
     try:
         graph = get_graph()
         if graph:
             info = graph.get_user_info()
             email = (info.get('email') or '').lower()
             with _my_email_lock:
-                _my_email_cache['email'] = email
-                _my_email_cache['timestamp'] = time.time()
+                cache['email'] = email
+                cache['timestamp'] = time.time()
             return email
     except Exception:
         pass
