@@ -466,6 +466,23 @@ def _normalize_email(email: str) -> str:
     return (email or '').strip().lower()
 
 
+# 29/04 PM audit DRY #34 — helper purge caches mémoire pour un message.
+# Avant : 3 sites dupliquaient `with _reply_lock: ... with _prefetch_lock: ...`
+# (api_classify_email, api_send_reply, etc.). Risque d'oubli/divergence si
+# on ajoute un cache à purger plus tard. Centralisation.
+# Note : ne purge PAS le cache DB email_cache (laissé aux call-sites qui
+# en ont besoin via _db.purge_email_cache_for).
+def _purge_message_caches(message_id):
+    """Purge _reply_cache + _prefetch_cache pour un message_id (thread-safe).
+    Sites visés : api_classify_email, api_send_reply, _event_purge_mail."""
+    if not message_id:
+        return
+    with _reply_lock:
+        _reply_cache.pop(message_id, None)
+    with _prefetch_lock:
+        _prefetch_cache.pop(message_id, None)
+
+
 # 29/04 PM audit constantes #29 — status caches en classe (rétro-compat
 # avec sites comparant à strings 'done', 'running', etc.). Pas Enum
 # strict pour ne pas casser les égalités existantes.
@@ -1355,7 +1372,7 @@ def _continuous_speculation_loop():
             # donc l'appel est quasi-gratuit tant que le contact n'est pas
             # à un point du schedule (juste un SQL count).
             try:
-                unique_senders = list({m.get('from_email', '').strip().lower()
+                unique_senders = list({_normalize_email(m.get('from_email'))
                                         for m in mails
                                         if m.get('from_email')})
                 def _analyze_batch(senders):
@@ -4469,7 +4486,7 @@ def _item_key(m):
     return (
         'fb',
         (m.get('subject') or '').strip().lower()[:80],
-        (m.get('from_email') or '').strip().lower(),
+        _normalize_email(m.get('from_email')),
         (m.get('date') or ''),  # Date complète, pas tronquée
     )
 
@@ -6654,10 +6671,7 @@ def api_classify_email():
             })
 
         # Nettoyer les caches (mail classé = traité, plus besoin du prefetch ni de la réponse pré-générée)
-        with _reply_lock:
-            _reply_cache.pop(message_id, None)
-        with _prefetch_lock:
-            _prefetch_cache.pop(message_id, None)
+        _purge_message_caches(message_id)
         # Purger le cache DB email_cache pour ce mail
         try:
             _db.purge_email_cache_for(new_id)
@@ -10000,10 +10014,7 @@ def send_reply():
             logger.debug(f"[learned-tpl] hook error : {_e}")
         # Nettoyer les deux caches (mail envoyé = traité)
         if message_id:
-            with _reply_lock:
-                _reply_cache.pop(message_id, None)
-            with _prefetch_lock:
-                _prefetch_cache.pop(message_id, None)
+            _purge_message_caches(message_id)
             _reply_metric_inc('purges_event')
         return jsonify(result)
     except GraphAuthError:
@@ -10394,7 +10405,7 @@ def api_post_send():
 
             # Correction registre → mise à jour profil immédiate
             if 'passer_tutoiement' in (categories or ''):
-                _contact = correspondent.strip().lower()
+                _contact = _normalize_email(correspondent)
                 if _contact:
                     _profile = _db.get_contact_profile(_contact)
                     if _profile:
@@ -10449,7 +10460,7 @@ def api_post_send():
             logger.error(f"[recalibrage] Erreur: {e}")
 
         # Profil contact
-        contact_email = correspondent.strip().lower()
+        contact_email = _normalize_email(correspondent)
         if contact_email:
             try:
                 if _greeting_closing_changed:
@@ -10955,7 +10966,7 @@ def api_new_profile_toast():
 def api_recalibrate_contacts():
     """Recalibre un ou tous les contacts (thread BG)."""
     data = request.get_json(force=True) or {}
-    target_email = data.get('email', '').strip().lower()
+    target_email = _normalize_email(data.get('email'))
 
     # Étape 7 multi-tenant — résoudre user_id pour le bridge BG (le thread
     # _run lancé ci-dessous tourne sans Flask context). On capture le user_id
