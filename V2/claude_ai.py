@@ -9,7 +9,13 @@ import json
 import re
 from datetime import datetime, timedelta
 import time
+import logging
 import anthropic
+
+# 29/04 PM audit qualité logs (PLUS_TARD_VF #27) — logger dédié pour
+# remplacer les ~47 logger.info() en stdout. Niveau INFO+ visible dans
+# journalctl OVH, DEBUG masqué en prod (utile en dev/diag).
+logger = logging.getLogger('easymail.claude')
 
 # 29/04 PM audit constantes — modèles Claude centralisés.
 # Avant : 9 sites hardcodaient 'claude-sonnet-4-20250514' / 'claude-haiku-4-5'
@@ -52,10 +58,9 @@ _style_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 if os.path.exists(_style_path):
     with open(_style_path, "r", encoding="utf-8") as f:
         _style_profile = f.read().strip()
-    print(f"[claude] Profil de style charge ({len(_style_profile)} chars)", flush=True)
+    logger.info(f"[claude] Profil de style charge ({len(_style_profile)} chars)")
 else:
-    print(f"[claude] Pas de style_profile.txt à {_style_path} — style generique utilise",
-          flush=True)
+    logger.info(f"[claude] Pas de style_profile.txt à {_style_path} — style generique utilise")
 
 # System prompt avec profil de style
 _BASE_SYSTEM = """Tu es le ghost-writer de l'utilisateur. Ecris comme lui, mais en un peu mieux : son style, son ton, ses habitudes — avec un francais irreprochable et une qualite de contenu superieure.
@@ -227,7 +232,7 @@ class ClaudeAssistant:
             )
             return response.content[0].text.strip()
         except Exception as e:
-            print(f"[ocr] Erreur Vision page {page_num}: {e}", flush=True)
+            logger.warning(f"[ocr] Erreur Vision page {page_num}: {e}")
             return ''
 
     def ocr_pdf_multi(self, pages_base64):
@@ -257,7 +262,7 @@ class ClaudeAssistant:
             )
             return response.content[0].text.strip()
         except Exception as e:
-            print(f"[ocr] Erreur Vision multi ({len(pages_base64)} pages): {e}", flush=True)
+            logger.error(f"[ocr] Erreur Vision multi ({len(pages_base64)} pages): {e}")
             return ''
 
     def _create_with_retry(self, **kwargs):
@@ -268,7 +273,7 @@ class ClaudeAssistant:
                 return self.client.messages.create(**kwargs)
             except Exception as e:
                 if 'overloaded' in str(e).lower() and attempt < 2:
-                    print(f"[{label}] Overloaded, retry {attempt+1}/2 dans {2*(attempt+1)}s...", flush=True)
+                    logger.warning(f"[{label}] Overloaded, retry {attempt+1}/2 dans {2*(attempt+1)}s...")
                     time.sleep(2 * (attempt + 1))
                     continue
                 raise
@@ -282,7 +287,7 @@ class ClaudeAssistant:
             with open(_style_path, "r", encoding="utf-8") as f:
                 _style_profile = f.read().strip()
             SYSTEM_PROMPT = _build_system_prompt(_style_profile)
-            print(f"[claude] Profil de style recharge ({len(_style_profile)} chars, niveau {_writing_level or 'non defini'})", flush=True)
+            logger.info(f"[claude] Profil de style recharge ({len(_style_profile)} chars, niveau {_writing_level or 'non defini'})")
 
     def _build_prompt(
         self,
@@ -347,14 +352,14 @@ class ClaudeAssistant:
                     _decay = max(0, _days_since // 90) * 0.10  # -10% par trimestre
                     raw_confidence = max(0.05, raw_confidence - _decay)
                     if _decay > 0:
-                        print(f"[prompt] Confidence decay: {_days_since}j depuis MAJ → -{_decay:.0%} → {raw_confidence:.0%}", flush=True)
+                        logger.debug(f"[prompt] Confidence decay: {_days_since}j depuis MAJ → -{_decay:.0%} → {raw_confidence:.0%}")
                 except Exception:
                     pass
             confidence_pct = int(raw_confidence * 100)
 
             # Blocage si confiance trop faible → utiliser profil par défaut
             if confidence_pct < 30:
-                print(f"[prompt] BLOCAGE PROFIL: confiance={confidence_pct}% < 30% pour {to_email} → profil par défaut", flush=True)
+                logger.debug(f"[prompt] BLOCAGE PROFIL: confiance={confidence_pct}% < 30% pour {to_email} → profil par défaut")
                 cp = None
 
         if cp:
@@ -415,11 +420,11 @@ class ClaudeAssistant:
                 if _gr_has_name and _from_first and _gr_name.lower() != _from_first.lower():
                     # Le greeting contient un nom différent du from_name → corriger
                     _greeting = _greeting.replace(_gr_name, _from_first)
-                    print(f"[prompt] GARDE greeting nom: '{_gr_name}' → '{_from_first}' (from_name du mail)", flush=True)
+                    logger.debug(f"[prompt] GARDE greeting nom: '{_gr_name}' → '{_from_first}' (from_name du mail)")
                 elif not _gr_has_name and _from_first:
                     # Le greeting n'a pas de nom → ajouter le from_name
                     _greeting = _greeting.rstrip(',').strip() + f" {_from_first},"
-                    print(f"[prompt] GARDE greeting: ajout nom '{_from_first}'", flush=True)
+                    logger.debug(f"[prompt] GARDE greeting: ajout nom '{_from_first}'")
 
             # --- GARDE GREETING RENFORCEE ---
             _user_last = self.user_name.split()[-1].lower() if self.user_name else ''
@@ -430,22 +435,22 @@ class ClaudeAssistant:
             # Cas 1 : greeting contient le nom/prénom de l'utilisateur → inversé
             if _user_last and len(_user_last) > 2 and _user_last in _greeting_lower:
                 _needs_fix = True
-                print(f"[prompt] GARDE greeting: contient nom utilisateur '{_user_last}' → inversé", flush=True)
+                logger.debug(f"[prompt] GARDE greeting: contient nom utilisateur '{_user_last}' → inversé")
             elif _user_first and len(_user_first) > 2 and _user_first in _greeting_lower and _contact_first.lower() != _user_first:
                 _needs_fix = True
-                print(f"[prompt] GARDE greeting: contient prénom utilisateur '{_user_first}' → inversé", flush=True)
+                logger.debug(f"[prompt] GARDE greeting: contient prénom utilisateur '{_user_first}' → inversé")
             # Cas 2 : greeting contient une adresse email
             if '@' in _greeting:
                 _needs_fix = True
-                print(f"[prompt] GARDE greeting: contient @ → invalide", flush=True)
+                logger.debug(f"[prompt] GARDE greeting: contient @ → invalide")
             # Cas 3 : greeting en anglais alors que language=fr
             if cp.get('language', 'fr') == 'fr' and any(w in _greeting_lower for w in ['hello', 'hi ', 'dear', 'hey']):
                 _needs_fix = True
-                print(f"[prompt] GARDE greeting: anglicisme détecté pour language=fr", flush=True)
+                logger.debug(f"[prompt] GARDE greeting: anglicisme détecté pour language=fr")
 
             if _needs_fix:
                 _greeting = f"Bonjour {_contact_first}," if _contact_first else "Bonjour,"
-                print(f"[prompt] GARDE greeting: corrigé → '{_greeting}'", flush=True)
+                logger.debug(f"[prompt] GARDE greeting: corrigé → '{_greeting}'")
 
             # Virgule finale obligatoire
             if _greeting and not _greeting.endswith(','):
@@ -458,19 +463,19 @@ class ClaudeAssistant:
             # Cas 1 : closing contient le nom de l'utilisateur (signature polluée)
             if _user_last and len(_user_last) > 2 and _user_last in _closing_lower:
                 _closing_fix = True
-                print(f"[prompt] GARDE closing: contient nom utilisateur → pollué par signature", flush=True)
+                logger.debug(f"[prompt] GARDE closing: contient nom utilisateur → pollué par signature")
             # Cas 2 : closing contient une adresse email
             if '@' in _closing:
                 _closing_fix = True
-                print(f"[prompt] GARDE closing: contient @ → invalide", flush=True)
+                logger.debug(f"[prompt] GARDE closing: contient @ → invalide")
             # Cas 3 : closing trop long (signature entière capturée)
             if len(_closing) > 40:
                 _closing_fix = True
-                print(f"[prompt] GARDE closing: trop long ({len(_closing)} chars) → pollué", flush=True)
+                logger.debug(f"[prompt] GARDE closing: trop long ({len(_closing)} chars) → pollué")
 
             if _closing_fix:
                 _closing = 'Cordialement,'
-                print(f"[prompt] GARDE closing: corrigé → '{_closing}'", flush=True)
+                logger.debug(f"[prompt] GARDE closing: corrigé → '{_closing}'")
             _humor = cp.get('humor', 'non')
             _humor_block = ""
             if _humor == 'oui':
@@ -501,7 +506,7 @@ Resume : {cp.get('profile_text', '')}{extras}{_humor_block}{confidence_note}
                     # Tutoiement uniquement si TOUS les marqueurs sont tu (100%) et au moins 3 marqueurs
                     if _tu_total >= 3 and _vous_total == 0:
                         _b_register = 'tutoiement'
-                        print(f"[prompt] Registre detecte dans B: tutoiement (tu={_tu_total}, vous={_vous_total}) pour {to_email}", flush=True)
+                        logger.debug(f"[prompt] Registre detecte dans B: tutoiement (tu={_tu_total}, vous={_vous_total}) pour {to_email}")
 
             if _b_register == 'tutoiement':
                 blocks.append(f"""## D — Correspondant detecte comme tutoye ({_contact_display}, {to_email})
@@ -730,12 +735,12 @@ Retourne uniquement le mail, sans objet ni commentaire."""
         creneau_keywords = ['créneau', 'creneau', 'disponible', 'disponibilité', 'disponibilite', 'serait envisageable', 'vous conviendrait', 'te conviendrait', 'quelle heure', 'quel horaire']
         matched_kw = [kw for kw in creneau_keywords if kw in mail_body_lower]
         if matched_kw and not brief:
-            print(f"[creneau] Détection créneaux dans le mail: {matched_kw}", flush=True)
+            logger.debug(f"[creneau] Détection créneaux dans le mail: {matched_kw}")
             creneau_warning = "\n\n⚠️ RAPPEL CRITIQUE — CRENEAUX DETECTES : ce mail propose ou demande des creneaux/disponibilites. Tu n'as PAS acces a l'agenda de l'utilisateur. NE CHOISIS PAS de creneau. Utilise le placeholder [CRENEAU A CONFIRMER] a la place et laisse l'utilisateur decider. Exemple : 'Je reviens vers vous pour confirmer le créneau [CRÉNEAU À CONFIRMER].' — ne JAMAIS ecrire '15h' ou '14h30' comme si c'etait un choix."
         elif matched_kw and brief:
-            print(f"[creneau] Créneaux détectés mais brief fourni — pas de warning (l'utilisateur décide)", flush=True)
+            logger.debug(f"[creneau] Créneaux détectés mais brief fourni — pas de warning (l'utilisateur décide)")
         else:
-            print(f"[creneau] Pas de détection (body={len(mail_body_lower)} chars)", flush=True)
+            logger.debug(f"[creneau] Pas de détection (body={len(mail_body_lower)} chars)")
 
         # === MODE TRANSFERT ===
         if is_forward:
@@ -793,7 +798,7 @@ Retourne uniquement le mail, sans objet ni commentaire."""
         input_tokens = getattr(usage, 'input_tokens', 0) or 0
         output_tokens = getattr(usage, 'output_tokens', 0) or 0
         hit = "HIT" if cache_read > 0 else "MISS"
-        print(f"[cache:{label}] {hit} read={cache_read} create={cache_create} input={input_tokens} output={output_tokens}", flush=True)
+        logger.debug(f"[cache:{label}] {hit} read={cache_read} create={cache_create} input={input_tokens} output={output_tokens}")
 
     def generate_reply_stream(self, **kwargs):
         """Generation streaming avec prompt caching.
@@ -827,7 +832,7 @@ Retourne uniquement le mail, sans objet ni commentaire."""
             except Exception as e:
                 last_error = e
                 if 'overloaded' in str(e).lower() and attempt < 2 and not has_yielded:
-                    print(f"[generate_stream] Overloaded, retry {attempt+1}/2 dans {2*(attempt+1)}s...", flush=True)
+                    logger.warning(f"[generate_stream] Overloaded, retry {attempt+1}/2 dans {2*(attempt+1)}s...")
                     time.sleep(2 * (attempt + 1))
                     continue
                 raise
@@ -929,7 +934,7 @@ Applique cette instruction de modification. Regles :
             except Exception as e:
                 last_error = e
                 if 'overloaded' in str(e).lower() and attempt < 2 and not has_yielded:
-                    print(f"[refine_stream] Overloaded, retry {attempt+1}/2 dans {2*(attempt+1)}s...", flush=True)
+                    logger.warning(f"[refine_stream] Overloaded, retry {attempt+1}/2 dans {2*(attempt+1)}s...")
                     time.sleep(2 * (attempt + 1))
                     continue
                 raise
@@ -1157,7 +1162,7 @@ La signature est ce qui suit le closing (derniere ligne avant fin du mail).
                         val = profile.get(field, '').lower().strip()
                         if val not in valid:
                             default = _DEFAULTS[field]
-                            print(f"[profile] VALIDATION: '{field}'='{val}' invalide → forcé '{default}'", flush=True)
+                            logger.debug(f"[profile] VALIDATION: '{field}'='{val}' invalide → forcé '{default}'")
                             profile[field] = default
                         else:
                             profile[field] = val
@@ -1193,7 +1198,7 @@ La signature est ce qui suit le closing (derniere ligne avant fin du mail).
                         try:
                             _sig = str(_sig_raw).strip()
                             if not _sig or len(_sig) > 100 or '@' in _sig or '<' in _sig or '>' in _sig:
-                                print(f"[profile] VALIDATION: user_signature_for_contact invalide ('{_sig[:50]}...') → null", flush=True)
+                                logger.debug(f"[profile] VALIDATION: user_signature_for_contact invalide ('{_sig[:50]}...') → null")
                                 profile['user_signature_for_contact'] = None
                             elif _sig.count('\n') > 2:
                                 # Limiter à 3 lignes max (sig mail typique)
@@ -1208,32 +1213,32 @@ La signature est ce qui suit le closing (derniere ligne avant fin du mail).
                     formality = (profile.get('profile_json', {}) if isinstance(profile.get('profile_json'), dict) else {}).get('formality_level', profile.get('formality_level', 'moyenne'))
                     if profile['register'] == 'tutoiement' and formality == 'haute':
                         formality = 'moyenne'
-                        print(f"[profile] COHERENCE: tutoiement + formality=haute → forcé formality=moyenne (registre préservé)", flush=True)
+                        logger.debug(f"[profile] COHERENCE: tutoiement + formality=haute → forcé formality=moyenne (registre préservé)")
                     if profile['tone'] == 'autoritaire' and profile['power_dynamic'] in ('utilisateur_client', 'utilisateur_prestataire'):
                         profile['tone'] = 'direct'
-                        print(f"[profile] COHERENCE: tone=autoritaire + power={profile['power_dynamic']} → forcé direct", flush=True)
+                        logger.debug(f"[profile] COHERENCE: tone=autoritaire + power={profile['power_dynamic']} → forcé direct")
                     if profile.get('category') in ('ami', 'famille') and formality == 'haute':
-                        print(f"[profile] COHERENCE: category={profile['category']} + formality=haute → forcé moyenne", flush=True)
+                        logger.debug(f"[profile] COHERENCE: category={profile['category']} + formality=haute → forcé moyenne")
                         formality = 'moyenne'
                     if profile['language'] == 'en' and 'bonjour' in greeting.lower():
                         profile['greeting'] = 'Hello,'
-                        print(f"[profile] COHERENCE: language=en + greeting français → forcé Hello,", flush=True)
+                        logger.debug(f"[profile] COHERENCE: language=en + greeting français → forcé Hello,")
 
                     # Greeting vs register
                     _gr_lower = profile['greeting'].lower()
                     if profile['register'] == 'vouvoiement' and any(_gr_lower.startswith(x) for x in ('salut ', 'hey ', 'coucou')):
                         _prenom = profile.get('display_name', '').split()[0] if profile.get('display_name') else ''
                         profile['greeting'] = f"Bonjour {_prenom}," if _prenom else "Bonjour,"
-                        print(f"[profile] COHERENCE: vouvoiement + greeting familier → forcé {profile['greeting']}", flush=True)
+                        logger.debug(f"[profile] COHERENCE: vouvoiement + greeting familier → forcé {profile['greeting']}")
                     elif profile['register'] == 'tutoiement' and any(x in _gr_lower for x in ('monsieur ', 'madame ', 'cher monsieur', 'chère madame')):
                         _prenom = profile.get('display_name', '').split()[0] if profile.get('display_name') else ''
                         profile['greeting'] = f"Salut {_prenom}," if _prenom else "Salut,"
-                        print(f"[profile] COHERENCE: tutoiement + greeting formel → forcé {profile['greeting']}", flush=True)
+                        logger.debug(f"[profile] COHERENCE: tutoiement + greeting formel → forcé {profile['greeting']}")
 
                     # Greeting identique au closing
                     if profile['greeting'].lower().strip(',. ') == profile['closing'].lower().strip(',. '):
                         profile['greeting'] = "Bonjour,"
-                        print(f"[profile] COHERENCE: greeting == closing → forcé Bonjour,", flush=True)
+                        logger.debug(f"[profile] COHERENCE: greeting == closing → forcé Bonjour,")
 
                     profile['sample_count'] = sample_count
                     profile['confidence'] = confidence
@@ -1246,7 +1251,7 @@ La signature est ce qui suit le closing (derniere ligne avant fin du mail).
                     }
                     return profile
         except Exception as e:
-            print(f"[learning] Erreur analyse contact {email_address}: {e}", flush=True)
+            logger.error(f"[learning] Erreur analyse contact {email_address}: {e}")
             return None
 
     # --- SCAN ÉCHÉANCES ------------------------------------------------------
@@ -1317,7 +1322,7 @@ La signature est ce qui suit le closing (derniere ligne avant fin du mail).
 
         # Ne corriger que si l'écart est raisonnable (< 15 jours) — sinon c'est peut-être une autre échéance
         if delta <= 15 and best_date_str != ai_date:
-            print(f"[echeances] CORRECTION DATE: IA={ai_date} -> texte={best_date_str} ('{best_match_text}', delta={delta}j)", flush=True)
+            logger.debug(f"[echeances] CORRECTION DATE: IA={ai_date} -> texte={best_date_str} ('{best_match_text}', delta={delta}j)")
             return best_date_str
 
         return ai_date
@@ -1484,12 +1489,12 @@ IMPORTANT : retourne UNIQUEMENT le JSON array, pas de texte avant/apres.
                             # Filtre dates passées : rejeter les échéances dont la date est dans le passé
                             _ech_date = r.get('date_echeance', '')
                             if _ech_date and _ech_date < today_str:
-                                print(f"[echeances] FILTRE DATE PASSÉE: {_ech_date} < {today_str} → ignoré ({r.get('description', '')[:60]})", flush=True)
+                                logger.debug(f"[echeances] FILTRE DATE PASSÉE: {_ech_date} < {today_str} → ignoré ({r.get('description', '')[:60]})")
                                 continue
                             echeances.append(r)
                     return echeances
         except Exception as e:
-            print(f"[echeances] Erreur scan batch: {e}", flush=True)
+            logger.error(f"[echeances] Erreur scan batch: {e}")
             return []
 
     def summarize_mails_batch(self, mails_batch):
@@ -1623,7 +1628,7 @@ Retourne UNIQUEMENT un JSON array (pas de markdown, pas de texte autour) :
                 }
             return output
         except Exception as e:
-            print(f"[summaries] Erreur batch: {e}", flush=True)
+            logger.error(f"[summaries] Erreur batch: {e}")
             return {}
 
     def summarize_one_mail_stream(self, mail):
@@ -1750,7 +1755,7 @@ Contenu :
                     pass
             yield ('end', {'points': points, 'actions': actions})
         except Exception as e:
-            print(f"[summaries-stream] Erreur : {e}", flush=True)
+            logger.error(f"[summaries-stream] Erreur : {e}")
             yield ('error', str(e))
             yield ('end', {'points': points, 'actions': actions})
 
@@ -1806,7 +1811,7 @@ Contenu :
         _n_original = len(folder_tree)
         _n_filtered = len(filtered_tree)
         if _n_filtered < _n_original:
-            print(f"[classify] Pré-filtrage dossiers: {_n_original} → {_n_filtered}", flush=True)
+            logger.debug(f"[classify] Pré-filtrage dossiers: {_n_original} → {_n_filtered}")
 
         folder_lines = [f"- {f['path']}" for f in filtered_tree if f.get('path')]
         folder_list = "\n".join(folder_lines)
@@ -1932,7 +1937,7 @@ Choisis parmi les DOSSIERS OUTLOOK DISPONIBLES fournis dans le system prompt."""
                     first['_suggestions'] = resolved
                     return first
         except Exception as e:
-            print(f"[classify] Erreur suggest_folder: {e}", flush=True)
+            logger.error(f"[classify] Erreur suggest_folder: {e}")
             return None
 
     def _resolve_folder_id(self, fp, folder_tree):
@@ -1967,7 +1972,7 @@ Choisis parmi les DOSSIERS OUTLOOK DISPONIBLES fournis dans le system prompt."""
         for f in folder_tree:
             if f['name'].lower() == last_seg:
                 return (f['path'], f['id'])
-        print(f"[classify] _resolve_folder_id: aucun match pour '{fp}'", flush=True)
+        logger.debug(f"[classify] _resolve_folder_id: aucun match pour '{fp}'")
         return None
 
     def suggest_pj_folder(self, sender, subject, attachment_names, folder_tree, recent_pj_classifications=None, contact_profile=None, pj_history=None, body_snippet=None):
@@ -2017,7 +2022,7 @@ Choisis parmi les DOSSIERS OUTLOOK DISPONIBLES fournis dans le system prompt."""
         _n_original = len(folder_tree)
         _n_filtered = len(filtered_tree)
         if _n_filtered < _n_original:
-            print(f"[classify_pj] Pré-filtrage dossiers: {_n_original} → {_n_filtered}", flush=True)
+            logger.debug(f"[classify_pj] Pré-filtrage dossiers: {_n_original} → {_n_filtered}")
 
         folder_lines = [f"- {f['path']}" for f in filtered_tree if f.get('path')]
         folder_list = "\n".join(folder_lines)
@@ -2105,7 +2110,7 @@ Choisis parmi les DOSSIERS WINDOWS DISPONIBLES fournis dans le system prompt."""
                         return None
                     return result
         except Exception as e:
-            print(f"[classify_pj] Erreur suggest_pj_folder: {e}", flush=True)
+            logger.error(f"[classify_pj] Erreur suggest_pj_folder: {e}")
             return None
 
     def categorize_correction(self, proposed, sent):
@@ -2169,5 +2174,5 @@ Choisis parmi les DOSSIERS WINDOWS DISPONIBLES fournis dans le system prompt."""
                     return block.text.strip()
             return ""
         except Exception as e:
-            print(f"[correction] Erreur analyse: {e}", flush=True)
+            logger.error(f"[correction] Erreur analyse: {e}")
             return ""

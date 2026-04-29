@@ -6737,7 +6737,7 @@ def api_extract_file_text():
                     _pdf_extracted = min(10, _pdf_total)
                     text = '\n'.join(page.extract_text() or '' for page in reader.pages[:10])[:10000]
                 if _pdf_total > 10:
-                    print(f"[extract_file_text] PDF tronque: {_pdf_extracted}/{_pdf_total} pages", flush=True)
+                    logger.debug(f"[extract_file_text] PDF tronque: {_pdf_extracted}/{_pdf_total} pages")
             except ImportError:
                 text = '[PDF detecte mais PyPDF2 non installe]'
         elif ext == '.docx':
@@ -6768,7 +6768,7 @@ def api_extract_file_text():
                 raw = _f.read()[:20000]
             text = re.sub(r'<[^>]+>', ' ', raw)[:10000]
     except Exception as e:
-        print(f"[extract_file_text] Erreur: {e}", flush=True)
+        logger.warning(f"[extract_file_text] Erreur: {e}")
         text = ''
     if not text.strip():
         return jsonify({"name": name, "text": "", "supported": False})
@@ -6784,7 +6784,7 @@ def api_extract_attachments(entry_id):
     Utilise le cache pre-extraction si disponible, sinon telechargement Graph a la demande."""
     data = request.get_json(silent=True) or {}
     indices = data.get('indices', None)
-    print(f"[extract] Demande extraction indices={indices}", flush=True)
+    logger.debug(f"[extract] Demande extraction indices={indices}")
 
     # Cache pre-extraction (background) — protégé par lock (Audit)
     with _pj_text_cache_lock:
@@ -6801,7 +6801,7 @@ def api_extract_attachments(entry_id):
             for r in _cached_pj['results']:
                 if r.get('index') == idx:
                     context = f"--- Piece jointe : {r['name']} ---\n{r['text'][:5000]}"
-                    print(f"[extract] Cache HIT: {r['name']}, {len(r['text'])} chars", flush=True)
+                    logger.debug(f"[extract] Cache HIT: {r['name']}, {len(r['text'])} chars")
                     return jsonify({"ok": True, "pj_context": context, "count": 1, "warnings": []})
 
     # Extraction via Graph
@@ -6845,7 +6845,7 @@ def api_extract_attachments(entry_id):
             try:
                 content_bytes = graph.get_attachment_content(real_entry_id, att_id)
             except Exception as e:
-                print(f"[extract] Erreur download {att_name}: {e}", flush=True)
+                logger.warning(f"[extract] Erreur download {att_name}: {e}")
                 continue
 
             # Sauvegarder en temp + extraire
@@ -6903,13 +6903,13 @@ def api_extract_attachments(entry_id):
 
         if parts:
             context = '\n\n'.join(parts)
-            print(f"[extract] {len(parts)} PJ analysee(s), {len(context)} chars", flush=True)
+            logger.debug(f"[extract] {len(parts)} PJ analysee(s), {len(context)} chars")
             return jsonify({"ok": True, "pj_context": context, "count": len(parts), "warnings": warnings})
         return jsonify({"ok": True, "pj_context": "", "count": 0})
     except GraphAuthError:
         return jsonify({"ok": False, "error": "Token expire", "auth_required": True}), 401
     except Exception as e:
-        print(f"[extract] Erreur: {e}", flush=True)
+        logger.warning(f"[extract] Erreur: {e}")
         return jsonify({"ok": False, "error": _safe_err(e)}), 500
 
 
@@ -7396,9 +7396,9 @@ def api_echeances_pre_scan():
                     'status': 'done', 'echeances': echeances or [], 'ts': time.time(),
                     'body': body, 'to': to_email, 'subject': subject
                 }
-            print(f"[echeances] Pre-scan termine: {len(echeances or [])} echeance(s)", flush=True)
+            logger.debug(f"[echeances] Pre-scan termine: {len(echeances or [])} echeance(s)")
         except Exception as e:
-            print(f"[echeances] Erreur pre-scan: {e}", flush=True)
+            logger.warning(f"[echeances] Erreur pre-scan: {e}")
             with _echeance_pre_scan_lock:
                 _echeance_pre_scan_cache[scan_key] = {
                     'status': 'done', 'echeances': [], 'ts': time.time()}
@@ -7421,10 +7421,10 @@ def api_echeances_purge_archives():
     """Supprime définitivement toutes les échéances archivées (terminées + annulées)."""
     try:
         deleted = _db.purge_archived_echeances()
-        print(f"[echeances] Archive purgee: {deleted} echéance(s) supprimee(s)", flush=True)
+        logger.debug(f"[echeances] Archive purgee: {deleted} echéance(s) supprimee(s)")
         return jsonify({"ok": True, "deleted": deleted})
     except Exception as e:
-        print(f"[echeances] Erreur purge: {e}", flush=True)
+        logger.warning(f"[echeances] Erreur purge: {e}")
         return jsonify({"ok": False, "error": _safe_err(e)})
 
 
@@ -7788,8 +7788,8 @@ def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids
         if len(common) >= 3:
             try:
                 _db.update_echeance(ech['id'], {'statut': 'terminee'})
-                print(f"[echeances] Auto-terminee: '{(ech.get('description') or '')[:50]}' "
-                      f"(correspondant a repondu, mots communs: {common})", flush=True)
+                logger.debug(f"[echeances] Auto-terminee: '{(ech.get('description') or '')[:50]}' "
+                      f"(correspondant a repondu, mots communs: {common})")
             except Exception:
                 pass
 
@@ -8046,12 +8046,12 @@ def _check_git_updates():
                 with _update_lock:
                     _update_available = True
                     _update_message = _msg
-                print(f'[update] MAJ disponible: {len(_commits)} commit(s) - {_last}', flush=True)
+                logger.debug(f'[update] MAJ disponible: {len(_commits)} commit(s) - {_last}')
             else:
                 with _update_lock:
                     _update_available = False
         except Exception as e:
-            print(f'[update] Erreur check: {e}', flush=True)
+            logger.warning(f'[update] Erreur check: {e}')
         time.sleep(7200)  # 2 heures
 
 
@@ -9263,7 +9263,7 @@ INSTRUCTIONS ECHEANCES :
 - Si le mail est une RELANCE : redige un rappel courtois mais ferme, en citant la date d'engagement initiale.
 - Si l'utilisateur a un engagement depasse : propose une formulation d'excuse/explication naturelle.
 - Sinon : mentionne l'echeance si le contexte s'y prete, sans forcer."""
-                print(f"[generate] Bloc F: {len(echeances_actives)} echeance(s) injectee(s) pour {_ech_correspondent}", flush=True)
+                logger.debug(f"[generate] Bloc F: {len(echeances_actives)} echeance(s) injectee(s) pour {_ech_correspondent}")
         except Exception as _e:
             logger.warning(f"Erreur Bloc F echéances: {_e}")
 
@@ -9494,10 +9494,10 @@ INSTRUCTIONS ECHEANCES :
                 _vz = len(re.findall(r"\b(vous |votre |vos |svp\b|pourriez-vous|s'il vous)", _final_text.lower()))
                 if _register == 'vouvoiement' and _tu > _vz and _tu >= 2:
                     _pg_warnings.append('register_mismatch')
-                    print(f"[garde-post] REGISTRE: vouvoiement attendu mais tu({_tu}) > vous({_vz})", flush=True)
+                    logger.debug(f"[garde-post] REGISTRE: vouvoiement attendu mais tu({_tu}) > vous({_vz})")
                 elif _register == 'tutoiement' and _vz > _tu and _vz >= 2:
                     _pg_warnings.append('register_mismatch')
-                    print(f"[garde-post] REGISTRE: tutoiement attendu mais vous({_vz}) > tu({_tu})", flush=True)
+                    logger.debug(f"[garde-post] REGISTRE: tutoiement attendu mais vous({_vz}) > tu({_tu})")
 
                 # 2. Nom utilisateur dans le greeting
                 try:
@@ -9505,7 +9505,7 @@ INSTRUCTIONS ECHEANCES :
                     _ulast = _uname.split()[-1].lower() if _uname else ''
                     if _ulast and len(_ulast) >= 3 and _ulast in _first_line.lower():
                         _pg_warnings.append('greeting_self_name')
-                        print(f"[garde-post] GREETING contient nom utilisateur: '{_first_line}'", flush=True)
+                        logger.debug(f"[garde-post] GREETING contient nom utilisateur: '{_first_line}'")
                 except Exception:
                     pass
 
@@ -9515,7 +9515,7 @@ INSTRUCTIONS ECHEANCES :
                     _fg = _first_line.rstrip(',').strip().lower()
                     if _eg and _fg != _eg and not _fg.startswith(_eg):
                         _pg_warnings.append('greeting_mismatch')
-                        print(f"[garde-post] GREETING: attendu '{_exp_greeting}' reçu '{_first_line}'", flush=True)
+                        logger.debug(f"[garde-post] GREETING: attendu '{_exp_greeting}' reçu '{_first_line}'")
 
                 # 2c. Closing attendu vs reçu
                 _last_line = _last_lines[-1] if _last_lines else ''
@@ -9524,7 +9524,7 @@ INSTRUCTIONS ECHEANCES :
                     _lc = _last_line.rstrip(',').strip().lower()
                     if _ec and _lc != _ec and _ec not in _lc:
                         _pg_warnings.append('closing_mismatch')
-                        print(f"[garde-post] CLOSING: attendu '{_exp_closing}' reçu '{_last_line}'", flush=True)
+                        logger.debug(f"[garde-post] CLOSING: attendu '{_exp_closing}' reçu '{_last_line}'")
 
                 # 3. Marqueurs IA
                 _ai_markers = ["en tant qu'assistant", "en tant qu'ia", "je n'ai pas accès",
@@ -9532,7 +9532,7 @@ INSTRUCTIONS ECHEANCES :
                 for _am in _ai_markers:
                     if _am in _final_text.lower():
                         _pg_warnings.append('ai_marker')
-                        print(f"[garde-post] MARQUEUR IA détecté: '{_am}'", flush=True)
+                        logger.debug(f"[garde-post] MARQUEUR IA détecté: '{_am}'")
                         break
 
                 # 4. Mail trop court (<30 chars hors greeting/closing)
@@ -9540,7 +9540,7 @@ INSTRUCTIONS ECHEANCES :
                     if len(_final_text.split('\n')) > 2 else _final_text
                 if len(_body_only) < 30 and reply_mode != 'new':
                     _pg_warnings.append('too_short')
-                    print(f"[garde-post] MAIL trop court: {len(_body_only)} chars", flush=True)
+                    logger.debug(f"[garde-post] MAIL trop court: {len(_body_only)} chars")
 
             if _pg_warnings:
                 yield f"data: {json.dumps({'warnings': _pg_warnings})}\n\n"
@@ -11278,7 +11278,7 @@ def api_apply_update():
             with _update_lock:
                 _update_available = False
                 _update_message = ''
-            print('[update] git pull OK — redemarrage...', flush=True)
+            logger.debug('[update] git pull OK — redemarrage...')
 
             def _restart():
                 time.sleep(1)
