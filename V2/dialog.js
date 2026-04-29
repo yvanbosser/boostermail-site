@@ -2946,6 +2946,15 @@ function _showSuccessOverlay() {
 function _openDashboard(view) {
     /** Affiche l'overlay tableau de bord avec la vue demandée.
      * view ∈ {'profile', 'contacts', 'echeances'} */
+    // Whitelist stricte (audit kit B5 29/04 PM tardif) — défense en
+    // profondeur contre injection URI : si view n'est pas dans la liste
+    // autorisée, on rejette silencieusement (pas d'iframe ouverte avec
+    // une URL forgée).
+    var VALID_VIEWS = {'profile': 1, 'contacts': 1, 'echeances': 1};
+    if (!VALID_VIEWS[view]) {
+        console.warn('[dashboard] view non autorisée :', view);
+        return;
+    }
     var titles = {
         'profile':   '👤 Profil',
         'contacts':  '📑 Contacts',

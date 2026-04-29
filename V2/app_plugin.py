@@ -11501,12 +11501,16 @@ def api_add_contact_keyword():
         if not profile:
             return jsonify({'status': 'error', 'reason': 'profil introuvable'}), 404
         # Stocker en specific_vocabulary du profile_json
+        # Triple-désérialisation robuste (cohérent avec fix _build_prompt
+        # commit 6fe95b6). 9/55 profils OVH étaient triplement sérialisés.
         pj = profile.get('profile_json', '{}')
-        if isinstance(pj, str):
+        _max_iter = 4
+        while isinstance(pj, str) and _max_iter > 0:
             try:
                 pj = json.loads(pj)
             except Exception:
-                pj = {}
+                break
+            _max_iter -= 1
         if not isinstance(pj, dict):
             pj = {}
         vocab = pj.get('specific_vocabulary', []) or []

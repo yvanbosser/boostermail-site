@@ -35,7 +35,7 @@ function _debugLog(eventName, details) {
 
 // Marqueur de version : s'écrit dès le chargement du JS → permet de vérifier
 // en lisant addin_debug.log que Outlook a bien rechargé le nouveau fichier.
-var _ADDIN_VERSION = 'v22-dialog-close-fix-29-04';
+var _ADDIN_VERSION = 'v23-dashboard-overlay-29-04';
 _debugLog('js_loaded', { version: _ADDIN_VERSION });
 
 // =============================================================================
