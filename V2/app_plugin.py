@@ -82,6 +82,7 @@ try:
         iter_user_caches as _iter_user_caches,
         get_all_user_ids as _get_all_user_ids,
         replace_user_caches as _replace_user_caches,
+        purge_user_caches as _purge_user_caches,
     )
     from user_context import get_current_user_id as _get_current_user_id
 except ImportError:
@@ -90,6 +91,7 @@ except ImportError:
     _iter_user_caches = None
     _get_all_user_ids = None
     _replace_user_caches = None
+    _purge_user_caches = None
     _get_current_user_id = None
 
 
@@ -491,9 +493,37 @@ if _UserScopedDict is not None:
     _warmup_cache = _UserScopedDict('warmup')
 else:
     _warmup_cache = {}  # Fallback ultra-défensif si imports échouent
-_warmup_done = False
-_warmup_progress = {"status": "idle", "loaded": 0, "total": 0, "current_subject": ""}
+# Étape 7 multi-tenant — _warmup_progress et _warmup_done par user.
+# _warmup_progress : UserScopedDict('warmup_progress') — sub-cache user contient
+# {status, loaded, total, current_subject}. Sites de lecture utilisent déjà
+# .get() avec defaults → migration transparente.
+# _warmup_done : flag booléen migré dans le même sub-cache via clé 'done'
+# (wrappers _is_warmup_done() / _mark_warmup_done() pour préserver l'API).
+if _UserScopedDict is not None:
+    _warmup_progress = _UserScopedDict('warmup_progress')
+else:
+    _warmup_progress = {"status": "idle", "loaded": 0, "total": 0, "current_subject": ""}
 _warmup_lock = threading.Lock()  # #8 : protege _warmup_done et _warmup_progress
+
+
+def _is_warmup_done() -> bool:
+    """Retourne True si le warmup du user courant est terminé.
+
+    Étape 7 multi-tenant — remplace l'accès direct à `_warmup_done` global.
+    Stockage : `_warmup_progress.get('done', False)` dans le sub-cache user.
+    """
+    return bool(_warmup_progress.get('done', False))
+
+
+def _mark_warmup_done(value: bool = True) -> None:
+    """Marque le warmup du user courant comme terminé (ou non).
+
+    Étape 7 multi-tenant — remplace `_warmup_done = True/False` global.
+    """
+    if value:
+        _warmup_progress['done'] = True
+    else:
+        _warmup_progress.pop('done', None)
 
 
 # === Phase 1 (25/04 soir) — Étiquetage canonique unique ===
@@ -598,7 +628,8 @@ def _execute_warmup(graph):
     - 3.2 Progression UI multi-étapes
     - 3.4 Pré-warm templates confirmé (déjà import-time, log explicite)
     """
-    global _warmup_done
+    # Étape 7 multi-tenant — `_warmup_done` n'est plus une variable globale
+    # mais une clé du sub-cache user-scoped via _is_warmup_done()/_mark_warmup_done().
     try:
         # Pré-charger _warmup_cache depuis la DB (session précédente) — affichage instantané
         try:
@@ -620,7 +651,7 @@ def _execute_warmup(graph):
                     "total": len(_warmup_cache),
                     "current_subject": "Cache chaud — prêt en un éclair",
                 })
-                _warmup_done = True
+                _mark_warmup_done(True)  # Étape 7 multi-tenant — était _warmup_done = True
             logger.info(f"Warmup FAST PATH : cache chaud ({len(_warmup_cache)} mails + "
                         f"prefetch < 48h) → skip Graph fetch")
             # Relancer la spéculation TIER 1 en arrière-plan (cache peut avoir des gaps)
@@ -748,7 +779,7 @@ def _execute_warmup(graph):
 
         # Marquer done APRÈS le lancement des threads
         with _warmup_lock:
-            _warmup_done = True
+            _mark_warmup_done(True)  # Étape 7 multi-tenant — était _warmup_done = True
             _warmup_progress["status"] = "done"
             _warmup_progress["current_subject"] = "Prêt !"
         logger.info("Warmup terminé — spéculation TIER 1 en cours")
@@ -867,7 +898,7 @@ def _execute_warmup(graph):
             time.sleep(60)
             with _warmup_lock:
                 # Les deux vérifications sous le même lock — pas de race condition
-                if _warmup_done:
+                if _is_warmup_done():
                     return  # Un warmup a réussi entre-temps
                 if _warmup_progress.get("status") == "running":
                     return  # Déjà relancé par auto-trigger
@@ -1319,7 +1350,7 @@ def _auto_trigger_warmup():
 
         # 1ere tentative
         with _warmup_lock:
-            if _warmup_done:
+            if _is_warmup_done():
                 logger.info("Auto-warmup: déjà fait, skip")
                 return
             if _warmup_progress.get("status") == "running":
@@ -1348,7 +1379,7 @@ def _auto_trigger_warmup():
             with _warmup_lock:
                 # Sortie si le warmup a deja ete declenche par autre voie
                 # (POST /api/warmup_inbox apres OAuth callback, etc.)
-                if _warmup_done or _warmup_progress.get("status") == "running":
+                if _is_warmup_done() or _warmup_progress.get("status") == "running":
                     logger.info(f"Auto-warmup: declenche par autre voie, "
                                 f"sortie de la boucle de retry (attempt={attempt})")
                     return
@@ -1382,10 +1413,11 @@ def _auto_trigger_warmup():
 def api_warmup_inbox():
     """Pre-charge les 10 derniers mails recus via Graph API.
     Lance le prefetch A/B/C pour chacun en arriere-plan."""
-    global _warmup_done
+    # Étape 7 multi-tenant — _warmup_done remplacé par _is_warmup_done()
+    # (sub-cache user-scoped, plus besoin de `global`).
     # ANOMALIE #4 fix : toutes les vérifications + mise à jour du statut dans un seul bloc lock
     with _warmup_lock:
-        if _warmup_done:
+        if _is_warmup_done():
             return jsonify({"status": "already_done", "count": len(_warmup_cache)})
         if _warmup_progress.get("status") == "running":
             return jsonify({"status": "already_running"})
@@ -1416,7 +1448,7 @@ def api_warmup_status():
     """
     with _warmup_lock:
         return jsonify({
-            "done": _warmup_done,
+            "done": _is_warmup_done(),
             "step": _warmup_progress.get('current_subject', ''),
             "current": _warmup_progress.get('loaded', 0),
             "total": _warmup_progress.get('total', 0),
@@ -2905,6 +2937,73 @@ _load_reply_cache()
 atexit.register(_persist_reply_cache)
 threading.Thread(target=_reply_cache_safety_net_loop, daemon=True, name='reply-cache-sn').start()
 threading.Thread(target=_reply_cache_metrics_report_loop, daemon=True, name='reply-cache-metrics').start()
+
+
+# =============================================================================
+# Étape 7 multi-tenant — Cleanup BG périodique des sub-caches users inactifs
+# =============================================================================
+
+def _multi_tenant_cleanup_loop():
+    """Thread BG qui purge les sub-caches des users inactifs > 30 jours.
+
+    Critère d'inactivité : timestamp du sub-cache ``_my_email`` du user.
+    ``_get_my_email()`` rafraîchit ce timestamp à chaque appel (= activité user).
+    Si > 30 jours sans rafraîchissement → user considéré inactif → purge tous
+    ses sub-caches via ``purge_user_caches(user_id)`` (helper user_scoped_cache).
+
+    Économise mémoire RAM serveur en multi-user (5-10 beta-testeurs prévus
+    Phase 8 SaaS, certains pourraient se déconnecter sans logout explicite).
+
+    Utilité en mono-user actuel : aucune (Yvan utilise BoosterMail au quotidien,
+    son timestamp _my_email est rafraîchi régulièrement). Le thread tourne
+    quand même pour assurer la robustesse en multi-user à venir.
+
+    Stratégie défensive :
+    - Skip 'default' : c'est le bridge mono-user, jamais purger.
+    - Skip si helpers indisponibles : retour silencieux.
+    - Try/except sur chaque iteration pour ne jamais crasher le thread.
+    """
+    if _iter_user_caches is None or _purge_user_caches is None:
+        logger.info("[multi-tenant cleanup] helpers indisponibles, thread skip")
+        return
+
+    # Premier scan après 1h (laisser le système démarrer)
+    time.sleep(3600)
+
+    while True:
+        try:
+            now = time.time()
+            cutoff = now - 30 * 24 * 3600  # 30 jours
+
+            purged_users = 0
+            for user_id, my_email_sub in _iter_user_caches('my_email'):
+                if user_id == 'default':
+                    continue  # Bridge mono-user, ne jamais purger
+                ts = my_email_sub.get('timestamp', 0)
+                if ts and ts < cutoff:
+                    purged = _purge_user_caches(user_id)
+                    logger.info(
+                        f"[multi-tenant cleanup] User {user_id[:12]} inactif > 30j "
+                        f"({(now - ts) / 86400:.1f}j) → {purged} sub-cache(s) purgé(s)"
+                    )
+                    purged_users += 1
+
+            if purged_users:
+                logger.info(
+                    f"[multi-tenant cleanup] {purged_users} user(s) inactif(s) > 30j purgé(s)"
+                )
+        except Exception as e:
+            logger.warning(f"[multi-tenant cleanup] erreur : {e}")
+
+        time.sleep(24 * 3600)  # Scan 1× par 24h
+
+
+threading.Thread(
+    target=_multi_tenant_cleanup_loop,
+    daemon=True,
+    name='mt-cleanup',
+).start()
+
 
 # SSE clients connectés
 _sse_clients = []

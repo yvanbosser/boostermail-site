@@ -1,6 +1,6 @@
 # Invariants V2 — règles absolues testables
 
-> **Dernière mise à jour** : 29/04/2026 PM (ajout I-MT-01 — pattern multi-tenant user-scoped caches, suite migration Étape 7 SaaS)
+> **Dernière mise à jour** : 29/04/2026 PM tardif (Étape 7 multi-tenant TERMINÉE — 22/22 caches migrés (100%) + cleanup BG périodique users inactifs en place)
 > **Principe** : chaque invariant est testable mécaniquement par `smoke_test.ps1`. Une violation = anomalie, point final.
 
 ---
@@ -469,18 +469,17 @@ plutôt qu'un dict global ``{}``.
     format v2 imbriqué ``{format_version: 2, entries_per_user: {uid: {mid: entry}}}``
     avec migration legacy v1→v2 transparente au load + migration
     ``'default' → user_id réel`` quand la DB connaît un user actif.
-- **Caches actuellement migrés** (20/22 au 29/04 PM, voir HISTORIQUE_DECISIONS) :
+- **Caches migrés** (22/22 = **100%** au 29/04 PM tardif, voir HISTORIQUE_DECISIONS) :
   ``_my_email_cache``, ``_reply_cache``, ``_warmup_cache``, ``_prefetch_cache``,
   ``_mail_preview_cache``, ``_c_keyword_cache``, ``_mail_open_counter``,
   ``_last_generate_times``, ``_echeance_pre_scan_cache``, ``_pj_text_cache``,
   ``_last_proposed``, ``_classify_momentum``, ``_learning_priorities_cache``,
   ``_contacts_recalib_progress``, ``_current_mail_data``,
   ``_current_compose_data``, ``_sent_requests``, ``_post_send_cache``,
-  ``_post_send_timestamps``, ``_outlook_folders_cache``.
-- **Caches restants à migrer** (2, peu critiques car non user-scoped strict) :
-  ``_warmup_done`` (boolean global, état serveur warmup), ``_warmup_progress``
-  (one-shot dict avec init values complexes). À refactoriser quand multi-user
-  réellement activé.
+  ``_post_send_timestamps``, ``_outlook_folders_cache``,
+  ``_warmup_progress`` (avec wrappers ``_is_warmup_done()``/``_mark_warmup_done()``
+  pour le flag booléen anciennement ``_warmup_done`` global, désormais clé
+  ``'done'`` du sub-cache ``warmup_progress``).
 - **Action si violé** : convertir le cache en ``UserScopedDict``, gérer les
   réassignations globales par ``clear() + update()``, et adapter la
   persistance disque vers format v2 si applicable.
