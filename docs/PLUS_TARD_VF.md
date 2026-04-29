@@ -1,6 +1,6 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 29/04/2026 fin de journée (BoosterMail SaaS 9/10 étapes prêtes — Étape 7 multi-tenant 100%, Étape 4 BG webhooks Graph POC déployé, welcome wizard #11+#12+#13 live, Auth JWT Bearer infra prête (Phase 4 activation différée à 2e compte test), 4 fixes pré-phase test #10+#11+#16+#15 livrés, 28 commits ce jour ; sujet #14 PARTIELLEMENT IMPLÉMENTÉ — bandeau passif v20 OK)
+> **Dernière mise à jour** : 29/04/2026 PM tardif post-audit V2 (12 commits supplémentaires de stabilisation autonome pendant absence Yvan : fix _build_prompt triple-désérialisation + popup OVH-only + barre PJ portée du proto + 9 fixes audit V2 ; 11 items tech debt identifiés section dédiée ci-dessous)
 
 ---
 
@@ -50,6 +50,32 @@ Si tu reviens sur ce doc au début d'une nouvelle session, voici **uniquement ce
 
 ### 💤 Long terme
 23. Inbox web standalone V2 — différé (décision V2 = plugin Outlook, pas web app)
+
+### 🔧 Tech debt — audit V2 stabilisation 29/04 PM tardif (autonomie ~2h30)
+
+> **Source** : `audit/rapports/2026-04-29_PM_audit_stabilisation_v2_autonome.md`
+> 7 sub-agents Explore + audits manuels. ~50 findings, 12 fixés ce soir, 11 documentés ici, 4 false positives écartés.
+
+**À fixer prochainement (impact réel)** :
+24. **smoke_test.ps1 dual-mode** — depuis fix popup OVH-only (commit `108e208`), I-RES-01/02 (V2 sur 3443 + Companion sur 5051) vont fail en mode SaaS pur. Ajouter check `ENABLE_LOCAL_BACKENDS` + skip ces invariants. ~30 min.
+25. **Subprocess Popen sans wait()** `app_plugin.py:11193` (/api/update_git) — orphelin si parent crash avant `os._exit(0)`. ~15 min.
+26. **Database._conn() jamais cleanup** — connection thread-local sans close, repose sur GC. Implémenter teardown Flask `@app.teardown_appcontext`. ~30 min.
+27. **40+ `print()` à upgrader en `logger.xxx`** — 27.5% du logging sort sur stdout au lieu de journalctl. ~1h30.
+28. **Migration modèle Claude vers Sonnet 4.6/4.7** — actuel `claude-sonnet-4-20250514` deprecated end-of-life **15/06/2026** par Anthropic (warning dans logs OVH). Centralisation faite (commit `3ccdb9e`), il suffit de changer 4 constantes dans `claude_ai.py:21-24`. Tester en staging avant deadline. ~30 min + tests.
+
+**Tech debt mineure** :
+29. **CacheStatus enum** — magic strings `'done'/'running'/'error'/'cancelled'/'filtered'` partout. Risque typo. ~30 min.
+30. **Constantes timeouts/TTL centralisées** — 13 timeouts + 5 TTL hardcodés. Recommandé : module `V2/constants.py` + env override. ~1h.
+31. **Cleanup proxy Companion** `app_plugin.py:5893-5950` — code legacy proto, 60 lignes mortes en mode SaaS. ~30 min.
+32. **Cleanup routes SSE legacy** — `/api/events/stream` non utilisé en SaaS pur. ~1h.
+33. **DRY normalize_email étendu** — helper `_normalize_email()` créé (commit `868e9ec`) mais 18+ sites n'en bénéficient pas encore. ~30 min.
+34. **DRY purge_message_caches helper** — 3 sites dupliquent `with _reply_lock + with _prefetch_lock`. ~30 min.
+
+**Items écartés / false positives** (audits ont over-flaggé) :
+- ❌ Deadlock `_start_speculative` (audit error-handling) : ré-acquisition flaggée à tort, ce sont des `with` séquentiels, pas imbriqués
+- ❌ XSS sur barre PJ (audit sécu) : `_escapeHtml` utilise `textContent`, sécurisé natif
+- ❌ Double json.loads `database.py:1098/1110` : 2 sources différentes (input vs DB), pas de double parse
+- ❌ HTTP 200 sur webhooks Graph : intentionnel (commentaire l. 3588) pour éviter retry Microsoft
 
 ---
 >
