@@ -298,6 +298,9 @@ class Database:
         c.execute("CREATE INDEX IF NOT EXISTS idx_classifications_folder ON folder_classifications(folder_path)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_pj_class_contact ON pj_classifications(contact_email)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_pj_class_folder ON pj_classifications(dest_folder)")
+        # 29/04 PM audit DB — pj_classifications.domain utilisé en WHERE l. 809+855
+        # mais l'index manquait (folder_classifications.domain a son index l. 297).
+        c.execute("CREATE INDEX IF NOT EXISTS idx_pj_class_domain ON pj_classifications(domain)")
 
         # Cache emails — affichage instantané sans COM
         c.execute("""

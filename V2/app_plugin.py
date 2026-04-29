@@ -11267,8 +11267,21 @@ def api_apply_update():
             def _restart():
                 time.sleep(1)
                 _python = sys.executable
-                # sys.argv[0] peut être un chemin relatif → utiliser __file__ absolu
-                subprocess.Popen([_python, os.path.abspath(__file__)], cwd=_git_dir)
+                # sys.argv[0] peut être un chemin relatif → utiliser __file__ absolu.
+                # 29/04 PM audit resource leaks — détacher le child pour qu'il
+                # survive proprement au os._exit() parent (Windows : DETACHED_PROCESS,
+                # Unix : start_new_session). Sans détachement, le child pouvait
+                # devenir orphelin/zombie temporaire si le parent kill avant
+                # qu'il ait son propre groupe de processus.
+                _popen_kwargs = {'cwd': _git_dir}
+                try:
+                    if os.name == 'nt':
+                        _popen_kwargs['creationflags'] = 0x00000008  # DETACHED_PROCESS
+                    else:
+                        _popen_kwargs['start_new_session'] = True
+                except Exception:
+                    pass
+                subprocess.Popen([_python, os.path.abspath(__file__)], **_popen_kwargs)
                 os._exit(0)
 
             threading.Thread(target=_restart, daemon=True).start()
