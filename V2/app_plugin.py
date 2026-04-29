@@ -788,8 +788,12 @@ def _execute_warmup(graph):
     # mais une clé du sub-cache user-scoped via _is_warmup_done()/_mark_warmup_done().
     try:
         # Pré-charger _warmup_cache depuis la DB (session précédente) — affichage instantané
+        # Fix 29/04 PM tardif : 10 → 200 (aligné avec la nouvelle limit fetch
+        # Graph 200). Sans ça, au cache chaud (FAST PATH), seuls 10 mails
+        # sont rechargés en _warmup_cache → cont-spec loop voit 10 mails →
+        # 54+ mails inbox restent invisibles au BG.
         try:
-            cached_rows = _db.get_recent_email_cache(limit=10)
+            cached_rows = _db.get_recent_email_cache(limit=200)
             with _warmup_lock:
                 for entry_id, email_data in cached_rows:
                     if entry_id not in _warmup_cache:
@@ -873,7 +877,13 @@ def _execute_warmup(graph):
         # Fix 23/04 (T3) : include_body=True pour que summarize_mails_to_db
         # puisse générer les résumés (sinon body_preview 255 chars = skip)
         # et que _start_speculative ait le body complet pour Claude.
-        mails = graph.get_received_emails(limit=50, include_body=True)
+        # Fix 29/04 PM tardif (audit BG/cache Yvan) : 50 → 200 — Yvan a 64
+        # mails inbox, 14 plus anciens que le top 50 étaient INVISIBLES au
+        # BG _continuous_speculation_loop (qui itère sur _warmup_cache).
+        # Résultat : 14 mails éligibles SANS draft. Aligne avec le slice
+        # [:200] déjà présent dans cont-spec loop l. 1300. Coût Graph et
+        # RAM négligeables (~1MB pour 200 mails × 5KB).
+        mails = graph.get_received_emails(limit=200, include_body=True)
         with _warmup_lock:
             _warmup_progress["total"] = len(mails)
         for i, msg in enumerate(mails):
@@ -898,9 +908,9 @@ def _execute_warmup(graph):
                     _db.save_email_cache(mid, msg)
                 except Exception as _e:
                     logger.debug(f"[warmup] save_email_cache échec mid={mid[:20]} : {_e}")
-        # Limite cache 50 entrées (cohérent avec la limite fetch)
+        # Limite cache 200 entrées (aligné avec la limite fetch — fix 29/04 PM)
         with _warmup_lock:
-            while len(_warmup_cache) > 50:
+            while len(_warmup_cache) > 200:
                 _warmup_cache.pop(next(iter(_warmup_cache)))
         logger.info(f"Warmup: {len(mails)} mails pre-charges + caches en DB")
 
