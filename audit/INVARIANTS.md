@@ -1,6 +1,6 @@
 # Invariants V2 — règles absolues testables
 
-> **Dernière mise à jour** : 29/04/2026 mi-journée (ajout I-EVENT-01/02 — limitations Microsoft event-based runtime, suite audit sujet #14)
+> **Dernière mise à jour** : 29/04/2026 PM (ajout I-MT-01 — pattern multi-tenant user-scoped caches, suite migration Étape 7 SaaS)
 > **Principe** : chaque invariant est testable mécaniquement par `smoke_test.ps1`. Une violation = anomalie, point final.
 
 ---
@@ -433,6 +433,61 @@ Aucune fonction enregistrée comme `FunctionName` d'un `<LaunchEvent>` du manife
 - **Pourquoi** : Microsoft cadenasse cette API dans les event-based runtimes (cf doc Microsoft Learn « Activate add-ins with events », mise à jour 21/04/2026, table « Unsupported APIs »). Tout appel échoue silencieusement et le handler ne pose aucune UI. Issue OfficeDev/office-js#3085 ouverte depuis 2023, jamais corrigée — décision Microsoft « by design » pour raisons de sécurité/UX.
 - **Historique** : 29/04/2026 — sujet #14 PLUS_TARD_VF (auto-ouverture popup au clic Répondre) abandonné après découverte de cette limitation. Voir `audit/rapports/2026-04-29_audit_approche_OnMessageCompose_InsightMessage.md`.
 - **Action si violé** : refondre l'approche (pas de contournement officiel disponible). Voir Pattern #20 dans `ANOMALIES_RECURRENTES.md` pour les voies alternatives explorées (toutes inacceptables).
+
+### I-MT-01 : Caches métier user-sensibles isolés via UserScopedDict
+
+Tout cache contenant des données spécifiques à un user (drafts, contexte
+mail, contacts, échéances, dossiers Outlook, etc.) DOIT être déclaré comme
+``UserScopedDict('cache_name')`` (du module ``V2/user_scoped_cache.py``)
+plutôt qu'un dict global ``{}``.
+
+- **Test** : grep dans ``V2/app_plugin.py`` les déclarations de la forme
+  ``_xxx_cache = {}`` au niveau module (~line 480-9500). Pour chaque cache
+  trouvé, vérifier si son contenu est user-sensible (identifié dans
+  ``audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md``). Si oui,
+  doit être ``_xxx_cache = UserScopedDict('xxx')`` (avec fallback ``{}``
+  ultra-défensif).
+- **Pourquoi** : sans isolation par user_id, deux users authentifiés
+  partageraient le même cache → fuite cross-user (drafts, contexte mail,
+  contacts). Le ``_reply_cache`` est le plus critique (drafts pré-générés
+  CONFIDENTIELS).
+- **Architecture** :
+  - Le proxy ``UserScopedDict`` résout le ``user_id`` à chaque accès via
+    ``user_context.get_current_user_id()`` (3 niveaux de fallback :
+    ``request.auth_user_id`` → ``session['auth_user_id']`` → DB
+    ``settings.auth_user_id`` cache 60s).
+  - Le bridge DB garantit en mode mono-user que les BG threads (sans
+    Flask context) résolvent vers le **même** user_id que les routes
+    Flask de l'user authentifié → cohérence writes BG ↔ reads routes.
+  - Pour les threads BG qui doivent iterer cross-user (cohesion,
+    safety net, persist), utiliser ``iter_user_caches(cache_name)``
+    plutôt que le proxy.
+- **Cas spéciaux** :
+  - **Réassignation globale** (ex ``global _xxx; _xxx = {...}``) : remplacer
+    par ``_xxx.clear(); _xxx.update({...})`` (sinon le proxy est écrasé).
+  - **Persistance disque** (drafts_v2.json, prefetch_cache_v2.json) :
+    format v2 imbriqué ``{format_version: 2, entries_per_user: {uid: {mid: entry}}}``
+    avec migration legacy v1→v2 transparente au load + migration
+    ``'default' → user_id réel`` quand la DB connaît un user actif.
+- **Caches actuellement migrés** (20/22 au 29/04 PM, voir HISTORIQUE_DECISIONS) :
+  ``_my_email_cache``, ``_reply_cache``, ``_warmup_cache``, ``_prefetch_cache``,
+  ``_mail_preview_cache``, ``_c_keyword_cache``, ``_mail_open_counter``,
+  ``_last_generate_times``, ``_echeance_pre_scan_cache``, ``_pj_text_cache``,
+  ``_last_proposed``, ``_classify_momentum``, ``_learning_priorities_cache``,
+  ``_contacts_recalib_progress``, ``_current_mail_data``,
+  ``_current_compose_data``, ``_sent_requests``, ``_post_send_cache``,
+  ``_post_send_timestamps``, ``_outlook_folders_cache``.
+- **Caches restants à migrer** (2, peu critiques car non user-scoped strict) :
+  ``_warmup_done`` (boolean global, état serveur warmup), ``_warmup_progress``
+  (one-shot dict avec init values complexes). À refactoriser quand multi-user
+  réellement activé.
+- **Action si violé** : convertir le cache en ``UserScopedDict``, gérer les
+  réassignations globales par ``clear() + update()``, et adapter la
+  persistance disque vers format v2 si applicable.
+- **Historique** : Étape 7 SaaS multi-tenant migrée le 29/04/2026 PM en
+  bloc (9 commits atomiques, validation prod OVH sans perte ni régression).
+  Cf rapport ``audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md``
+  pour la liste exhaustive des caches initiaux.
 
 ### I-EVENT-02 : `notificationMessages` actionable button cadenassé sur ShowTaskPane
 
