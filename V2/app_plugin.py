@@ -743,7 +743,7 @@ def _is_garbage_draft(text):
         if p in text_lower:
             return True
     # Aussi : draft trop court (< 50 chars) après strip HTML = suspect
-    plain = re.sub(r'<[^>]+>', '', text).strip()
+    plain = _HTML_TAG_RE.sub('',text).strip()
     if len(plain) < 50:
         return True
     return False
@@ -2194,7 +2194,7 @@ def _prewarm_echeance_for_mail(mid, mail_data):
         # [2] Pré-filtre heuristique (0 API)
         body = (mail_data.get('body') or mail_data.get('body_preview') or '')[:4000]
         subject = mail_data.get('subject', '')
-        body_plain = re.sub(r'<[^>]+>', ' ', body)
+        body_plain = _HTML_TAG_RE.sub(' ',body)
         body_plain = re.sub(r'\s+', ' ', body_plain).strip()
         if not body_plain or not _has_echeance_pattern(subject + ' ' + body_plain):
             # Pas de pattern → [] = néant. Persister pour ne plus re-scanner.
@@ -4773,7 +4773,7 @@ def _detect_importance(body, subject, contact_profile=None, mid=''):
     """
     try:
         # Strip HTML (le body peut contenir des balises)
-        body_text = re.sub(r'<[^>]+>', ' ', body or '')
+        body_text = _HTML_TAG_RE.sub(' ',body or '')
         subject_lower = (subject or '').lower()
         body_lower_500 = body_text[:500].lower()
         body_full_lower = body_text.lower()
@@ -4939,7 +4939,7 @@ def _should_speculate(mail_data):
         return False, 'expéditeur automatique'
 
     # Filtre 4 : body < 10 chars sans "?"
-    body_stripped = re.sub(r'<[^>]+>', '', body).strip()
+    body_stripped = _HTML_TAG_RE.sub('',body).strip()
     if len(body_stripped) < 10 and '?' not in body_stripped:
         return False, 'body < 10 chars sans question'
 
@@ -6819,7 +6819,7 @@ def api_extract_file_text():
         elif ext in ('.htm', '.html'):
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as _f:
                 raw = _f.read()[:20000]
-            text = re.sub(r'<[^>]+>', ' ', raw)[:10000]
+            text = _HTML_TAG_RE.sub(' ',raw)[:10000]
     except Exception as e:
         logger.warning(f"[extract_file_text] Erreur: {e}")
         text = ''
@@ -6944,7 +6944,7 @@ def api_extract_attachments(entry_id):
                 elif ext in ('.txt', '.csv'):
                     text = content_bytes.decode('utf-8', errors='ignore')[:5000]
                 elif ext in ('.htm', '.html'):
-                    text = re.sub(r'<[^>]+>', ' ', content_bytes.decode('utf-8', errors='ignore'))[:5000]
+                    text = _HTML_TAG_RE.sub(' ',content_bytes.decode('utf-8', errors='ignore'))[:5000]
 
                 if text:
                     parts.append(f"--- Piece jointe : {att_name} ---\n{text}")
@@ -7409,7 +7409,7 @@ def api_echeances_pre_scan():
         return jsonify({"ok": True, "echeances": []})
 
     # Pre-filtre heuristique : skip si aucun pattern d'echeance detecte
-    _body_clean = re.sub(r'<[^>]+>', '', body).strip()
+    _body_clean = _HTML_TAG_RE.sub('',body).strip()
     if not _has_echeance_pattern(_body_clean):
         return jsonify({"ok": True, "echeances": [], "skipped": "no_pattern"})
 
@@ -9131,7 +9131,7 @@ def generate_reply():
         raw_body = re.sub(r'<style[^>]*>.*?</style>', ' ', raw_body, flags=re.DOTALL | re.IGNORECASE)
         raw_body = re.sub(r'<script[^>]*>.*?</script>', ' ', raw_body, flags=re.DOTALL | re.IGNORECASE)
         raw_body = re.sub(r'<br\s*/?>|</p>|</div>|</tr>', '\n', raw_body, flags=re.IGNORECASE)
-        raw_body = re.sub(r'<[^>]+>', '', raw_body)
+        raw_body = _HTML_TAG_RE.sub('',raw_body)
         raw_body = raw_body.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
         raw_body = re.sub(r'[ \t]+', ' ', raw_body)
         raw_body = re.sub(r'\n{3,}', '\n\n', raw_body).strip()
@@ -9503,7 +9503,7 @@ INSTRUCTIONS ECHEANCES :
                 _body_clean = re.sub(r'</p>\s*<p[^>]*>', '\n\n', _body_clean, flags=re.IGNORECASE)
                 _body_clean = re.sub(r'<p[^>]*>', '', _body_clean, flags=re.IGNORECASE)
                 _body_clean = re.sub(r'</p>', '\n\n', _body_clean, flags=re.IGNORECASE)
-                _body_clean = re.sub(r'<[^>]+>', '', _body_clean)
+                _body_clean = _HTML_TAG_RE.sub('',_body_clean)
                 import html as _html_mod_stream
                 _body_clean = _html_mod_stream.unescape(_body_clean)
                 _body_clean = re.sub(r'\n{3,}', '\n\n', _body_clean).strip()
@@ -9751,7 +9751,7 @@ def _strip_greeting_closing(text):
 def _extract_pattern_keywords(received_body, received_subject):
     """Retourne 3-5 mots-clés représentatifs du mail reçu (normalisés, séparés par ,)."""
     import unicodedata
-    src = (received_subject or '') + ' ' + re.sub(r'<[^>]+>', ' ', received_body or '')
+    src = (received_subject or '') + ' ' + _HTML_TAG_RE.sub(' ',received_body or '')
     src = unicodedata.normalize('NFKD', src).encode('ascii', 'ignore').decode('ascii')
     words = re.findall(r"[a-zA-Z]{3,}", src.lower())
     # Stopwords FR/EN basiques
@@ -9794,7 +9794,7 @@ def _extract_learned_template_post_send(message_id, sent_raw_body, mode):
         return
     try:
         # Core = sent_raw_body sans HTML, sans greeting/closing
-        core = re.sub(r'<[^>]+>', ' ', sent_raw_body).strip()
+        core = _HTML_TAG_RE.sub(' ',sent_raw_body).strip()
         core = _strip_greeting_closing(core)
         if not core:
             _log_template_metric('learned_tpl.skipped.core_empty', message_id)
