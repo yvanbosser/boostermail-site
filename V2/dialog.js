@@ -2067,8 +2067,11 @@ function _onGenerationDone(streamedText) {
         editor.innerHTML = paragraphs;
     }
 
-    document.getElementById('btnUndo').style.display = _undoStack.length > 0 ? '' : 'none';
-    document.getElementById('btnSend').disabled = false;
+    // #11 Garde défensive : si dialog fermé pendant le streaming, ces éléments
+    // peuvent être détachés du DOM.
+    var _btnUndo = document.getElementById('btnUndo');
+    if (_btnUndo) _btnUndo.style.display = _undoStack.length > 0 ? '' : 'none';
+    _safeSetSendBtn({ disabled: false });
     var btnRestore = document.getElementById('btnRestore');
     if (btnRestore) btnRestore.style.display = _versionStack.length > 0 ? '' : 'none';
     _perfMonitor.mark('T5_reply_done');
@@ -2422,18 +2425,19 @@ function _sendViaGraph(body, to, cc, subject) {
                 _lastTemplateMatch = null;
             }
             // Succès → post-envoi
-            document.getElementById('headerStatus').textContent = 'Mail envoye !';
-            btnSend.innerHTML = '&#x2705; Envoye';
+            // #11 Garde défensive : headerStatus + btnSend peuvent être détachés
+            // du DOM si dialog fermé entre le clic et l'arrivée de la réponse Graph.
+            var _hdr = document.getElementById('headerStatus');
+            if (_hdr) _hdr.textContent = 'Mail envoye !';
+            _safeSetSendBtn({ html: '&#x2705; Envoye' });
             _postSend(body, to, cc, subject);
         } else if (data.auth_required) {
             // Token expiré
             alert('Session expir\u00e9e. Reconnectez-vous via Profil > Mode Standard.');
-            btnSend.disabled = false;
-            btnSend.innerHTML = '&#x1f4e4; Relire et envoyer';
+            _safeSetSendBtn({ html: '&#x1f4e4; Relire et envoyer', disabled: false });
         } else {
             alert('Erreur envoi : ' + (data.error || 'inconnue'));
-            btnSend.disabled = false;
-            btnSend.innerHTML = '&#x1f4e4; Relire et envoyer';
+            _safeSetSendBtn({ html: '&#x1f4e4; Relire et envoyer', disabled: false });
         }
     })
     .catch(function(err) {
@@ -2442,8 +2446,8 @@ function _sendViaGraph(body, to, cc, subject) {
             ? 'D\u00e9lai d\'envoi d\u00e9pass\u00e9 (30s). R\u00e9seau lent ou serveur indisponible. R\u00e9essayez.'
             : 'Erreur r\u00e9seau : ' + (err && err.message ? err.message : 'inconnue');
         alert(msg);
-        btnSend.disabled = false;
-        btnSend.innerHTML = '&#x1f4e4; Relire et envoyer';
+        // #11 Garde d\u00e9fensive : btnSend peut \u00eatre d\u00e9tach\u00e9 du DOM
+        _safeSetSendBtn({ html: '&#x1f4e4; Relire et envoyer', disabled: false });
     });
 }
 
@@ -3195,6 +3199,25 @@ function _clearProgressPlaceholder() {
 }
 
 /**
+ * #11 Garde défensive : applique disabled/innerHTML sur btnSend uniquement
+ * si l'élément existe encore dans le DOM. Si le dialog a été fermé entre
+ * le clic envoi et l'arrivée de la réponse Graph (.then tardif), on
+ * écrirait silencieusement sur un élément null → exception JS visible
+ * dans console.error qui pollue Sentry et déclenche le toast cross-origin.
+ *
+ * Usage :
+ *   _safeSetSendBtn({ html: '✅ Envoye', disabled: true });   // succès
+ *   _safeSetSendBtn({ html: '📤 Relire', disabled: false });  // erreur, réactiver
+ *   _safeSetSendBtn({ disabled: false });                      // juste réactiver
+ */
+function _safeSetSendBtn(opts) {
+    var btn = document.getElementById('btnSend');
+    if (!btn) return;  // Dialog fermé, on no-op
+    if (opts && typeof opts.html === 'string') btn.innerHTML = opts.html;
+    if (opts && typeof opts.disabled === 'boolean') btn.disabled = opts.disabled;
+}
+
+/**
  * fetch avec timeout explicite (21/04 audit cycle 2 #A).
  * fetch() natif n'a pas de timeout → peut bloquer indéfiniment si le
  * serveur ne ferme jamais la connexion (ex: V2 down, réseau freeze).
@@ -3594,16 +3617,19 @@ function _sendViaCompanion(body, to, cc, subject) {
     }
 
     function _onSuccessUi(route) {
-        document.getElementById('headerStatus').textContent =
+        // #11 Garde défensive : si dialog fermé entre le clic et l'arrivée Graph,
+        // headerStatus et btnSend peuvent être détachés du DOM.
+        var _hdr = document.getElementById('headerStatus');
+        if (_hdr) _hdr.textContent =
             route === 'graph' ? 'Mail envoyé' : 'Reponse injectee dans Outlook';
-        document.getElementById('btnSend').innerHTML = '&#x2705; Envoye';
+        _safeSetSendBtn({ html: '&#x2705; Envoye' });
         _postSend(body, to, cc, subject);
     }
 
     function _onErrorUi(msg) {
         alert(msg);
-        document.getElementById('btnSend').disabled = false;
-        document.getElementById('btnSend').innerHTML = '&#x1f4e4; Envoyer';
+        // #11 Garde défensive
+        _safeSetSendBtn({ html: '&#x1f4e4; Envoyer', disabled: false });
     }
 
     // Cleanup 27/04 PM : _sendViaCompanionFallback supprime (companion local
