@@ -2252,7 +2252,7 @@ def _prewarm_classement_for_mail(mid, mail_data):
 
         # [2 bis] Skip si mail de l'utilisateur à lui-même (Fix 2 — 25/04)
         # Classer un mail envoyé par soi-même n'a pas de sens.
-        _user_email = (_db.get_setting('auth_user_email') or '').strip().lower()
+        _user_email = _normalize_email(_db.get_setting('auth_user_email'))
         if _user_email and contact_email == _user_email:
             try:
                 _db.save_mail_classement(mid, None, 'self')
@@ -4372,7 +4372,7 @@ def _normalize_context_item(m, correspondent_email='', my_email=''):
     direction : 'received' si from_email == correspondent, 'sent' si == my_email.
     Fallback : 'received' si indéterminable.
     """
-    from_email = (m.get('from_email') or '').strip().lower()
+    from_email = _normalize_email(m.get('from_email'))
     from_name = m.get('from_name') or ''
     # Fallback from_name = local part de l'email si absent
     if not from_name and from_email:
@@ -4556,7 +4556,7 @@ def _normalize_context_c(items, source='unknown', correspondent_email='', my_ema
     corr_lower = (correspondent_email or '').lower()
     for m in items:
         body_snippet = m.get('body_snippet') or m.get('body_preview') or m.get('body', '')
-        from_email = (m.get('from_email') or '').strip().lower()
+        from_email = _normalize_email(m.get('from_email'))
         # Déterminer direction
         if my_lower and from_email == my_lower:
             direction = 'sent'
@@ -7334,7 +7334,7 @@ def api_echeances_pre_scan():
         return jsonify({"ok": True, "echeances": []})
     data = request.get_json(force=True) or {}
     body = (data.get('body') or '').strip()
-    to_email = (data.get('to') or '').strip().lower()
+    to_email = _normalize_email(data.get('to'))
     subject = (data.get('subject') or '').strip()
     if not body or body.startswith('Erreur'):
         return jsonify({"ok": True, "echeances": []})
@@ -7416,7 +7416,7 @@ def api_echeances_purge_archives():
 def api_echeances_search_relance_mail():
     """Recherche un mail de relance dans les threads par sujet + correspondant."""
     subject = request.args.get('subject', '').strip()
-    correspondant = request.args.get('correspondant', '').strip().lower()
+    correspondant = _normalize_email(request.args.get('correspondant', ''))
     if not subject:
         return jsonify({"body": None})
     threads = _db.get_threads_for_correspondent(correspondant) if correspondant else []
@@ -7442,7 +7442,7 @@ def api_echeances_search_relance_mail():
 @app.route('/api/echeances/check_sender', methods=['GET'])
 def api_echeances_check_sender():
     """Vérifie si l'expéditeur d'un mail a des échéances actives liées."""
-    sender = request.args.get('email', '').strip().lower()
+    sender = _normalize_email(request.args.get('email', ''))
     mail_subject = request.args.get('subject', '').strip()
     if not sender:
         return jsonify({"echeances": []})
@@ -7454,7 +7454,7 @@ def api_echeances_check_sender():
     subject_words = {w for w in subject_clean.split() if len(w) >= 3}
     matched = []
     for ech in all_active:
-        ech_corr = (ech.get('correspondant') or '').strip().lower()
+        ech_corr = _normalize_email(ech.get('correspondant'))
         if ech_corr != sender:
             continue
         desc_text = (ech.get('description') or '') + ' ' + (ech.get('original_subject') or '')
@@ -7748,7 +7748,7 @@ def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids
     exclude_ids = exclude_ids or set()
     from_email = ''
     if cached_email:
-        from_email = (cached_email.get('from', '') or '').strip().lower()
+        from_email = _normalize_email(cached_email.get('from', ''))
     if not from_email:
         return  # Nouveau mail sans mail recu = pas d'auto-annulation
 
@@ -7763,7 +7763,7 @@ def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids
     for ech in all_echeances:
         if ech.get('id') in exclude_ids:
             continue
-        ech_corr = (ech.get('correspondant', '') or '').strip().lower()
+        ech_corr = _normalize_email(ech.get('correspondant', ''))
         if ech_corr != from_email:
             continue
         desc_text = (ech.get('description') or '') + ' ' + (ech.get('original_subject') or '')
@@ -10876,7 +10876,7 @@ def api_metrics():
 def api_analyze_contact():
     """Force l'analyse d'un contact spécifique."""
     data = request.get_json(force=True) or {}
-    contact_email = data.get('email', '').strip().lower()
+    contact_email = _normalize_email(data.get('email', ''))
     if not contact_email:
         return jsonify({"error": "Email requis"}), 400
 
