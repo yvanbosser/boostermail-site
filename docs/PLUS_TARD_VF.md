@@ -1,6 +1,10 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 30/04/2026 PM (incident prod 06:11 UTC FD leak SQLite résolu → fix `b2d2f73` + `LimitNOFILE=65535` + Pattern #21 + I-DB-06 ; voir `docs/sessions/OUTLOOK_BILAN_SESSION_20260430_PM_incident_fd_leak.md`)
+> **Dernière mise à jour** : 30/04/2026 PM étendu (5 commits ce jour : FD leak + 2 fixes UI Yvan signalés + endpoint diag + audit autres leaks ; voir `docs/sessions/OUTLOOK_BILAN_SESSION_20260430_PM_incident_fd_leak.md` Partie 1+2)
+>
+> **🆕 2 leaks ressources détectés en autonomie 30/04 PM** (rapport `audit/rapports/2026-04-30_PM_audit_autres_leaks_ressources.md`) — à fixer en session dédiée 1-2h pré-beta payante :
+> - **HIGH** `GraphClient` HTTP Session jamais fermée (65 callsites `get_graph()` dans `app_plugin.py`) → wrapper `with get_graph() as graph:`
+> - **MEDIUM** `ThreadPoolExecutor` `pool.shutdown(wait=False)` ligne 4371 → utiliser `with`
 >
 > **Backlog STAND-BY restants 4/12** (décision Yvan 30/04 matin, à traiter si symptômes observables) :
 > - **S8** : threads `.join(timeout=3)` au shutdown (~1-2s perte BG, négligeable)

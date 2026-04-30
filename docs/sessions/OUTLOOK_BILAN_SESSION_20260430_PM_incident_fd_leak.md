@@ -1,8 +1,8 @@
-# Bilan session 30/04/2026 PM — Incident prod FD leak SQLite + fix
+# Bilan session 30/04/2026 PM — Incident prod FD leak + fixes UI Yvan tests + Phase autonomie
 
-> **Dernière mise à jour** : 30/04/2026 PM
-> **Top commit master** : `b2d2f73` + commit doc à venir
-> **Durée session** : ~1h45 (alerte 06:11 UTC, prise en main ~10:25 UTC, fix déployé ~10:42 UTC)
+> **Dernière mise à jour** : 30/04/2026 PM (étendu après clôture initiale — Yvan a fait 2 tests user, signalé 2 bugs UI fixés en autonomie + Phase A/B livrées)
+> **Top commit master** : `842dc31` (5 commits ce jour PM)
+> **Durée session** : ~3h cumulées (incident + 2 fixes UI + Phase A/B autonomie)
 
 ---
 
@@ -188,3 +188,101 @@ Backup créé : `boostermail.service.bak.20260430_103502`.
 ---
 
 **Session close après validation monitoring 15 min + commits doc.**
+
+---
+
+# Partie 2 — Session prolongée 30/04 PM (fixes UI Yvan + autonomie)
+
+> Yvan a testé en condition réelle après la clôture initiale et signalé 2 bugs. Fièvreux, il m'a demandé d'avancer en autonomie. 4 commits supplémentaires.
+
+## Bug B — `Cannot read properties of undefined (reading 'push')` ⚠️ CRITIQUE
+
+**Symptôme** : Yvan ouvre un mail Julien LE VU. Résumé OK, classement OK, échéance OK. Mais zone réponse reste vide ("La reponse apparaitra ici…"). Toast rouge en bas : `BoosterMail : Cannot read properties of undefined (reading 'push')`. Aucune POST de génération côté nginx.
+
+**Diagnostic** (logs `/opt/boostermail/addin_debug.log`) :
+```
+2026-04-30T10:53:33 | dialog_js_error | {
+  "msg": "Cannot read properties of undefined (reading 'push')",
+  "src": "dialog.js?v=v26-stand-by-S2-S9-30-04",
+  "line": 3272, "col": 32
+}
+```
+
+**Cause root** : régression du commit `0b910c1` (STAND-BY S2 du matin). La déclaration `var _autocompleteRegistrations = []` était ligne 3149, **APRÈS** l'appel `_initAutocomplete('fieldTo'/'fieldCc')` ligne 364 dans le flux d'init. Le hoisting `var` met la variable à `undefined` au moment du premier `.push()`. L'erreur arrête la chaîne d'init avant que `_generateReply()` soit appelé.
+
+**Fix** (commit `95178cc`) : déplacement des 2 déclarations (`_autocompleteRegistrations` + `_autocompleteGlobalHandlerBound`) en TOP du fichier `V2/dialog.js`. Suppression du doublon ligne 3149. Bump cache busting `v26 → v27-fix-autocomplete-init-30-04-PM`.
+
+## Bug A — Toast Outlook "Not Found" au clic boutons overlay
+
+**Symptôme** : Yvan voit un toast "Not Found" en haut à droite quand il clique Echeances/Contacts/Profil dans l'overlay popup BoosterMail.
+
+**Diagnostic** (sub-agent Explore) : `popup.js:14` hardcodait `var _backendUrl = 'https://localhost:3443'`. Mais `popup.html` est servi par `api.boostermail.ai` en prod. Au clic d'un bouton de nav, `window.location.href = _backendUrl + '/plugin/echeances'` → tente `https://localhost:3443/plugin/echeances` → host inexistant côté Yvan → toast Outlook "Not Found".
+
+**Fix** (commit `e419741`) : `_backendUrl` dérivé de `window.location.origin` à l'exécution. Compatible local (`https://localhost:3443`) ET SaaS (`https://api.boostermail.ai`). Bump cache busting `v14 → v15-fix-backend-url-30-04-PM`.
+
+**Note** : `autorunshared.js` continue d'utiliser `'https://api.boostermail.ai'` hardcodé volontairement (shared runtime Office, contexte différent où `window.location` peut être indisponible).
+
+## Phase A — Audit autres leaks ressources
+
+Sub-agent Explore en lecture seule sur intégralité V2/. **2 leaks à traiter identifiés** (non bloquants, à fixer en session dédiée pré-beta payante) :
+
+| Criticité | Leak | Site | Fix recommandé | Effort |
+|---|---|---|---|---|
+| **HIGH** | `GraphClient` HTTP Session jamais fermée (65+ callsites `get_graph()`) | `app_plugin.py` factory l. 442 | wrapper context manager `with get_graph() as graph:` | 1-2h |
+| **MEDIUM** | `ThreadPoolExecutor` `pool.shutdown(wait=False)` | `app_plugin.py:4371` | utiliser `with ThreadPoolExecutor() as pool:` | 15 min |
+| LOW | `requests.post/get` sans Session (graph_webhooks.py 4 sites) | — | Session module-scope | 30 min |
+
+**Aucun nouveau leak SQLite** au-delà de Pattern #21. Pattern persistent runtime confirmé OK pour `Database._conn()`. Bonne hygiène globale.
+
+Rapport complet : [`audit/rapports/2026-04-30_PM_audit_autres_leaks_ressources.md`](../../audit/rapports/2026-04-30_PM_audit_autres_leaks_ressources.md).
+
+## Phase B — Endpoint diagnostic `/api/admin/db_conns_stats`
+
+Recommandation moyen terme du bilan FD leak. Implémenté dans `V2/app_plugin.py` (commit `842dc31`). Lecture seule, pas d'auth (info non sensible).
+
+**Réponse JSON** :
+```json
+{
+    "tracked_conns": 2,
+    "live_threads_count": 15,
+    "live_threads_names": ["MainThread", "db-gc", "cont-spec", ...],
+    "zombie_estimate": 0,
+    "gc_started": true,
+    "db_path": "/opt/boostermail/V2/boostermail.db"
+}
+```
+
+**Validation prod live** (post-restart Flask) : 2 conn DB pour 15 threads vivants — pattern persistent fonctionne nickel, seuls les threads qui touchent à la DB ont leur conn. `zombie_estimate=0` à T+0 → GC propre.
+
+**Détail diagnostic** : 2 threads `db-gc` visibles dans `live_threads_names` → suggère 2 instances `Database()` quelque part (à investiguer mais pas critique, juste 2 sleep loops 60s en parallèle).
+
+**Usage prévu** :
+- `curl -sk https://api.boostermail.ai/api/admin/db_conns_stats` pour monitoring continu
+- Alerte si `tracked_conns > live_threads_count + 60` pendant > 60s → GC bloqué (I-DB-06 violation)
+
+## Récap commits Partie 2
+
+| Hash | Sujet |
+|---|---|
+| `95178cc` | fix(dialog): _autocompleteRegistrations declare en TOP (regression S2) |
+| `e419741` | fix(popup): _backendUrl dynamique (window.location.origin) — fix toast Not Found |
+| `842dc31` | feat(admin): endpoint /api/admin/db_conns_stats + audit autres leaks |
+| (à venir) | docs(session): cloture extension session 30/04 PM |
+
+## État OVH au sortir de la session étendue
+
+| | |
+|---|---|
+| Top commit master | `842dc31` |
+| Service `boostermail.service` | active (running), restart à ~12h00 UTC après deploy app_plugin.py |
+| FDs actuels | ~63 (T+5min après restart) |
+| `db_conns_stats` endpoint | live, 2 tracked / 15 threads / 0 zombie |
+| Cache busting | `dialog.js?v=v27-fix-autocomplete-init-30-04-PM` + `popup.js?v=v15-fix-backend-url-30-04-PM` |
+
+## Prochaine session (à confirmer par Yvan au réveil)
+
+1. **Vérifier au réveil** que les 2 fixes UI fonctionnent (ouvrir un mail, générer une réponse, cliquer Echeances dans l'overlay popup). Pas de purge cache WebView2 nécessaire (cache busting bumpé).
+2. **Si OK** : retour roadmap business (tests E2E / Phase 4 Stripe / beta-testeurs / niche métier) ou polish technique (LEAK #1 GraphClient — 1-2h, recommandé pré-beta).
+3. **Si KO** : voir [`docs/saas/ROLLBACK_PROCEDURE.md`](../saas/ROLLBACK_PROCEDURE.md) Cas 1 chirurgical pour revert un commit spécifique.
+
+**Session étendue close après validation monitoring + commit final docs.**

@@ -1,6 +1,6 @@
 # Prompt de reprise — Session « New Outlook via OVH »
 
-> **Dernière mise à jour** : 30/04/2026 PM (incident prod FD leak SQLite résolu — fix `b2d2f73` + `LimitNOFILE=65535` systemd ; Pattern #21 + I-DB-06 ajoutés ; ROLLBACK_PROCEDURE Cas 0/4 + PLUS_TARD_VF mis à jour ; **prochaine session : monitoring 24-48h db-gc** ou retour roadmap business / STAND-BY restants)
+> **Dernière mise à jour** : 30/04/2026 PM étendu (5 commits : FD leak + 2 fixes UI signalés par Yvan + endpoint diagnostic db_conns_stats + audit autres leaks ; **prochaine session : valider les 2 fixes UI au réveil Yvan** puis monitoring db-gc / roadmap business / fix LEAK #1 GraphClient HTTP Session pré-beta)
 >
 > **Mode d'emploi** : à chaque démarrage d'une nouvelle session Claude sur le sujet « New Outlook via OVH », **copier-coller le bloc ci-dessous en intégralité**. Il référence tous les docs nécessaires et donne le contexte de la session précédente.
 >
@@ -20,7 +20,7 @@ Test rapide :
 Si ton worktree est différent (auto-créé style `claude/happy-XXXX`), exécute en début de session :
   git fetch && git merge master --no-edit
 puis :
-  git log --oneline -5    # doit afficher au minimum `b2d2f73 fix(db): GC background pour conn SQLite des threads zombies` (30/04 PM, fix incident FD leak)
+  git log --oneline -5    # doit afficher au minimum `842dc31 feat(admin): endpoint /api/admin/db_conns_stats + audit autres leaks` (30/04 PM, fin session étendue)
 
 ---
 
@@ -31,40 +31,53 @@ CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
 - Toutes les modifs (UX/UI/data) déployées sur OVH dans la foulée — plus de WIP local persistant
 - Yvan utilise BoosterMail au quotidien depuis https://api.boostermail.ai/
 
-ÉTAT DE FIN DE LA DERNIÈRE SESSION (30/04/2026 PM — incident prod FD leak SQLite résolu)
-- **Session ~1h45** : ouverte sur incident prod actif (UptimeRobot avait alerté 06:11 UTC, prod en zombie depuis 4h). nginx 504 + service `active` mais Flask saturé (`Errno 24 Too many open files`). 1075 FDs sur 1024 du soft limit `LimitNOFILE` systemd.
-- **Cause root identifiée** : `Database._conn()` thread-local + ~80 sites `threading.Thread(...).start()` daemon transitoires dans `app_plugin.py`. Quand un thread daemon meurt, `_local` ne ferme pas la conn SQLite → leak progressif. 509 handles `boostermail.db` + 508 `boostermail.db-wal` à saturation. Vitesse mesurée sans fix : ~200 FDs/min en burst au boot.
-- **Fix double livré** :
-  - **Palliatif systemd** (`/etc/systemd/system/boostermail.service`) : `LimitNOFILE=65535` (vs défaut 1024) + `daemon-reload` + restart → 64× de marge
-  - **Fix root code** (commit `b2d2f73`) : `Database._all_conns` passé de `list[conn]` à `dict[tid, conn]` + thread BG `db-gc` daemon (60s) qui ferme les conn dont le TID n'est plus dans `threading.enumerate()`. Pattern persistent runtime préservé pour les threads vivants — pas de régression perf. Démarrage paresseux du GC au 1er `_conn()`.
-  - **5 tests fonctionnels locaux** passent avant deploy (10 workers transitoires → 11 conn → GC ferme 10 zombies → main reste utilisable)
-- **Validation prod (monitoring 1 mesure/min)** :
-  - T+0 : 49 FDs (vs 614 mesurés sans fix après 3 min)
-  - T+3min : 44 FDs stables
-  - T+6min : 47 FDs stables, GC tourne, log `[db-gc] closed N zombie connection(s)` régulier
+ÉTAT DE FIN DE LA DERNIÈRE SESSION (30/04/2026 PM étendu — 5 commits : FD leak + 2 fixes UI Yvan + endpoint + audit)
+- **Session ~3h cumulées** : 1h45 incident FD leak + 1h15 extension fixes UI + Phase A/B autonomie pendant qu'Yvan fiévreux se reposait.
+- **Commits master ce jour PM** :
+  - `b2d2f73` fix(db): GC background pour conn SQLite des threads zombies — incident prod 06:11 UTC saturation `LimitNOFILE` (1024) en ~1h16. Fix double : `LimitNOFILE=65535` systemd + thread BG `db-gc` 60s.
+  - `8c407b8` docs(session): cloture session 30/04 PM — bilan + cascade Pattern #21 + I-DB-06 + ROLLBACK Cas 0/4
+  - `95178cc` fix(dialog): _autocompleteRegistrations declare en TOP — régression S2 du matin. `dialog.js:3272 push undefined` empêchait toute génération de réponse.
+  - `e419741` fix(popup): _backendUrl dynamique (window.location.origin) — toast "Not Found" sur boutons Echeances/Contacts/Profil dû à `localhost:3443` hardcodé en SaaS.
+  - `842dc31` feat(admin): endpoint /api/admin/db_conns_stats + audit autres leaks (rapport `audit/rapports/2026-04-30_PM_audit_autres_leaks_ressources.md`)
+- **2 leaks supplémentaires identifiés** (non bloquants, pré-beta) :
+  - HIGH : `GraphClient` HTTP Session jamais fermée (65 callsites `get_graph()`)
+  - MEDIUM : `ThreadPoolExecutor` `pool.shutdown(wait=False)` ligne 4371
+- **Validation prod live** :
+  - FD leak : 614 → 44 FDs (×14 mieux), GC tourne régulièrement (log `[db-gc] closed N zombie`)
+  - Bug B fix dialog : nouveau cache busting `dialog.js?v=v27-fix-autocomplete-init-30-04-PM` déployé OVH
+  - Bug A fix popup : nouveau cache busting `popup.js?v=v15-fix-backend-url-30-04-PM` déployé OVH
+  - Endpoint live : `tracked_conns=2, live_threads=15, zombie_estimate=0`
 - **Documentation cascade complète** :
   - **Pattern #21** dans `audit/ANOMALIES_RECURRENTES.md` (leak FD `threading.local()` + remède db-gc)
   - **I-DB-06** dans `audit/INVARIANTS.md` (conn SQLite bornées par GC zombie)
   - **Cas 0** + **Cas 4** dans `docs/saas/ROLLBACK_PROCEDURE.md` (diagnostic d'urgence FDs + procédure palliatif/revert)
   - **Bloc « ✅ FIXÉ 30/04 PM »** dans `docs/PLUS_TARD_VF.md` TL;DR
-  - **Bilan complet** : `docs/sessions/OUTLOOK_BILAN_SESSION_20260430_PM_incident_fd_leak.md`
+  - **Rapport audit autres leaks** : `audit/rapports/2026-04-30_PM_audit_autres_leaks_ressources.md`
+  - **Bilan complet (Partie 1 + Partie 2)** : `docs/sessions/OUTLOOK_BILAN_SESSION_20260430_PM_incident_fd_leak.md`
 
 🎯 PROCHAINE SESSION (À DÉFINIR PAR YVAN)
-1. **Monitoring db-gc 24-48h** (recommandé, 5 min) — confirmer que les FDs restent < 200 sur une journée Yvan complète :
-   ```bash
-   ssh ubuntu@51.178.162.208 "sudo journalctl -u boostermail --since '24 hours ago' --no-pager | grep db-gc | tail -20"
-   ssh ubuntu@51.178.162.208 "PID=\$(systemctl show boostermail --property=MainPID --value) && sudo ls /proc/\$PID/fd | wc -l"
-   ```
-2. **Retour roadmap business** (cf bilan 30/04 matin section discussion) :
+1. **VALIDATION CÔTÉ YVAN AU RÉVEIL** (30 sec) — vérifier que les 2 fixes UI marchent :
+   - Ouvrir un mail dans New Outlook → cliquer BoosterMail → la réponse doit se générer (pas de toast rouge "Cannot read properties of undefined")
+   - Cliquer le bouton Echeances/Contacts/Profil dans l'overlay popup → la page doit se charger (pas de toast "Not Found")
+   - Si purge cache WebView2 nécessaire : cf section C.3 onboarding (rare, le cache busting v27/v15 devrait être pris automatiquement par le `no-store`)
+2. **Endpoint diagnostic live** (1 sec) :
+   `curl -sk https://api.boostermail.ai/api/admin/db_conns_stats` → JSON avec `tracked_conns`, `live_threads_count`, `zombie_estimate`. Au steady state attendu : `zombie_estimate ≈ 0`.
+3. **Si OK → retour roadmap business** (cf bilan 30/04 matin section discussion) :
    - Tests end-to-end automatisés sur 5 flux critiques (~1 journée)
    - Phase 4 paiement Stripe + RGPD (~1-2 semaines)
    - 3-5 beta-testeurs payants dans le réseau direct
    - Niche métier (comptables ? avocats ?)
-3. **STAND-BY restants 4/12** (cf bilan 30/04 matin) : S8/S10/S11/S12, à traiter si symptômes observables
+4. **POLISH TECHNIQUE recommandé pré-beta** (1-2h) — fix LEAK #1 + #2 du rapport audit autres leaks 30/04 PM (`audit/rapports/2026-04-30_PM_audit_autres_leaks_ressources.md`) :
+   - LEAK #1 HIGH : `GraphClient` HTTP Session non fermée (65 callsites) → wrapper `with get_graph() as graph:`
+   - LEAK #2 MEDIUM : `ThreadPoolExecutor` `pool.shutdown(wait=False)` ligne 4371 → utiliser `with`
+5. **STAND-BY restants 4/12** (cf bilan 30/04 matin) : S8/S10/S11/S12, à traiter si symptômes observables
 
 ⚠️ ALTERNATIVES si récidive ou stress test :
-- **Audit autres `threading.local()`** dans le code (cache HTTP session, requests pool, etc.) — Pattern #21 documente la procédure
-- **Endpoint `/api/admin/db_conns_stats`** (returnerait `{total_tracked, live_threads}`) pour monitoring continu
+- **Monitoring db-gc 24-48h** :
+  ```bash
+  ssh ubuntu@51.178.162.208 "sudo journalctl -u boostermail --since '24 hours ago' --no-pager | grep db-gc | tail -20"
+  curl -sk https://api.boostermail.ai/api/admin/db_conns_stats
+  ```
 
 AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 
