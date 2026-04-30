@@ -288,6 +288,33 @@ function _cleanupAllStreams() {
 // Wire au beforeunload — le "chef sortant" qui libère les portes
 window.addEventListener('beforeunload', _cleanupAllStreams);
 
+// =============================================================================
+// STAND-BY S9 — Registre des cleanups DOM (listeners document/window)
+//
+// Pattern pour les listeners attachés à document/window qui ne meurent pas
+// automatiquement quand le dialog se ferme (ex: autocomplete global click,
+// global drag handlers). Ceux attachés aux éléments DOM internes du dialog
+// sont nettoyés automatiquement par le navigateur quand l'iframe meurt.
+//
+// Usage : `_registerCleanup(function() { document.removeEventListener(...); });`
+// =============================================================================
+
+var _domCleanupCallbacks = [];
+
+/** Enregistre un callback de cleanup DOM (exécuté au beforeunload). */
+function _registerCleanup(fn) {
+    if (typeof fn === 'function') _domCleanupCallbacks.push(fn);
+}
+
+function _runDomCleanups() {
+    for (var i = 0; i < _domCleanupCallbacks.length; i++) {
+        try { _domCleanupCallbacks[i](); } catch(_) { /* silent */ }
+    }
+    _domCleanupCallbacks = [];
+}
+
+window.addEventListener('beforeunload', _runDomCleanups);
+
 
 // =============================================================================
 // INITIALISATION
@@ -3115,6 +3142,33 @@ function _listenParentMessages() {
 //
 // _loadContacts() et _contactsCache supprimes (plus utilises).
 
+// STAND-BY S2 — registry global des autocomplete pour partager UN SEUL
+// handler click document, au lieu de un handler PAR input. Avant : fieldTo
+// + fieldCc → 2 handlers identiques sur document. Après : 1 handler qui
+// itère le registry et ferme tous les dropdowns en dehors du clic.
+var _autocompleteRegistrations = [];
+var _autocompleteGlobalHandlerBound = false;
+
+function _bindGlobalAutocompleteHandler() {
+    if (_autocompleteGlobalHandlerBound) return;
+    _autocompleteGlobalHandlerBound = true;
+    var _autocompleteClickHandler = function(e) {
+        for (var i = 0; i < _autocompleteRegistrations.length; i++) {
+            var reg = _autocompleteRegistrations[i];
+            if (e.target !== reg.input && !reg.dropdown.contains(e.target)) {
+                reg.dropdown.classList.remove('active');
+            }
+        }
+    };
+    document.addEventListener('click', _autocompleteClickHandler);
+    // STAND-BY S9 — cleanup au beforeunload pour libérer le handler document.
+    _registerCleanup(function() {
+        document.removeEventListener('click', _autocompleteClickHandler);
+        _autocompleteRegistrations = [];
+        _autocompleteGlobalHandlerBound = false;
+    });
+}
+
 function _initAutocomplete(inputId, dropdownId) {
     var input = document.getElementById(inputId);
     var dropdown = document.getElementById(dropdownId);
@@ -3213,17 +3267,10 @@ function _initAutocomplete(inputId, dropdownId) {
         }
     });
 
-    // Fermer si clic ailleurs — fix audit 21/04 : flag sur l'élément pour
-    // éviter d'accumuler des handlers click au document (un par appel de
-    // _initAutocomplete : appelé pour fieldTo + fieldCc → 2 handlers sinon).
-    if (!input.__autocompleteGlobalClickBound) {
-        document.addEventListener('click', function(e) {
-            if (e.target !== input && !dropdown.contains(e.target)) {
-                dropdown.classList.remove('active');
-            }
-        });
-        input.__autocompleteGlobalClickBound = true;
-    }
+    // STAND-BY S2 — enregistrer cet autocomplete dans le registry global
+    // (handler click document partagé via _bindGlobalAutocompleteHandler).
+    _autocompleteRegistrations.push({ input: input, dropdown: dropdown });
+    _bindGlobalAutocompleteHandler();
 }
 
 

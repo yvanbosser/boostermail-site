@@ -571,11 +571,37 @@ function _openViaDisplayDialog(item, dialogUrl, data, getMailBody, fromName, fro
                 }
             });
 
-            // Écouter la fermeture du dialog — libérer le runtime SEULEMENT ici
+            // STAND-BY S3 — flag idempotent : event.completed() ne doit être
+            // appelé QU'UNE FOIS, sinon Office.js peut crasher. Le timer
+            // ci-dessous + le DialogEventReceived peuvent se déclencher dans
+            // n'importe quel ordre, d'où la garde.
+            var _runtimeReleased = false;
+            function _releaseRuntime(reason) {
+                if (_runtimeReleased) return;
+                _runtimeReleased = true;
+                try {
+                    console.log('EasyMail: event.completed() libéré (' + reason + ')');
+                    event.completed();
+                } catch (e) {
+                    console.warn('EasyMail: event.completed() failed:', e);
+                }
+            }
+
+            // Écouter la fermeture du dialog — libérer le runtime ici
             dialog.addEventHandler(Office.EventType.DialogEventReceived, function () {
-                // Dialog fermé → maintenant on peut libérer le runtime
-                event.completed();
+                _releaseRuntime('dialog_closed');
             });
+
+            // STAND-BY S3 — Timeout 15 min : si dialog reste ouvert sans être
+            // fermé (user parti en réunion, oublié, etc.), libérer le runtime
+            // de force pour éviter qu'Outlook gèle le handle Office.js.
+            // 15 min = compromis entre confort utilisateur (assez long pour
+            // rédiger une réponse complexe) et protection Outlook.
+            setTimeout(function () {
+                _releaseRuntime('timeout_15min');
+                // Best-effort : tenter de fermer le dialog si encore ouvert
+                try { dialog.close(); } catch (e) { /* déjà fermé */ }
+            }, 15 * 60 * 1000);
 
             // NE PAS appeler event.completed() ici — le runtime doit rester actif
             // tant que le dialog est ouvert, sinon New Outlook ferme le dialog.
