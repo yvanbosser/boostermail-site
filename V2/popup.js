@@ -11,7 +11,15 @@
 
 /* global Office */
 
-var _backendUrl = 'https://localhost:3443';
+// Fix 30/04 PM — _backendUrl détecté dynamiquement depuis l'origin de
+// la page courante. Avant : hardcodé `https://localhost:3443` qui plantait
+// en SaaS (popup.html servi par api.boostermail.ai → boutons Echeances/
+// Contacts/Profil naviguaient vers https://localhost:3443/plugin/echeances
+// → host inexistant côté Yvan → toast Outlook "Not Found").
+// Compatible local (https://localhost:3443) ET SaaS (https://api.boostermail.ai).
+var _backendUrl = (window.location && window.location.origin)
+    ? window.location.origin
+    : 'https://localhost:3443';
 var _container = 'taskpane';  // 'taskpane' | 'pyqt' | 'extension'
 var _currentItem = null;
 var _currentMailData = null;  // Dernières données du mail courant (pour les 3 modes)
