@@ -26,15 +26,18 @@ class Database:
     def __init__(self, db_path):
         self.db_path = db_path
         self._local = threading.local()
-        # 29/04 PM audit resource leaks #26 — set des connections ouvertes
-        # cross-thread pour cleanup propre au shutdown (atexit). Avant :
-        # connections persistaient sans close, OS faisait le cleanup mais
-        # SQLite WAL pouvait laisser des -wal/-shm orphelins.
-        # On garde le pattern persistent par thread (perf : evite open/close
-        # à chaque requête, raison commentaire l. 31). On ajoute juste un
-        # tracker pour le shutdown clean.
-        self._all_conns = []  # list[sqlite3.Connection]
+        # Tracker keyed par thread_id pour cleanup runtime des conn
+        # zombies. Le pattern persistent par thread (l.40-51) garde une
+        # conn dans `_local.conn` pour eviter open/close a chaque requete,
+        # mais les ~80 sites `threading.Thread(...).start()` du backend
+        # spawnent des threads daemon transitoires. Quand un thread meurt,
+        # `_local` ne ferme pas la conn => leak FD progressif.
+        # Cf bilan 30/04 : 200 FDs/min observes, saturation LimitNOFILE
+        # en ~1h16. Fix : thread BG `db-gc` ferme toutes les 60s les conn
+        # dont le TID n'est plus vivant.
+        self._all_conns = {}  # dict[int (TID), sqlite3.Connection]
         self._all_conns_lock = threading.Lock()
+        self._gc_started = False
 
     def _conn(self):
         """Connection persistante par thread (evite open/close a chaque requete)."""
@@ -46,21 +49,73 @@ class Database:
             conn.execute("PRAGMA busy_timeout=5000")  # audit I4 : 5s avant erreur locked
             conn.row_factory = sqlite3.Row
             self._local.conn = conn
+            tid = threading.get_ident()
+            old_conn = None
+            start_gc = False
             with self._all_conns_lock:
-                self._all_conns.append(conn)
+                # TID reutilise (rare avec daemon threads CPython, mais
+                # possible) : l'ancienne conn n'est plus accessible via
+                # _local.conn donc on la ferme nous-meme.
+                old_conn = self._all_conns.get(tid)
+                self._all_conns[tid] = conn
+                if not self._gc_started:
+                    self._gc_started = True
+                    start_gc = True
+            if old_conn is not None:
+                try:
+                    old_conn.close()
+                except Exception:
+                    pass
+            if start_gc:
+                threading.Thread(
+                    target=self._gc_zombie_conns_loop,
+                    daemon=True,
+                    name='db-gc'
+                ).start()
         return self._local.conn
+
+    def _gc_zombie_conns_loop(self):
+        """BG loop (60s) : ferme les conn des threads morts.
+
+        Preserve le pattern persistent runtime (threads vivants gardent
+        leur conn pour la perf), mais evite l'accumulation de FDs zombies
+        que threading.local() laisse traines quand un thread daemon meurt
+        sans fermer sa conn. Daemon=True donc s'arrete avec le process."""
+        import time
+        while True:
+            try:
+                time.sleep(60)
+                self._gc_zombie_conns_once()
+            except Exception:
+                pass  # ne jamais tuer le GC
+
+    def _gc_zombie_conns_once(self):
+        """Un passage de GC. Ferme les conn des TID non vivants."""
+        live_tids = {t.ident for t in threading.enumerate()}
+        zombies = []
+        with self._all_conns_lock:
+            for tid in list(self._all_conns.keys()):
+                if tid not in live_tids:
+                    zombies.append(self._all_conns.pop(tid))
+        for conn in zombies:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        if zombies:
+            print(f"[db-gc] closed {len(zombies)} zombie connection(s)", flush=True)
 
     def close_all_threads(self):
         """Ferme TOUTES les connections (tous threads). Pour atexit/shutdown.
-        Préserve le pattern persistent en runtime — appelée uniquement au
+        Preserve le pattern persistent en runtime — appelee uniquement au
         shutdown du process via atexit.register dans app_plugin.py."""
         with self._all_conns_lock:
-            for conn in self._all_conns:
+            for conn in self._all_conns.values():
                 try:
                     conn.close()
                 except Exception:
                     pass
-            self._all_conns = []
+            self._all_conns = {}
 
     def init(self):
         conn = sqlite3.connect(self.db_path)
