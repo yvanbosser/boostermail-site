@@ -14,8 +14,12 @@ try:
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
 except ImportError:
+    import subprocess
     print("Installation de 'cryptography'...")
-    os.system(f'"{sys.executable}" -m pip install cryptography')
+    # subprocess.run avec liste d'arguments — pas de shell injection possible.
+    # os.system + f-string était dangereux si sys.executable contenait des espaces non
+    # échappés ou caractères spéciaux (audit Pass 8).
+    subprocess.run([sys.executable, '-m', 'pip', 'install', 'cryptography'], check=True)
     from cryptography import x509
     from cryptography.x509.oid import NameOID
     from cryptography.hazmat.primitives import hashes, serialization

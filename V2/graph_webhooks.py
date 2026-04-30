@@ -314,14 +314,25 @@ def parse_notification_payload(payload: dict, expected_client_state: str) -> lis
         logger.warning("[graph webhooks] payload['value'] pas une liste, rejeté")
         return []
 
+    # Garde anti-bypass : si expected_client_state est vide/None, rejet total.
+    # Sinon un attaquant pourrait envoyer un faux webhook avec clientState=''
+    # avant que la subscription soit enregistrée en DB → '' == '' passerait.
+    if not isinstance(expected_client_state, str) or not expected_client_state:
+        logger.warning(
+            "[graph webhooks] expected_client_state vide/invalide — "
+            "tous les notifs rejetés (anti-spoofing)"
+        )
+        return []
+
     valid_ids = []
     for notif in notifications:
         if not isinstance(notif, dict):
             continue
         cs = notif.get('clientState', '')
-        if cs != expected_client_state:
+        if not isinstance(cs, str) or cs != expected_client_state:
+            cs_preview = (cs[:8] if isinstance(cs, str) else str(type(cs).__name__))
             logger.warning(
-                f"[graph webhooks] clientState mismatch (got={cs[:8]}... "
+                f"[graph webhooks] clientState mismatch (got={cs_preview}... "
                 f"expected={expected_client_state[:8]}...) — notif rejetée"
             )
             continue
