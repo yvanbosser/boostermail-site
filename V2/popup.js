@@ -1061,4 +1061,21 @@ function _pollOnboarding() {
             _nav('drag-end');
         }
     });
+
+    // Audit Pass 8 — cleanup au unmount popup : clearInterval polling +
+    // close SSE pour éviter requêtes fantômes après fermeture (especially
+    // multi-open/close avec WebView2 qui garde la page en cache).
+    window.addEventListener('beforeunload', function() {
+        try {
+            if (_pollingInterval) {
+                clearInterval(_pollingInterval);
+                _pollingInterval = null;
+            }
+        } catch(e) {}
+        try {
+            if (_sseSource && _sseSource.readyState !== 2) {
+                _sseSource.close();
+            }
+        } catch(e) {}
+    });
 })();
