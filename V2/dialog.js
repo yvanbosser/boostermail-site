@@ -71,6 +71,16 @@ try {
                         Office.context.ui && typeof Office.context.ui.messageParent === 'function');
 } catch(e) { _isOfficeContext = false; }
 
+// STAND-BY S2 (déclarés en TOP — fix incident 30/04 PM "Cannot read properties
+// of undefined reading 'push'") — registry global des autocomplete pour partager
+// UN SEUL handler click document, au lieu d'un handler PAR input. Le hoisting
+// var de _autocompleteRegistrations en bas de fichier (commit 0b910c1) le
+// laissait à undefined au moment où _initAutocomplete() est appelée pendant
+// l'init du dialog (ligne ~364), avant que l'assignation `= []` ne soit
+// exécutée. Solution : déclarer + initialiser en TOP, avant tout usage.
+var _autocompleteRegistrations = [];
+var _autocompleteGlobalHandlerBound = false;
+
 
 // =============================================================================
 // SAFETY NET GLOBAL (21/04 — P3)
@@ -3142,12 +3152,9 @@ function _listenParentMessages() {
 //
 // _loadContacts() et _contactsCache supprimes (plus utilises).
 
-// STAND-BY S2 — registry global des autocomplete pour partager UN SEUL
-// handler click document, au lieu de un handler PAR input. Avant : fieldTo
-// + fieldCc → 2 handlers identiques sur document. Après : 1 handler qui
-// itère le registry et ferme tous les dropdowns en dehors du clic.
-var _autocompleteRegistrations = [];
-var _autocompleteGlobalHandlerBound = false;
+// STAND-BY S2 — déclarations déplacées en TOP du fichier (cf incident 30/04 PM
+// "Cannot read properties of undefined reading 'push'"). Le handler ci-dessous
+// ne reste ici que pour la cohérence de localisation avec _initAutocomplete.
 
 function _bindGlobalAutocompleteHandler() {
     if (_autocompleteGlobalHandlerBound) return;
