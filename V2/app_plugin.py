@@ -10347,12 +10347,20 @@ def api_classification_post_send(message_id):
     if plate_result.get('status') == 'done':
         plate_data = plate_result.get('data') or {}
         if plate_data.get('suggestion'):
+            # Fix 30/04 PM (signal Yvan : arborescence vide quand cache HIT) :
+            # fetch les folders Graph pour permettre au front d'afficher
+            # l'arborescence en plus de la suggestion. Cache 5 min via
+            # _get_outlook_folders_cached → coût négligeable.
+            try:
+                folders = _get_outlook_folders_cached() or []
+            except Exception:
+                folders = []
             return jsonify({
                 "status": "done",
                 "suggestion": {
                     "suggestion": plate_data.get('suggestion'),
                     "source": plate_data.get('source', 'rule'),
-                    "folders": [],
+                    "folders": folders,
                 },
             })
 

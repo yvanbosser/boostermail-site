@@ -52,19 +52,35 @@ var _companionAvailable = false;
     _btn('btnTransferer', function () { _handleAction('forward'); });
     _btn('btnClasser', function () { alert('Classement — a implementer'); });
 
-    // Navigation — Tableau de bord (29/04 PM tardif) :
-    // les 3 vues Profil/Contacts/Échéances sont des pages séparées
-    // /plugin/profile, /plugin/contacts, /plugin/echeances (port du proto).
-    // Navigation in-place : on remplace la page actuelle (overlay PyQt
-    // ou iframe dialog) par la page demandée.
-    _btn('navEcheances', function () { window.location.href = _backendUrl + '/plugin/echeances'; });
-    _btn('navContacts', function () { window.location.href = _backendUrl + '/plugin/contacts'; });
-    _btn('navProfil', function () { window.location.href = _backendUrl + '/plugin/profile'; });
+    // Navigation — Tableau de bord (refonte 30/04 PM tardif, signal Yvan) :
+    // ouvre les 3 vues Profil/Contacts/Échéances dans une nouvelle FENÊTRE
+    // browser centrée plein-écran (style proto port 5050). Avant : un
+    // window.location.href in-place qui bloquait le taskpane sur la page
+    // dashboard. Maintenant : window.open() avec fallback in-place si bloqué.
+    function _openDashboardWindow(view) {
+        var url = _backendUrl + '/plugin/' + view;
+        var w = Math.min(1200, (screen.availWidth || 1200) - 80);
+        var h = Math.min(800, (screen.availHeight || 800) - 80);
+        var x = ((screen.availWidth || 1200) - w) / 2;
+        var y = ((screen.availHeight || 800) - h) / 2;
+        var feats = 'width=' + w + ',height=' + h + ',left=' + x + ',top=' + y +
+                    ',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no';
+        try {
+            var nw = window.open(url, 'boostermail_dashboard_' + view, feats);
+            if (nw) { nw.focus(); return; }
+        } catch (e) {}
+        // Fallback navigation in-place si window.open bloqué.
+        window.location.href = url;
+    }
+
+    _btn('navEcheances', function () { _openDashboardWindow('echeances'); });
+    _btn('navContacts', function () { _openDashboardWindow('contacts'); });
+    _btn('navProfil', function () { _openDashboardWindow('profile'); });
 
     // Navigation FIXE en haut (Audit 20/04) — même handlers
-    _btn('navEcheancesFixed', function () { window.location.href = _backendUrl + '/plugin/echeances'; });
-    _btn('navContactsFixed', function () { window.location.href = _backendUrl + '/plugin/contacts'; });
-    _btn('navProfilFixed', function () { window.location.href = _backendUrl + '/plugin/profile'; });
+    _btn('navEcheancesFixed', function () { _openDashboardWindow('echeances'); });
+    _btn('navContactsFixed', function () { _openDashboardWindow('contacts'); });
+    _btn('navProfilFixed', function () { _openDashboardWindow('profile'); });
 
     // Logique ?view=X — démarrer directement sur la vue demandée si param URL.
     // Permet à dialog.html d'ouvrir popup.html?view=profil et de tomber
