@@ -89,7 +89,15 @@ try:
         get_current_user_id as _get_current_user_id,
         require_user,
     )
-except ImportError:
+except ImportError as _import_err:
+    # Audit Pass 9 — log explicite : ce fallback fait perdre l'isolation
+    # multi-tenant (caches deviennent dicts globaux partagés). Toléré en
+    # mono-user dev mais DANGEREUX en SaaS : log.error pour visibilité.
+    import logging as _logging
+    _logging.getLogger('easymail.v1').error(
+        f"[multi-tenant] Import user_scoped_cache/user_context ÉCHOUÉ ({_import_err}) "
+        f"— caches dégradés en dicts globaux. Risque fuite cross-user en SaaS !"
+    )
     _get_user_cache = None
     _UserScopedDict = None
     _iter_user_caches = None
@@ -472,15 +480,88 @@ def _normalize_email(email: str) -> str:
 # on ajoute un cache à purger plus tard. Centralisation.
 # Note : ne purge PAS le cache DB email_cache (laissé aux call-sites qui
 # en ont besoin via _db.purge_email_cache_for).
+# STAND-BY S4+S5 — helper centralisé pour la normalisation greeting/closing.
+# Avant : 2 blocs ~30 lignes dupliqués (zone preemptive cache hit + zone
+# génération normale dans generate_reply, plus en partie dans _start_speculative).
+# Toute modification d'une garde devait être répliquée 2-3 fois → risque de
+# divergence (déjà observé Pass 7 : un site avait split()[0] non gardé alors
+# que les 2 autres l'étaient).
+def _normalize_reply_greeting_closing(contact_profile, correspondent_email, user_name_setting):
+    """Calcule (greeting, closing) avec toutes les gardes :
+
+    - charge depuis contact_profile si présent
+    - garde anti-confusion : remplace si greeting contient le nom user
+    - garde anti-anglicisme FR : remplace si commence par hello/hi/hey
+    - fallback greeting : extrait prénom depuis local part email
+    - fallback closing : "Cordialement,"
+
+    Toutes les sorties .split()[0] sont gardées (Pass 7) : si la liste est vide,
+    fallback "Bonjour,".
+    """
+    greeting = ''
+    closing = ''
+    if contact_profile:
+        greeting = (contact_profile.get('greeting') or '').strip()
+        closing = (contact_profile.get('closing') or '').strip()
+        # Garde anti-confusion : si greeting contient le nom user, reset
+        if user_name_setting:
+            _user_parts = user_name_setting.split()
+            _user_last = _user_parts[-1].lower() if _user_parts else ''
+            if _user_last and len(_user_last) >= 3 and _user_last in greeting.lower():
+                _prn_parts = (contact_profile.get('display_name') or '').split()
+                _prn = _prn_parts[0] if _prn_parts else ''
+                greeting = f"Bonjour {_prn}," if _prn else "Bonjour,"
+        # Garde anti-anglicisme FR
+        if (contact_profile.get('language', 'fr') == 'fr'
+                and any(greeting.lower().startswith(x) for x in ('hello', 'hi ', 'hey '))):
+            _prn_parts = (contact_profile.get('display_name') or '').split()
+            _prn = _prn_parts[0] if _prn_parts else ''
+            greeting = f"Bonjour {_prn}," if _prn else "Bonjour,"
+    # Fallbacks
+    if not greeting:
+        if correspondent_email:
+            # Garde anti-IndexError sur emails malformés (.@x.com, -@x.com)
+            _local_parts = (correspondent_email.split('@')[0]
+                            .replace('.', ' ').replace('-', ' ').title().split())
+            _local = _local_parts[0] if _local_parts else ''
+            greeting = f"Bonjour {_local}," if _local and len(_local) > 2 else "Bonjour,"
+        else:
+            greeting = "Bonjour,"
+    if not closing:
+        closing = "Cordialement,"
+    return greeting, closing
+
+
 def _purge_message_caches(message_id):
-    """Purge _reply_cache + _prefetch_cache pour un message_id (thread-safe).
-    Sites visés : api_classify_email, api_send_reply, _event_purge_mail."""
+    """Purge tous les caches contenant le message_id (thread-safe).
+
+    Audit Pass 9 : étendu pour couvrir _mail_preview_cache + _post_send_cache
+    (avant : seulement _reply_cache + _prefetch_cache → incohérence si user
+    supprime/classe un mail, les autres caches conservaient des données stale).
+
+    Sites visés : api_classify_email, api_send_reply, _event_purge_mail.
+    Best-effort : ignore les caches non encore définis (lazy init au boot).
+    """
     if not message_id:
         return
     with _reply_lock:
         _reply_cache.pop(message_id, None)
     with _prefetch_lock:
         _prefetch_cache.pop(message_id, None)
+    # Mail preview (résumé pré-calculé)
+    try:
+        with _mail_preview_lock:
+            _mail_preview_cache.pop(message_id, None)
+    except NameError:
+        pass  # cache pas encore défini (purge appelée tôt)
+    # Post-send cache (3 clés par message_id)
+    try:
+        with _post_send_lock:
+            for _prefix in ('body_', 'subject_', 'from_'):
+                _post_send_cache.pop(_prefix + message_id, None)
+                _post_send_timestamps.pop(_prefix + message_id, None)
+    except NameError:
+        pass
 
 
 # 29/04 PM audit constantes #29 — status caches en classe (rétro-compat
@@ -1100,8 +1181,46 @@ _preload_activity_lock = threading.Lock() # Audit : protège _preload_last_activ
 #
 # Phase A = setup NO-OP : les Events sont créés mais pas encore utilisés.
 # L'état global reste identique à avant. Activation en Phase B/C.
-_bodies_enriched = threading.Event()      # set par _run_prefetch après A+B
-_c_context_ready = threading.Event()      # set par _run_prefetch après C
+_bodies_enriched = threading.Event()      # set par _run_prefetch après A+B (legacy, fallback)
+_c_context_ready = threading.Event()      # set par _run_prefetch après C (legacy, fallback)
+
+# STAND-BY S6 — Events PER-MAIL pour éviter contamination cross-mail.
+# Avant : 2 Events globaux partagés par tous les mails → si user ouvre A puis B
+# rapidement, le .set() pour B réveille le .wait() de A → context A potentiellement
+# pollué par contexte B. Guard anti-contamination post-wait existant mais coûteux
+# (re-poll de _prefetch_cache).
+# Après : dict cache_key → {'bodies_enriched': Event, 'c_context_ready': Event}.
+# Chaque mail a sa paire d'Events propre, pas de contamination possible.
+# TTL 5 min via cleanup à la création (drop entries trop vieilles).
+_per_mail_events = {}
+_per_mail_events_lock = threading.Lock()
+_PER_MAIL_EVENTS_TTL = 300  # 5 minutes
+
+def _get_mail_events(cache_key):
+    """Retourne le dict d'Events pour ce cache_key (créé à la demande, thread-safe).
+
+    Returns: {'bodies_enriched': Event, 'c_context_ready': Event, 'ts': float}
+    """
+    if not cache_key:
+        # Fallback legacy : globaux partagés pour les sites qui n'ont pas de cache_key
+        return {'bodies_enriched': _bodies_enriched, 'c_context_ready': _c_context_ready, 'ts': 0}
+    with _per_mail_events_lock:
+        # Cleanup TTL : drop les entries trop vieilles (libère RAM)
+        _now = time.time()
+        _stale = [k for k, v in _per_mail_events.items()
+                  if _now - v.get('ts', 0) > _PER_MAIL_EVENTS_TTL]
+        for k in _stale:
+            _per_mail_events.pop(k, None)
+        # Get or create
+        if cache_key not in _per_mail_events:
+            _per_mail_events[cache_key] = {
+                'bodies_enriched': threading.Event(),
+                'c_context_ready': threading.Event(),
+                'ts': _now,
+            }
+        else:
+            _per_mail_events[cache_key]['ts'] = _now  # refresh TTL
+        return _per_mail_events[cache_key]
 
 # Option A (24/04) — Sémaphore limitant la concurrence des appels LLM
 # spéculatifs (provider-agnostique : Claude aujourd'hui, potentiellement
@@ -2812,6 +2931,14 @@ threading.Thread(target=_continuous_speculation_loop, daemon=True, name='cont-sp
 
 
 
+# Audit Pass 9 — sérialisation des écritures drafts_v2.json.
+# 7 sites appellent _persist_reply_cache() en thread daemon → 7 threads
+# concurrents partagent le même nom de tmp file (`_DRAFTS_CACHE_PATH+'.tmp'`)
+# → race os.replace() : un thread peut tenter de replace un tmp déjà replacé
+# par un autre → FileNotFoundError + perte de l'écriture en cours.
+_persist_lock = threading.Lock()
+
+
 def _persist_reply_cache():
     """Sauvegarde le cache réponse sur disque (drafts_v2.json).
 
@@ -2838,7 +2965,15 @@ def _persist_reply_cache():
 
     Appelé à l'exit + après save_draft + après chaque bg_speculation générée.
     Purge à la lecture (_load_reply_cache) via safety net 4 semaines.
+
+    Audit Pass 9 — _persist_lock sérialise les 7 sites appelants pour éviter
+    la race tmp file partagée (cf. commentaire ci-dessus).
     """
+    # Acquisition non-bloquante : si un autre thread est déjà en train d'écrire,
+    # on skip (la prochaine écriture incluera nos modifs récentes anyway).
+    if not _persist_lock.acquire(blocking=False):
+        logger.debug("[reply_cache] Persist déjà en cours, skip (autre thread l'effectue)")
+        return
     try:
         # Étape 7 — Iterate sur tous les users qui ont des entrées dans le cache.
         # En mono-user (Yvan seul, BG threads), tout est dans 'default'.
@@ -2897,6 +3032,8 @@ def _persist_reply_cache():
             logger.info("[reply_cache] Persist 0 entrée (cache vide)")
     except Exception as e:
         logger.warning(f"[reply_cache] Échec persist : {e}")
+    finally:
+        _persist_lock.release()
 
 
 def _load_reply_cache():
@@ -3323,14 +3460,33 @@ def _poll_companion_loop():
 threading.Thread(target=_poll_companion_loop, daemon=True).start()
 
 
+# STAND-BY S7 — Détection clients SSE orphelins.
+# Constants : un client est considéré orphelin après N q.Full consécutifs
+# (signe que le client n'a pas consommé sa queue) ou après MAX_AGE secondes
+# sans avoir consommé un seul event.
+_SSE_ORPHAN_FULL_THRESHOLD = 3   # 3 broadcast.Full consécutifs → drop
+_SSE_MAX_AGE_SECONDS = 1800       # 30 min sans activité → drop
+
 def _broadcast_sse(event_type, data):
-    """Pousse un event à tous les clients SSE connectés."""
+    """Pousse un event à tous les clients SSE connectés.
+
+    STAND-BY S7 — détecte les clients orphelins (queue saturée plusieurs
+    broadcasts consécutifs) et les drop. Évite l'accumulation jusqu'au cap
+    MAX_CLIENTS quand un client crash sans broken pipe TCP propre.
+    """
     with _sse_lock:
-        for q in _sse_clients:
+        _to_drop = []
+        for client in _sse_clients:
             try:
-                q.put_nowait({'type': event_type, 'data': data})
+                client['q'].put_nowait({'type': event_type, 'data': data})
+                client['full_count'] = 0  # reset si l'event passe
             except _queue.Full:
-                pass  # Client lent, on skip
+                client['full_count'] = client.get('full_count', 0) + 1
+                if client['full_count'] >= _SSE_ORPHAN_FULL_THRESHOLD:
+                    _to_drop.append(client)
+        for client in _to_drop:
+            _sse_clients.remove(client)
+            logger.info(f"[sse] orphan client drop ({_SSE_ORPHAN_FULL_THRESHOLD} Full consécutifs)")
 
 
 # --- SSE endpoint (O3) ------------------------------------------------------
@@ -3348,36 +3504,41 @@ def sse_stream():
              speculative_ready, speculative_chunk
     """
     q = _queue.Queue(maxsize=100)
+    # STAND-BY S7 — wrapping en dict pour tracker last_seen + full_count.
+    client = {'q': q, 'created_at': time.time(), 'last_seen': time.time(), 'full_count': 0}
     with _sse_lock:
         # Garde-fou : si on dépasse le cap, on drop le plus ancien client
         # (probablement orphelin dont le broken pipe n'a pas été détecté).
         if len(_sse_clients) >= _SSE_MAX_CLIENTS:
             _dropped = _sse_clients.pop(0)
             logger.warning(f"[sse] cap {_SSE_MAX_CLIENTS} atteint — drop oldest client (probablement orphelin)")
-        _sse_clients.append(q)
+        _sse_clients.append(client)
 
     def generate():
         try:
             while True:
                 try:
                     event = q.get(timeout=30)
+                    client['last_seen'] = time.time()
                     try:
                         yield f"event: {event['type']}\ndata: {json.dumps(event['data'])}\n\n"
                     except (TypeError, ValueError) as je:
                         logger.warning(f"SSE serialize error: {je}")
                         yield f"event: {event.get('type', 'error')}\ndata: {{}}\n\n"
                 except _queue.Empty:
-                    # (B14) Heartbeat pour maintenir la connexion, puis reprend la boucle
+                    # (B14) Heartbeat pour maintenir la connexion, puis reprend la boucle.
+                    # STAND-BY S7 — drop si trop ancien sans activité (orphelin silencieux).
+                    if time.time() - client['last_seen'] > _SSE_MAX_AGE_SECONDS:
+                        logger.info(f"[sse] orphan client drop (idle > {_SSE_MAX_AGE_SECONDS}s)")
+                        return  # Quitte le générateur → trigger le finally cleanup
                     yield "event: heartbeat\ndata: {}\n\n"
+                    client['last_seen'] = time.time()  # heartbeat = activité réseau
         except GeneratorExit:
             pass
         finally:
             with _sse_lock:
-                if q in _sse_clients:
-                    _sse_clients.remove(q)
-
-    return Response(stream_with_context(generate()), content_type='text/event-stream',
-                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+                if client in _sse_clients:
+                    _sse_clients.remove(client)
 
 
 # --- Debug log add-in (diagnostic comportement côté serveur) -----------------
@@ -3728,8 +3889,10 @@ def _handle_graph_webhook_notifications(message_ids):
             # Construire mail_data au format attendu par _run_prefetch
             from_obj = msg.get('from') or {}
             from_addr = from_obj.get('emailAddress') if isinstance(from_obj, dict) else {}
+            # I-DATA-13 : prioriser internet_message_id (RFC 2822) sur l'OData id
+            # Graph (cohérence avec le reste du pipeline qui clé sur IMID).
             mail_data = {
-                'message_id': msg.get('id', ''),
+                'message_id': msg.get('internetMessageId') or msg.get('id', ''),
                 'internet_message_id': msg.get('internetMessageId', ''),
                 'subject': msg.get('subject', ''),
                 'from_email': (from_addr.get('address', '') if isinstance(from_addr, dict) else '').lower(),
@@ -4116,6 +4279,10 @@ def _run_prefetch(mail_data):
     if existing_status == 'done':
         _bodies_enriched.set()
         _c_context_ready.set()
+        # STAND-BY S6 — set per-mail aussi pour les waiters spécifiques
+        _ev_done = _get_mail_events(cache_key)
+        _ev_done['bodies_enriched'].set()
+        _ev_done['c_context_ready'].set()
         # Fix root-cause I-CX-01 (24/04 P5) : prefetch 'done' ≠ draft généré.
         # La boucle BG envoie ces mails ici car _reply_cache ne les a pas,
         # mais le `return` précédent skippait _start_speculative → 0 drafts.
@@ -4169,8 +4336,15 @@ def _run_prefetch(mail_data):
     # Phase B (21/04) — Reset des Events de synchronisation pour ce prefetch.
     # Ces Events seront signalés (.set()) au fur et à mesure que les contextes
     # A/B/C sont prêts. Ils réveillent _start_speculative() qui attend en .wait().
-    # Contamination multi-mail : gérée par le guard anti-contamination post-wait
-    # dans _start_speculative() qui re-vérifie _prefetch_cache[cache_key]['status'].
+    #
+    # STAND-BY S6 — Events PER-MAIL : chaque cache_key a sa propre paire
+    # d'Events (au lieu de globaux). Plus de contamination cross-mail possible.
+    # Les .set() globaux restent en parallèle pour rétrocompat (callers legacy
+    # qui ne passent pas par _get_mail_events).
+    _mail_events = _get_mail_events(cache_key)
+    _mail_events['bodies_enriched'].clear()
+    _mail_events['c_context_ready'].clear()
+    # Legacy globaux (rétrocompat avec sites non encore migrés)
     _bodies_enriched.clear()
     _c_context_ready.clear()
 
@@ -4227,6 +4401,7 @@ def _run_prefetch(mail_data):
                 # la spéculation partira avec context_c vide (graceful
                 # degradation).
                 _c_context_ready.set()
+                _mail_events['c_context_ready'].set()  # STAND-BY S6 per-mail
             finally:
                 pool.shutdown(wait=False)  # Ne pas bloquer — les threads non-annulables se terminent seuls
 
@@ -4242,6 +4417,7 @@ def _run_prefetch(mail_data):
             # immédiatement sans attendre C. Gain principal : −14 s sur
             # spéculation pour les mails de contacts connus.
             _bodies_enriched.set()
+            _mail_events['bodies_enriched'].set()  # STAND-BY S6 per-mail
             logger.info(f"[prefetch] Bodies A+B prêts en {time.time()-_t_prefetch_start:.2f}s pour {(message_id or cache_key)[:20]}")
 
             _broadcast_sse('prefetch_progress', {'a': len(context_a), 'b': len(context_b), 'c': len(context_c)})
@@ -4267,6 +4443,7 @@ def _run_prefetch(mail_data):
                         pass
                     # Phase B (21/04) — Mode Dégradé : signal bodies après B
                     _bodies_enriched.set()
+                    _mail_events['bodies_enriched'].set()  # STAND-BY S6 per-mail
                     if fc:
                         try:
                             context_c = fc.result(timeout=TIMEOUT_PREFETCH_FUTURE) or []
@@ -4275,6 +4452,7 @@ def _run_prefetch(mail_data):
                     # Phase B (21/04) — Mode Dégradé : signal C prêt (même si
                     # pas de keywords ou échec). Évite deadlock côté speculative.
                     _c_context_ready.set()
+                    _mail_events['c_context_ready'].set()  # STAND-BY S6 per-mail
                 _broadcast_sse('prefetch_progress', {'a': 0, 'b': len(context_b), 'c': len(context_c)})
             except Exception as e:
                 logger.warning(f"Prefetch Companion error: {e}")
@@ -4372,6 +4550,13 @@ def _run_prefetch(mail_data):
         # via _prefetch_cache[key]['status'] == 'error' et s'arrêtera proprement.
         _bodies_enriched.set()
         _c_context_ready.set()
+        # STAND-BY S6 — set per-mail aussi (safety net waiters spécifiques)
+        try:
+            _ev_err = _get_mail_events(cache_key)
+            _ev_err['bodies_enriched'].set()
+            _ev_err['c_context_ready'].set()
+        except Exception:
+            pass  # cache_key peut être indéfini si erreur très tôt
 
 
 def _prefetch_context_a(graph, conversation_id):
@@ -5008,14 +5193,16 @@ def _start_speculative(mail_data):
         # Avant : polling à pas de 300 ms, au mieux T+0,9 s, au pire T+25 s si
         # _start_speculative démarrait juste après un tick de polling.
         #
-        # Contamination multi-mail (Events globaux) : un autre _run_prefetch()
-        # peut avoir set le signal avant notre prefetch. Le guard anti-
-        # contamination post-wait (boucle 5×200 ms) re-vérifie que NOTRE
-        # cache_key a bien son prefetch 'done' ou 'error'.
+        # STAND-BY S6 — Events PER-MAIL : on attend désormais les Events
+        # spécifiques à ce cache_key, plus les globaux comme contamination
+        # est impossible avec events propres au mail. Le guard polling
+        # reste pour gérer le cas où _run_prefetch n'a pas encore créé
+        # l'entry _per_mail_events (race startup).
         _t_wait_start = time.time()
+        _spec_events = _get_mail_events(cache_key)
 
-        # --- Wait 1 : bodies A+B enrichis ---
-        _bodies_enriched.wait(timeout=15)
+        # --- Wait 1 : bodies A+B enrichis (per-mail prioritaire, global fallback) ---
+        _spec_events['bodies_enriched'].wait(timeout=15)
 
         # Guard anti-contamination : polling court pour valider que c'est bien
         # NOTRE mail qui a vu son prefetch aboutir. 5×200 ms = 1 s max.
@@ -5030,9 +5217,9 @@ def _start_speculative(mail_data):
                 break
             time.sleep(0.2)
 
-        # --- Wait 2 : contexte C prêt ---
+        # --- Wait 2 : contexte C prêt (per-mail prioritaire) ---
         # Plus court car C arrive souvent dans la foulée de A+B (parallèle).
-        _c_context_ready.wait(timeout=10)
+        _spec_events['c_context_ready'].wait(timeout=10)
 
         # Check final annulation
         with _reply_lock:
@@ -8994,10 +9181,12 @@ def generate_reply():
             if cached.get('status') == 'done' and cached.get('chunks'):
                 cached_chunks = list(cached['chunks'])      # copie locale (thread-safe)
                 cached_text = cached.get('text', '')        # copie locale
+                cache_age = time.time() - cached.get('ts', time.time())
                 _reply_cache.pop(message_id, None)     # consommé → pop immédiat
             else:
                 cached_chunks = None
                 cached_text = ''
+                cache_age = 0.0
         if cached_chunks:
             logger.info(f"Cache préemptif HIT pour {message_id[:20]} (age={cache_age:.0f}s)")
             # Nettoyer aussi le prefetch_cache (contexte A/B/C déjà consommé par la spéculation)
@@ -9008,30 +9197,10 @@ def generate_reply():
             _preemptive_from = cached.get('contact', '')
             _preemptive_imp = cached.get('importance', 'S')
             _preemptive_cp = _db.get_contact_profile(_preemptive_from) if _preemptive_from else None
-            _preemptive_greeting = ''
-            _preemptive_closing = ''
-            if _preemptive_cp:
-                _preemptive_greeting = (_preemptive_cp.get('greeting') or '').strip()
-                _preemptive_closing = (_preemptive_cp.get('closing') or '').strip()
-                _user_name_chk = _db.get_setting('user_name', '')
-                if _user_name_chk:
-                    _last = _user_name_chk.split()[-1].lower()
-                    if _last and len(_last) >= 3 and _last in _preemptive_greeting.lower():
-                        _prn = (_preemptive_cp.get('display_name') or '').split()[0]
-                        _preemptive_greeting = f"Bonjour {_prn}," if _prn else "Bonjour,"
-                if (_preemptive_cp.get('language', 'fr') == 'fr'
-                        and any(_preemptive_greeting.lower().startswith(x) for x in ('hello', 'hi ', 'hey '))):
-                    _prn = (_preemptive_cp.get('display_name') or '').split()[0]
-                    _preemptive_greeting = f"Bonjour {_prn}," if _prn else "Bonjour,"
-            if not _preemptive_greeting:
-                if _preemptive_from:
-                    _local = (_preemptive_from.split('@')[0]
-                              .replace('.', ' ').replace('-', ' ').title().split()[0])
-                    _preemptive_greeting = f"Bonjour {_local}," if _local and len(_local) > 2 else "Bonjour,"
-                else:
-                    _preemptive_greeting = "Bonjour,"
-            if not _preemptive_closing:
-                _preemptive_closing = "Cordialement,"
+            # STAND-BY S4 — helper centralisé (avant : ~30 lignes dupliquées)
+            _preemptive_greeting, _preemptive_closing = _normalize_reply_greeting_closing(
+                _preemptive_cp, _preemptive_from, _db.get_setting('user_name', '')
+            )
             # PLUS_TARD_VF #3 (28/04) — signature résolue par contact
             # (override par contact_profile sinon settings.user_name).
             _preemptive_sig = _resolve_user_signature(_preemptive_cp,
@@ -9294,12 +9463,17 @@ def generate_reply():
                     desc = ech.get('description', '')
                     etype = ech.get('type', '')
                     try:
-                        days_left = (datetime.strptime(date_e, "%Y-%m-%d") - datetime.now()).days
+                        # Off-by-one fix (audit Pass 8) : date_e parsée à 00:00:00,
+                        # datetime.now() à HH:MM en cours → comparaison sur date()
+                        # uniquement pour des jours-calendaires propres.
+                        _date_target = datetime.strptime(date_e, "%Y-%m-%d").date()
+                        days_left = (_date_target - datetime.now().date()).days
                         if days_left < 0:
                             statut_str = "DEPASSEE"
                         elif days_left == 0:
                             statut_str = "AUJOURD'HUI"
                         elif days_left <= 3:
+                            # Garde anti-pluriel négatif : days_left est >0 ici (branche elif)
                             statut_str = f"dans {days_left} jour{'s' if days_left > 1 else ''}"
                         else:
                             statut_str = f"dans {days_left} jours"
@@ -9389,41 +9563,13 @@ INSTRUCTIONS ECHEANCES :
 
     # --- 12l : Pré-injection greeting / closing / signature ---
     # correspondent déjà défini plus haut (to_email si forward, sinon from_email)
-    greeting = ''
-    closing = ''
+    user_name = _db.get_setting('user_name', '')
+    # STAND-BY S4 — helper centralisé (avant : ~30 lignes dupliquées avec preemptive)
+    greeting, closing = _normalize_reply_greeting_closing(
+        contact_profile, correspondent, user_name
+    )
     signature = ''
 
-    if contact_profile:
-        cp = contact_profile
-        greeting = (cp.get('greeting') or '').strip()
-        closing = (cp.get('closing') or '').strip()
-
-        # Garde anti-confusion : si le greeting contient le nom de l'utilisateur, le corriger
-        user_name = _db.get_setting('user_name', '')
-        if user_name:
-            user_last = user_name.split()[-1].lower() if user_name else ''
-            if user_last and len(user_last) >= 3 and user_last in greeting.lower():
-                # Le greeting contient le nom de l'utilisateur au lieu du correspondant
-                prenom = cp.get('display_name', '').split()[0] if cp.get('display_name') else ''
-                greeting = f"Bonjour {prenom}," if prenom else "Bonjour,"
-
-        # Garde anti-anglicisme pour les contacts FR
-        if cp.get('language', 'fr') == 'fr' and any(greeting.lower().startswith(x) for x in ('hello', 'hi ', 'hey ')):
-            prenom = cp.get('display_name', '').split()[0] if cp.get('display_name') else ''
-            greeting = f"Bonjour {prenom}," if prenom else "Bonjour,"
-
-    # Fallbacks
-    if not greeting:
-        if correspondent:
-            # Essayer d'extraire le prénom de l'email
-            local = correspondent.split('@')[0].replace('.', ' ').replace('-', ' ').title().split()[0]
-            greeting = f"Bonjour {local}," if local and len(local) > 2 else "Bonjour,"
-        else:
-            greeting = "Bonjour,"
-    if not closing:
-        closing = "Cordialement,"
-
-    user_name = _db.get_setting('user_name', '')
     # PLUS_TARD_VF #3 (28/04) — signature résolue par contact (override si profil
     # le précise, sinon fallback `settings.user_name`). Utilisée pour le rendu
     # final ; `user_name` reste pour les gardes anti-self-greeting (patronyme).
@@ -9642,6 +9788,12 @@ def refine_reply():
 
     if not current_reply or not instruction:
         return jsonify({"error": "current_reply et instruction requis"}), 400
+
+    # Audit Pass 9 — garde forward défensive backend : si user efface le champ
+    # "À" en mode forward avant cliquer Refine, le frontend devrait bloquer
+    # mais on ajoute une validation serveur pour cohérence avec generate_reply.
+    if data.get('mode') == 'forward' and not data.get('to_email', '').strip():
+        return jsonify({"error": "to_email requis en mode forward"}), 400
 
     ai = get_ai()
     if not ai:
@@ -10207,7 +10359,7 @@ def api_classification_post_send(message_id):
                     _cache_set(cache_key, None)
                     return
 
-                folders = graph.get_all_folders()
+                folders = graph.get_all_folders() or []
                 folder_tree = '\n'.join([
                     f"{'  ' * f.get('depth', 0)}{f.get('name', '')} ({f.get('id', '')})"
                     for f in folders[:100]
@@ -10381,10 +10533,12 @@ def api_post_send():
     _cache_cleanup()
 
     # Stocker les données du mail pour les workflows post-envoi (12i)
+    # Utiliser _cache_set() pour acquérir le lock + tracker le timestamp TTL
+    # (sinon ces 3 entrées échappent au cleanup _cache_cleanup()).
     if message_id:
-        _post_send_cache[f'body_{message_id}'] = received_body or body[:2000]
-        _post_send_cache[f'subject_{message_id}'] = subject
-        _post_send_cache[f'from_{message_id}'] = from_email
+        _cache_set(f'body_{message_id}', received_body or body[:2000])
+        _cache_set(f'subject_{message_id}', subject)
+        _cache_set(f'from_{message_id}', from_email)
 
     errors = []
 
