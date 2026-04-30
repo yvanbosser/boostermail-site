@@ -101,8 +101,12 @@ class OpenAIProvider(AIProvider):
                     stream=True
                 )
                 for chunk in response:
+                    # Garde anti-IndexError : chunks intermédiaires peuvent avoir choices=[]
+                    # (ex: chunk de role uniquement, ou rate_limit meta-chunk).
+                    if not chunk.choices:
+                        continue
                     delta = chunk.choices[0].delta
-                    if delta.content:
+                    if delta and delta.content:
                         has_yielded = True
                         yield delta.content
                 return  # Succès
@@ -137,7 +141,12 @@ class OpenAIProvider(AIProvider):
                     ],
                     stream=False
                 )
-                return response.choices[0].message.content
+                # Garde anti-IndexError/AttributeError : choices=[] ou content=None possibles
+                if response.choices:
+                    msg = response.choices[0].message
+                    return msg.content if msg.content else ''
+                logger.warning("OpenAI API a renvoyé choices=[] (filtre ou erreur)")
+                return ''
             except Exception as e:
                 err_str = str(e).lower()
                 if ('rate' in err_str or 'overloaded' in err_str) and attempt < 2:

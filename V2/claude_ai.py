@@ -230,7 +230,11 @@ class ClaudeAssistant:
                     ]
                 }]
             )
-            return response.content[0].text.strip()
+            # Garde anti-IndexError : content peut être vide (refus OCR)
+            if response.content:
+                return response.content[0].text.strip()
+            logger.warning(f"[ocr] Vision page {page_num} : content vide")
+            return ''
         except Exception as e:
             logger.warning(f"[ocr] Erreur Vision page {page_num}: {e}")
             return ''
@@ -260,7 +264,11 @@ class ClaudeAssistant:
                 max_tokens=8000,
                 messages=[{"role": "user", "content": content}]
             )
-            return response.content[0].text.strip()
+            # Garde anti-IndexError : content peut être vide
+            if response.content:
+                return response.content[0].text.strip()
+            logger.warning(f"[ocr] Vision multi ({len(pages_base64)} pages) : content vide")
+            return ''
         except Exception as e:
             logger.error(f"[ocr] Erreur Vision multi ({len(pages_base64)} pages): {e}")
             return ''
@@ -335,10 +343,15 @@ class ClaudeAssistant:
         # Utiliser le display_name du profil contact s'il existe, sinon parser l'email
         if contact_profile and contact_profile.get('display_name'):
             _contact_display = contact_profile['display_name']
-        elif to_email and _raw_local.split()[0] not in _SERVICE_PREFIXES:
-            _contact_display = to_email.split('@')[0].replace('.', ' ').title()
         else:
-            _contact_display = "correspondant"
+            # Garde anti-IndexError : si to_email='@x.com' ou contient que des
+            # caractères supprimés par replace, _raw_local devient '' → split() vide.
+            _raw_parts = _raw_local.split()
+            _raw_first = _raw_parts[0] if _raw_parts else ''
+            if to_email and _raw_first and _raw_first not in _SERVICE_PREFIXES:
+                _contact_display = to_email.split('@')[0].replace('.', ' ').title()
+            else:
+                _contact_display = "correspondant"
         cp = None  # Initialisé ici pour éviter UnboundLocalError
         if contact_profile and contact_profile.get('profile_text'):
             cp = contact_profile

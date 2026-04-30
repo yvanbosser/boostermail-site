@@ -155,7 +155,12 @@ class ClaudeProvider(AIProvider):
                     f"cache_read={getattr(usage, 'cache_read_input_tokens', 0)} "
                     f"out={usage.output_tokens}"
                 )
-                return response.content[0].text
+                # Garde anti-IndexError : Anthropic peut renvoyer content=[]
+                # sur refus / réponse vide (rare mais possible).
+                if response.content:
+                    return response.content[0].text
+                logger.warning("Claude API a renvoyé content=[] (refus ou réponse vide)")
+                return ''
             except Exception as e:
                 last_error = e
                 if 'overloaded' in str(e).lower() and attempt < 2:
@@ -201,7 +206,11 @@ class ClaudeProvider(AIProvider):
                         ]
                     }]
                 )
-                return response.content[0].text.strip()
+                # Garde anti-IndexError : content peut être vide (refus OCR, page illisible)
+                if response.content:
+                    return response.content[0].text.strip()
+                logger.warning(f"OCR Vision page {page_num} : content vide")
+                return ''
             except Exception as e:
                 if 'overloaded' in str(e).lower() and attempt < 2:
                     time.sleep(2 * (attempt + 1))
@@ -237,7 +246,11 @@ class ClaudeProvider(AIProvider):
                     max_tokens=8000,
                     messages=[{"role": "user", "content": content}]
                 )
-                return response.content[0].text.strip()
+                # Garde anti-IndexError : content peut être vide
+                if response.content:
+                    return response.content[0].text.strip()
+                logger.warning(f"OCR Vision multi ({len(pages_base64)} pages) : content vide")
+                return ''
             except Exception as e:
                 if 'overloaded' in str(e).lower() and attempt < 2:
                     time.sleep(2 * (attempt + 1))
