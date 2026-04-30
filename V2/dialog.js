@@ -2120,6 +2120,13 @@ function _fetchGenerateReply(body) {
                             var last = JSON.parse(_lineBuffer.substring(6));
                             if (last.chunk) {
                                 if (_progressPlaceholderActive) _clearProgressPlaceholder();
+                                // Fix 30/04 PM — même garde anti-doublon que dans
+                                // le path read() normal (cas SSE court qui termine
+                                // entièrement en 1 read).
+                                if (streamedText === '') {
+                                    editor.innerHTML = '';
+                                    _progressPlaceholderActive = false;
+                                }
                                 editor.insertAdjacentText('beforeend', last.chunk);
                                 streamedText += last.chunk;
                             }
@@ -2140,6 +2147,18 @@ function _fetchGenerateReply(body) {
                             if (data.chunk) {
                                 // Placeholder → supprimé juste avant le 1er chunk
                                 if (_progressPlaceholderActive) _clearProgressPlaceholder();
+                                // Fix 30/04 PM (signal Yvan : doublon "Bonjour Stéphane"
+                                // + signature 2× quand re-génération sur mail avec draft
+                                // user_edit existant). Garde anti-doublon : au 1er chunk
+                                // de la génération, on s'assure que l'editor est vide
+                                // (clear hard, indépendant du placeholder flag). Couvre
+                                // les cas où instant_reply a pré-rempli l'editor avec
+                                // un draft, où le placeholder a été remplacé hors flow,
+                                // ou toute race DOM/flag non détectée.
+                                if (streamedText === '') {
+                                    editor.innerHTML = '';
+                                    _progressPlaceholderActive = false;
+                                }
                                 spinner.classList.remove('active');
                                 document.getElementById('headerStatus').textContent = 'Generation en cours...';
                                 editor.insertAdjacentText('beforeend', data.chunk);
