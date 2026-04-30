@@ -275,6 +275,11 @@ def create_auth_blueprint(auth_provider_factory) -> Blueprint:
             return jsonify({'error': 'Code d\'autorisation manquant'}), 400
 
         try:
+            # STAND-BY S1 — passer le state au provider pour lookup race-safe
+            # du pending_flow (multi-user simultané OK).
+            user_info = provider.exchange_code(code, state=state)
+        except TypeError:
+            # Backward-compat : provider sans support state (legacy)
             user_info = provider.exchange_code(code)
         except Exception as e:
             return_url = session.pop('auth_return_url', '/plugin/dialog.html')

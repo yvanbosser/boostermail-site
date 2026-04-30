@@ -16,6 +16,8 @@ NE JAMAIS MODIFIER app.py, claude_ai.py, outlook_com.py, templates/.
 
 import json
 import logging
+import threading
+import time
 
 import msal
 import requests
@@ -120,6 +122,10 @@ class MicrosoftAuthProvider(AuthProvider):
         """
         Construit l'URL de redirection vers Microsoft login.
         Multi-tenant ('common') → supporte tous les tenants M365 + comptes perso.
+
+        STAND-BY S1 — stockage du flow dans un dict indexé par state au lieu
+        d'un attribut d'instance partagé. Permet 2+ users en flow OAuth
+        simultané sans race condition (chacun a son state unique).
         """
         # Filtrer offline_access des scopes MSAL (il est demandé implicitement par MSAL)
         api_scopes = [s for s in self._scopes if s != 'offline_access']
@@ -130,28 +136,53 @@ class MicrosoftAuthProvider(AuthProvider):
             state=state,
         )
 
-        # Stocker le flow pour le callback (MSAL en a besoin)
-        # On le stocke dans le cache MSAL lui-même (sérialisé en DB)
-        self._pending_flow = flow
-        # Note : en multi-instance, il faudrait stocker ça en session ou Redis.
-        # En mono-instance dev, c'est OK.
+        # STAND-BY S1 — dict state-keyed avec lock + TTL via timestamp.
+        # Le state est unique par tentative (généré dans /auth/login via
+        # secrets.token_urlsafe), donc clé naturelle pour distinguer flows.
+        if not hasattr(self.__class__, '_pending_flows'):
+            self.__class__._pending_flows = {}
+            self.__class__._pending_flows_lock = threading.Lock()
+        with self.__class__._pending_flows_lock:
+            # Cleanup défensif : drop les flows > 10 min (TTL de l'auth_uri MSAL)
+            _now = time.time()
+            _stale = [k for k, v in self.__class__._pending_flows.items()
+                      if _now - v.get('_ts', 0) > 600]
+            for k in _stale:
+                self.__class__._pending_flows.pop(k, None)
+            flow['_ts'] = _now
+            self.__class__._pending_flows[state] = flow
 
         return flow['auth_uri']
 
-    def exchange_code(self, code: str) -> dict:
+    def exchange_code(self, code: str, state: str = '') -> dict:
         """
         Échange le code d'autorisation contre des tokens via MSAL.
         Stocke les tokens dans le cache MSAL → DB chiffrée.
         Retourne {user_id, email, name}.
+
+        STAND-BY S1 — récupère le flow depuis le dict state-keyed (multi-user).
+        Le param `state` est lu par le caller depuis `request.args.get('state')`.
+        Backward-compat : si state vide, fallback sur l'ancien `_pending_flow`
+        d'instance (deprecated, gardé pour transition).
         """
-        # Utiliser le flow initié dans get_auth_url()
-        if not hasattr(self, '_pending_flow') or not self._pending_flow:
+        # STAND-BY S1 — lookup state-keyed (race-safe en multi-user)
+        flow = None
+        if state and hasattr(self.__class__, '_pending_flows'):
+            with self.__class__._pending_flows_lock:
+                flow = self.__class__._pending_flows.pop(state, None)
+                if flow:
+                    flow.pop('_ts', None)  # nettoyer le metadata
+        # Fallback legacy mono-user si state non fourni
+        if flow is None and hasattr(self, '_pending_flow') and self._pending_flow:
+            flow = self._pending_flow
+            self._pending_flow = None
+        if not flow:
             raise RuntimeError("Aucun flux d'authentification en cours. Relancez /auth/login.")
 
         # Reconstituer la réponse pour MSAL
         auth_response = {
             'code': code,
-            'state': self._pending_flow.get('state', ''),
+            'state': flow.get('state', ''),
         }
         # Ajouter tous les query params de la requête actuelle
         for key in ('session_state', 'client_info'):
@@ -160,11 +191,9 @@ class MicrosoftAuthProvider(AuthProvider):
                 auth_response[key] = val
 
         result = self._msal_app.acquire_token_by_auth_code_flow(
-            auth_code_flow=self._pending_flow,
+            auth_code_flow=flow,
             auth_response=auth_response,
         )
-
-        self._pending_flow = None  # Nettoyage
 
         if 'error' in result:
             error_desc = result.get('error_description', result['error'])
