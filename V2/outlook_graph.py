@@ -149,7 +149,13 @@ class GraphClient(EmailProvider):
 
             if resp.status_code == 429 or resp.status_code == 503:
                 # Rate limited ou service indisponible
-                retry_after = int(resp.headers.get('Retry-After', 2 ** (attempt + 1)))
+                # Garde anti-ValueError : Retry-After peut être un entier
+                # OU une date HTTP-date (RFC 7231) — int() crashe sur date.
+                _default_backoff = 2 ** (attempt + 1)
+                try:
+                    retry_after = int(resp.headers.get('Retry-After', _default_backoff))
+                except (ValueError, TypeError):
+                    retry_after = _default_backoff
                 retry_after = min(retry_after, 30)  # Cap à 30s
                 logger.warning(
                     f"Graph {resp.status_code}, retry {attempt+1}/{max_retries} "
@@ -196,14 +202,29 @@ class GraphClient(EmailProvider):
         """
         GET avec pagination automatique via @odata.nextLink.
 
+        Dedup sur ``id`` si présent : Graph peut renvoyer un même item sur 2
+        pages successives (nouveau mail arrivé pendant la pagination, ou bug
+        serveur). On garde la première occurrence.
+
         Returns:
             Liste agrégée de tous les résultats (max max_results).
         """
         results = []
+        seen_ids = set()
         while url and len(results) < max_results:
             data = self._get(url)
-            items = data.get('value', [])
-            results.extend(items)
+            items = data.get('value', []) or []
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                item_id = it.get('id')
+                if item_id:
+                    if item_id in seen_ids:
+                        continue
+                    seen_ids.add(item_id)
+                results.append(it)
+                if len(results) >= max_results:
+                    break
             url = data.get('@odata.nextLink')
         return results[:max_results]
 
