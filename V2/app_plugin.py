@@ -11025,9 +11025,22 @@ def _maybe_analyze_contact(contact_email):
     if existing:
         if existing.get('manually_edited'):
             return
-        if not _should_analyze_contact(mail_count):
+        # Fix 30/04 PM (signal Yvan : signature Yvan BOSSER au lieu de
+        # contact-spécifique pour Julien). Sample_count=0 sur un profil
+        # existant est ANORMAL — soit l'analyse précédente a silencieusement
+        # échoué (try/except qui swallow), soit le profil a été créé par
+        # un autre path (e.g., création auto au 1er mail vu sans declencher
+        # _maybe_analyze_contact). Cas observé : 3/115 profils en prod
+        # (Julien LE VU 86 mails, yvan@gmail, Ronan FOUIN). Sans rattrapage,
+        # ces profils restent dans cet état → user_signature_for_contact
+        # toujours NULL → fallback "Yvan BOSSER (Groupe Bosser)" même avec
+        # contact très familier. Force re-analyse pour rattrapage immédiat.
+        if existing.get('sample_count', 0) == 0:
+            logger.info(f"[learning] Re-analyse forcee de {contact_email} (sample_count=0 anormal, rattrapage)")
+        elif not _should_analyze_contact(mail_count):
             return
-        logger.info(f"[learning] Re-analyse de {contact_email} (mail #{mail_count})")
+        else:
+            logger.info(f"[learning] Re-analyse de {contact_email} (mail #{mail_count})")
     else:
         # Fix 24/04 : pour la PREMIÈRE analyse d'un contact SANS profil, ne
         # pas bloquer sur le schedule strict [1,2,3,4,5,7,9,13,17,25,50,...].
@@ -11041,7 +11054,14 @@ def _maybe_analyze_contact(contact_email):
             return
         logger.info(f"[learning] Premiere analyse de {contact_email} (mail #{mail_count})")
 
-    threads = _db.get_threads_with_contact(contact_email, limit=25)
+    # Fix 30/04 PM (signal Yvan) : limit 25 → 50. Le sub-agent a montré que
+    # avec limit=25, certains contacts à forte volumétrie (Julien : 86 mails)
+    # n'ont parfois aucun mail ENVOYÉ dans les 25 derniers (asymétrie reçus/
+    # envoyés). Claude ne peut alors pas extraire user_signature_for_contact.
+    # Avec limit=50 on capture plus d'historique sans alourdir le prompt
+    # (Claude reçoit toujours sent_mails[:15] + received_mails[:10] côté
+    # claude_ai.analyze_contact_profile).
+    threads = _db.get_threads_with_contact(contact_email, limit=50)
     sent_mails = [t for t in threads if t['direction'] == 'sent']
     received_mails = [t for t in threads if t['direction'] == 'received']
 
