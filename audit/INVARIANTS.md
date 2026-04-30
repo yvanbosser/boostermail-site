@@ -1,6 +1,6 @@
 # Invariants V2 — règles absolues testables
 
-> **Dernière mise à jour** : 29/04/2026 fin de journée (BoosterMail SaaS quasi beta-ready : 28 commits ce jour incluant Étape 7 multi-tenant 100%, Étape 4 BG webhooks Graph POC, welcome wizard #11+#12+#13, Auth JWT Bearer infra, saas_smoke.sh, 5 fixes logger.debug, 2 audits Pattern #17 + except: pass, 4 fixes pré-phase test #10+#11+#16+#15)
+> **Dernière mise à jour** : 30/04/2026 PM (ajout I-DB-06 conn SQLite bornées par GC zombie après incident leak FD prod 06:11 UTC — cf Pattern #21)
 > **Principe** : chaque invariant est testable mécaniquement par `smoke_test.ps1`. Une violation = anomalie, point final.
 
 ---
@@ -118,6 +118,23 @@ Clé `HKCU\Software\Microsoft\Office\16.0\Wef\Developer` contient une valeur don
 - `anthropic_api_key` non vide
 - `fernet_key` non vide
 - `user_name` présent (peut être vide mais key existe)
+
+### I-DB-06 : Conn SQLite bornées par GC zombie (cf Pattern #21)
+- **Garantie** : le nombre de conn dans `Database._all_conns` ne peut pas croître indéfiniment. Un thread BG `db-gc` (daemon, démarré paresseusement au 1er `_conn()`) tourne toutes les 60s et ferme les conn dont le TID n'est plus dans `threading.enumerate()`.
+- **Test runtime** : `sudo ls /proc/$(pgrep -f app_plugin.py | head -1)/fd | wc -l` doit rester `< 200` après 5+ min d'usage normal (vs ~1024 sans le fix avant 30/04 PM).
+- **Test fonctionnel** (couvert dans le commit `b2d2f73`) :
+  ```python
+  db = Database('test.db')
+  for _ in range(10):
+      threading.Thread(target=db._conn, daemon=True).start()
+  for t in threading.enumerate():
+      if t != threading.main_thread():
+          t.join()
+  db._gc_zombie_conns_once()
+  assert len(db._all_conns) == 1  # main thread only
+  ```
+- **Signal d'alerte** : si `_all_conns` dépasse `len(threading.enumerate()) + 5` plus de 60s, le GC est cassé ou bloqué. Vérifier `sudo journalctl -u boostermail | grep db-gc` (doit voir `closed N zombie connection(s)` régulièrement quand des threads transitoires meurent).
+- **Pattern lié** : Pattern #21 dans `audit/ANOMALIES_RECURRENTES.md`.
 
 ---
 

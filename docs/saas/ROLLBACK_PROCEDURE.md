@@ -1,7 +1,27 @@
 # Procédure rollback rapide — déploiement OVH
 
-> **Dernière mise à jour** : 30/04/2026
+> **Dernière mise à jour** : 30/04/2026 PM (ajout Cas 4 incident FD leak + note LimitNOFILE systemd)
 > **Contexte** : OVH = source de vérité unique. Workflow déploiement = scp + restart service.
+
+---
+
+## ⚡ Cas 0 — Service ne répond plus (504 / Connection Timeout)
+
+Avant tout rollback, **2 diagnostics de 30s** :
+
+```bash
+# 1. Le service est-il tombé ou juste saturé ?
+ssh ubuntu@51.178.162.208 "sudo systemctl is-active boostermail && sudo systemctl status boostermail --no-pager | head -10"
+
+# 2. FDs ouverts (cf Pattern #21 — leak FD SQLite)
+ssh ubuntu@51.178.162.208 "PID=\$(systemctl show boostermail --property=MainPID --value) && cat /proc/\$PID/limits | grep 'open files' && sudo ls /proc/\$PID/fd | wc -l"
+```
+
+| Diagnostic | Action |
+|---|---|
+| `inactive` / `failed` | Cas 1 (revert commit) ou Cas 2 (revert session) |
+| `active` mais FDs ≥ soft limit (1024 par défaut) | **Restart immédiat** : `sudo systemctl restart boostermail`. Cf Pattern #21 — vérifier que `LimitNOFILE=65535` est dans le service systemd, sinon Cas 4 |
+| `active` + logs `Errno 24 Too many open files` | **Pattern #21** — appliquer le fix db-gc (cf Cas 4) |
 
 ---
 
@@ -60,6 +80,55 @@ scp V2/core/auth_base.py V2/core/claude_provider.py V2/core/openai_provider.py \
 
 # 4. Restart
 ssh ubuntu@51.178.162.208 "sudo systemctl restart boostermail.service"
+```
+
+---
+
+## Cas 4 — Incident FD leak (Pattern #21)
+
+Si la prod sature les FDs (`Errno 24 Too many open files`, ratio db/wal handles élevé dans `/proc/PID/fd`), 2 leviers à appliquer :
+
+### 4.A — Palliatif systemd `LimitNOFILE` (immédiat, ~30s downtime)
+
+```bash
+# 1. Vérifier la valeur actuelle
+ssh ubuntu@51.178.162.208 "grep -i limitnofile /etc/systemd/system/boostermail.service || echo 'NON DEFINI (defaut systemd = 1024)'"
+
+# 2. Si non défini ou < 65535 :
+ssh ubuntu@51.178.162.208 "sudo cp /etc/systemd/system/boostermail.service /etc/systemd/system/boostermail.service.bak.\$(date +%Y%m%d_%H%M%S) && sudo sed -i '/^Restart=always/a LimitNOFILE=65535' /etc/systemd/system/boostermail.service && sudo systemctl daemon-reload && sudo systemctl restart boostermail"
+
+# 3. Vérification du Main PID
+ssh ubuntu@51.178.162.208 "PID=\$(systemctl show boostermail --property=MainPID --value) && cat /proc/\$PID/limits | grep 'open files'"
+# Doit afficher : Max open files  65535  65535  files
+```
+
+### 4.B — Fix root code (commit `b2d2f73` — déjà déployé sur master 30/04 PM)
+
+Le pattern `Database._all_conns` est passé de `list[conn]` à `dict[tid, conn]` + thread BG `db-gc` daemon (60s) qui ferme les conn des threads zombies. Si le fix doit être **revertd** (faux positif, régression observée) :
+
+```bash
+# Local — revert le commit
+cd /c/EasyMail
+git revert b2d2f73 --no-edit
+
+# Push fichier sur OVH
+scp V2/database.py ubuntu@51.178.162.208:/tmp/database.py
+ssh ubuntu@51.178.162.208 "sudo mv /tmp/database.py /opt/boostermail/V2/database.py && sudo chown ubuntu:ubuntu /opt/boostermail/V2/database.py && sudo systemctl restart boostermail"
+
+# ⚠️ Important : SI tu reverts b2d2f73, garder LimitNOFILE=65535 sinon retour panne en ~1h16
+```
+
+### 4.C — Validation après fix
+
+```bash
+# Sur 5-10 min, FDs doivent rester < 200 (vs ~1024 avant fix)
+for i in 1 2 3 4 5; do
+  sleep 60
+  ssh ubuntu@51.178.162.208 "PID=\$(systemctl show boostermail --property=MainPID --value) && echo \"T+\${i}min: FDs=\$(sudo ls /proc/\$PID/fd | wc -l)\""
+done
+
+# Logs db-gc périodiques (preuves que le GC tourne)
+ssh ubuntu@51.178.162.208 "sudo journalctl -u boostermail --since '5 minutes ago' --no-pager | grep db-gc"
 ```
 
 ---

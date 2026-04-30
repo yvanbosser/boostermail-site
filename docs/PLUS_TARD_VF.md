@@ -1,12 +1,19 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 30/04/2026 matin (audit ULTRA Pass 2-9 + 8 STAND-BY traités sur 12 ; 11 commits déployés OVH ; smoke_test 41/1 stable ; voir `docs/sessions/OUTLOOK_BILAN_SESSION_20260430.md`)
+> **Dernière mise à jour** : 30/04/2026 PM (incident prod 06:11 UTC FD leak SQLite résolu → fix `b2d2f73` + `LimitNOFILE=65535` + Pattern #21 + I-DB-06 ; voir `docs/sessions/OUTLOOK_BILAN_SESSION_20260430_PM_incident_fd_leak.md`)
 >
-> **Backlog STAND-BY restants 4/12** (décision Yvan 30/04, à traiter si symptômes observables) :
+> **Backlog STAND-BY restants 4/12** (décision Yvan 30/04 matin, à traiter si symptômes observables) :
 > - **S8** : threads `.join(timeout=3)` au shutdown (~1-2s perte BG, négligeable)
 > - **S10** : webhook handler ThreadPoolExecutor (à traiter quand volume > 100 notifs/min)
 > - **S11** : signal arrêt global `_shutdown_event` (idem S8)
 > - **S12** : `_warmup_cache` éviction LRU au lieu de FIFO (1-2s délai sur vieux mails consultés)
+>
+> **✅ FIXÉ 30/04/2026 PM — Incident FD leak prod (Pattern #21)** :
+> - **Symptôme** : nginx 504 + service `active` mais Flask saturé (`Errno 24 Too many open files`). UptimeRobot alerte 06:11 UTC. Cause : 509 handles `boostermail.db` + 508 handles `boostermail.db-wal` ouverts par des conn SQLite zombies (threads transitoires `daemon=True` qui meurent sans fermer leur conn `_local`).
+> - **Fix infra** : `LimitNOFILE=65535` (vs défaut 1024) dans `/etc/systemd/system/boostermail.service` côté OVH — palliatif qui donne 64× de marge.
+> - **Fix root** (commit `b2d2f73`) : `Database._all_conns` passé de `list[conn]` à `dict[tid, conn]` + thread BG `db-gc` (60s) qui ferme les conn dont le TID n'est plus vivant. Pattern persistent runtime préservé pour les threads vivants.
+> - **Validation** : T+3min après deploy → 44 FDs stables (vs 614 mesurés sans fix). GC tourne, log `[db-gc] closed N zombie connection(s)` toutes les minutes.
+> - **Doc** : Pattern #21 (`audit/ANOMALIES_RECURRENTES.md`), I-DB-06 (`audit/INVARIANTS.md`), Cas 0+4 (`docs/saas/ROLLBACK_PROCEDURE.md`).
 
 ---
 

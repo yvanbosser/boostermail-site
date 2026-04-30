@@ -1,6 +1,6 @@
 # Prompt de reprise — Session « New Outlook via OVH »
 
-> **Dernière mise à jour** : 30/04/2026 fin de session audit ULTRA (Pass 2-9 + 8 STAND-BY traités sur 12 ; 11 commits granulaires Option C déployés OVH ; smoke_test 41/1 stable ; cache busting bumpé `autorunshared v25` / `dialog v26` / `popup v14` ; **prochaine session : tests utilisateur réels en condition d'usage** + à voir si traitement des 4 STAND-BY restants S8/S10/S11/S12 si symptômes observables)
+> **Dernière mise à jour** : 30/04/2026 PM (incident prod FD leak SQLite résolu — fix `b2d2f73` + `LimitNOFILE=65535` systemd ; Pattern #21 + I-DB-06 ajoutés ; ROLLBACK_PROCEDURE Cas 0/4 + PLUS_TARD_VF mis à jour ; **prochaine session : monitoring 24-48h db-gc** ou retour roadmap business / STAND-BY restants)
 >
 > **Mode d'emploi** : à chaque démarrage d'une nouvelle session Claude sur le sujet « New Outlook via OVH », **copier-coller le bloc ci-dessous en intégralité**. Il référence tous les docs nécessaires et donne le contexte de la session précédente.
 >
@@ -20,7 +20,7 @@ Test rapide :
 Si ton worktree est différent (auto-créé style `claude/happy-XXXX`), exécute en début de session :
   git fetch && git merge master --no-edit
 puis :
-  git log --oneline -5    # doit afficher au minimum `c145c8b chore(cache-busting): bump versions JS apres STAND-BY S2/S3/S9` (30/04 matin, fin de session audit ULTRA + STAND-BY)
+  git log --oneline -5    # doit afficher au minimum `b2d2f73 fix(db): GC background pour conn SQLite des threads zombies` (30/04 PM, fix incident FD leak)
 
 ---
 
@@ -31,34 +31,40 @@ CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
 - Toutes les modifs (UX/UI/data) déployées sur OVH dans la foulée — plus de WIP local persistant
 - Yvan utilise BoosterMail au quotidien depuis https://api.boostermail.ai/
 
-ÉTAT DE FIN DE LA DERNIÈRE SESSION (30/04/2026 fin de session — audit ULTRA Pass 2-9 + STAND-BY)
-- **Session ~6h** : audit ULTRA exhaustif sur intégralité V2 (~44 000 lignes), 8 passes successives PLAYBOOK #5, 30 sub-agents Explore, ~340 findings bruts. **30 vrais bugs corrigés** (10 critiques, 15 majeures, 5 mineures) sur 18 classes distinctes.
-- **8 STAND-BY traités sur 12** (décision Yvan) :
-  - **S1** auth_microsoft race `_pending_flow` → dict state-keyed (préparation SaaS multi-user)
-  - **S2** dialog.js double-binding click handler → registry global
-  - **S3** ⭐ autorunshared.js timeout `event.completed()` 15 min (anti-freeze Outlook si dialog ouvert longtemps)
-  - **S4+S5** helper `_normalize_reply_greeting_closing()` extrait (~30 lignes dédup)
-  - **S6** Events PER-MAIL (anti-contamination si 2 mails ouverts rapidement)
-  - **S7** SSE clients orphan detection (full_count + last_seen TTL 30 min)
-  - **S9** dialog.js `_registerCleanup` pattern + cleanup S2 handler
-- **STAND-BY ignorés (4/12)** : S8 (threads .join shutdown), S10 (webhook thread pool), S11 (signal arrêt global), S12 (cache LRU). À traiter si symptômes observables.
-- **11 commits granulaires Option C** poussés sur master, déployés OVH (`scp` 16 fichiers + `systemctl restart` 04:55 UTC). Top commit : `c145c8b chore(cache-busting): bump versions JS apres STAND-BY S2/S3/S9 + popup cleanup`.
-- **Cache busting bumpé** : `autorunshared.js v25-stand-by-S2-S3-S9-30-04`, `dialog.js v26-stand-by-S2-S9-30-04`, `popup.js v14-cleanup-beforeunload-30-04`.
-- **Backup local** créé : `V2_backup/2026-04-30_0900/` (15 MB, état post-déploiement). Voir `BACKUP_INFO.md` dedans.
-- **Procédure rollback** documentée : `docs/saas/ROLLBACK_PROCEDURE.md` (Cas 1 chirurgical / Cas 2 panic / Cas 3 backup local + diagnostic post-rollback + cache busting front).
-- **Smoke_test 41/1 stable** du début à la fin (le FAIL résiduel `I-CX-01` reste le faux positif workflow OVH connu).
-- **Discussion stratégique avec Yvan** consignée dans le bilan : avis honnête sur la solidité technique du code (correct pour pré-beta, mais 11 700 lignes `app_plugin.py` à risque), avis honnête sur les chances commerciales (60-70% pour 10 clients à 3 mois, 5-10% pour 1000 clients ; angle mort principal = acquisition client, pas le code). Reco : tests end-to-end automatisés + niche métier (comptables/avocats) + 3-5 beta-testeurs payants cette semaine.
+ÉTAT DE FIN DE LA DERNIÈRE SESSION (30/04/2026 PM — incident prod FD leak SQLite résolu)
+- **Session ~1h45** : ouverte sur incident prod actif (UptimeRobot avait alerté 06:11 UTC, prod en zombie depuis 4h). nginx 504 + service `active` mais Flask saturé (`Errno 24 Too many open files`). 1075 FDs sur 1024 du soft limit `LimitNOFILE` systemd.
+- **Cause root identifiée** : `Database._conn()` thread-local + ~80 sites `threading.Thread(...).start()` daemon transitoires dans `app_plugin.py`. Quand un thread daemon meurt, `_local` ne ferme pas la conn SQLite → leak progressif. 509 handles `boostermail.db` + 508 `boostermail.db-wal` à saturation. Vitesse mesurée sans fix : ~200 FDs/min en burst au boot.
+- **Fix double livré** :
+  - **Palliatif systemd** (`/etc/systemd/system/boostermail.service`) : `LimitNOFILE=65535` (vs défaut 1024) + `daemon-reload` + restart → 64× de marge
+  - **Fix root code** (commit `b2d2f73`) : `Database._all_conns` passé de `list[conn]` à `dict[tid, conn]` + thread BG `db-gc` daemon (60s) qui ferme les conn dont le TID n'est plus dans `threading.enumerate()`. Pattern persistent runtime préservé pour les threads vivants — pas de régression perf. Démarrage paresseux du GC au 1er `_conn()`.
+  - **5 tests fonctionnels locaux** passent avant deploy (10 workers transitoires → 11 conn → GC ferme 10 zombies → main reste utilisable)
+- **Validation prod (monitoring 1 mesure/min)** :
+  - T+0 : 49 FDs (vs 614 mesurés sans fix après 3 min)
+  - T+3min : 44 FDs stables
+  - T+6min : 47 FDs stables, GC tourne, log `[db-gc] closed N zombie connection(s)` régulier
+- **Documentation cascade complète** :
+  - **Pattern #21** dans `audit/ANOMALIES_RECURRENTES.md` (leak FD `threading.local()` + remède db-gc)
+  - **I-DB-06** dans `audit/INVARIANTS.md` (conn SQLite bornées par GC zombie)
+  - **Cas 0** + **Cas 4** dans `docs/saas/ROLLBACK_PROCEDURE.md` (diagnostic d'urgence FDs + procédure palliatif/revert)
+  - **Bloc « ✅ FIXÉ 30/04 PM »** dans `docs/PLUS_TARD_VF.md` TL;DR
+  - **Bilan complet** : `docs/sessions/OUTLOOK_BILAN_SESSION_20260430_PM_incident_fd_leak.md`
 
 🎯 PROCHAINE SESSION (À DÉFINIR PAR YVAN)
-**Le code est dans un état impeccable au sortir de cette session.** Smoke_test passe, audit ULTRA convergent, 8 STAND-BY radicaux traités. La suite logique selon ma reco honnête (cf bilan section discussion) :
-1. **Tests end-to-end automatisés** sur les 5 flux critiques (ouverture mail, génération, refine, envoi, post-send) — c'est le vrai trou de couverture aujourd'hui (smoke_test ne valide pas le flux réel)
-2. **Phase 4 paiement Stripe + RGPD** — non négociable pour vendre
-3. **3-5 beta-testeurs payants** dans le réseau direct
-4. **Niche métier** : choix d'UN secteur (comptables ? avocats ?) et effort spécifique
+1. **Monitoring db-gc 24-48h** (recommandé, 5 min) — confirmer que les FDs restent < 200 sur une journée Yvan complète :
+   ```bash
+   ssh ubuntu@51.178.162.208 "sudo journalctl -u boostermail --since '24 hours ago' --no-pager | grep db-gc | tail -20"
+   ssh ubuntu@51.178.162.208 "PID=\$(systemctl show boostermail --property=MainPID --value) && sudo ls /proc/\$PID/fd | wc -l"
+   ```
+2. **Retour roadmap business** (cf bilan 30/04 matin section discussion) :
+   - Tests end-to-end automatisés sur 5 flux critiques (~1 journée)
+   - Phase 4 paiement Stripe + RGPD (~1-2 semaines)
+   - 3-5 beta-testeurs payants dans le réseau direct
+   - Niche métier (comptables ? avocats ?)
+3. **STAND-BY restants 4/12** (cf bilan 30/04 matin) : S8/S10/S11/S12, à traiter si symptômes observables
 
-⚠️ ALTERNATIVES si Yvan veut continuer le polish technique :
-- Traiter 1 ou 2 STAND-BY restants si symptômes observés (S10 pour volume webhook, S12 pour cache LRU)
-- Découper `app_plugin.py` en modules thématiques (`flows/`, `caches/`, `bg/`) pour préparer la maintenabilité long terme
+⚠️ ALTERNATIVES si récidive ou stress test :
+- **Audit autres `threading.local()`** dans le code (cache HTTP session, requests pool, etc.) — Pattern #21 documente la procédure
+- **Endpoint `/api/admin/db_conns_stats`** (returnerait `{total_tracked, live_threads}`) pour monitoring continu
 
 AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 

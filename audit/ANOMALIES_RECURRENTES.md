@@ -1,6 +1,6 @@
 # Anomalies récurrentes — mémoire des patterns
 
-> **Dernière mise à jour** : 27/04/2026 PM (ajout Pattern #18 cache WebView2 + Pattern #15 fixé sur 4 sites suspects via audit kit)
+> **Dernière mise à jour** : 30/04/2026 PM (ajout Pattern #21 leak FD `threading.local()` + cleanup db-gc — incident prod 06:11 UTC)
 > **Règle** : à chaque nouveau bug détecté, ajouter ici **immédiatement**. À chaque nouveau symptôme, consulter ici **d'abord**.
 
 ---
@@ -805,6 +805,63 @@ Microsoft impose des restrictions strictes aux event-based runtimes pour préser
 - [Activate add-ins with events — Microsoft Learn (21/04/2026)](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/event-based-activation)
 - [Office.MailboxEnums.ActionType enum — Microsoft Learn (24/04/2026)](https://learn.microsoft.com/en-us/javascript/api/outlook/office.mailboxenums.actiontype)
 - [Issue #3085 — Dialog API does not work in Outlook event-based Add-In](https://github.com/OfficeDev/office-js/issues/3085)
+
+---
+
+## Pattern #21 — Leak FD via `threading.local()` + threads transitoires
+
+**Historique** :
+- 30/04/2026 PM : incident prod 06:11 UTC. `LimitNOFILE` saturé (1024) après ~1h16 d'uptime. UptimeRobot alerte. nginx 504 Gateway Timeout. 509 handles `boostermail.db` + 508 handles `boostermail.db-wal` simultanés. Service tournait depuis 04:55 UTC (5h35).
+- 29/04/2026 PM : commit `1c84013` avait ajouté `Database.close_all_threads()` + `atexit.register()` pour fermer les conn au shutdown. Mais le **runtime** n'était pas couvert.
+
+**Symptôme générique** :
+- Service Flask `active` mais ne répond plus (504 nginx)
+- Logs : `[Errno 24] Too many open files` sur les sockets HTTPS sortants (Microsoft Graph, etc.) — c'est un **symptôme tardif** : quand SQLite a déjà saturé tous les FDs, c'est l'auth Microsoft qui crashe en premier
+- `lsof | wc -l` ou `ls /proc/PID/fd | wc -l` montre ~1024 FDs sur process Python
+- Ratio db/wal handles ≈ 1:1, plusieurs centaines
+
+**Cause racine** :
+Pattern `Database._conn()` thread-local persistant :
+```python
+def _conn(self):
+    if not hasattr(self._local, 'conn') or self._local.conn is None:
+        conn = sqlite3.connect(...)
+        self._local.conn = conn
+    return self._local.conn
+```
+- `threading.local()` rattache `conn` au TID
+- Backend a ~80 sites `threading.Thread(target=...).start()` qui spawnent des **threads daemon transitoires** (prefetch, prewarm, scan_echeances, post_send_learning, etc.)
+- Quand un thread daemon meurt, `_local` GC ne ferme PAS la conn SQLite (sqlite3.Connection garde le FD jusqu'à `close()` explicite ou GC complet du process)
+- À ~10-20 threads transitoires/min × 1 conn chacun → 600+ conn zombies en quelques minutes
+
+**Fix canonique** (commit `b2d2f73` + `LimitNOFILE=65535` côté systemd) :
+1. **Palliatif infra** : `LimitNOFILE=65535` dans `[Service]` du fichier systemd (vs 1024 par défaut). Donne 64× de marge.
+2. **Fix root code** : `Database._all_conns` passé de `list[conn]` à `dict[tid, conn]` + thread BG `db-gc` daemon qui tourne toutes les 60s :
+   - Compare `_all_conns.keys()` à `{t.ident for t in threading.enumerate()}`
+   - Ferme les conn dont le TID n'est plus vivant
+   - Ne touche pas aux conn des threads vivants (perf préservée)
+3. Démarrage paresseux du GC au premier `_conn()` (pas de thread inutile aux tests)
+4. Gestion du cas TID réutilisé : à chaque `_conn()`, l'ancienne entrée éventuelle pour le TID courant est fermée avant remplacement
+
+**Test de non-régression** :
+- I-DB-06 (cf `audit/INVARIANTS.md`) : `len(_db._all_conns) <= len(threading.enumerate()) + 1` après 60s, ou `[db-gc] closed N` visible dans les logs périodiquement
+- Test fonctionnel reproduit dans le commit : 10 threads transitoires créent 11 conn, GC ferme 10 zombies après thread.join()
+
+**Signaux d'alerte** :
+- nginx 504 sur `api.boostermail.ai` + service systemd `active` mais Flask ne répond plus
+- `cat /proc/PID/limits | grep 'open files'` → soft à la valeur de saturation
+- `sudo ls /proc/PID/fd | wc -l` ≥ 1000 (ou la valeur du soft limit)
+- Logs `[Errno 24] Too many open files` (apparaissent sur tous les opens : sockets, files)
+- Ratio `boostermail.db` ≈ `boostermail.db-wal` dans `/proc/PID/fd` (chaque conn SQLite ouvre les 2)
+
+**Action si récidive** (autre table thread-local-scoped) :
+- Vérifier s'il y a d'autres `threading.local()` dans le code (ex: cache HTTP session, cookies, etc.) → appliquer le même pattern db-gc
+- Confirmer que le shadowing à `threading.local()` ferme bien les ressources via un `__del__` ou un finalizer
+
+**Sources** :
+- Incident 30/04 : `docs/sessions/OUTLOOK_BILAN_SESSION_20260430_PM_incident_fd_leak.md`
+- Commit fix : `b2d2f73 fix(db): GC background pour conn SQLite des threads zombies`
+- Doc systemd `LimitNOFILE` : https://www.freedesktop.org/software/systemd/man/systemd.exec.html#LimitCPU=
 
 ---
 
