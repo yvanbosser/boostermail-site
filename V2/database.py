@@ -934,52 +934,62 @@ class Database:
         return c.lastrowid
 
     def increment_learned_template(self, template_id, field='success_count'):
-        """Incrémente usage/success/reject + met à jour last_used. Gère la promotion/démotion."""
+        """Incrémente usage/success/reject + met à jour last_used. Gère la promotion/démotion.
+
+        BEGIN IMMEDIATE car le SELECT…UPDATE status est un read-modify-write :
+        sans verrou, deux threads pourraient lire les mêmes compteurs et émettre
+        des transitions de statut concurrentes.
+        """
         import time as _t
         # Audit 20/04 : branching explicite plutôt que f-string SQL.
         # Techniquement safe via le whitelist ci-dessous, mais le pattern f-string
         # avec nom de colonne est fragile et à proscrire.
+        if field not in ('usage_count', 'success_count', 'reject_count'):
+            return  # field invalide — silent no-op (historique)
         now = int(_t.time())
         conn = self._conn()
-        if field == 'usage_count':
-            conn.execute(
-                "UPDATE learned_templates SET usage_count = usage_count + 1,"
-                " last_used = ? WHERE id = ?",
-                (now, template_id),
-            )
-        elif field == 'success_count':
-            conn.execute(
-                "UPDATE learned_templates SET success_count = success_count + 1,"
-                " last_used = ? WHERE id = ?",
-                (now, template_id),
-            )
-        elif field == 'reject_count':
-            conn.execute(
-                "UPDATE learned_templates SET reject_count = reject_count + 1,"
-                " last_used = ? WHERE id = ?",
-                (now, template_id),
-            )
-        else:
-            return  # field invalide — silent no-op (historique)
-        # Promotion / démotion automatique
-        c = conn.execute(
-            "SELECT success_count, reject_count, status FROM learned_templates WHERE id = ?",
-            (template_id,),
-        )
-        row = c.fetchone()
-        if row:
-            success, reject, status = row
-            new_status = status
-            if status == 'candidate' and success >= 3:
-                new_status = 'promoted'
-            elif status != 'demoted' and reject >= 3:
-                new_status = 'demoted'
-            if new_status != status:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if field == 'usage_count':
                 conn.execute(
-                    "UPDATE learned_templates SET status = ? WHERE id = ?",
-                    (new_status, template_id),
+                    "UPDATE learned_templates SET usage_count = usage_count + 1,"
+                    " last_used = ? WHERE id = ?",
+                    (now, template_id),
                 )
-        conn.commit()
+            elif field == 'success_count':
+                conn.execute(
+                    "UPDATE learned_templates SET success_count = success_count + 1,"
+                    " last_used = ? WHERE id = ?",
+                    (now, template_id),
+                )
+            else:  # reject_count
+                conn.execute(
+                    "UPDATE learned_templates SET reject_count = reject_count + 1,"
+                    " last_used = ? WHERE id = ?",
+                    (now, template_id),
+                )
+            # Promotion / démotion automatique
+            c = conn.execute(
+                "SELECT success_count, reject_count, status FROM learned_templates WHERE id = ?",
+                (template_id,),
+            )
+            row = c.fetchone()
+            if row:
+                success, reject, status = row
+                new_status = status
+                if status == 'candidate' and success >= 3:
+                    new_status = 'promoted'
+                elif status != 'demoted' and reject >= 3:
+                    new_status = 'demoted'
+                if new_status != status:
+                    conn.execute(
+                        "UPDATE learned_templates SET status = ? WHERE id = ?",
+                        (new_status, template_id),
+                    )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     def save_to_thread(self, project, direction, subject, body, correspondent):
         conn = self._conn()
@@ -1099,7 +1109,9 @@ class Database:
                 (correspondent, limit)
             )
             for r in c.fetchall():
-                results.append({'proposed': r[1][:300], 'sent': r[2][:300], 'correspondent': r[3], 'categories': r[4] or '', 'analysis': r[5] or ''})
+                # Garde anti-TypeError : si proposed/sent NULL en DB (migration ancienne),
+                # `None[:300]` crashe. Le schéma déclare NOT NULL mais defensive.
+                results.append({'proposed': (r[1] or '')[:300], 'sent': (r[2] or '')[:300], 'correspondent': r[3], 'categories': r[4] or '', 'analysis': r[5] or ''})
                 seen_ids.add(r[0])
 
         remaining = limit - len(results)
@@ -1110,7 +1122,7 @@ class Database:
             )
             for r in c.fetchall():
                 if r[0] not in seen_ids and len(results) < limit:
-                    results.append({'proposed': r[1][:300], 'sent': r[2][:300], 'correspondent': r[3], 'categories': r[4] or '', 'analysis': r[5] or ''})
+                    results.append({'proposed': (r[1] or '')[:300], 'sent': (r[2] or '')[:300], 'correspondent': r[3], 'categories': r[4] or '', 'analysis': r[5] or ''})
 
         return results
 
@@ -1127,6 +1139,13 @@ class Database:
         return dict(row) if row else None
 
     def save_contact_profile(self, email, profile_data):
+        # Normalisation email en bas de casse pour cohérence avec
+        # get_contact_profile (qui utilise LOWER(email)). Sans ça, un caller
+        # passant 'Yvan@x.com' crée une entrée distincte de 'yvan@x.com' déjà
+        # en DB → duplicates et profils fragmentés (audit Pass 8).
+        email = (email or '').strip().lower()
+        if not email:
+            return  # silently no-op si email vide (rétrocompatible)
         conn = self._conn()
         now = datetime.now().isoformat()
         # Fusionner les entry_ids existants avec les nouveaux
