@@ -8950,6 +8950,44 @@ def api_template_feedback():
     return jsonify({"ok": True})
 
 
+@app.route('/api/admin/db_conns_stats', methods=['GET'])
+def api_admin_db_conns_stats():
+    """Diagnostic SQLite conn leak — Pattern #21 / I-DB-06 (cf 30/04 PM).
+
+    Retourne :
+    - tracked_conns : nombre de conn dans Database._all_conns
+    - live_threads_count : nombre de threads vivants (threading.enumerate())
+    - live_threads_names : liste des noms (pour identifier les threads BG)
+    - zombie_estimate : tracked - live (approximation des conn zombies en attente du tick GC 60s)
+    - gc_started : True si le thread BG db-gc a démarré paresseusement
+    - db_path : chemin de la DB (info)
+
+    Au steady state attendu : tracked ≈ live + 0..3 (delta éphémère 60s
+    correspondant aux threads transitoires nés/morts depuis le dernier tick GC).
+    Si tracked >> live + 60 → le GC db-gc est cassé ou bloqué (alerte I-DB-06).
+
+    Aucune authentification : info diagnostic non sensible. Utile pour
+    monitoring continu (curl périodique) et alerting léger.
+    """
+    import threading
+    try:
+        with _db._all_conns_lock:
+            tracked_conns = len(_db._all_conns)
+        live_threads = [t.name for t in threading.enumerate()]
+        zombie_estimate = max(0, tracked_conns - len(live_threads))
+        return jsonify({
+            'tracked_conns': tracked_conns,
+            'live_threads_count': len(live_threads),
+            'live_threads_names': sorted(live_threads),
+            'zombie_estimate': zombie_estimate,
+            'gc_started': bool(_db._gc_started),
+            'db_path': str(_db.db_path),
+        })
+    except Exception as e:
+        logger.warning(f"db_conns_stats error : {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/templates_stats', methods=['GET'])
 def api_admin_templates_stats():
     """Sujet PLUS_TARD_VF #2 (28/04) — Tableau de bord agrégé du pipeline templates.
