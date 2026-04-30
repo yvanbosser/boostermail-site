@@ -510,7 +510,9 @@ def _should_show_popup_now():
             headers={'Accept': 'application/json'},
         )
         with urllib.request.urlopen(req, timeout=2.5, context=ctx) as resp:
-            body = json.loads(resp.read().decode('utf-8'))
+            # errors='replace' anti-crash sur encoding non-UTF8 (audit Pass 8).
+            # Le try/except englobant garantit que toute exception bascule sur True.
+            body = json.loads(resp.read().decode('utf-8', errors='replace'))
         return bool(body.get('should_show_popup', True))
     except Exception as e:
         logger.debug(f"activation_status check échoué ({e}) — on affiche par défaut")
