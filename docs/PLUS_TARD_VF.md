@@ -1,6 +1,12 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 29/04/2026 PM tardif post-dîner Yvan (10 commits supplémentaires : tech debt #24/26/27/28/29/30/31/33/34 résolus + #32 SKIP justifié ; cumul session 28+10 ≈ 38 commits ce jour ; tech debt résiduelle V2 → 0 item bloquant)
+> **Dernière mise à jour** : 30/04/2026 matin (audit ULTRA Pass 2-9 + 8 STAND-BY traités sur 12 ; 11 commits déployés OVH ; smoke_test 41/1 stable ; voir `docs/sessions/OUTLOOK_BILAN_SESSION_20260430.md`)
+>
+> **Backlog STAND-BY restants 4/12** (décision Yvan 30/04, à traiter si symptômes observables) :
+> - **S8** : threads `.join(timeout=3)` au shutdown (~1-2s perte BG, négligeable)
+> - **S10** : webhook handler ThreadPoolExecutor (à traiter quand volume > 100 notifs/min)
+> - **S11** : signal arrêt global `_shutdown_event` (idem S8)
+> - **S12** : `_warmup_cache` éviction LRU au lieu de FIFO (1-2s délai sur vieux mails consultés)
 
 ---
 

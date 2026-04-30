@@ -28,6 +28,7 @@ __pycache__/
 
 # Backups
 easymail_backup_*/
+V2_backup/
 
 # Documents / rapports (pas utiles pour les testeurs)
 *.docx
