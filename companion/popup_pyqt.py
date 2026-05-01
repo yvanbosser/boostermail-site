@@ -218,12 +218,12 @@ class EasyMailPopup(QMainWindow):
 
         self._screen = QApplication.primaryScreen().availableGeometry()
         self._overlay_w = min(max(int(self._screen.width() * 0.22), 280), 380)
-        # Décision Yvan 01/05/2026 — overlay STRICT 3 boutons (header bleu +
-        # nav Échéances/Contacts/Profil). Yvan veut ZÉRO espace vide en bas.
-        # Itération 3 : 80px fixe. Le contenu réel = header (~36px + padding) +
-        # nav (~36px + padding) ≈ 80-100px logical. Sur HiDPI (1.5x), 80
-        # logical → 120 physical, ce qui matche encore exactement le contenu.
-        self._overlay_h = 80
+        # Décision Yvan 01/05/2026 — overlay STRICT 3 boutons. Yvan veut
+        # ZÉRO espace vide en bas. Itération 4 : 70px fixe + bg coordonné
+        # bleu (popup.html) si la fenêtre Qt dépasse à cause du DPI scaling
+        # ou du frame OS. Le contenu réel = header (~36px) + nav (~36px) =
+        # ~72px. 70px = juste assez tight pour ne plus afficher de bg en bas.
+        self._overlay_h = 70
         # Dimensions élargies pour le CTA marketing (user pas activé)
         self._marketing_w = min(max(int(self._screen.width() * 0.30), 420), 520)
         self._marketing_h = min(max(int(self._screen.height() * 0.55), 420), 560)
