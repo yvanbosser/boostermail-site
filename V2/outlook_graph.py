@@ -14,11 +14,13 @@ Rate limits Graph API :
 - Retry auto sur HTTP 429 avec header Retry-After
 """
 
-import re
-import time
+import atexit
+import base64
 import json
 import logging
-import base64
+import re
+import threading
+import time
 from urllib.parse import quote
 
 import requests
@@ -73,45 +75,127 @@ class GraphClient(EmailProvider):
 
     PROVIDER_NAME = 'microsoft-graph'
 
+    # =========================================================================
+    # SHARED HTTP SESSIONS (refactor 30/04 PM autonomie — LEAK #1 du rapport
+    # `audit/rapports/2026-04-30_PM_audit_autres_leaks_ressources.md`)
+    # =========================================================================
+    # Avant : `self._session = requests.Session()` per-instance dans __init__.
+    # GraphClient est instancié à chaque appel `get_graph()` (factory
+    # app_plugin.py l. ~442) — ~65 callsites. Aucun callsite n'invoquait
+    # `.close()` ni `with`. Le `__del__` fallback fonctionnait via reference
+    # counting CPython, mais des refs cycliques ou closures (BG threads,
+    # caches utilisant graph) pouvaient retarder le GC → accumulation de
+    # connexions TIME_WAIT (30-60s par socket TCP). Sur charge moyenne
+    # (~100 req/min), cela pouvait monter à ~6000 sockets en TIME_WAIT
+    # avant fenêtre kernel.
+    #
+    # Après : 1 Session HTTP par token d'authentification (1 par user en
+    # multi-tenant), partagée au niveau classe. Toutes les instances
+    # GraphClient utilisant le même token réutilisent la même Session →
+    # même pool de connexions HTTP → réutilisation maximale (HTTP keep-alive
+    # + HTTP/2 si le serveur l'autorise) → 0 leak TIME_WAIT.
+    #
+    # Trade-off : la Session reste vivante tant que le token n'est pas révoqué.
+    # En multi-tenant à 1000 users, on aura ~1000 Sessions en RAM (~10-50 MB
+    # cumulé, négligeable). Cleanup au shutdown via atexit.
+
+    _shared_sessions: dict = {}  # dict[access_token: str, requests.Session]
+    _shared_sessions_lock = threading.Lock()
+
+    @classmethod
+    def _get_session_for_token(cls, access_token: str) -> requests.Session:
+        """Retourne la Session HTTP partagée pour ce token (lazy init).
+
+        Thread-safe via `_shared_sessions_lock`. Les Sessions sont fermées
+        au shutdown du process via atexit (cf `_close_all_shared_sessions`)."""
+        # Double-checked locking pattern pour éviter le lock sur le hot path
+        sess = cls._shared_sessions.get(access_token)
+        if sess is not None:
+            return sess
+        with cls._shared_sessions_lock:
+            sess = cls._shared_sessions.get(access_token)
+            if sess is not None:
+                return sess
+            sess = requests.Session()
+            sess.headers.update({
+                'Authorization': f'Bearer {access_token}',
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            })
+            # Pool sizing pour Flask multithread + threads BG (~30 actifs).
+            # pool_maxsize=50 → assez large pour absorber les bursts sans
+            # bloquer (pool_block=False = on attend pas, on crée en plus si
+            # besoin), et keep-alive efficace pour le steady-state.
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=50,
+                pool_maxsize=50,
+                pool_block=False,
+            )
+            sess.mount('https://', adapter)
+            sess.mount('http://', adapter)
+            cls._shared_sessions[access_token] = sess
+            return sess
+
+    @classmethod
+    def _close_all_shared_sessions(cls):
+        """Atexit hook : ferme toutes les Sessions HTTP partagées au shutdown.
+
+        Important pour libérer proprement les sockets TCP (sinon le kernel
+        les garde en TIME_WAIT 30-60s)."""
+        with cls._shared_sessions_lock:
+            for sess in cls._shared_sessions.values():
+                try:
+                    sess.close()
+                except Exception:
+                    pass
+            cls._shared_sessions.clear()
+
+    @classmethod
+    def _evict_session_for_token(cls, access_token: str):
+        """Force le retrait + fermeture de la Session pour un token donné.
+
+        À appeler après une révocation de token / refresh OAuth qui invalide
+        l'ancien token. Évite que la dict de sessions accumule des Sessions
+        de tokens morts. Pour l'instant non câblé (TODO multi-tenant) — la
+        rotation de tokens reste rare en mono-user."""
+        with cls._shared_sessions_lock:
+            sess = cls._shared_sessions.pop(access_token, None)
+        if sess is not None:
+            try:
+                sess.close()
+            except Exception:
+                pass
+
     def __init__(self, access_token: str):
         super().__init__(access_token)
-        self._session = requests.Session()
-        self._session.headers.update({
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-        })
+        # Session HTTP partagée au niveau classe (cf _get_session_for_token).
+        # `self._session` reste accessible comme avant pour rétrocompat des
+        # ~65 callsites + appels directs (ex: l. ~1088 `self._session.put`).
+        self._access_token = access_token
+        self._session = type(self)._get_session_for_token(access_token)
 
-    # 29/04 PM audit resource leaks — close session explicite + context manager.
-    # GraphClient est instancié à chaque requête Flask (cf get_graph() factory
-    # app_plugin.py:430). Sans fermeture, les sessions HTTP s'accumulent en
-    # connexions TIME_WAIT (30-60s par socket). Pas critique en mono-user
-    # mais avoir close() permet d'être plus propre et facilite le multi-tenant.
     def close(self):
-        """Ferme la session HTTP sous-jacente (libère les pools de connexions)."""
-        try:
-            if self._session is not None:
-                self._session.close()
-        except Exception:
-            pass
+        """No-op après refactor 30/04 PM (LEAK #1 fix).
+
+        La Session HTTP est partagée au niveau classe. Elle ne doit PAS
+        être fermée à la fin d'une instance — d'autres instances GraphClient
+        avec le même token l'utilisent encore. Cleanup global au shutdown
+        via atexit `_close_all_shared_sessions`. Pour libérer une Session
+        de token spécifique (ex: après refresh OAuth), utiliser
+        `_evict_session_for_token(token)`."""
+        pass
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+        # Pas de close() : la Session est partagée. Ne pas swallow l'exception.
         return False
 
     def __del__(self):
-        # Filet de sécurité GC : si oubli de close() explicite, on ferme
-        # quand l'objet est garbage-collected. Pas une excuse pour ne pas
-        # close(), juste un fallback. Le `try` évite les erreurs durant
-        # l'interpreter shutdown (où requests peut être déjà partiellement
-        # déchargé).
-        try:
-            self.close()
-        except Exception:
-            pass
+        # No-op après refactor 30/04 PM. La Session partagée est fermée
+        # au shutdown du process via atexit.
+        pass
 
     # =========================================================================
     # HELPERS PRIVÉS
@@ -1148,3 +1232,13 @@ class GraphClient(EmailProvider):
 
     def upload_to_onedrive(self, folder_path, filename, content):
         return self.upload_to_cloud(folder_path, filename, content)
+
+# =============================================================================
+# CLEANUP — fermeture des Sessions HTTP partagées au shutdown
+# =============================================================================
+# Refactor 30/04 PM (LEAK #1) : les Sessions sont partagées au niveau classe
+# pour éviter le leak de connexions TIME_WAIT. Cet atexit garantit qu'elles
+# sont proprement fermées au shutdown du process Flask (sinon les sockets
+# restent en TIME_WAIT 30-60s côté kernel).
+atexit.register(GraphClient._close_all_shared_sessions)
+

@@ -4367,8 +4367,16 @@ def _run_prefetch(mail_data):
             keywords = _extract_prefetch_keywords(subject)
 
             # Fix #12 : ne pas utiliser le context manager du pool (shutdown wait=True bloque)
-            # Utiliser submit() + cancel() explicite pour ne pas attendre les futures lentes
-            pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+            # Utiliser submit() + cancel() explicite pour ne pas attendre les futures lentes.
+            # Refactor 30/04 PM (LEAK #2 du rapport audit autres leaks) : on garde
+            # `wait=False` au shutdown ci-dessous (intention originale : ne pas bloquer
+            # le main thread sur des futures lentes). Sécurisé par 3 mécanismes :
+            # (1) timeout strict TIMEOUT_PREFETCH_FUTURE par future, (2) cancel()
+            # explicite si timeout, (3) `cancel_futures=True` au shutdown qui annule
+            # les futures pas encore démarrées (Python 3.9+).
+            pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=3, thread_name_prefix='prefetch-abc'
+            )
             _my_email_pre = _get_my_email()
             try:
                 future_a = pool.submit(_prefetch_context_a, graph, conversation_id) if conversation_id else None
@@ -4403,7 +4411,11 @@ def _run_prefetch(mail_data):
                 _c_context_ready.set()
                 _mail_events['c_context_ready'].set()  # STAND-BY S6 per-mail
             finally:
-                pool.shutdown(wait=False)  # Ne pas bloquer — les threads non-annulables se terminent seuls
+                # `cancel_futures=True` (Python 3.9+) annule les futures pas
+                # encore démarrées en plus du shutdown(wait=False). Évite que
+                # des futures queued (au cas où max_workers=3 saturé) ne
+                # s'exécutent inutilement après le timeout du caller.
+                pool.shutdown(wait=False, cancel_futures=True)
 
             # Phase 2.1 : normaliser tous les items pour _build_prompt()
             # (ajoute body_snippet, from_name, direction — corrige les bugs B1/B2/B3)
