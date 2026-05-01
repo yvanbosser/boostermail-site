@@ -45,14 +45,20 @@
         }
         .btn-back:hover { background: rgba(255, 255, 255, 0.25); }
 
-        /* Liens de nav entre les 3 pages dashboard (Contacts ↔ Profil ↔ Échéances).
-           Décision Yvan 01/05/2026 : navigation directe depuis chaque page. */
+        /* Liens de nav entre les 3 pages dashboard (Contact ↔ Profil ↔ Échéance).
+           Décision Yvan 01/05/2026 (3 onglets symétriques + onglet actif highlight). */
         .nav-link {
             color: rgba(255, 255, 255, 0.85); text-decoration: none;
-            font-size: 13px; font-weight: 500; padding: 6px 12px;
+            font-size: 13px; font-weight: 500; padding: 8px 16px;
             border-radius: 6px; transition: all 0.15s;
+            border: 1px solid transparent;
         }
         .nav-link:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+        .nav-link.active {
+            background: #fff; color: #0F6CBD; font-weight: 600;
+            border: 1px solid #fff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
 
         .container { max-width: 1000px; margin: 24px auto; padding: 0 24px; }
 
@@ -187,11 +193,11 @@
 </head>
 <body>
     <div class="header">
-        <h1>BoosterMail — Contacts</h1>
+        <h1>BoosterMail</h1>
         <div class="header-right">
-            <a href="/plugin/echeances" class="nav-link">⏰ Échéances</a>
+            <a href="/plugin/contacts" class="nav-link active">👤 Contact</a>
             <a href="/plugin/profile" class="nav-link">⚙ Profil</a>
-            <span class="header-count">{{ profiles|length }} profil{{ 's' if profiles|length > 1 else '' }}</span>
+            <a href="/plugin/echeances" class="nav-link">⏰ Échéance</a>
             <a href="javascript:window.close()" class="btn-back" onclick="if(!window.close())history.back();return false;">Fermer</a>
         </div>
     </div>
