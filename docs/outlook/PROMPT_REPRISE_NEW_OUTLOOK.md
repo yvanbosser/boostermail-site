@@ -1,6 +1,6 @@
 # Prompt de reprise — Session « New Outlook via OVH »
 
-> **Dernière mise à jour** : 30/04/2026 PM autonomie (Yvan en convalescence, ~10 commits livrés en autonomie totale : FD leak + UI fixes + endpoint diag + RGPD docs/audit/redaction/export + LEAK #1+#2 fixes + classement saisie manuelle + Patterns #21-23 + Invariants I-DB-06/I-RES-05/I-SEC-07 ; **prochaine session : valider les nouveautés au réveil Yvan + compléter docs RGPD juridiques + récupérer DPA Anthropic**)
+> **Dernière mise à jour** : 30/04/2026 PM autonomie totale (Yvan convalescence, **9 commits autonomie** + 4 sujets choisis post-validation : RGPD complet (audit + 4 docs juridiques + export + delete 30j grâce + redaction logs PII + logrotate) + LEAK #1/#2 fixes + classement saisie manuelle + batch recalibrate contacts + tests E2E 10/10 PASS + Patterns #21-23 + Invariants I-DB-06/I-RES-05/I-SEC-07 ; **prochaine session : investiguer bug overlay Outlook signalé par Yvan + compléter placeholders docs juridiques + récupérer DPA Anthropic**)
 >
 > **Mode d'emploi** : à chaque démarrage d'une nouvelle session Claude sur le sujet « New Outlook via OVH », **copier-coller le bloc ci-dessous en intégralité**. Il référence tous les docs nécessaires et donne le contexte de la session précédente.
 >
@@ -20,7 +20,7 @@ Test rapide :
 Si ton worktree est différent (auto-créé style `claude/happy-XXXX`), exécute en début de session :
   git fetch && git merge master --no-edit
 puis :
-  git log --oneline -5    # doit afficher au minimum `623e4d8 feat(rgpd): endpoint /api/gdpr/export Articles 15+20` (30/04 PM autonomie)
+  git log --oneline -5    # doit afficher au minimum `db88cd2 feat: Sujet 1B batch recalibrate + Sujet 5A tests E2E (10/10 PASS)` (30/04 PM autonomie partie 2)
 
 ---
 

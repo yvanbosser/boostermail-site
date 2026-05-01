@@ -203,3 +203,104 @@ f86c89c docs(rgpd): drafts politique + mentions + registre + sous-traitants + au
 ---
 
 **Session autonomie close après cloture_check.sh exit 0.**
+
+---
+
+# Partie 2 — Autonomie post-validation Yvan (4 sujets choisis)
+
+> Yvan revient avec la fièvre, valide les 7 commits autonomie, fait le test Outlook (« ça fonctionne mais pas de popup ni overlay »), et choisit 4 sujets d'autonomie supplémentaires : 1B, 2B, 3A, 5A. 5e commit ce jour PM (db88cd2) après ce premier bilan.
+
+## Sujet 3A — Logrotate côté OVH
+
+`/etc/logrotate.d/boostermail` créé sur le serveur :
+- Rotation **30 jours** sur `addin_debug.log` (root et V2/) — durée de conservation logs PII conformément à Article 5(1)(e) RGPD
+- Compression delaycompress, copytruncate (le service garde son file handle)
+- `sudo logrotate -d` validation OK
+- Pas de commit code (pure infra système)
+
+## Sujet 2B — Endpoints GDPR Article 17 (droit à l'effacement)
+
+Politique « période de grâce 30 jours » comme demandé par Yvan :
+- `POST /api/gdpr/request_deletion` : exige body `{"confirm": "DELETE_MY_ACCOUNT"}`. Set le settings `gdpr_deletion_requested_at` à now. Calcule `deletion_after = now + 30j`.
+- `POST /api/gdpr/cancel_deletion` : annule la demande dans la période.
+- `GET /api/gdpr/deletion_status` : statut + `days_remaining`.
+- Helper interne `_gdpr_purge_user_data()` : code complet **NON BRANCHÉ** automatiquement. Activation manuelle requise via `gdpr_deletion_enabled='1'` (sécurité multi-couches contre auto-purge accidentelle en mono-user).
+
+Cycle E2E testé OK (request → status `days_remaining=29` → cancel → status `no_request`). Commit `33764c5`.
+
+## Sujet 1B — Batch recalibrate signatures contacts
+
+Endpoint `POST /api/admin/recalibrate_contacts_signature?dry_run=true|false&limit=N` :
+- Liste les contacts avec `user_signature_for_contact NULL` ET `sample_count > 0` ET non `manually_edited`
+- Reset `sample_count=0` puis lance `_maybe_analyze_contact()` qui force la re-analyse Claude (cf branche du commit `c3ae37a` matin)
+- Mode `dry_run=true` par défaut (sécurité anti-coût accidentel)
+
+**Exécution** :
+- Dry run : 107 candidats détectés
+- Batch limit=20 lancé : signatures trouvées sur la majorité (`cla***@ubs.com`, `lou***@spliit.fr`, `sim***@ca-atlantique-vendee.fr`, `bas***@airbee-conseil.fr`, etc.). Catégories variées : fournisseur, banquier, avocat.
+- Reste : **87 candidats** à traiter au moment du commit. Batch limit=100 relancé en background pour finir.
+
+Commit `db88cd2` (avec Sujet 5A).
+
+## Sujet 5A — Tests E2E (squelette pytest)
+
+Squelette fonctionnel dans `audit/tests/e2e/` :
+- `conftest.py` : fixtures `base_url` paramétrable + session HTTP partagée
+- `test_health.py` (3 tests) : `warmup_status`, `db_conns_stats`, `status`
+- `test_gdpr.py` (4 tests) : cycle complet export + request/cancel/status + validation `confirm` requis
+- `test_classement.py` (3 tests) : validation params `classify_email_manual` + dry_run `recalibrate`
+- `README.md` : guide lancement, conventions, coverage actuel + à étendre
+
+**Validation prod** :
+```
+pytest audit/tests/e2e/ -v --base-url=https://api.boostermail.ai
+====== 10 passed in 6.27s ======
+```
+
+10/10 tests PASSENT. Squelette fonctionnel, à étendre quand mocks Graph API + Claude dispos pour couvrir les flux end-to-end critiques (génération SSE, refine, envoi, post-send).
+
+## Bug observé pendant la session — noté dans PLUS_TARD_VF
+
+Yvan signale au test Outlook : « ça fonctionne par contre pas de popup de lancement et pas d overlay ». Les logs montrent un `dialog_js_error: Script error line 0 cross_origin: true` à 12:36:38 UTC. Erreur JS dans le dialog mais cross-origin invisible. Génération marche quand même (Yvan a confirmé).
+
+Hypothèses :
+- Refactor LEAK #1 (Sessions HTTP class-level) qui aurait pu casser un endpoint Graph
+- Phase 4 PII redaction qui change le schema des events (`display_dialog_attempt`, `item_changed_fired`) — `autorunshared.js` peut s'attendre à des champs en clair que le backend redacte maintenant côté `addin_debug.log` mais pas côté response API
+
+À investiguer au prochain cycle. Documenté dans `PLUS_TARD_VF.md` (bloc Bugs détectés en autonomie).
+
+## Récap commits Partie 2
+
+| Hash | Sujet |
+|---|---|
+| `33764c5` | feat(rgpd): endpoints request/cancel/status deletion + helper purge non branche |
+| `db88cd2` | feat: Sujet 1B batch recalibrate + Sujet 5A tests E2E (10/10 PASS) |
+
+## Total commits autonomie 30/04 PM (Partie 1 + Partie 2)
+
+```
+db88cd2 feat: Sujet 1B batch recalibrate + Sujet 5A tests E2E (10/10 PASS)
+33764c5 feat(rgpd): endpoints request/cancel/status deletion + helper purge non branche
+51b9877 docs(session): cloture session 30/04 PM autonomie totale convalescence Yvan
+623e4d8 feat(rgpd): endpoint /api/gdpr/export Articles 15+20
+91b5de1 fix(rgpd): redaction PII dans addin_debug.log + logs metiers
+2c95ba8 feat(classement): saisie manuelle path dossier + creation recursive Graph API
+4a08635 docs(audit): Pattern #22 + I-RES-05 + bug Graph 400 search noté
+2077cbb fix(graph): Session HTTP partagee class-level + ThreadPoolExecutor cancel_futures
+f86c89c docs(rgpd): drafts politique + mentions + registre + sous-traitants + audit
+```
+
+**9 commits master totaux pendant l'autonomie aujourd'hui.**
+
+## État OVH au sortir de la Partie 2
+
+| | |
+|---|---|
+| Top commit master | `db88cd2` |
+| Service `boostermail.service` | active, restart à 12:42 UTC après deploy GDPR delete account |
+| FDs actuels | sain |
+| Tests E2E auto | 10/10 PASS sur prod en 6.27s |
+| Logrotate | configuré (rotation 30j) |
+| Endpoints nouveaux Partie 2 | `/api/gdpr/request_deletion` (POST), `/api/gdpr/cancel_deletion` (POST), `/api/gdpr/deletion_status` (GET), `/api/admin/recalibrate_contacts_signature` (POST) |
+
+**Session autonomie totale (Parties 1+2) close.**
