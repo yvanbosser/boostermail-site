@@ -971,6 +971,114 @@ class GraphClient(EmailProvider):
             logger.error(f"Erreur move_to_folder: {e}")
             return {'success': False, 'new_id': '', 'error': str(e)[:200]}
 
+    def resolve_or_create_folder_path(self, path: str, default_parent: str = 'Boîte de réception') -> dict:
+        """Résout un chemin texte en folder_id, crée récursivement si manquant.
+
+        Permet à l'user de saisir manuellement un nom de dossier dans la popup
+        classement (ex: 'IMMOBILIER/METEOR-LINKIAA') même si la mailbox cloud
+        ne le contient pas encore. Reprend la philosophie du proto port 5050
+        qui s'appuyait sur Outlook COM (mailbox locale, hiérarchie complète).
+
+        Cas d'usage typique (signal Yvan 30/04 PM) :
+        - Mailbox cloud `groupe-bosser.fr` quasi-vide (4 dossiers système)
+        - Suggestion IA forcée vers « Boîte de réception » faute d'alternative
+        - User tape « IMMOBILIER/METEOR » → on crée la hiérarchie + classe le mail
+
+        Sécurité (path injection) :
+        - Max 5 niveaux de profondeur (anti-arbre infini)
+        - Max 100 chars par segment (anti-buffer overflow)
+        - `@microsoft.graph.conflictBehavior=fail` pour ne pas écraser un dossier existant
+
+        Args:
+            path: Chemin avec '/' comme séparateur. Ex: 'IMMOBILIER/METEOR'
+                  ou 'Boîte de réception/IMMOBILIER'.
+            default_parent: Si le 1er segment ne match pas un dossier root existant,
+                            on le crée comme enfant de ce parent (par défaut Inbox).
+
+        Returns:
+            {'success': True, 'folder_id': '...', 'created_folders': [...], 'final_path': '...'}
+            ou {'success': False, 'error': '...'}.
+        """
+        try:
+            segments = [s.strip() for s in path.split('/') if s.strip()]
+            if not segments:
+                return {'success': False, 'error': 'Chemin vide'}
+            if len(segments) > 5:
+                return {'success': False, 'error': 'Profondeur max 5 niveaux'}
+            for s in segments:
+                if len(s) > 100:
+                    return {'success': False, 'error': f'Segment trop long: {s[:30]}...'}
+
+            # Récupère l'arborescence actuelle (évite get_all_folders qui peut
+            # rate-limiter Graph 429 — utilise plutôt direct le helper si dispo).
+            all_folders = self.get_all_folders()
+            path_to_folder = {f['path']: f for f in all_folders}
+            name_to_root = {f['name']: f for f in all_folders if f.get('depth', 0) == 0}
+
+            # Si le 1er segment match un dossier root → on part de ce root
+            # Sinon → on prefix par default_parent (typiquement Boîte de réception)
+            current_parent_id = None
+            current_path = ''
+            if segments[0] in name_to_root:
+                root = name_to_root[segments[0]]
+                current_parent_id = root['id']
+                current_path = root['path']
+                segments = segments[1:]  # consommé
+            else:
+                root = name_to_root.get(default_parent)
+                if root:
+                    current_parent_id = root['id']
+                    current_path = root['path']
+
+            created_folders = []
+            for seg in segments:
+                candidate_path = f"{current_path}/{seg}" if current_path else seg
+                existing = path_to_folder.get(candidate_path)
+                if existing:
+                    current_parent_id = existing['id']
+                    current_path = existing['path']
+                    continue
+
+                # Création du dossier
+                if current_parent_id:
+                    create_url = f'/me/mailFolders/{current_parent_id}/childFolders'
+                else:
+                    create_url = '/me/mailFolders'
+
+                created = self._post(
+                    create_url,
+                    data={
+                        'displayName': seg,
+                        '@microsoft.graph.conflictBehavior': 'fail',
+                    }
+                )
+                if not created or not created.get('id'):
+                    return {'success': False, 'error': f'Création échouée pour: {seg}'}
+
+                current_parent_id = created['id']
+                current_path = candidate_path
+                created_folders.append(candidate_path)
+                # Met à jour le mapping pour les segments suivants
+                path_to_folder[candidate_path] = {
+                    'id': created['id'],
+                    'path': candidate_path,
+                    'name': seg,
+                    'depth': created.get('depth', 0),
+                }
+
+            if not current_parent_id:
+                return {'success': False, 'error': 'Impossible de résoudre la racine'}
+
+            return {
+                'success': True,
+                'folder_id': current_parent_id,
+                'created_folders': created_folders,
+                'final_path': current_path,
+            }
+        except Exception as e:
+            logger.error(f"Erreur resolve_or_create_folder_path('{path}'): {e}")
+            return {'success': False, 'error': str(e)[:200]}
+
     def copy_to_folder(self, message_id: str, folder_id: str) -> dict:
         """
         POST /me/messages/{id}/copy

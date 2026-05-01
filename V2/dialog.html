@@ -420,6 +420,15 @@
             <div class="em-popup-title">&#x1f4c1; Classer ce mail</div>
             <div class="em-popup-body" id="classMailBody">
                 <div id="classMailSuggestion"></div>
+                <!-- Saisie manuelle (Phase 3 — 30/04 PM) :
+                     permet à l'user de taper un nom de dossier (ex IMMOBILIER/METEOR)
+                     même si la mailbox cloud ne le contient pas encore. Création
+                     récursive via Graph API à la validation. -->
+                <input type="text" id="classMailManualPath"
+                       placeholder="Ou tapez un dossier (ex : IMMOBILIER/METEOR)"
+                       autocomplete="off" spellcheck="false"
+                       maxlength="200"
+                       style="width:100%;margin-top:10px;padding:8px 10px;border:1px solid #d0d7de;border-radius:6px;font-size:13px;box-sizing:border-box;" />
                 <div class="em-folder-tree" id="classMailTree"></div>
             </div>
             <div class="em-popup-actions">
@@ -459,6 +468,6 @@
         </div>
     </div>
 
-    <script defer src="dialog.js?v=v30-fix-doublon-sse-30-04-PM"></script>
+    <script defer src="dialog.js?v=v31-classement-saisie-manuelle-30-04-PM"></script>
 </body>
 </html>

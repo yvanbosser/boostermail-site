@@ -6899,6 +6899,116 @@ def api_classify_email():
         return jsonify({"error": _safe_err(e)}), 500
 
 
+@app.route('/api/classify_email_manual', methods=['POST'])
+def api_classify_email_manual():
+    """
+    Classe un mail dans un dossier saisi manuellement par l'user (path texte).
+    Crée récursivement les dossiers manquants via Graph API.
+
+    Use case : signal Yvan 30/04 PM. La mailbox cloud `groupe-bosser.fr` n'a
+    que 4 dossiers système (Archive, Boîte de réception, Flux RSS, Éléments
+    envoyés). Pas de hiérarchie métier (IMMOBILIER, METEOR, LINKIAA, etc).
+    Le proto port 5050 fonctionnait via Outlook COM (mailbox locale = arbo
+    complète). En SaaS Graph API on a une mailbox cloud souvent moins peuplée.
+    Solution : permettre la saisie manuelle d'un path → création + classement.
+
+    Body JSON : { message_id, path, sent_message_id? }
+    Path ex: 'IMMOBILIER/METEOR' ou 'Boîte de réception/IMMOBILIER/METEOR'.
+    Sécurité : max 5 niveaux profondeur, max 100 chars par segment (cf
+    GraphClient.resolve_or_create_folder_path).
+    """
+    data = request.get_json() or {}
+    message_id = data.get('message_id', '')
+    path = (data.get('path', '') or '').strip()
+    sent_message_id = data.get('sent_message_id', '')
+
+    if not message_id or not path:
+        return jsonify({"error": "message_id et path requis"}), 400
+
+    graph = get_graph()
+    if not graph:
+        return jsonify({"error": "Mode Standard requis"}), 403
+
+    try:
+        # 1) Résoudre le path → folder_id (création récursive si manquant)
+        resolve = graph.resolve_or_create_folder_path(path)
+        if not resolve.get('success'):
+            return jsonify({
+                "error": "Résolution du dossier échouée",
+                "detail": resolve.get('error', ''),
+            }), 400
+
+        folder_id = resolve['folder_id']
+        final_path = resolve['final_path']
+        created_folders = resolve.get('created_folders', [])
+
+        # 2) Déplacer le mail reçu
+        move_result = graph.move_to_folder(message_id, folder_id)
+
+        # 3) Copier le mail envoyé (si fourni)
+        copy_result = None
+        if sent_message_id:
+            copy_result = graph.copy_to_folder(sent_message_id, folder_id)
+
+        # 4) Sauvegarder en DB pour apprentissage (rule learning)
+        new_id = move_result.get('new_id', '') or message_id
+        email = graph.get_email_by_id(new_id)
+        if email:
+            contact_email = email.get('from_email', '')
+            domain = _extract_email_domain(contact_email)
+            subject_kw = _extract_subject_keywords(email.get('subject', ''))
+            _db.save_classification(
+                entry_id=new_id,
+                folder_path=final_path,
+                folder_id=folder_id,
+                contact_email=contact_email,
+                domain=domain,
+                subject=email.get('subject', ''),
+                subject_keywords=subject_kw,
+            )
+            _classify_momentum.clear()
+            _classify_momentum.update({
+                'folder_id': folder_id,
+                'folder_name': final_path,
+                'ts': time.time(),
+            })
+
+        # 5) Nettoyer les caches
+        _purge_message_caches(message_id)
+        try:
+            _db.purge_email_cache_for(new_id)
+        except Exception:
+            pass
+
+        # 6) Invalider le cache outlook_folders (nouveau dossier créé → arbre changé)
+        if created_folders and _get_user_cache is not None and _get_current_user_id is not None:
+            try:
+                user_id = _get_current_user_id() or 'default'
+                cache = _get_user_cache('outlook_folders', user_id)
+                cache['list'] = []  # force rechargement au prochain appel
+                cache['ts'] = 0
+            except Exception:
+                pass
+
+        logger.info(
+            f"[manual_classify] {message_id[:30]} → {final_path} "
+            f"(créés: {len(created_folders)})"
+        )
+        return jsonify({
+            "status": "ok",
+            "folder_id": folder_id,
+            "final_path": final_path,
+            "created_folders": created_folders,
+            "move": move_result,
+            "copy": copy_result,
+        })
+    except GraphAuthError:
+        return jsonify({"error": "Token expiré", "auth_required": True}), 401
+    except Exception as e:
+        logger.error(f"Erreur api_classify_email_manual: {e}")
+        return jsonify({"error": _safe_err(e)}), 500
+
+
 # =============================================================================
 # ROUTES API — PIÈCES JOINTES
 # =============================================================================

@@ -2821,11 +2821,47 @@ function _showClassMailPopup(suggestion, folders) {
         document.getElementById('classMailTree').innerHTML = treeHtml;
     }
 
+    // Phase 3 (30/04 PM) — brancher l'input de saisie manuelle.
+    // Quand user tape un path → désactive sélection arborescence,
+    // active "Classer ici" qui appellera /api/classify_email_manual.
+    var manualInput = document.getElementById('classMailManualPath');
+    if (manualInput) {
+        // Reset à l'ouverture de la popup
+        manualInput.value = '';
+        manualInput.removeEventListener('input', _onManualPathInput);
+        manualInput.addEventListener('input', _onManualPathInput);
+    }
+
     document.getElementById('popupClassMail').classList.add('active');
+}
+
+// Phase 3 (30/04 PM) — Handler input saisie manuelle de path dossier.
+// Si l'user tape : on annule la sélection arborescence/suggestion et on
+// active le bouton "Classer ici" qui passera en mode manual_classify.
+var _selectedFolderManualPath = '';
+
+function _onManualPathInput(e) {
+    var val = (e && e.target && e.target.value || '').trim();
+    var btn = document.getElementById('btnClassMail');
+    if (val.length > 0) {
+        _selectedFolderManualPath = val;
+        _selectedFolderId = '';  // mode manual prend le pas
+        // Highlight off (sélection arbo/suggestion neutralisée)
+        document.querySelectorAll('.em-folder-item, .em-folder-suggestion').forEach(function(el) {
+            el.classList.remove('selected');
+        });
+        if (btn) btn.disabled = false;
+    } else {
+        _selectedFolderManualPath = '';
+        if (btn) btn.disabled = (_selectedFolderId ? false : true);
+    }
 }
 
 function _selectFolder(folderId, element) {
     _selectedFolderId = folderId;
+    _selectedFolderManualPath = '';  // user re-sélectionne via arbo → reset manual
+    var manualInput = document.getElementById('classMailManualPath');
+    if (manualInput) manualInput.value = '';
     document.getElementById('btnClassMail').disabled = false;
     // Highlight
     document.querySelectorAll('.em-folder-item, .em-folder-suggestion').forEach(function(el) {
@@ -2837,6 +2873,13 @@ function _selectFolder(folderId, element) {
 }
 
 function doClassMail() {
+    // Phase 3 (30/04 PM) : si l'user a tapé un path manuel, on route vers
+    // /api/classify_email_manual qui crée récursivement les dossiers manquants.
+    // Sinon : path classique (folder_id sélectionné dans l'arborescence/suggestion).
+    if (_selectedFolderManualPath) {
+        _doClassMailManual(_selectedFolderManualPath);
+        return;
+    }
     if (!_selectedFolderId) return;
     document.getElementById('btnClassMail').disabled = true;
     document.getElementById('btnClassMail').textContent = 'Classement...';
@@ -2858,6 +2901,53 @@ function doClassMail() {
     .catch(function() {
         document.getElementById('popupClassMail').classList.remove('active');
         _startClassPJ();
+    });
+}
+
+// Phase 3 (30/04 PM) — Classement par saisie manuelle d'un path texte.
+// Le backend (`/api/classify_email_manual`) crée récursivement les dossiers
+// manquants via Graph API si le path n'existe pas (max 5 niveaux de
+// profondeur, max 100 chars/segment).
+function _doClassMailManual(path) {
+    var btn = document.getElementById('btnClassMail');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Création + classement...';
+    }
+
+    _fetchTimeout(_backendUrl + '/api/classify_email_manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            message_id: _messageId,
+            path: path,
+        }),
+    }, 15000)  // 15s : création récursive + move peut être plus long que classify simple
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data && data.status === 'ok') {
+            // Pas d'alert : workflow non-bloquant, on passe au classement PJ
+            document.getElementById('popupClassMail').classList.remove('active');
+            _startClassPJ();
+        } else {
+            // Erreur : afficher dans le bouton et rester sur la popup pour retry
+            if (btn) {
+                btn.textContent = 'Erreur : ' + (data && data.detail || data && data.error || 'inconnue');
+                setTimeout(function() {
+                    btn.textContent = 'Classer ici';
+                    btn.disabled = false;
+                }, 3000);
+            }
+        }
+    })
+    .catch(function(err) {
+        if (btn) {
+            btn.textContent = 'Erreur réseau';
+            setTimeout(function() {
+                btn.textContent = 'Classer ici';
+                btn.disabled = false;
+            }, 2500);
+        }
     });
 }
 

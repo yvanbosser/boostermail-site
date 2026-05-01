@@ -5,6 +5,7 @@
 > **🆕 Refactors livrés en autonomie 30/04 PM** :
 > - **✅ FIX LEAK #1 HIGH** GraphClient HTTP Session partagée class-level (commit `2077cbb`) — Pattern #22 + I-RES-05
 > - **✅ FIX LEAK #2 MEDIUM** ThreadPoolExecutor `cancel_futures=True` (commit `2077cbb`)
+> - **✅ Saisie manuelle classement** (Phase 3 commit ci-dessous) — helper `GraphClient.resolve_or_create_folder_path` + route `/api/classify_email_manual` + input texte dans popup classement. Permet à l'user de taper un path (ex `IMMOBILIER/METEOR`) qui est créé récursivement via Graph API si manquant. Reproduit la philosophie du proto port 5050 sur mailbox cloud peu peuplée. Cache bust `dialog.js v31`.
 >
 > **🆕 Nouveau bug détecté en kit audit Phase 2 (autonomie 30/04 PM)** :
 > - **MEDIUM** Graph 400 sur `$search="subject:..."` quand le sujet contient caractères spéciaux (`&`, `#`, `(`, etc.). Cause : Graph interprète `&` comme séparateur QueryString. Symptôme observé sur 3 mails (Surfaces du Cardo, Payment Netlify, Secure your account). Pre-existing, pas dû au refactor LEAK #1. Fix : URL-encoder les caractères dangereux dans le query `$search` côté `outlook_graph.py:search_emails`. Estimé 30 min.
