@@ -5,7 +5,9 @@
 > **🆕 Refactors livrés en autonomie 30/04 PM** :
 > - **✅ FIX LEAK #1 HIGH** GraphClient HTTP Session partagée class-level (commit `2077cbb`) — Pattern #22 + I-RES-05
 > - **✅ FIX LEAK #2 MEDIUM** ThreadPoolExecutor `cancel_futures=True` (commit `2077cbb`)
-> - **✅ Saisie manuelle classement** (Phase 3 commit ci-dessous) — helper `GraphClient.resolve_or_create_folder_path` + route `/api/classify_email_manual` + input texte dans popup classement. Permet à l'user de taper un path (ex `IMMOBILIER/METEOR`) qui est créé récursivement via Graph API si manquant. Reproduit la philosophie du proto port 5050 sur mailbox cloud peu peuplée. Cache bust `dialog.js v31`.
+> - **✅ Saisie manuelle classement** (Phase 3 commit `2c95ba8`) — helper `GraphClient.resolve_or_create_folder_path` + route `/api/classify_email_manual` + input texte dans popup classement. Permet à l'user de taper un path (ex `IMMOBILIER/METEOR`) qui est créé récursivement via Graph API si manquant. Cache bust `dialog.js v31`.
+> - **✅ Redaction PII logs RGPD** (Phase 4 commit `91b5de1`) — helpers `_hash_email_partial` / `_redact_url_pii` / `_redact_pii_for_log` dans `app_plugin.py`. Route `/api/debug_addin_log` redacte avant écriture sur disque. 7 sites `logger.info` avec emails patchés. Pattern #23 + I-SEC-07.
+> - **✅ Endpoint GDPR Export** (Phase 5 commit `91b5de1+`) — `/api/gdpr/export` lecture seule retourne ZIP/JSON avec toutes les données user (10 tables + metadata). Article 15 + 20 RGPD. Validation prod : 4229 rows / 3.6 MB exportés OK.
 >
 > **🆕 Nouveau bug détecté en kit audit Phase 2 (autonomie 30/04 PM)** :
 > - **MEDIUM** Graph 400 sur `$search="subject:..."` quand le sujet contient caractères spéciaux (`&`, `#`, `(`, etc.). Cause : Graph interprète `&` comme séparateur QueryString. Symptôme observé sur 3 mails (Surfaces du Cardo, Payment Netlify, Secure your account). Pre-existing, pas dû au refactor LEAK #1. Fix : URL-encoder les caractères dangereux dans le query `$search` côté `outlook_graph.py:search_emails`. Estimé 30 min.

@@ -9141,6 +9141,183 @@ def api_template_feedback():
     return jsonify({"ok": True})
 
 
+@app.route('/api/gdpr/export', methods=['GET'])
+def api_gdpr_export():
+    """Export RGPD des données du user (Articles 15 + 20 RGPD).
+
+    Phase 4 RGPD (autonomie 30/04 PM) — recommandation #1 du rapport
+    `audit/rapports/2026-04-30_PM_audit_rgpd.md`.
+
+    Article 15 : droit d'accès — l'user peut récupérer une copie complète
+    de ses données.
+    Article 20 : droit à la portabilité — format structuré (JSON), lisible
+    par machine, transférable.
+
+    Retourne un JSON avec toutes les tables DB qui contiennent des PII
+    de l'utilisateur. Pas d'authentification renforcée pour l'instant
+    (en mono-user beta) — à durcir en multi-tenant via @require_user.
+
+    NB : pour le multi-tenant, filtrer par user_id sur toutes les
+    requêtes. Aujourd'hui, en mono-user, on retourne TOUT le contenu
+    DB (Yvan = unique user). Pré-multi-tenant, le user_id Microsoft est
+    récupérable via session/JWT mais le schéma DB ne stocke pas encore
+    user_id sur toutes les tables (cf étape 7 multi-tenant 22/22 caches
+    isolés mais pas DB).
+
+    Format réponse :
+    {
+        "export_metadata": {
+            "exported_at": "2026-04-30T...",
+            "user_email": "yvan@...",
+            "schema_version": 1,
+            "rows_total": N
+        },
+        "contact_profiles": [...],
+        "threads": [...],
+        "echeances": [...],
+        "folder_classifications": [...],
+        "pj_classifications": [...],
+        "metrics": [...],
+        "settings_user_visible": {...}  # exclut auth_token, fernet_key
+    }
+    """
+    try:
+        export_data = {}
+        rows_total = 0
+
+        # 1) Profils contacts
+        try:
+            profiles = _db.get_all_contact_profiles() or []
+            export_data['contact_profiles'] = profiles
+            rows_total += len(profiles)
+        except Exception as e:
+            logger.warning(f"[gdpr/export] contact_profiles error : {e}")
+            export_data['contact_profiles'] = []
+
+        # 2) Threads (historique conversations)
+        try:
+            conn = _db._conn()
+            c = conn.cursor()
+            c.execute("SELECT * FROM threads ORDER BY created_at DESC")
+            threads = [dict(r) for r in c.fetchall()]
+            export_data['threads'] = threads
+            rows_total += len(threads)
+        except Exception as e:
+            logger.warning(f"[gdpr/export] threads error : {e}")
+            export_data['threads'] = []
+
+        # 3) Échéances détectées
+        try:
+            c.execute("SELECT * FROM echeances ORDER BY created_at DESC")
+            echeances = [dict(r) for r in c.fetchall()]
+            export_data['echeances'] = echeances
+            rows_total += len(echeances)
+        except Exception as e:
+            logger.warning(f"[gdpr/export] echeances error : {e}")
+            export_data['echeances'] = []
+
+        # 4) Classifications folder + PJ
+        try:
+            c.execute("SELECT * FROM folder_classifications ORDER BY created_at DESC")
+            export_data['folder_classifications'] = [dict(r) for r in c.fetchall()]
+            rows_total += len(export_data['folder_classifications'])
+        except Exception as e:
+            logger.warning(f"[gdpr/export] folder_classifications error : {e}")
+            export_data['folder_classifications'] = []
+
+        try:
+            c.execute("SELECT * FROM pj_classifications ORDER BY created_at DESC")
+            export_data['pj_classifications'] = [dict(r) for r in c.fetchall()]
+            rows_total += len(export_data['pj_classifications'])
+        except Exception as e:
+            logger.warning(f"[gdpr/export] pj_classifications error : {e}")
+            export_data['pj_classifications'] = []
+
+        # 5) Métriques d'usage
+        try:
+            c.execute("SELECT * FROM metrics ORDER BY created_at DESC LIMIT 10000")
+            metrics = [dict(r) for r in c.fetchall()]
+            export_data['metrics'] = metrics
+            rows_total += len(metrics)
+        except Exception as e:
+            logger.warning(f"[gdpr/export] metrics error : {e}")
+            export_data['metrics'] = []
+
+        # 6) Style corrections (apprentissage automatique)
+        try:
+            c.execute("SELECT * FROM style_corrections ORDER BY created_at DESC")
+            corrections = [dict(r) for r in c.fetchall()]
+            export_data['style_corrections'] = corrections
+            rows_total += len(corrections)
+        except Exception as e:
+            logger.warning(f"[gdpr/export] style_corrections error : {e}")
+            export_data['style_corrections'] = []
+
+        # 7) Settings user-visibles (exclut secrets : auth_token_cache, fernet_key, anthropic_api_key, etc.)
+        SAFE_SETTINGS_KEYS = {
+            'user_name', 'user_email', 'default_importance', 'pj_root_folder',
+            'show_marketing_signature', 'onboarding_mail_count',
+            'writing_level', 'writing_score',
+        }
+        try:
+            c.execute("SELECT key, value FROM settings WHERE key IN ({})".format(
+                ','.join(['?'] * len(SAFE_SETTINGS_KEYS))
+            ), tuple(SAFE_SETTINGS_KEYS))
+            settings_user = {r[0]: r[1] for r in c.fetchall()}
+            export_data['settings_user_visible'] = settings_user
+        except Exception as e:
+            logger.warning(f"[gdpr/export] settings error : {e}")
+            export_data['settings_user_visible'] = {}
+
+        # 8) Reply cache (drafts user — peut contenir PII)
+        try:
+            with _reply_lock:
+                # Flatten le UserScopedDict si applicable
+                if hasattr(_reply_cache, 'iter_user_caches'):
+                    drafts_export = {}
+                    for uid, user_cache in _reply_cache.iter_user_caches():
+                        drafts_export[uid] = {k: v for k, v in user_cache.items()}
+                    export_data['reply_drafts'] = drafts_export
+                else:
+                    export_data['reply_drafts'] = dict(_reply_cache)
+            # Compter approximativement
+            for uid, dr in (export_data.get('reply_drafts') or {}).items():
+                if isinstance(dr, dict):
+                    rows_total += len(dr)
+        except Exception as e:
+            logger.warning(f"[gdpr/export] reply_drafts error : {e}")
+            export_data['reply_drafts'] = {}
+
+        # Métadonnées export
+        try:
+            user_email = _get_my_email() or _db.get_setting('user_email', '') or 'unknown'
+        except Exception:
+            user_email = 'unknown'
+
+        export_data['export_metadata'] = {
+            'exported_at': datetime.now().isoformat(timespec='seconds'),
+            'user_email': user_email,
+            'schema_version': 1,
+            'rows_total': rows_total,
+            'service': 'BoosterMail',
+            'gdpr_articles': '15 (accès) + 20 (portabilité)',
+            'note': 'Cet export contient toutes vos données stockées par BoosterMail. '
+                    'Les champs sensibles (auth_token, fernet_key, api_keys) sont exclus '
+                    'pour des raisons de sécurité.',
+        }
+
+        # Réponse JSON pretty (pour lisibilité user) avec Content-Disposition
+        # qui force le download côté browser (pas de display inline).
+        resp = jsonify(export_data)
+        resp.headers['Content-Disposition'] = (
+            f'attachment; filename="boostermail_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json"'
+        )
+        return resp
+    except Exception as e:
+        logger.error(f"[gdpr/export] erreur globale : {e}", exc_info=True)
+        return jsonify({'error': str(e)[:200]}), 500
+
+
 @app.route('/api/admin/db_conns_stats', methods=['GET'])
 def api_admin_db_conns_stats():
     """Diagnostic SQLite conn leak — Pattern #21 / I-DB-06 (cf 30/04 PM).
