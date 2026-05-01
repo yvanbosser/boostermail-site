@@ -9,6 +9,9 @@
 > - **✅ Redaction PII logs RGPD** (Phase 4 commit `91b5de1`) — helpers `_hash_email_partial` / `_redact_url_pii` / `_redact_pii_for_log` dans `app_plugin.py`. Route `/api/debug_addin_log` redacte avant écriture sur disque. 7 sites `logger.info` avec emails patchés. Pattern #23 + I-SEC-07.
 > - **✅ Endpoint GDPR Export** (Phase 5 commit `91b5de1+`) — `/api/gdpr/export` lecture seule retourne ZIP/JSON avec toutes les données user (10 tables + metadata). Article 15 + 20 RGPD. Validation prod : 4229 rows / 3.6 MB exportés OK.
 >
+> **🆕 Bugs détectés en autonomie 30/04 PM tardif (à investiguer)** :
+> - **MEDIUM** « Pas de popup de lancement et pas d'overlay » au clic BoosterMail dans Outlook (signal Yvan post-purge cache WebView2). Logs montrent `dialog_js_error: Script error line 0 cross_origin: true` à 12:36:38 UTC. Erreur JS dans le dialog mais cross-origin invisible. Génération marche quand même (Yvan a confirmé). À investiguer : peut-être lié au refactor LEAK #1 (Sessions HTTP class-level) ou Phase 4 PII redaction (changement schema des events `display_dialog_attempt`, `item_changed_fired`, etc. côté autorunshared.js qui peut s'attendre à des champs en clair). Reproductible facilement, à fix au prochain cycle.
+>
 > **🆕 Nouveau bug détecté en kit audit Phase 2 (autonomie 30/04 PM)** :
 > - **MEDIUM** Graph 400 sur `$search="subject:..."` quand le sujet contient caractères spéciaux (`&`, `#`, `(`, etc.). Cause : Graph interprète `&` comme séparateur QueryString. Symptôme observé sur 3 mails (Surfaces du Cardo, Payment Netlify, Secure your account). Pre-existing, pas dû au refactor LEAK #1. Fix : URL-encoder les caractères dangereux dans le query `$search` côté `outlook_graph.py:search_emails`. Estimé 30 min.
 >

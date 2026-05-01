@@ -9548,6 +9548,109 @@ def _gdpr_purge_user_data() -> dict:
         return {'status': 'error', 'error': str(e)[:200]}
 
 
+@app.route('/api/admin/recalibrate_contacts_signature', methods=['POST'])
+def api_admin_recalibrate_contacts_signature():
+    """Batch re-analyse des contacts dont user_signature_for_contact est NULL.
+
+    Choix Yvan 1B (autonomie 30/04 PM) : suite à l'audit signature Julien,
+    on a vu que seulement 4/115 profils ont leur signature contact-spécifique
+    renseignée. Mon fix matin (commit c3ae37a) force la re-analyse au
+    prochain trigger naturel mais ça peut prendre des semaines.
+
+    Cet endpoint relance manuellement l'analyse sur tous les profils
+    candidats (ceux avec sample_count > 0 ET user_signature_for_contact NULL,
+    et NON manually_edited).
+
+    Sécurité :
+    - POST seulement (pas de déclenchement accidentel par GET browser)
+    - Paramètre `?dry_run=true` par défaut → liste les candidats sans rien faire
+    - Limite explicite : `?limit=N` (default 50) pour borner le coût Claude
+
+    Coût estimé : ~$0.01 par contact analysé (Sonnet 4.6, ~5000 tokens).
+    Pour 111 contacts = ~$1 max.
+    """
+    dry_run = request.args.get('dry_run', 'true').lower() in ('true', '1', 'yes')
+    try:
+        limit = int(request.args.get('limit', '50'))
+    except ValueError:
+        limit = 50
+    limit = max(1, min(limit, 200))
+
+    try:
+        conn = _db._conn()
+        c = conn.cursor()
+        c.execute(
+            """SELECT email, display_name, sample_count
+               FROM contact_profiles
+               WHERE (user_signature_for_contact IS NULL OR user_signature_for_contact = '')
+                 AND (manually_edited IS NULL OR manually_edited = 0)
+                 AND sample_count > 0
+               ORDER BY sample_count DESC
+               LIMIT ?""",
+            (limit,)
+        )
+        candidates = [{'email': r[0], 'display_name': r[1], 'sample_count': r[2]}
+                      for r in c.fetchall()]
+
+        if dry_run:
+            return jsonify({
+                'status': 'dry_run',
+                'candidates_count': len(candidates),
+                'candidates_sample': candidates[:10],
+                'message': f"{len(candidates)} contacts seraient re-analyses. "
+                           f"Pour executer reellement, appeler avec ?dry_run=false",
+            })
+
+        # Execution réelle : lance _maybe_analyze_contact pour chaque candidat.
+        # Cette fonction respecte _CONTACT_ANALYSIS_SCHEDULE mais avec mon
+        # fix c3ae37a (matin), si sample_count=0 elle force la re-analyse.
+        # Ici sample_count > 0 donc on doit juste s'assurer du re-trigger.
+        # Approche : on reset temporairement sample_count à 0 pour forcer
+        # le path "sample_count=0 anormal", puis l'analyse va le restaurer.
+
+        analyzed = 0
+        signatures_found = 0
+        errors = []
+        for cand in candidates:
+            email = cand['email']
+            try:
+                # Reset sample_count à 0 → force re-analyse dans
+                # _maybe_analyze_contact (cf branche "sample_count=0 anormal" du
+                # commit c3ae37a)
+                existing = _db.get_contact_profile(email)
+                if existing:
+                    existing_copy = dict(existing)
+                    existing_copy['sample_count'] = 0
+                    _db.save_contact_profile(email, existing_copy)
+                    _maybe_analyze_contact(email)
+                    # Vérifier si signature trouvée
+                    refreshed = _db.get_contact_profile(email)
+                    sig = (refreshed or {}).get('user_signature_for_contact')
+                    if sig:
+                        signatures_found += 1
+                    analyzed += 1
+                    logger.info(
+                        f"[recalibrate] {_hash_email_partial(email)} "
+                        f"analyzed (sig: {'found' if sig else 'null'})"
+                    )
+            except Exception as e:
+                logger.error(f"[recalibrate] {_hash_email_partial(email)} error : {e}")
+                errors.append({'email': _hash_email_partial(email), 'error': str(e)[:100]})
+
+        return jsonify({
+            'status': 'completed',
+            'analyzed': analyzed,
+            'signatures_found': signatures_found,
+            'signatures_null_after_analysis': analyzed - signatures_found,
+            'errors_count': len(errors),
+            'errors_sample': errors[:5],
+            'remaining_candidates': max(0, len(candidates) - analyzed),
+        })
+    except Exception as e:
+        logger.error(f"[recalibrate] erreur globale : {e}", exc_info=True)
+        return jsonify({'error': str(e)[:200]}), 500
+
+
 @app.route('/api/admin/db_conns_stats', methods=['GET'])
 def api_admin_db_conns_stats():
     """Diagnostic SQLite conn leak — Pattern #21 / I-DB-06 (cf 30/04 PM).
