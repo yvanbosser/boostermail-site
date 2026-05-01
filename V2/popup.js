@@ -98,20 +98,19 @@ var _companionAvailable = false;
 
     // Afficher la nav fixe + section scrollable dès que overlay
     if (_container === 'pyqt' || _container === 'extension') {
+        // Décision Yvan 01/05/2026 — overlay STRICT : header bleu + 3 boutons
+        // (Échéances/Contacts/Profil) UNIQUEMENT. Tout le reste (mainContent,
+        // scrollSection, emptyState, setupWizard, firstUseState, profilSection)
+        // est forcé à `display:none !important` via la classe CSS
+        // `mode-strict-overlay` (cf bloc CSS dans popup.html).
+        // Le `!important` override les éventuels `style.display = 'block'`
+        // que popup.js fait ailleurs (ex: ligne ~474 lors de la sélection
+        // d'un mail). Ces accès continuent de fonctionner sans crash car les
+        // éléments existent dans le DOM, juste cachés visuellement.
+        document.body.classList.add('mode-strict-overlay');
+
         var fn = document.getElementById('fixedNav');
         if (fn) fn.style.display = 'flex';
-        // Décision Yvan 01/05/2026 — overlay simplifié à 3 boutons SEULEMENT
-        // (Échéances/Contacts/Profil dans fixedNav). Le bandeau identité +
-        // grand bouton "Répondre avec BoosterMail" + Rep.tous/Transférer/
-        // Classer (section scrollSection) ne sont plus affichés. La réponse
-        // aux mails se fait via le bouton "BoosterMail" dans le ribbon
-        // Outlook qui ouvre directement le dialog principal.
-        // scrollSection reste dans le DOM (style="display:none" initial)
-        // pour ne pas casser les accès JS aux éléments enfants
-        // (contactName/contactAvatar/etc.) — popup.js les setter encore
-        // mais sans rendu visible.
-        var es = document.getElementById('emptyState');
-        if (es) es.style.display = 'none';
     }
 
     // Test connexion backend

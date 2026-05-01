@@ -103,6 +103,42 @@ def test_popup_legacy_reply_buttons_hidden():
     )
 
 
+def test_popup_strict_overlay_css_class_present():
+    """popup.html doit contenir le bloc CSS `body.mode-strict-overlay` qui
+    cache mainContent/scrollSection/etc. en !important.
+
+    Décision Yvan 01/05/2026 : overlay strict = header bleu + 3 boutons
+    UNIQUEMENT. Plus de section PJ/échéance/classement/profil.
+    """
+    soup = _load_html('popup.html')
+    style_tag = soup.find('style')
+    assert style_tag is not None, "popup.html : aucun bloc <style>"
+    css_text = style_tag.get_text()
+    # Vérif que la règle mode-strict-overlay existe et cache mainContent
+    assert 'mode-strict-overlay' in css_text, (
+        "Règle CSS 'mode-strict-overlay' manquante dans popup.html. "
+        "Cf décision Yvan 01/05/2026 — overlay strict 3 boutons."
+    )
+    assert '#mainContent' in css_text and '!important' in css_text, (
+        "Règle CSS doit forcer #mainContent à display:none !important "
+        "en mode strict overlay."
+    )
+
+
+def test_popup_js_adds_strict_overlay_class():
+    """popup.js doit ajouter la classe 'mode-strict-overlay' au body en
+    mode pyqt/extension. Sinon les sections legacy s'afficheraient.
+    """
+    popup_js_path = os.path.join(V2_DIR, 'popup.js')
+    with open(popup_js_path, encoding='utf-8') as f:
+        src = f.read()
+    assert "classList.add('mode-strict-overlay')" in src or \
+           'classList.add("mode-strict-overlay")' in src, (
+        "popup.js doit appeler document.body.classList.add('mode-strict-overlay') "
+        "en mode pyqt/extension."
+    )
+
+
 def test_popup_no_taskpane_text():
     """popup.html ne doit pas contenir de référence à 'taskpane' dans le
     rendu visible. Décision Yvan 29/04 : taskpane interdite (mémoire

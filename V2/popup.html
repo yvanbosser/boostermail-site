@@ -127,6 +127,21 @@
         /* Prefetch indicator */
         .tp-prefetch { padding: 4px 12px; background: #e3f2fd; font-size: 8px; color: #0F6CBD; text-align: center; display: none; }
         .tp-prefetch.active { display: block; }
+
+        /* Mode 'pyqt' / 'extension' : overlay STRICT à 3 boutons (décision
+           Yvan 01/05/2026). Cache TOUT ce qui n'est pas le header bleu et
+           la barre de 3 boutons fixedNav. Les `!important` overrident les
+           éventuels `style.display = 'block'` que popup.js ferait ailleurs.
+           Mode 'taskpane' (legacy) : pas affecté, contenu complet visible. */
+        body.mode-strict-overlay #mainContent,
+        body.mode-strict-overlay #scrollSection,
+        body.mode-strict-overlay #emptyState,
+        body.mode-strict-overlay #setupWizard,
+        body.mode-strict-overlay #firstUseState,
+        body.mode-strict-overlay #profilSection,
+        body.mode-strict-overlay #mailContent {
+            display: none !important;
+        }
     </style>
 </head>
 <body>
@@ -295,6 +310,6 @@
         </div>
     </div>
 
-    <script src="popup.js?v=v17-overlay-3-boutons-only-01-05"></script>
+    <script src="popup.js?v=v18-overlay-strict-3-buttons-01-05"></script>
 </body>
 </html>
