@@ -218,7 +218,14 @@ class EasyMailPopup(QMainWindow):
 
         self._screen = QApplication.primaryScreen().availableGeometry()
         self._overlay_w = min(max(int(self._screen.width() * 0.22), 280), 380)
-        self._overlay_h = int(self._screen.height() * 0.31)
+        # Décision Yvan 01/05/2026 — overlay STRICT 3 boutons (header bleu +
+        # nav Échéances/Contacts/Profil). Avant : ~31% hauteur écran (~330px)
+        # qui laissait un grand blanc sous les 3 boutons puisque le contenu
+        # mainContent est désormais caché en `display:none !important` (cf
+        # popup.html bloc CSS `body.mode-strict-overlay`).
+        # Après : taille fixe ~120px qui correspond au contenu réel
+        # (header 56px + nav 50px + bordures). Plus de blanc visible.
+        self._overlay_h = 120
         # Dimensions élargies pour le CTA marketing (user pas activé)
         self._marketing_w = min(max(int(self._screen.width() * 0.30), 420), 520)
         self._marketing_h = min(max(int(self._screen.height() * 0.55), 420), 560)

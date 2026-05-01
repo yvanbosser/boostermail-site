@@ -3,24 +3,56 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EasyMail — Contacts</title>
+    <title>BoosterMail — Contacts</title>
 
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            /* Fond très légèrement teinté de bleu chaud pour adoucir l'écran */
+            background: linear-gradient(180deg, #f5f8fc 0%, #f0f2f5 100%);
+            min-height: 100vh;
+        }
 
+        /* Header bleu cohérent avec l'overlay BoosterMail (#0F6CBD).
+           Décision Yvan 01/05/2026 : sobre mais chaleureux. */
         .header {
-            background: white; padding: 16px 24px;
+            background: linear-gradient(135deg, #0F6CBD 0%, #1976D2 100%);
+            padding: 18px 28px;
             display: flex; align-items: center; justify-content: space-between;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.08); position: sticky; top: 0; z-index: 10;
+            box-shadow: 0 2px 8px rgba(15, 108, 189, 0.15);
+            position: sticky; top: 0; z-index: 10;
+            color: #fff;
         }
-        .header h1 { font-size: 18px; color: #1a1a2e; }
-        .header-right { display: flex; gap: 10px; align-items: center; }
+        .header h1 {
+            font-size: 18px; color: #fff; font-weight: 600;
+            display: flex; align-items: center; gap: 10px;
+        }
+        .header h1::before {
+            content: '👥';
+            font-size: 20px;
+        }
+        .header-right { display: flex; gap: 12px; align-items: center; }
+        .header-count {
+            font-size: 13px; color: rgba(255, 255, 255, 0.85);
+            font-weight: 500;
+        }
         .btn-back {
-            background: none; border: 1px solid #ddd; color: #666; padding: 8px 18px;
+            background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.3);
+            color: #fff; padding: 8px 18px;
             border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 500;
+            transition: all 0.15s;
         }
-        .btn-back:hover { background: #f5f5f5; }
+        .btn-back:hover { background: rgba(255, 255, 255, 0.25); }
+
+        /* Liens de nav entre les 3 pages dashboard (Contacts ↔ Profil ↔ Échéances).
+           Décision Yvan 01/05/2026 : navigation directe depuis chaque page. */
+        .nav-link {
+            color: rgba(255, 255, 255, 0.85); text-decoration: none;
+            font-size: 13px; font-weight: 500; padding: 6px 12px;
+            border-radius: 6px; transition: all 0.15s;
+        }
+        .nav-link:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
 
         .container { max-width: 1000px; margin: 24px auto; padding: 0 24px; }
 
@@ -155,10 +187,12 @@
 </head>
 <body>
     <div class="header">
-        <h1>Contacts</h1>
+        <h1>BoosterMail — Contacts</h1>
         <div class="header-right">
-            <span style="font-size:12px;color:#999;">{{ profiles|length }} profil{{ 's' if profiles|length > 1 else '' }}</span>
-            <a href="/inbox" class="btn-back">Retour</a>
+            <a href="/plugin/echeances" class="nav-link">⏰ Échéances</a>
+            <a href="/plugin/profile" class="nav-link">⚙ Profil</a>
+            <span class="header-count">{{ profiles|length }} profil{{ 's' if profiles|length > 1 else '' }}</span>
+            <a href="javascript:window.close()" class="btn-back" onclick="if(!window.close())history.back();return false;">Fermer</a>
         </div>
     </div>
 
