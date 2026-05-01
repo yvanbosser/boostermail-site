@@ -142,6 +142,16 @@
         body.mode-strict-overlay #mailContent {
             display: none !important;
         }
+
+        /* Mode strict overlay : body s'adapte au contenu (fini le 100vh
+           qui forçait du blanc en bas si la fenêtre Qt est plus grande).
+           Bg bleu si la fenêtre dépasse → cohérent avec le header au lieu
+           d'un blanc visible. */
+        body.mode-strict-overlay {
+            height: auto !important;
+            min-height: 0 !important;
+            background: #0F6CBD !important;
+        }
     </style>
 </head>
 <body>
@@ -310,6 +320,6 @@
         </div>
     </div>
 
-    <script src="popup.js?v=v18-overlay-strict-3-buttons-01-05"></script>
+    <script src="popup.js?v=v19-overlay-fit-content-01-05"></script>
 </body>
 </html>
