@@ -32,10 +32,16 @@
         .header-right { display: flex; gap: 12px; align-items: center; }
         .nav-link {
             color: rgba(255, 255, 255, 0.85); text-decoration: none;
-            font-size: 13px; font-weight: 500; padding: 6px 12px;
+            font-size: 13px; font-weight: 500; padding: 8px 16px;
             border-radius: 6px; transition: all 0.15s;
+            border: 1px solid transparent;
         }
         .nav-link:hover { background: rgba(255,255,255,0.15); color: #fff; }
+        .nav-link.active {
+            background: #fff; color: #0F6CBD; font-weight: 600;
+            border: 1px solid #fff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
         .btn-back {
             background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);
             color: #fff; padding: 8px 18px;
@@ -195,10 +201,11 @@
 </head>
 <body>
     <div class="header">
-        <h1>BoosterMail — Profil</h1>
+        <h1>BoosterMail</h1>
         <div class="header-right">
-            <a href="/plugin/contacts" class="nav-link">👤 Contacts</a>
-            <a href="/plugin/echeances" class="nav-link">⏰ Échéances</a>
+            <a href="/plugin/contacts" class="nav-link">👤 Contact</a>
+            <a href="/plugin/profile" class="nav-link active">⚙ Profil</a>
+            <a href="/plugin/echeances" class="nav-link">⏰ Échéance</a>
             <a href="javascript:window.close()" class="btn-back" onclick="if(!window.close())history.back();return false;">Fermer</a>
         </div>
     </div>
