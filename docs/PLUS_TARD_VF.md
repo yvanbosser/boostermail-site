@@ -1,6 +1,6 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 30/04/2026 PM étendu (5 commits ce jour : FD leak + 2 fixes UI Yvan signalés + endpoint diag + audit autres leaks ; voir `docs/sessions/OUTLOOK_BILAN_SESSION_20260430_PM_incident_fd_leak.md` Partie 1+2)
+> **Dernière mise à jour** : 30/04/2026 PM autonomie (Yvan en convalescence, ~10 commits livrés en autonomie totale : FD leak + UI fixes + endpoint diag + RGPD complet + LEAK #1+#2 + classement manuel + Pattern #21-23 + Invariants ; voir `docs/sessions/OUTLOOK_BILAN_SESSION_20260430_PM_autonomie.md`)
 >
 > **🆕 Refactors livrés en autonomie 30/04 PM** :
 > - **✅ FIX LEAK #1 HIGH** GraphClient HTTP Session partagée class-level (commit `2077cbb`) — Pattern #22 + I-RES-05
