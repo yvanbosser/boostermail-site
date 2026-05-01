@@ -1,6 +1,6 @@
 # Invariants V2 — règles absolues testables
 
-> **Dernière mise à jour** : 30/04/2026 PM (ajout I-RES-05 Sessions HTTP GraphClient partagées class-level — fix LEAK #1 autonomie convalescence Yvan, cf Pattern #22)
+> **Dernière mise à jour** : 30/04/2026 PM (ajout I-SEC-07 PII redaction logs — Phase 4 RGPD autonomie convalescence Yvan, cf Pattern #23)
 > **Principe** : chaque invariant est testable mécaniquement par `smoke_test.ps1`. Une violation = anomalie, point final.
 
 ---
@@ -196,6 +196,16 @@ Les 4 points d'insertion `editor.innerHTML` utilisent `_escapeHtml()` ou équiva
 
 ### I-SEC-05 : Config.json non committé
 `.gitignore` contient `config.json`.
+
+### I-SEC-07 : Aucune PII en clair dans `addin_debug.log` ou journalctl Flask (RGPD)
+- **Garantie** : tous les emails sont hashés partiellement (`man***@domain.fr`) via `_hash_email_partial()` avant log. Les champs `subject`, `body_preview` sont tronqués à 50 chars dans `addin_debug.log`. Les URL contenant des query strings PII sont redactées via `_redact_url_pii()`.
+- **Test** :
+  ```bash
+  ssh ovh "sudo grep -E '@(gmail|orange|outlook|free|wanadoo|coaxis|solaris-gestion|airbee|groupe-bosser)\\.' /opt/boostermail/addin_debug.log | grep -v '\\*\\*\\*@' | head"
+  ```
+  doit retourner 0 ligne.
+- **Signal d'alerte** : `journalctl -u boostermail | grep -E '@\w+\.\w+' | grep -v '\\*\\*\\*'` retourne des emails complets récents → site oublié dans les helpers `_redact_*`.
+- **Pattern lié** : Pattern #23 dans `audit/ANOMALIES_RECURRENTES.md`.
 
 ### I-SEC-06 : Garde anti-injection sur TOUS les prompts Claude consommant du contenu mail
 Toute methode de `V2/claude_ai.py` qui construit un prompt avec `{body}`,

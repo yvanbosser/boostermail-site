@@ -3441,7 +3441,7 @@ def _poll_companion_loop():
                         _current_mail_data.update(new_data)
                     _sse_data = {k: v for k, v in new_data.items() if k != 'body'}
                     _broadcast_sse('mail_changed', _sse_data)
-                    logger.info(f"Mail changé → {from_email} / {subject[:40]}")
+                    logger.info(f"Mail changé → {_hash_email_partial(from_email)} / {subject[:40]}")
                     # Filtre #5 Smart Speculative : incrémenter le compteur d'ouvertures
                     _increment_open_counter(new_data.get('message_id', ''))
                     # Lancer le prefetch
@@ -3546,14 +3546,83 @@ def sse_stream():
 _addin_debug_log_path = os.path.join(EASYMAIL_DIR, 'addin_debug.log')
 _addin_debug_lock = threading.Lock()
 
+
+# Phase 4 RGPD audit logging PII (autonomie 30/04 PM) — redaction des PII
+# dans les logs add-in. Avant : addin_debug.log contenait subject + from_email
+# + body_preview + URL dialog complète (avec to/cc/messageId/fromName en
+# query string). Risque RGPD si le fichier fuite ou est accédé par un tiers.
+# Cf rapport audit/rapports/2026-04-30_PM_audit_rgpd.md section 3.
+import hashlib as _hashlib_pii  # alias pour éviter shadow
+
+_PII_FIELDS_TRUNCATE_50 = {'subject', 'body_preview'}
+_PII_FIELDS_HASH = {'from_email', 'fromEmail', 'to', 'cc', 'fromName', 'recipient', 'correspondent'}
+_PII_FIELDS_REDACT_URL = {'url'}
+
+
+def _hash_email_partial(email: str) -> str:
+    """Hash partiel d'un email pour log : garde la partie avant @ tronquée à
+    3 chars + le domaine. Ex: 'manon.rabiller@airbee-conseil.fr' →
+    'man***@airbee-conseil.fr'. Permet de distinguer les contacts pour debug
+    sans exposer la PII complète."""
+    if not isinstance(email, str) or '@' not in email:
+        # Fallback : hash SHA-256 tronqué pour valeurs sans @
+        return _hashlib_pii.sha256(str(email).encode('utf-8', errors='replace')).hexdigest()[:8]
+    local, _, domain = email.partition('@')
+    return f"{local[:3]}***@{domain}" if local else f"***@{domain}"
+
+
+def _redact_url_pii(url: str) -> str:
+    """Redact PII dans une URL : garde le path, redact les query string values.
+    Ex: '/plugin/dialog.html?subject=Hello&from=a@b.com' → '/plugin/dialog.html?subject=<redacted>&from=<redacted>'."""
+    if not isinstance(url, str) or '?' not in url:
+        return url
+    base, _, qs = url.partition('?')
+    if not qs:
+        return base
+    redacted_pairs = []
+    for pair in qs.split('&'):
+        key, _, _val = pair.partition('=')
+        # On garde juste les clés non-sensibles (ex: 'platform', 'mode', 'et')
+        if key in ('platform', 'mode', 'et', 'hasAttachments', 'standalone', 'container'):
+            redacted_pairs.append(pair)
+        elif key:
+            redacted_pairs.append(f"{key}=<redacted>")
+    return f"{base}?{'&'.join(redacted_pairs)}"
+
+
+def _redact_pii_for_log(details: dict) -> dict:
+    """Redact les champs PII connus avant écriture dans addin_debug.log.
+
+    Stratégie défensive : on ne CASSE PAS le diagnostic (les champs restent
+    présents avec une version redactée), mais on évite les fuites RGPD.
+    Mots-clés PII identifiés à partir de l'audit RGPD 30/04 PM PHASE 4.
+    """
+    if not isinstance(details, dict):
+        return details
+    redacted = {}
+    for k, v in details.items():
+        if k in _PII_FIELDS_TRUNCATE_50 and isinstance(v, str):
+            redacted[k] = (v[:50] + '...') if len(v) > 50 else v
+        elif k in _PII_FIELDS_HASH and isinstance(v, str):
+            redacted[k] = _hash_email_partial(v)
+        elif k in _PII_FIELDS_REDACT_URL and isinstance(v, str):
+            redacted[k] = _redact_url_pii(v)
+        else:
+            redacted[k] = v
+    return redacted
+
+
 @app.route('/api/debug_addin_log', methods=['POST'])
 def api_debug_addin_log():
     """Journalise un événement envoyé par l'add-in dans addin_debug.log
-    pour diagnostic. Toujours 204 No Content, silencieux."""
+    pour diagnostic. Toujours 204 No Content, silencieux.
+
+    Phase 4 RGPD (30/04 PM) : redaction automatique des champs PII connus
+    avant écriture sur disque. Voir `_redact_pii_for_log()`."""
     try:
         data = request.get_json(force=True, silent=True) or {}
         evt = data.get('event', '?')
-        det = data.get('details', {})
+        det = _redact_pii_for_log(data.get('details', {}))
         with _addin_debug_lock:
             with open(_addin_debug_log_path, 'a', encoding='utf-8') as f:
                 f.write(f"{datetime.now().isoformat(timespec='seconds')} | {evt} | {json.dumps(det, ensure_ascii=False, default=str)}\n")
@@ -10796,7 +10865,7 @@ def api_post_send():
                             if _pdata.get('register') != 'tutoiement':
                                 _pdata['register'] = 'tutoiement'
                                 _db.save_contact_profile(_contact, _pdata)
-                                logger.info(f"[learning] {_contact} → forcé tutoiement")
+                                logger.info(f"[learning] {_hash_email_partial(_contact)} → forcé tutoiement")
                         except Exception as e:
                             logger.debug(f"[_db.save_contact_profile] silent error : {e}")
 
@@ -10848,7 +10917,7 @@ def api_post_send():
                     if existing:
                         existing['sample_count'] = 0
                         _db.save_contact_profile(contact_email, existing)
-                    logger.info(f"[learning] TRIGGER greeting/closing → re-analyse {contact_email}")
+                    logger.info(f"[learning] TRIGGER greeting/closing → re-analyse {_hash_email_partial(contact_email)}")
                 _maybe_analyze_contact(contact_email)
             except Exception as e:
                 logger.error(f"[learning] Erreur: {e}")
@@ -11158,11 +11227,11 @@ def _maybe_analyze_contact(contact_email):
         # toujours NULL → fallback "Yvan BOSSER (Groupe Bosser)" même avec
         # contact très familier. Force re-analyse pour rattrapage immédiat.
         if existing.get('sample_count', 0) == 0:
-            logger.info(f"[learning] Re-analyse forcee de {contact_email} (sample_count=0 anormal, rattrapage)")
+            logger.info(f"[learning] Re-analyse forcee de {_hash_email_partial(contact_email)} (sample_count=0 anormal, rattrapage)")
         elif not _should_analyze_contact(mail_count):
             return
         else:
-            logger.info(f"[learning] Re-analyse de {contact_email} (mail #{mail_count})")
+            logger.info(f"[learning] Re-analyse de {_hash_email_partial(contact_email)} (mail #{mail_count})")
     else:
         # Fix 24/04 : pour la PREMIÈRE analyse d'un contact SANS profil, ne
         # pas bloquer sur le schedule strict [1,2,3,4,5,7,9,13,17,25,50,...].
@@ -11174,7 +11243,7 @@ def _maybe_analyze_contact(contact_email):
         # les re-analyses suivent le schedule normal (via branche `if existing`).
         if mail_count < 3 and not _should_analyze_contact(mail_count):
             return
-        logger.info(f"[learning] Premiere analyse de {contact_email} (mail #{mail_count})")
+        logger.info(f"[learning] Premiere analyse de {_hash_email_partial(contact_email)} (mail #{mail_count})")
 
     # Fix 30/04 PM (signal Yvan) : limit 25 → 50. Le sub-agent a montré que
     # avec limit=25, certains contacts à forte volumétrie (Julien : 86 mails)
@@ -11231,7 +11300,7 @@ def _maybe_analyze_contact(contact_email):
         is_new = not existing
         profile['email'] = contact_email
         _db.save_contact_profile(contact_email, profile)
-        logger.info(f"[learning] Profil sauvegarde: {contact_email} — {profile.get('category','?')}, {profile.get('register','?')}")
+        logger.info(f"[learning] Profil sauvegarde: {_hash_email_partial(contact_email)} — {profile.get('category','?')}, {profile.get('register','?')}")
 
         if is_new:
             global _new_profile_toast

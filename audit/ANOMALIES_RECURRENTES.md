@@ -1,6 +1,6 @@
 # Anomalies récurrentes — mémoire des patterns
 
-> **Dernière mise à jour** : 30/04/2026 PM (ajout Pattern #22 Sessions HTTP partagées class-level — refactor LEAK #1 GraphClient autonomie convalescence Yvan)
+> **Dernière mise à jour** : 30/04/2026 PM (ajout Pattern #23 PII en clair dans logs — Phase 4 RGPD autonomie convalescence Yvan)
 > **Règle** : à chaque nouveau bug détecté, ajouter ici **immédiatement**. À chaque nouveau symptôme, consulter ici **d'abord**.
 
 ---
@@ -909,6 +909,70 @@ def _conn(self):
 - Audit : `audit/rapports/2026-04-30_PM_audit_autres_leaks_ressources.md` LEAK #1
 - Commit fix : `2077cbb fix(graph): Session HTTP partagee class-level + ThreadPoolExecutor cancel_futures`
 - Doc requests Sessions : https://requests.readthedocs.io/en/latest/user/advanced/#session-objects
+
+---
+
+## Pattern #23 — PII en clair dans les logs (RGPD)
+
+**Historique** :
+- 30/04/2026 PM (Phase 4 autonomie convalescence Yvan) : audit RGPD du code V2 a révélé que `addin_debug.log` (logs JS de l'add-in côté serveur) contenait des PII en clair : URL dialog complète avec `subject`, `from_email`, `to`, `cc`, `messageId`, `fromName` en query string. Aussi `body_preview` (50-200 premiers chars du body email), `subject`, `from_email` dans l'event `generate_reply_received`. Côté `journalctl` Flask, les logs `[learning]` mentionnaient les emails contacts en clair (ex: `Profil sauvegarde: manon.rabiller@airbee-conseil.fr — fournisseur, vouvoiement`).
+
+**Symptôme générique** :
+- `grep '@' /opt/.../addin_debug.log` retourne des emails en clair
+- `journalctl -u service` contient des PII (emails, sujets, contenus)
+- Sentry events contiennent des champs PII si `send_default_pii=True` (à éviter)
+
+**Risque RGPD** :
+- Article 5(1)(c) RGPD — minimisation des données
+- Article 32 RGPD — sécurité (intégrité + confidentialité)
+- Si le fichier de log fuite (compromission SSH, backup non chiffré, copie sur poste tiers), tout l'historique des mails de l'utilisateur est exposé.
+
+**Cause racine** :
+- Pattern f-string Python avec emails/sujets directement interpolés
+- Logging "verbose for debug" oublié en production
+- Pas de helper redaction centralisé
+
+**Fix canonique** (commit ci-après — Phase 4 RGPD 30/04 PM) :
+
+```python
+# Helper centralisé
+def _hash_email_partial(email: str) -> str:
+    """man***@airbee-conseil.fr (3 chars + domaine)."""
+    if not isinstance(email, str) or '@' not in email:
+        return _hashlib.sha256(str(email).encode()).hexdigest()[:8]
+    local, _, domain = email.partition('@')
+    return f"{local[:3]}***@{domain}" if local else f"***@{domain}"
+
+def _redact_url_pii(url: str) -> str:
+    """Garde le path, redact les query string values."""
+    # ...
+def _redact_pii_for_log(details: dict) -> dict:
+    """Truncate subject/body_preview à 50 chars, hash emails."""
+    # ...
+```
+
+Application :
+- Tous les `logger.info(f"... {email} ...")` → `_hash_email_partial(email)`
+- Route `/api/debug_addin_log` → applique `_redact_pii_for_log()` avant écriture
+
+**Test de non-régression** :
+- I-SEC-07 (cf `audit/INVARIANTS.md`) : 0 email en clair dans les nouveaux logs (grep `@.*\\.[a-z]{2,}` doit matcher 0 ligne hors valeurs hashées `***@`)
+
+**Signaux d'alerte** :
+- `grep -E '@(gmail|orange|outlook|free|wanadoo)' /opt/boostermail/addin_debug.log | wc -l` > 0 sur les nouvelles entrées
+- `journalctl -u boostermail | grep -E '@\\w+\\.\\w+' | head` montre des emails en clair récents
+
+**Action si récidive** :
+- Ajouter le nouveau site au sample audit
+- Étendre les helpers `_PII_FIELDS_HASH` / `_PII_FIELDS_TRUNCATE_50` si nouveau type de champ PII
+
+**Rotation des logs** (Action plus tard) :
+- `addin_debug.log` n'a pas de rotation `logrotate` configurée → croissance indéfinie + retention infinie = violation Article 5(1)(e) RGPD
+- Action : créer `/etc/logrotate.d/boostermail` avec rotation 30j + compress + delete auto. Hors scope code (infra), à faire en session SaaS dédiée.
+
+**Sources** :
+- Audit : `audit/rapports/2026-04-30_PM_audit_rgpd.md`
+- Commit fix : à venir Phase 4 (autonomie convalescence Yvan)
 
 ---
 
