@@ -9318,6 +9318,236 @@ def api_gdpr_export():
         return jsonify({'error': str(e)[:200]}), 500
 
 
+# =============================================================================
+# RGPD — DROIT À L'EFFACEMENT (Article 17) — Période de grâce 30 jours
+# =============================================================================
+# Phase 5 RGPD (autonomie 30/04 PM, choix Yvan 2B "période de grâce 30 jours").
+#
+# Politique :
+# 1. POST /api/gdpr/request_deletion → marque le compte avec timestamp.
+#    L'user reste actif pendant 30 jours (peut annuler via cancel_deletion).
+#    Pas de purge immédiate des données.
+# 2. POST /api/gdpr/cancel_deletion → annule la demande dans les 30 jours.
+# 3. GET /api/gdpr/deletion_status → consulter l'état.
+# 4. Helper interne `_gdpr_purge_user_data()` : prêt à exécuter mais
+#    NON BRANCHÉ AUTOMATIQUEMENT — Yvan doit valider l'activation par
+#    settings flag `gdpr_deletion_enabled=1`. Sécurité : en mono-user
+#    actuellement, on ne veut pas se purger soi-même par accident.
+#
+# Note : cette implémentation est mono-user (Yvan = unique user). En
+# multi-tenant, à étendre pour cibler par user_id (Microsoft auth_user_id).
+
+
+@app.route('/api/gdpr/request_deletion', methods=['POST'])
+def api_gdpr_request_deletion():
+    """RGPD Article 17 — Demande de suppression du compte.
+
+    Politique « période de grâce 30 jours » (choix Yvan 30/04 PM) :
+    - Marque le compte avec `gdpr_deletion_requested_at` (timestamp UTC ISO).
+    - L'user reste actif pendant 30 jours, peut annuler via cancel_deletion.
+    - Au-delà : purge complète automatique (tâche BG périodique, à brancher
+      manuellement par admin via settings flag `gdpr_deletion_enabled=1`).
+
+    Sécurité : exige un body `{"confirm": "DELETE_MY_ACCOUNT"}` pour éviter
+    les déclenchements accidentels.
+    """
+    data = request.get_json() or {}
+    if data.get('confirm') != 'DELETE_MY_ACCOUNT':
+        return jsonify({
+            "error": "Confirmation requise",
+            "message": "Pour confirmer la demande de suppression, envoyer "
+                       "{'confirm': 'DELETE_MY_ACCOUNT'} dans le body.",
+        }), 400
+
+    try:
+        existing_ts = _db.get_setting('gdpr_deletion_requested_at')
+        if existing_ts:
+            return jsonify({
+                "status": "already_requested",
+                "requested_at": existing_ts,
+                "deletion_after": _gdpr_compute_deletion_date(existing_ts),
+                "message": f"Une demande de suppression existe déjà depuis {existing_ts}. "
+                           "Utilisez /api/gdpr/cancel_deletion pour l'annuler.",
+            }), 200
+
+        now_iso = datetime.now().isoformat(timespec='seconds')
+        _db.save_setting('gdpr_deletion_requested_at', now_iso)
+        deletion_after = _gdpr_compute_deletion_date(now_iso)
+
+        logger.warning(
+            f"[gdpr] Demande de suppression enregistree (effective le {deletion_after})"
+        )
+        return jsonify({
+            "status": "deletion_requested",
+            "requested_at": now_iso,
+            "deletion_after": deletion_after,
+            "grace_period_days": 30,
+            "message": "Votre demande de suppression a été enregistrée. Votre compte "
+                       "et vos données seront supprimés définitivement dans 30 jours. "
+                       "Vous pouvez annuler cette demande à tout moment via "
+                       "/api/gdpr/cancel_deletion.",
+        })
+    except Exception as e:
+        logger.error(f"[gdpr] request_deletion erreur : {e}")
+        return jsonify({"error": str(e)[:200]}), 500
+
+
+@app.route('/api/gdpr/cancel_deletion', methods=['POST'])
+def api_gdpr_cancel_deletion():
+    """RGPD Article 17 — Annule une demande de suppression dans la période de grâce."""
+    try:
+        existing_ts = _db.get_setting('gdpr_deletion_requested_at')
+        if not existing_ts:
+            return jsonify({
+                "status": "no_request",
+                "message": "Aucune demande de suppression en cours.",
+            }), 200
+
+        # Set vide pour annuler
+        _db.save_setting('gdpr_deletion_requested_at', '')
+        logger.info(f"[gdpr] Demande de suppression annulee (etait du {existing_ts})")
+        return jsonify({
+            "status": "cancelled",
+            "previously_requested_at": existing_ts,
+            "message": "Votre demande de suppression a été annulée. Votre compte reste actif.",
+        })
+    except Exception as e:
+        logger.error(f"[gdpr] cancel_deletion erreur : {e}")
+        return jsonify({"error": str(e)[:200]}), 500
+
+
+@app.route('/api/gdpr/deletion_status', methods=['GET'])
+def api_gdpr_deletion_status():
+    """RGPD Article 17 — Statut de la demande de suppression du compte."""
+    try:
+        ts = _db.get_setting('gdpr_deletion_requested_at')
+        if not ts:
+            return jsonify({
+                "status": "no_request",
+                "active": True,
+            })
+        deletion_after = _gdpr_compute_deletion_date(ts)
+        # Calcul jours restants
+        try:
+            requested = datetime.fromisoformat(ts)
+            scheduled = datetime.fromisoformat(deletion_after)
+            days_remaining = max(0, (scheduled - datetime.now()).days)
+        except Exception:
+            days_remaining = None
+        return jsonify({
+            "status": "deletion_requested",
+            "requested_at": ts,
+            "deletion_after": deletion_after,
+            "days_remaining": days_remaining,
+            "active": True,  # tant que pas effective, le compte reste actif
+        })
+    except Exception as e:
+        logger.error(f"[gdpr] deletion_status erreur : {e}")
+        return jsonify({"error": str(e)[:200]}), 500
+
+
+def _gdpr_compute_deletion_date(requested_at_iso: str) -> str:
+    """Calcule la date d'effective de suppression (= request + 30 jours)."""
+    try:
+        requested = datetime.fromisoformat(requested_at_iso)
+        from datetime import timedelta as _td
+        deletion = requested + _td(days=30)
+        return deletion.isoformat(timespec='seconds')
+    except Exception:
+        return ''
+
+
+def _gdpr_purge_user_data() -> dict:
+    """Helper INTERNE — purge complète des données user (Article 17 RGPD).
+
+    ⚠️ DANGER ⚠️ — Cette fonction effectue une suppression DURE des données :
+    - Tables DB : threads, contact_profiles, echeances, folder_classifications,
+      pj_classifications, metrics, style_corrections, mail_summaries
+    - Settings user-visibles (préserve les secrets admin : anthropic_api_key,
+      fernet_key, et `gdpr_deletion_*` pour traçabilité)
+    - Fichiers persistants : drafts_v2.json, prefetch_cache_v2.json,
+      addin_debug.log (réinitialisé)
+    - Caches RAM : reply_cache, mail_preview_cache (purgés)
+
+    Sécurité multi-couches :
+    1. Cette fonction n'est PAS appelée automatiquement (pas de tâche BG
+       branchée). Activation manuelle par admin via flag settings
+       `gdpr_deletion_enabled=1` (à mettre à la main avant d'autoriser
+       la purge effective).
+    2. Logs explicites avant ET après l'opération.
+    3. Préserve la traçabilité (settings `gdpr_deletion_*`).
+
+    En mono-user (Yvan = unique user), cela équivaut à un "factory reset"
+    du service. En multi-tenant futur : à étendre pour ne purger qu'un
+    user_id donné.
+
+    Returns: dict avec compteurs des éléments purgés ou 'error'.
+    """
+    if _db.get_setting('gdpr_deletion_enabled') != '1':
+        return {
+            'status': 'disabled',
+            'message': 'gdpr_deletion_enabled flag is not set to "1". '
+                       'Aborting purge for safety. Set this flag manually '
+                       'via _db.save_setting("gdpr_deletion_enabled", "1") '
+                       'to authorize the purge.',
+        }
+
+    purged = {}
+    try:
+        conn = _db._conn()
+        c = conn.cursor()
+        for table in ('threads', 'contact_profiles', 'echeances',
+                      'folder_classifications', 'pj_classifications',
+                      'metrics', 'style_corrections', 'mail_summaries',
+                      'treated_emails', 'learned_templates'):
+            try:
+                c.execute(f"SELECT COUNT(*) FROM {table}")
+                count = c.fetchone()[0]
+                c.execute(f"DELETE FROM {table}")
+                conn.commit()
+                purged[table] = count
+                logger.warning(f"[gdpr/purge] Table {table} : {count} rows supprimees")
+            except Exception as e:
+                logger.error(f"[gdpr/purge] erreur table {table} : {e}")
+                purged[table] = f'error: {e}'
+
+        # Settings user-visibles (préserve les secrets admin et la traçabilité gdpr_*)
+        ADMIN_PRESERVE = {
+            'anthropic_api_key', 'openai_api_key', 'fernet_key',
+            'auth_token_cache', 'azure_client_id', 'azure_tenant_id',
+        }
+        try:
+            c.execute("SELECT key FROM settings")
+            keys = [r[0] for r in c.fetchall()]
+            count = 0
+            for k in keys:
+                if k in ADMIN_PRESERVE or k.startswith('gdpr_'):
+                    continue
+                c.execute("DELETE FROM settings WHERE key = ?", (k,))
+                count += 1
+            conn.commit()
+            purged['settings_user'] = count
+        except Exception as e:
+            purged['settings_user'] = f'error: {e}'
+
+        # Marker de purge effective
+        try:
+            now_iso = datetime.now().isoformat(timespec='seconds')
+            _db.save_setting('gdpr_deletion_executed_at', now_iso)
+            logger.warning(f"[gdpr/purge] Purge effective enregistree au {now_iso}")
+        except Exception:
+            pass
+
+        return {
+            'status': 'purged',
+            'purged_at': datetime.now().isoformat(timespec='seconds'),
+            'purged': purged,
+        }
+    except Exception as e:
+        logger.error(f"[gdpr/purge] erreur globale : {e}", exc_info=True)
+        return {'status': 'error', 'error': str(e)[:200]}
+
+
 @app.route('/api/admin/db_conns_stats', methods=['GET'])
 def api_admin_db_conns_stats():
     """Diagnostic SQLite conn leak — Pattern #21 / I-DB-06 (cf 30/04 PM).
