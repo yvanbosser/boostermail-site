@@ -1,6 +1,6 @@
 # Anomalies récurrentes — mémoire des patterns
 
-> **Dernière mise à jour** : 30/04/2026 PM (ajout Pattern #21 leak FD `threading.local()` + cleanup db-gc — incident prod 06:11 UTC)
+> **Dernière mise à jour** : 30/04/2026 PM (ajout Pattern #22 Sessions HTTP partagées class-level — refactor LEAK #1 GraphClient autonomie convalescence Yvan)
 > **Règle** : à chaque nouveau bug détecté, ajouter ici **immédiatement**. À chaque nouveau symptôme, consulter ici **d'abord**.
 
 ---
@@ -862,6 +862,53 @@ def _conn(self):
 - Incident 30/04 : `docs/sessions/OUTLOOK_BILAN_SESSION_20260430_PM_incident_fd_leak.md`
 - Commit fix : `b2d2f73 fix(db): GC background pour conn SQLite des threads zombies`
 - Doc systemd `LimitNOFILE` : https://www.freedesktop.org/software/systemd/man/systemd.exec.html#LimitCPU=
+
+---
+
+## Pattern #22 — Sessions HTTP créées per-instance dans une factory hot path
+
+**Historique** :
+- 30/04/2026 PM (autonomie pendant convalescence Yvan) : audit autres leaks ressources (rapport `audit/rapports/2026-04-30_PM_audit_autres_leaks_ressources.md`) flag LEAK #1 HIGH : `GraphClient.__init__` créait `requests.Session()` à chaque instance. La factory `get_graph()` (app_plugin.py:442) instancie `GraphClient` à chaque requête Flask sur ~65 callsites → ~100 Sessions/min en charge moyenne.
+
+**Symptôme générique** :
+- Connexions TCP en TIME_WAIT s'accumulent (`netstat | grep TIME_WAIT | wc -l` croît au fil du temps)
+- En charge soutenue : saturation `nf_conntrack` ou kernel limits → erreurs intermittentes "Cannot assign requested address"
+- Performance dégradée : pas de réutilisation HTTP keep-alive → handshake TCP+TLS à chaque requête (~100-300ms gaspillés)
+
+**Cause racine** :
+- `requests.Session()` instanciée per-instance d'une classe utilisée comme client HTTP éphémère
+- Aucun `with` ni `.close()` invoqué par les callsites (oubli typique sur factory pattern)
+- `__del__` fallback fonctionne via reference counting CPython mais peut être différé si refs cycliques (BG threads, caches, closures) → leak en pratique
+
+**Fix canonique** (commit `2077cbb`) :
+- Sessions HTTP partagées au niveau **classe** keyed par identifiant d'authentification (token, user_id, etc.)
+- Lazy init via classmethod `_get_session_for_token()` avec double-checked locking
+- Pool sizing explicite (`pool_connections=50, pool_maxsize=50, pool_block=False`)
+- Cleanup global via `atexit.register(cls._close_all_shared_sessions)`
+- Eviction explicite disponible : `_evict_session_for_token(token)` pour rotation OAuth
+- L'attribut `self._session` reste accessible pour rétrocompat des callsites existants
+- `close()` devient no-op (commenté pour expliquer pourquoi)
+
+**Test de non-régression** :
+- I-RES-05 (cf `audit/INVARIANTS.md`) : toutes les Sessions HTTP partagées sont fermées au shutdown
+- Test fonctionnel : 100 instances même token → 1 Session unique (`set(id(g._session) for g in graphs))` doit valoir 1)
+
+**Signaux d'alerte** :
+- `netstat -an | grep TIME_WAIT | wc -l` > 1000 sur un service Python qui fait peu d'appels externes
+- Code grep : `requests.Session\(\)` dans `__init__` d'une classe instanciée fréquemment
+- Pas de `with` block ni `.close()` aux callsites
+- `__del__` cleanup-only suspect (latence GC, refs cycliques)
+
+**Action si récidive** (autre client HTTP per-instance) :
+1. Identifier la clé partageable (token, user_id, base_url, …)
+2. Convertir Session per-instance → dict class-level keyed
+3. Ajouter `atexit.register` pour cleanup shutdown
+4. Garder rétrocompat de l'attribut `self._session` si des callsites l'utilisent direct
+
+**Sources** :
+- Audit : `audit/rapports/2026-04-30_PM_audit_autres_leaks_ressources.md` LEAK #1
+- Commit fix : `2077cbb fix(graph): Session HTTP partagee class-level + ThreadPoolExecutor cancel_futures`
+- Doc requests Sessions : https://requests.readthedocs.io/en/latest/user/advanced/#session-objects
 
 ---
 

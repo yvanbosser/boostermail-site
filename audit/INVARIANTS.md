@@ -1,6 +1,6 @@
 # Invariants V2 — règles absolues testables
 
-> **Dernière mise à jour** : 30/04/2026 PM (ajout I-DB-06 conn SQLite bornées par GC zombie après incident leak FD prod 06:11 UTC — cf Pattern #21)
+> **Dernière mise à jour** : 30/04/2026 PM (ajout I-RES-05 Sessions HTTP GraphClient partagées class-level — fix LEAK #1 autonomie convalescence Yvan, cf Pattern #22)
 > **Principe** : chaque invariant est testable mécaniquement par `smoke_test.ps1`. Une violation = anomalie, point final.
 
 ---
@@ -118,6 +118,13 @@ Clé `HKCU\Software\Microsoft\Office\16.0\Wef\Developer` contient une valeur don
 - `anthropic_api_key` non vide
 - `fernet_key` non vide
 - `user_name` présent (peut être vide mais key existe)
+
+### I-RES-05 : Sessions HTTP GraphClient partagées class-level (cf Pattern #22)
+- **Garantie** : 1 seule `requests.Session()` par token d'authentification dans tout le process. Vérifiable via `len(GraphClient._shared_sessions)` qui doit être ≤ nombre de tokens actifs.
+- **Test fonctionnel** : 100 instances `GraphClient(token)` avec le même token doivent partager `g._session` (même `id()`).
+- **Cleanup** : `atexit.register(GraphClient._close_all_shared_sessions)` ferme toutes les sessions au shutdown du process.
+- **Signal d'alerte** : `netstat -an | grep TIME_WAIT | wc -l` > 1000 sur OVH alors que le trafic est faible → vérifier si une nouvelle classe utilise `requests.Session()` per-instance sans le pattern partagé.
+- **Pattern lié** : Pattern #22 dans `audit/ANOMALIES_RECURRENTES.md`.
 
 ### I-DB-06 : Conn SQLite bornées par GC zombie (cf Pattern #21)
 - **Garantie** : le nombre de conn dans `Database._all_conns` ne peut pas croître indéfiniment. Un thread BG `db-gc` (daemon, démarré paresseusement au 1er `_conn()`) tourne toutes les 60s et ferme les conn dont le TID n'est plus dans `threading.enumerate()`.
