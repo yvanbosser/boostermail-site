@@ -160,6 +160,61 @@ ITÉRATION N
 
 ---
 
+## Workflow 9 — "Audit UX/design alignment" (ajouté 01/05/2026)
+
+### Origine
+
+Création suite à un trou structurel détecté dans la session 30/04 PM autonomie : le fichier `V2/popup.html` affichait 7 boutons (3 nav + 4 ancien design taskpane) alors que les specs documentaient « 3 boutons seulement » (cf `docs/specs_proto/SPEC_FONCTIONNALITES_PROTO.md:488` + bilan 23/04).
+
+**8 audits ULTRA passés sans détecter ça** : tous orientés bugs techniques (race conditions, fuites FD, sécurité, encoding, datetime, etc.) — Pattern PLAYBOOK #5. Aucun n'avait pour mission de **confronter le rendu visuel aux specs**.
+
+### Objectif
+
+Détecter automatiquement les **écarts entre intention UX/design et rendu effectif** :
+- Éléments présents dans le HTML/UI mais NON spécifiés (régression : héritage d'un ancien design pas nettoyé)
+- Éléments spécifiés MAIS absents du rendu (oubli d'implémentation)
+- Éléments présents mais avec un mauvais comportement / texte / position
+
+### Quand faire ce workflow
+
+- **Après chaque décision UX** d'Yvan qui change un écran (priorité 1)
+- **Avant chaque audit ULTRA** (priorité 2 — sinon on cherche des bugs de précision dans une UI déjà fausse)
+- **Au moins 1× par semaine** quand on est dans une phase de polish UI
+
+### Étapes
+
+1. **Source de vérité — `audit/checklists/ui_design_specs.md` (15 min)**
+   - Liste les écrans user-facing avec pour chacun : ce qui DOIT être visible (boutons, sections, états).
+   - Mise à jour par Yvan à chaque décision UX. **Si la spec change, ce fichier change AVANT le code**.
+
+2. **Audit automatisé — `audit/tests/e2e/test_ui_specs.py` (1 min)**
+   - `python -m pytest audit/tests/e2e/test_ui_specs.py -v`
+   - Parse chaque HTML, extrait les éléments visibles via BeautifulSoup, compare aux specs.
+   - Échoue à un `assert` si écart détecté.
+   - **Exit 0 = écrans conformes**. Exit ≠ 0 = écrans à fixer.
+
+3. **Audit visuel manuel (10 min, complément)**
+   - Yvan ouvre chaque écran user-facing dans Outlook réel
+   - Confronte avec la spec
+   - Signale les écarts en mots simples (« je vois X au lieu de Y »)
+
+4. **Fix + MAJ specs (variable)**
+   - Si écart détecté = bug → fixer le code (sans toucher la spec)
+   - Si écart détecté = ancienne spec → MAJ `ui_design_specs.md` avec la nouvelle décision
+   - Re-lancer `test_ui_specs.py` jusqu'à exit 0
+
+### Critères de fin
+
+- `test_ui_specs.py` exit 0
+- `audit/checklists/ui_design_specs.md` reflète l'intention courante d'Yvan
+- Aucun écart visuel-spec connu non noté dans `PLUS_TARD_VF.md`
+
+### Pourquoi ce workflow EXISTE et pas avant
+
+Trou détecté **après 7-8 audits ULTRA passés sans le voir** (exemple popup.html). Les sub-agents Explore cherchaient des défauts de code ; aucun n'avait de référentiel UX à confronter. Ce workflow comble cette lacune.
+
+---
+
 ## Règles communes à tous les workflows
 
 1. **Je ne dis jamais "c'est fixé" sans smoke_test exit 0 + preuve visible**

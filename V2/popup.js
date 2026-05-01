@@ -100,10 +100,18 @@ var _companionAvailable = false;
     if (_container === 'pyqt' || _container === 'extension') {
         var fn = document.getElementById('fixedNav');
         if (fn) fn.style.display = 'flex';
-        var sc = document.getElementById('scrollSection');
-        if (sc) sc.style.display = 'flex';
+        // Décision Yvan 01/05/2026 — overlay simplifié à 3 boutons SEULEMENT
+        // (Échéances/Contacts/Profil dans fixedNav). Le bandeau identité +
+        // grand bouton "Répondre avec BoosterMail" + Rep.tous/Transférer/
+        // Classer (section scrollSection) ne sont plus affichés. La réponse
+        // aux mails se fait via le bouton "BoosterMail" dans le ribbon
+        // Outlook qui ouvre directement le dialog principal.
+        // scrollSection reste dans le DOM (style="display:none" initial)
+        // pour ne pas casser les accès JS aux éléments enfants
+        // (contactName/contactAvatar/etc.) — popup.js les setter encore
+        // mais sans rendu visible.
         var es = document.getElementById('emptyState');
-        if (es) es.style.display = 'none';  // on cache — les 3 lignes sont toujours là
+        if (es) es.style.display = 'none';
     }
 
     // Test connexion backend
