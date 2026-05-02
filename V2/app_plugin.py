@@ -7212,12 +7212,38 @@ def api_attachments(message_id):
 
 @app.route('/api/attachment/<path:message_id>/<path:attachment_id>')
 def api_download_attachment(message_id, attachment_id):
-    """Télécharge une PJ (Mode Standard)."""
+    """Télécharge une PJ (Mode Standard).
+
+    Param query :
+      - inline=1 : retourne avec Content-Type deviné depuis le filename +
+        Content-Disposition: inline → permet au navigateur d'afficher la
+        PJ directement (preview PDF, images) au lieu de la télécharger.
+        Filename query optionnel pour le mimetype guessing.
+        Ajout 02/05/2026 PM (signal Yvan : chip PJ section Résumé du
+        dialog doit être cliquable pour ouvrir la PJ).
+      - sinon : application/octet-stream (download)
+    """
     graph = get_graph()
     if not graph:
         return jsonify({"error": "Mode Standard requis"}), 403
     try:
         content = graph.get_attachment_content(message_id, attachment_id)
+        inline = request.args.get('inline') == '1'
+        filename = (request.args.get('filename') or '').strip()
+        if inline:
+            import mimetypes
+            mime = 'application/octet-stream'
+            if filename:
+                guessed, _ = mimetypes.guess_type(filename)
+                if guessed:
+                    mime = guessed
+            # Sanitize filename pour Content-Disposition (pas de \r\n ni quotes)
+            safe_name = (filename or 'attachment').replace('"', '').replace('\r', '').replace('\n', '')
+            headers = {
+                'Content-Type': mime,
+                'Content-Disposition': f'inline; filename="{safe_name}"',
+            }
+            return Response(content, headers=headers)
         return Response(content, mimetype='application/octet-stream')
     except GraphAuthError:
         return jsonify({"error": "Token expiré", "auth_required": True}), 401
@@ -11478,7 +11504,17 @@ def api_pj_classification_post_send(message_id):
     plate_result = _fetch_single_preview_plate(message_id, 'pj_classement')
     if plate_result.get('status') == 'done':
         plate_data = plate_result.get('data') or {}
-        if plate_data.get('suggestion'):
+        # Fix 02/05 PM (signal Yvan : popup PJ apparaît au 2e clic seulement) —
+        # On ENTRE même quand suggestion=None (cas 'none'/'none_*' générique
+        # où le BG n'a pas trouvé de Tier matché). Avant : la branche n'était
+        # prise QUE si plate_data.suggestion existait → on tombait dans le
+        # scan from scratch lent (status='scanning' → 2e clic nécessaire).
+        # Maintenant : tant que le BG est 'done' (pipeline complet exécuté),
+        # on retourne attachments + folders + (suggestion null si none) →
+        # la popup pré-envoi cliquable s'ouvre dès le 1er clic, l'user
+        # peut classer manuellement via arbo + saisie path.
+        # Exception : source='no_pj' (mail sans PJ) → pas de popup à ouvrir.
+        if plate_data.get('source') != 'no_pj':
             # Recharger les PJ via Graph (la suggestion seule ne contient
             # pas la liste des fichiers, juste le dossier cible)
             attachments = []
@@ -11497,12 +11533,13 @@ def api_pj_classification_post_send(message_id):
                 folders = wf_row.get('folders', []) if wf_row else []
             except Exception:
                 folders = []
-            _suggestions_top3 = plate_data.get('suggestions') or [plate_data.get('suggestion')]
+            sugg = plate_data.get('suggestion')
+            _suggestions_top3 = plate_data.get('suggestions') or ([sugg] if sugg else [])
             return jsonify({
                 "status": "done",
                 "pj_suggestions": {
                     "attachments": doc_attachments,
-                    "suggestion": plate_data.get('suggestion'),
+                    "suggestion": sugg,
                     "suggestions": _suggestions_top3,
                     "source": plate_data.get('source', 'rule'),
                     "folders": folders,

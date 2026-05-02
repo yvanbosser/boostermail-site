@@ -1689,9 +1689,25 @@ function _renderAttachments(attachments) {
         attachments.forEach(function(att) {
             if (att.is_inline) return;
             hasPJ = true;
-            var chip = document.createElement('span');
+            // \u00C9tape 02/05 PM signal Yvan : chip PJ cliquable pour ouvrir
+            // la PJ dans un nouvel onglet (preview browser pour PDF/images,
+            // download pour les autres). URL :
+            // /api/attachment/<mid>/<att_id>?inline=1 \u2192 backend renvoie le
+            // bon Content-Type + Content-Disposition: inline.
+            // <a> au lieu de <span> pour cliquabilit\u00E9 native (target=_blank
+            // \u00E9vite les popup blockers).
+            var chip = document.createElement('a');
             chip.className = 'resume-att-chip';
             chip.textContent = '\uD83D\uDCC4 ' + att.name;
+            if (_messageId && att.id) {
+                chip.href = _backendUrl + '/api/attachment/'
+                    + encodeURIComponent(_messageId) + '/'
+                    + encodeURIComponent(att.id)
+                    + '?inline=1&filename=' + encodeURIComponent(att.name || 'attachment');
+                chip.target = '_blank';
+                chip.rel = 'noopener noreferrer';
+                chip.title = 'Cliquer pour ouvrir la pi\u00E8ce jointe';
+            }
             resumePJList.appendChild(chip);
         });
         resumePJ.style.display = hasPJ ? 'block' : 'none';
