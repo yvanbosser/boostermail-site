@@ -12416,6 +12416,17 @@ def api_setup_onboarding():
     graph = get_graph()
 
     def _run_onboarding():
+        # Reset du statut AVANT toute opération longue (signal Yvan 02/05 :
+        # le frontend pollait l'ancien statut 'done' avant que le BG ait
+        # le temps de basculer vers 'running' → barre passait à 100% en 2s).
+        # Ce reset doit être atomique et précéder le get_sent_emails Graph
+        # (peut prendre 5-30s).
+        try:
+            _db.save_setting('onboarding_status', 'running')
+            _db.save_setting('onboarding_indexed', '0')
+            _db.save_setting('onboarding_total', '0')
+        except Exception:
+            pass
         try:
             sent_mails = []
             # Source 1 : Graph API (Mode Standard)
@@ -12455,30 +12466,53 @@ def api_setup_onboarding():
                 _db.save_setting('onboarding_status', 'no_mails')
                 return
 
-            _db.save_setting('onboarding_status', 'running')
             _db.save_setting('onboarding_total', str(len(sent_mails)))
 
             # Indexer les mails dans la DB (threads)
             # Limite 800 alignée sur le proto (signal Yvan 02/05).
+            # Update onboarding_indexed à chaque batch de 10 pour que le
+            # frontend voie la progression en temps réel (signal Yvan
+            # « 0 mails indexés bloqué » : avant on ne sauvait qu'à la fin).
             indexed = 0
+            errors = 0
             for mail in sent_mails[:800]:
                 try:
+                    # threads.project est NOT NULL — passer '' (pas None)
+                    # Fix 02/05/2026 : avant on passait None → SQLite IntegrityError
+                    # silencieux → 0 mails indexés. Cohérent avec _save_to_thread
+                    # appelé ailleurs avec project=''.
                     _db.save_to_thread(
-                        project=None,
+                        project='',
                         direction='sent',
                         subject=mail.get('subject', ''),
                         body=mail.get('body_preview', '')[:2000],
-                        correspondent=mail.get('from_email', '') or mail.get('to', [{}])[0].get('email', ''),
+                        correspondent=mail.get('from_email', '') or (
+                            mail.get('to', [{}])[0].get('email', '')
+                            if isinstance(mail.get('to'), list) and mail.get('to')
+                            else ''
+                        ),
                     )
                     indexed += 1
-                except Exception:
-                    pass
+                except Exception as _e:
+                    errors += 1
+                    if errors <= 3:
+                        logger.warning(f"[onboarding] save_to_thread erreur ({errors}/3 logged) : {_e}")
+                # Update DB toutes les 10 itérations pour le polling live
+                if indexed % 10 == 0:
+                    try:
+                        _db.save_setting('onboarding_indexed', str(indexed))
+                    except Exception:
+                        pass
 
+            # Save final
             _db.save_setting('onboarding_indexed', str(indexed))
             _db.save_setting('onboarding_status', 'done')
             _db.save_setting('onboarding_done', 'true')
             _db.save_setting('setup_step', 'done')
-            logger.info(f"Onboarding terminé : {indexed} mails indexés")
+            logger.info(
+                f"Onboarding terminé : {indexed} mails indexés / "
+                f"{len(sent_mails)} récupérés ({errors} erreurs)"
+            )
         except Exception as e:
             logger.error(f"Erreur onboarding: {e}")
             _db.save_setting('onboarding_status', f'error: {str(e)[:100]}')

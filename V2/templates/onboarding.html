@@ -735,10 +735,12 @@
 
     var _styleStarted = false;
     var _analysisPoll = null;
+    var _styleSawRunning = false;  // Guard : on ne croit à un 'done' qu'après avoir vu 'running' au moins une fois
 
     function startStyleAnalysis() {
         if (_styleStarted) return;
         _styleStarted = true;
+        _styleSawRunning = false;  // Reset guard à chaque entrée dans l'étape
 
         // Reset visuel
         var barEl = document.getElementById('style-bar');
@@ -771,7 +773,15 @@
                         var indexed = d.indexed || 0;
 
                         // Statut terminal : done
+                        // Guard : si on voit 'done' AVANT d'avoir vu 'running'
+                        // au moins une fois, c'est probablement le statut de
+                        // l'exécution PRÉCÉDENTE (le BG actuel n'a pas encore
+                        // basculé le statut). On attend.
                         if (status === 'done') {
+                            if (!_styleSawRunning && elapsed < 15) {
+                                if (sEl) sEl.textContent = 'Démarrage de l\'analyse…';
+                                return;  // attendre le vrai 'running'
+                            }
                             clearInterval(_analysisPoll);
                             _analysisPoll = null;
                             if (bEl) bEl.style.width = '100%';
@@ -804,6 +814,7 @@
 
                         // Statut intermédiaire : running
                         if (status === 'running') {
+                            _styleSawRunning = true;  // Guard : on a vu running au moins une fois
                             // Phase 1 : récupération Graph (avant que total soit connu)
                             if (total === 0) {
                                 if (sEl) sEl.textContent = 'Récupération de vos mails Outlook…';
