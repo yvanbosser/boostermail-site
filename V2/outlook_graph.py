@@ -505,13 +505,23 @@ class GraphClient(EmailProvider):
 
         Note : $search et $orderby ne se combinent PAS dans Graph API.
         Les résultats sont triés par pertinence (pas par date).
+
+        Fix 01/05/2026 (signal Yvan PLUS_TARD_VF) : sujets contenant `&`,
+        `#`, `(`, `=` étaient interprétés comme séparateurs URL par Graph
+        → 'unterminated string literal at position N'. Causait Graph 400
+        sur des sujets comme 'Secure your account & control your costs'
+        ou 'Surfaces du Cardo - Visite des surfaces de 144m2 & 128m2'.
+        Fix : URL-encoder la query après échappement des guillemets.
         """
         try:
-            # Encoder les guillemets dans la query KQL
+            # 1. Échapper les guillemets DANS le KQL (ex: subject:"abc" → subject:\"abc\")
             safe_query = query.replace('"', '\\"')
+            # 2. URL-encoder TOUS les caractères réservés URL (& # ( ) : etc.)
+            #    Le `safe=''` force l'encodage complet ; alphanum + - . _ ~ restent OK.
+            encoded_query = quote(safe_query, safe='')
             url = (
                 f'/me/messages'
-                f'?$search="{safe_query}"'
+                f'?$search="{encoded_query}"'
                 f'&$select={_LIST_SELECT}'
                 f'&$top={min(max_results, 250)}'
             )
