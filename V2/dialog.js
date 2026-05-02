@@ -2427,6 +2427,22 @@ function restorePreviousVersion() {
 function regenWithImportance(delta) {
     // Plus court (delta=-1) ou Plus travaillé (delta=+1)
     // Ajuste l'importance avant de régénérer
+    if (_isGenerating) return;
+
+    // Décision Yvan 01/05/2026 : la flèche « Version précédente » (btnRestore)
+    // doit apparaître après un clic Plus court / Plus travaillé aussi (pas
+    // seulement après Essayer une autre réponse). Push de la version courante
+    // dans _versionStack comme dans regenReply().
+    var editor = document.getElementById('editor');
+    var currentHtml = editor.innerHTML;
+    if (currentHtml && currentHtml.trim()) {
+        _versionStack.push(currentHtml);
+    }
+    // Affiche la flèche restore (btnRestore) immédiatement, sans attendre la
+    // fin du streaming — feedback visuel direct.
+    var btnRestore = document.getElementById('btnRestore');
+    if (btnRestore) btnRestore.style.display = '';
+
     var impMap = {'R': 0, 'S': 1, 'H': 2};
     var impReverse = ['R', 'S', 'H'];
     var currentIdx = impMap[_importance] || 1;

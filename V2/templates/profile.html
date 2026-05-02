@@ -206,7 +206,6 @@
             <a href="/plugin/contacts" class="nav-link">👤 Contact</a>
             <a href="/plugin/profile" class="nav-link active">⚙ Profil</a>
             <a href="/plugin/echeances" class="nav-link">⏰ Échéance</a>
-            <a href="javascript:window.close()" class="btn-back" onclick="if(!window.close())history.back();return false;">Fermer</a>
         </div>
     </div>
 
@@ -221,7 +220,7 @@
         </div>
 
         <!-- SCORE DE CONNAISSANCE -->
-        <div class="section-title">Scoring EasyMail</div>
+        <div class="section-title">Scoring BoosterMail</div>
         <div class="knowledge-card">
             <div class="circle-wrap">
                 <svg viewBox="0 0 160 160" width="160" height="160">
@@ -306,13 +305,13 @@
         </div>
 
         <!-- Signature marketing -->
-        <div class="section-title">Signature EasyMail</div>
+        <div class="section-title">Signature BoosterMail</div>
         <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:24px;">
             <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:#444;">
                 <input type="checkbox" id="show-signature" {{ 'checked' if show_marketing_signature else '' }}
                        onchange="saveSignatureSetting(this.checked)"
                        style="width:18px;height:18px;accent-color:#0078d4;cursor:pointer;">
-                Afficher la mention <em style="color:#999;">"Genere avec EasyMail"</em> en bas de chaque mail envoye
+                Afficher la mention <em style="color:#999;">"Genere avec BoosterMail"</em> en bas de chaque mail envoye
             </label>
             <div id="sig-saved" style="display:none;color:#4caf50;font-size:12px;margin-top:6px;">Sauvegarde !</div>
         </div>
@@ -335,14 +334,14 @@
         <!-- STYLE REDACTIONNEL -->
         <div class="section-title" style="display:flex;align-items:center;gap:12px;">
             Style rédactionnel
-            <button class="btn-reanalyze" id="btn-reanalyze" onclick="confirmReanalyze()">Recalibrer EasyMail</button>
+            <button class="btn-reanalyze" id="btn-reanalyze" onclick="confirmReanalyze()">Recalibrer BoosterMail</button>
         </div>
         <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:24px;">
             <!-- Zone analyse en cours (cachée par défaut) -->
             <div id="style-analyzing" style="display:none;">
                 <div style="text-align:center;margin-bottom:16px;">
                     <div style="font-size:15px;color:#333;font-weight:500;margin-bottom:6px;">
-                        EasyMail apprend votre plume. Dans quelques instants, il écrira exactement comme vous.
+                        BoosterMail apprend votre plume. Dans quelques instants, il écrira exactement comme vous.
                     </div>
                     <div style="font-size:13px;color:#999;font-style:italic;">
                         Quelques minutes d'analyse pour des heures de gagnées. Ça vaut le coup d'attendre.
@@ -369,7 +368,7 @@
             <div id="style-profile-zone">
             {% if style %}
             <div style="font-size:13px;color:#444;line-height:1.7;margin-bottom:12px;" id="style-summary">
-                EasyMail a analysé {{ mail_count }} de vos échanges pour reproduire votre style, ton et formules personnalisés.
+                BoosterMail a analysé {{ mail_count }} de vos échanges pour reproduire votre style, ton et formules personnalisés.
                 {% if style_date %}Dernière calibration : {{ style_date }}.{% endif %}
             </div>
             <div id="style-toggle" onclick="toggleStyle()" style="cursor:pointer;display:flex;align-items:center;gap:6px;font-size:12px;color:#0078d4;font-weight:600;user-select:none;width:fit-content;margin-bottom:8px;">
@@ -390,7 +389,7 @@
         <div class="milestone-popup" onclick="event.stopPropagation()">
             <div class="milestone-icon" id="milestone-icon">🎯</div>
             <div class="milestone-title" id="milestone-title">Niveau 10 !</div>
-            <div class="milestone-sub" id="milestone-sub">EasyMail commence a vous connaitre. Continuez pour des reponses encore plus precises !</div>
+            <div class="milestone-sub" id="milestone-sub">BoosterMail commence a vous connaitre. Continuez pour des reponses encore plus precises !</div>
             <button class="milestone-btn" onclick="closeMilestone()">Continuer</button>
         </div>
     </div>
@@ -406,26 +405,26 @@
         }
 
         function scoreMessage(pct) {
-            if (pct >= 90) return 'Binome parfait — EasyMail ecrit comme vous';
+            if (pct >= 90) return 'Binome parfait — BoosterMail ecrit comme vous';
             if (pct >= 70) return 'Excellente synergie — on se comprend tres bien';
             if (pct >= 50) return 'On progresse ensemble — les reponses s\'affinent';
             if (pct >= 30) return 'Chaque mail me rend plus performant !';
             if (pct >= 10) return 'On fait connaissance — chaque mail compte';
-            return 'EasyMail a tout a apprendre de vous';
+            return 'BoosterMail a tout a apprendre de vous';
         }
 
         // ═══ Messages milestone ═══
         var milestoneMessages = {
-            10: { icon: '🌱', title: 'Niveau 10 !', sub: 'On demarre ensemble ! EasyMail analyse votre style et apprend vos habitudes.' },
-            20: { icon: '📝', title: 'Niveau 20 !', sub: 'EasyMail progresse. Votre profil redactionnel se dessine, on affine les reponses.' },
+            10: { icon: '🌱', title: 'Niveau 10 !', sub: 'On demarre ensemble ! BoosterMail analyse votre style et apprend vos habitudes.' },
+            20: { icon: '📝', title: 'Niveau 20 !', sub: 'BoosterMail progresse. Votre profil redactionnel se dessine, on affine les reponses.' },
             30: { icon: '🎯', title: 'Niveau 30 !', sub: 'Bel effort d\'equipe ! Vos correspondants sont identifies, le ton s\'ajuste.' },
-            40: { icon: '📊', title: 'Niveau 40 !', sub: 'On avance bien ensemble ! EasyMail travaille dur pour gagner en precision.' },
+            40: { icon: '📊', title: 'Niveau 40 !', sub: 'On avance bien ensemble ! BoosterMail travaille dur pour gagner en precision.' },
             50: { icon: '⚡', title: 'Niveau 50 !', sub: 'Mi-parcours ! A nous deux, on produit deja des brouillons de qualite.' },
-            60: { icon: '🧠', title: 'Niveau 60 !', sub: 'EasyMail vous connait bien. Chaque correction le rend meilleur pour vous.' },
+            60: { icon: '🧠', title: 'Niveau 60 !', sub: 'BoosterMail vous connait bien. Chaque correction le rend meilleur pour vous.' },
             70: { icon: '🚀', title: 'Niveau 70 !', sub: 'Excellent binome ! Les reponses sont presque parfaites du premier coup.' },
             80: { icon: '💎', title: 'Niveau 80 !', sub: 'Impressionnant. Ensemble, on reproduit votre style avec precision.' },
             90: { icon: '🏆', title: 'Niveau 90 !', sub: 'Quasi parfait ! Vos correspondants ne font plus la difference.' },
-            100: { icon: '👑', title: 'Niveau 100 !', sub: 'Maximum atteint ! EasyMail est devenu votre double redactionnel.' }
+            100: { icon: '👑', title: 'Niveau 100 !', sub: 'Maximum atteint ! BoosterMail est devenu votre double redactionnel.' }
         };
 
         // ═══ Charger le score ═══
@@ -632,7 +631,7 @@
                         profileZone.style.display = 'block';
                         profileZone.innerHTML = '<div style="padding:16px;background:#fff3cd;border:1px solid #ffc107;border-radius:8px;">'
                             + '<div style="font-weight:600;color:#856404;margin-bottom:6px;">Analyse interrompue.</div>'
-                            + '<div style="font-size:13px;color:#856404;line-height:1.6;">Sans profil de style, EasyMail génèrera des réponses professionnelles standards — mais n\'intègrera pas votre ton, vos formulations et vos habitudes. Relancez l\'analyse quand vous le souhaitez.</div>'
+                            + '<div style="font-size:13px;color:#856404;line-height:1.6;">Sans profil de style, BoosterMail génèrera des réponses professionnelles standards — mais n\'intègrera pas votre ton, vos formulations et vos habitudes. Relancez l\'analyse quand vous le souhaitez.</div>'
                             + '</div>';
                     }
                     var btn = document.getElementById('btn-reanalyze');
@@ -641,7 +640,7 @@
         }
 
         function confirmReanalyze() {
-            if (!confirm('Recalibrer EasyMail : relit vos mails Outlook, régénère votre style rédactionnel et recalibre tous vos profils de correspondants.\n\nDurée estimée : 5-10 minutes.\n\nContinuer ?')) return;
+            if (!confirm('Recalibrer BoosterMail : relit vos mails Outlook, régénère votre style rédactionnel et recalibre tous vos profils de correspondants.\n\nDurée estimée : 5-10 minutes.\n\nContinuer ?')) return;
             reanalyze();
         }
 

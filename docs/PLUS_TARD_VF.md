@@ -20,7 +20,10 @@
 > - **#4 DPA Anthropic** — récupérer via formulaire enterprise. **Bloquant pré-beta payante**.
 > - **#5 Compléter `[À COMPLÉTER]` dans `legal/`** — identité éditeur (forme juridique, SIREN, RCS), siège social, médiateur consommation (si B2C), tribunal compétent.
 > - **#7 Marque INPI BoosterMail** — dépôt ~250€. Recommandé avant beta payante.
-> - **Mailbox `dpo@boostermail.ai`** — créer (ou rediriger vers `contact@`) pour cohérence avec les docs juridiques.
+> - **Mailbox `dpo@boostermail.ai`** — adresse référencée dans les 4 docs juridiques (POLITIQUE_CONFIDENTIALITE, MENTIONS_LEGALES, REGISTRE_TRAITEMENTS, SOUS_TRAITANTS) comme contact RGPD. **N'existe pas encore physiquement**. 3 options pour Yvan (à trancher) :
+>     - **Option 1** : créer une vraie mailbox dédiée `dpo@boostermail.ai` chez OVH (ou autre hébergeur mail) — pro mais une boîte de plus à consulter
+>     - **Option 2** (recommandée) : configurer un alias/redirection `dpo@boostermail.ai` → mail perso `yvan.bosser@groupe-bosser.fr` — gratuit chez la plupart des hébergeurs, simple
+>     - **Option 3** : remplacer `dpo@boostermail.ai` par une autre adresse dans les 4 docs (ex: `contact@boostermail.ai` ou directement le mail perso d'Yvan). Faisable côté code en 5 min.
 >
 > **🆕 Sujets reportés (à planifier ensemble)** :
 > - **#11 Découper `app_plugin.py` 11700 lignes** en modules thématiques (`flows/`, `caches/`, `bg/`, `routes/`). Gros chantier ~1 journée, low risk si tests E2E couvrent les 5 flux critiques. Recommandé pré-beta payante pour maintenabilité.
