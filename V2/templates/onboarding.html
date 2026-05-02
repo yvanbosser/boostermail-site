@@ -402,23 +402,32 @@
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
-    <!-- ÉTAPE 2 — Analyse de votre style -->
+    <!-- ÉTAPE 2 — Analyse de votre style (copie EXACTE du proto profile.html) -->
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <div class="step" id="step-2">
-        <div class="step-icon">✍️</div>
-        <h2 class="step-title">BoosterMail apprend votre plume</h2>
-        <p class="step-subtitle">
-            Dans quelques instants, il écrira exactement comme vous.
-        </p>
-
-        <div class="progress-track">
-            <div class="progress-fill" id="style-progress"></div>
-        </div>
-        <div class="progress-label" id="style-label">Préparation…</div>
-
-        <div class="info-tip" style="margin-top: 24px;">
-            💡 BoosterMail analyse vos derniers mails envoyés et reçus pour comprendre :
-            votre ton, vos formules de politesse, votre signature, vos contacts récurrents.
+        <!-- Zone analyse en cours — copie identique au proto -->
+        <div id="style-analyzing">
+            <div style="text-align:center;margin-bottom:16px;">
+                <div style="font-size:15px;color:#333;font-weight:500;margin-bottom:6px;">
+                    BoosterMail apprend votre plume. Dans quelques instants, il écrira exactement comme vous.
+                </div>
+                <div style="font-size:13px;color:#999;font-style:italic;">
+                    Quelques minutes d'analyse pour des heures de gagnées. Ça vaut le coup d'attendre.
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;justify-content:center;">
+                <div style="width:20px;height:20px;border:2px solid #e0e0e0;border-top-color:#0078d4;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;"></div>
+                <span id="style-step" style="color:#0078d4;font-weight:600;font-size:13px;">Démarrage...</span>
+            </div>
+            <div style="padding:0 20px;">
+                <div style="background:#e9ecef;border-radius:4px;height:6px;overflow:hidden;">
+                    <div id="style-bar" style="background:#0078d4;height:100%;width:0%;border-radius:4px;transition:width 0.5s ease;"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:11px;color:#999;">
+                    <span id="style-elapsed"></span>
+                    <span id="style-phase"></span>
+                </div>
+            </div>
         </div>
 
         <div id="step-2-buttons" style="display:none; margin-top: 24px; text-align:center;">
@@ -715,50 +724,86 @@
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // ÉTAPE 2 — ANALYSE DE STYLE
+    // ÉTAPE 2 — ANALYSE DE STYLE (copie EXACTE de la fonction reanalyze() du proto)
     // ═══════════════════════════════════════════════════════════════
 
     var _styleStarted = false;
-    var _styleProgressTimer = null;
+    var _analysisPoll = null;
 
     function startStyleAnalysis() {
         if (_styleStarted) return;
         _styleStarted = true;
 
-        // Lance l'analyse côté backend
-        fetch('/api/setup/onboarding', { method: 'POST' })
-            .catch(function() {});
+        // Reset barre et textes (au cas où on revient en arrière)
+        var barEl = document.getElementById('style-bar');
+        var stepEl = document.getElementById('style-step');
+        var phaseEl = document.getElementById('style-phase');
+        var elapsedEl = document.getElementById('style-elapsed');
+        if (barEl) barEl.style.width = '0%';
+        if (stepEl) { stepEl.textContent = 'Démarrage...'; stepEl.style.color = '#0078d4'; }
+        if (phaseEl) phaseEl.textContent = '';
+        if (elapsedEl) elapsedEl.textContent = '';
 
-        // Poll progression toutes les 2s
-        _styleProgressTimer = setInterval(function() {
-            fetch('/api/style_status')
-                .then(function(r) { return r.json(); })
-                .then(function(d) {
-                    var pct = Math.round((d.progress || 0));
-                    document.getElementById('style-progress').style.width = pct + '%';
-                    document.getElementById('style-label').textContent = d.label || ('Analyse… ' + pct + '%');
-                    if (d.status === 'done' || pct >= 100) {
-                        clearInterval(_styleProgressTimer);
-                        _styleProgressTimer = null;
-                        document.getElementById('style-progress').style.width = '100%';
-                        document.getElementById('style-label').textContent = '✓ Style analysé';
+        // Lance l'analyse via /api/reanalyze_style (même endpoint que le proto
+        // utilise pour le bouton "Recalibrer BoosterMail" dans Profil)
+        fetch('/api/reanalyze_style', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function() {
+                var t0 = Date.now();
+                _analysisPoll = setInterval(function() {
+                    var elapsed = Math.floor((Date.now() - t0) / 1000);
+                    var elEl = document.getElementById('style-elapsed');
+                    if (elEl) elEl.textContent = elapsed + 's';
+                    fetch('/api/style_status').then(function(r) { return r.json(); }).then(function(d) {
+                        if (d.ready) {
+                            clearInterval(_analysisPoll);
+                            _analysisPoll = null;
+                            // Bascule UI : barre à 100%, message succès, bouton Continuer
+                            var bEl = document.getElementById('style-bar');
+                            if (bEl) bEl.style.width = '100%';
+                            var sEl = document.getElementById('style-step');
+                            if (sEl) { sEl.textContent = '✓ Style analysé'; sEl.style.color = '#28a745'; }
+                            document.getElementById('step-2-buttons').style.display = 'block';
+                            saveSetupStep(3);
+                            return;
+                        }
+                        var sEl = document.getElementById('style-step');
+                        if (sEl && d.step) sEl.textContent = d.step;
+                        // Barre de progression par phase + chunks (mapping identique au proto)
+                        var bEl = document.getElementById('style-bar');
+                        var pEl = document.getElementById('style-phase');
+                        if (bEl && d.step) {
+                            if (d.step.indexOf('envoyés lus') > -1) { bEl.style.width = '20%'; if (pEl) pEl.textContent = '20%'; }
+                            else if (d.step.indexOf('reçus lus') > -1) { bEl.style.width = '40%'; if (pEl) pEl.textContent = '40%'; }
+                            else if (d.step.indexOf('Analyse') > -1 && d.step.indexOf('style') > -1) {
+                                var chunkPct = d.chunks ? Math.min(d.chunks / 130, 1) : 0;
+                                var pct = 50 + Math.floor(chunkPct * 35);
+                                bEl.style.width = pct + '%';
+                                if (pEl) pEl.textContent = pct + '%';
+                            }
+                            else if (d.step.indexOf('Indexation') > -1) { bEl.style.width = '92%'; if (pEl) pEl.textContent = '92%'; }
+                        }
+                        // Si pas analyzing et pas ready → erreur
+                        if (!d.analyzing && !d.ready) {
+                            clearInterval(_analysisPoll);
+                            _analysisPoll = null;
+                            if (sEl) { sEl.textContent = d.step || 'Erreur lors de l\'analyse'; sEl.style.color = '#dc3545'; }
+                            document.getElementById('step-2-buttons').style.display = 'block';
+                        }
+                    }).catch(function() {
+                        clearInterval(_analysisPoll);
+                        _analysisPoll = null;
+                        var sEl = document.getElementById('style-step');
+                        if (sEl) { sEl.textContent = 'Erreur de connexion'; sEl.style.color = '#dc3545'; }
                         document.getElementById('step-2-buttons').style.display = 'block';
-                        saveSetupStep(3);
-                    }
-                })
-                .catch(function() {});
-        }, 2000);
-
-        // Auto-progression visuelle si le backend ne renvoie rien (mode dégradé)
-        var fakeP = 0;
-        var fakeTimer = setInterval(function() {
-            if (!_styleProgressTimer) { clearInterval(fakeTimer); return; }
-            fakeP = Math.min(fakeP + 2, 90);
-            var current = parseInt(document.getElementById('style-progress').style.width) || 0;
-            if (current < fakeP) {
-                document.getElementById('style-progress').style.width = fakeP + '%';
-            }
-        }, 600);
+                    });
+                }, 2000);
+            })
+            .catch(function() {
+                var sEl = document.getElementById('style-step');
+                if (sEl) { sEl.textContent = 'Impossible de lancer l\'analyse'; sEl.style.color = '#dc3545'; }
+                document.getElementById('step-2-buttons').style.display = 'block';
+            });
     }
 
     // ═══════════════════════════════════════════════════════════════
