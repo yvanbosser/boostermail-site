@@ -1394,6 +1394,52 @@ def _mark_popup_shown():
         logger.debug(f"mark_popup_shown indispo ({e})")
 
 
+def _get_outlook_type():
+    """Retourne le type d'Outlook qui tourne : 'newOutlook', 'classicOutlook',
+    ou None s'il n'est pas en cours. Utilisé par /outlook_version (02/05/2026).
+
+    Logique identique à _is_outlook_running mais avec discrimination du type.
+    """
+    import ctypes
+    from ctypes import wintypes
+    TH32CS_SNAPPROCESS = 0x00000002
+    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+    class _PE(ctypes.Structure):
+        _fields_ = [
+            ('dwSize', wintypes.DWORD),
+            ('cntUsage', wintypes.DWORD),
+            ('th32ProcessID', wintypes.DWORD),
+            ('th32DefaultHeapID', ctypes.POINTER(ctypes.c_ulong)),
+            ('th32ModuleID', wintypes.DWORD),
+            ('cntThreads', wintypes.DWORD),
+            ('th32ParentProcessID', wintypes.DWORD),
+            ('pcPriClassBase', ctypes.c_long),
+            ('dwFlags', wintypes.DWORD),
+            ('szExeFile', ctypes.c_char * 260),
+        ]
+
+    kernel32 = ctypes.windll.kernel32
+    snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if snapshot == INVALID_HANDLE_VALUE:
+        return None
+    pe = _PE()
+    pe.dwSize = ctypes.sizeof(_PE)
+    try:
+        if kernel32.Process32First(snapshot, ctypes.byref(pe)):
+            while True:
+                name = pe.szExeFile.lower().strip(b'\x00')
+                if name == b'olk.exe':
+                    return 'newOutlook'
+                if name == b'outlook.exe':
+                    return 'classicOutlook'
+                if not kernel32.Process32Next(snapshot, ctypes.byref(pe)):
+                    break
+    finally:
+        kernel32.CloseHandle(snapshot)
+    return None
+
+
 def _is_outlook_running():
     """Detecte si Outlook (New ou Classic) tourne — methode rapide via ctypes."""
     import ctypes
@@ -1743,41 +1789,14 @@ class _IPCHandler(BaseHTTPRequestHandler):
         elif self.path == '/outlook_version':
             # 02/05/2026 — détecte la version d'Outlook tournant localement.
             # Utilisé par la section « Connexion Outlook » du Profil.
-            # Retourne l'une des valeurs : 'newOutlook' (olk.exe),
-            # 'classicOutlook' (outlook.exe), ou '' si Outlook pas en cours
-            # (le frontend tombera alors en fallback sur last_outlook_platform).
+            # Retourne 'newOutlook' (olk.exe), 'classicOutlook' (outlook.exe),
+            # ou '' si Outlook pas en cours (le frontend tombera alors en
+            # fallback sur le setting OVH last_outlook_platform).
             try:
-                running = _is_outlook_running()
-                # _is_outlook_running scanne les processes ; on a besoin du
-                # type spécifique. On reproduit la logique brièvement ici.
-                version = ''
-                try:
-                    import ctypes as _ct
-                    kernel32 = _ct.windll.kernel32
-                    TH32CS_SNAPPROCESS = 0x00000002
-                    snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-                    if snapshot:
-                        pe = PROCESSENTRY32()
-                        pe.dwSize = _ct.sizeof(PROCESSENTRY32)
-                        try:
-                            if kernel32.Process32First(snapshot, _ct.byref(pe)):
-                                while True:
-                                    name = pe.szExeFile.lower().strip(b'\x00')
-                                    if name == b'olk.exe':
-                                        version = 'newOutlook'
-                                        break
-                                    if name == b'outlook.exe':
-                                        version = 'classicOutlook'
-                                        break
-                                    if not kernel32.Process32Next(snapshot, _ct.byref(pe)):
-                                        break
-                        finally:
-                            kernel32.CloseHandle(snapshot)
-                except Exception:
-                    pass
+                version = _get_outlook_type() or ''
                 self._json_response({
                     'version': version,
-                    'running': bool(running),
+                    'running': bool(version),
                 })
             except Exception as _ex:
                 self._json_response({'version': '', 'running': False, 'error': str(_ex)[:200]})
