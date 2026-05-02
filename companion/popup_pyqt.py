@@ -580,7 +580,7 @@ class EasyMailPopup(QMainWindow):
         """
         Popup d'activation — design cohérent avec warmup (audit 20/04).
         Fond gradient doux (pas agressif), carte blanche, icone gradient,
-        2 boutons Annuler/Activer en 2 min.
+        2 boutons Plus tard / Lancer.
         """
         widget = QWidget()
         widget.setObjectName('root')
@@ -666,7 +666,7 @@ class EasyMailPopup(QMainWindow):
 
         card_layout.addSpacing(4)
 
-        # Boutons Annuler / Activer (mêmes styles que warmup)
+        # Boutons Plus tard / Lancer (mêmes styles que warmup)
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
@@ -682,7 +682,7 @@ class EasyMailPopup(QMainWindow):
         btn_cancel.clicked.connect(self.close)
         btn_row.addWidget(btn_cancel)
 
-        btn_activate = QPushButton('Activer en 2 minutes')
+        btn_activate = QPushButton('Lancer')
         btn_activate.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_activate.setFixedHeight(36)
         btn_activate.setStyleSheet(
@@ -722,7 +722,7 @@ class EasyMailPopup(QMainWindow):
         )
         return bar
 
-    # -------- Handler : clic "Activer en 2 minutes" -------------------------
+    # -------- Handler : clic "Lancer" ---------------------------------------
 
     def _on_activate_click(self):
         """
