@@ -12664,6 +12664,18 @@ def page_echeances():
     return render_template('echeances.html')
 
 
+@app.route('/plugin/help')
+def page_help():
+    """Chatbot Assistance BoosterMail — page autonome (02/05/2026).
+
+    Ouvert depuis l'overlay via _openDashboardWindow('help'). Affichage
+    pleine fenêtre avec FAQ + champ Claude. La logique de rendu (FAQ
+    statiques + appel /api/assist) est entièrement côté frontend dans
+    le template help.html.
+    """
+    return render_template('help.html')
+
+
 # =============================================================================
 # CHATBOT ASSISTANCE BoosterMail (02/05/2026)
 # Route hybride : 7 FAQ statiques côté frontend + Claude Haiku pour les

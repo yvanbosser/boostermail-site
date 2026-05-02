@@ -88,8 +88,10 @@ var _companionAvailable = false;
         alert('✏️ Composition rapide d\'un nouveau message — bientôt disponible.');
     });
 
-    // 02/05/2026 — Bouton ❓ Aide : ouvre le chatbot d'assistance
-    _btn('navHelpFixed', function () { _openAssistChatbot(); });
+    // 02/05/2026 — Bouton ❓ Aide : ouvre le chatbot dans une fenêtre
+    // dédiée (idem Profil/Contacts/Échéances). L'overlay PyQt fait 280×70 px,
+    // trop petit pour un chatbot interne — fix Yvan signal « ne fonctionne pas ».
+    _btn('navHelpFixed', function () { _openDashboardWindow('help'); });
 
     // Logique ?view=X — démarrer directement sur la vue demandée si param URL.
     // Permet à dialog.html d'ouvrir popup.html?view=profil et de tomber
@@ -1104,9 +1106,13 @@ function _pollOnboarding() {
 
     // ═══════════════════════════════════════════════════════════════
     // CHATBOT ASSISTANCE BoosterMail (02/05/2026)
-    // 7 FAQ statiques cliquables + champ libre Claude Haiku.
-    // System prompt strict côté backend pour éviter les hallucinations.
-    // ═══════════════════════════════════════════════════════════════
+    // Note : la logique a été MIGRÉE vers /plugin/help (template
+    // autonome) car l'overlay 280×70 px est trop petit pour héberger
+    // une modale chatbot. Le bouton ❓ Aide ouvre maintenant
+    // /plugin/help dans une fenêtre browser dédiée via _openDashboardWindow.
+    // Tout le code ci-dessous est conservé en commentaire mais inactif —
+    // il sera supprimé une fois le système validé en live.
+    /* DISABLED — code conservé pour référence historique.
 
     // 8 FAQ pré-rédigées (validées avec Yvan, ne pas modifier sans accord).
     // Réponses HTML simples (gras + listes) pour rendu propre dans la modale.
@@ -1320,6 +1326,7 @@ function _pollOnboarding() {
             if (e.key === 'Enter') { e.preventDefault(); _assistSendQuestion(); }
         });
     });
+    */ // FIN code commenté chatbot inline
 
     // Audit Pass 8 — cleanup au unmount popup : clearInterval polling +
     // close SSE pour éviter requêtes fantômes après fermeture (especially

@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BoosterMail — Assistance</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f5f8fc;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header bleu cohérent avec les autres pages */
+        .header {
+            background: linear-gradient(135deg, #0F6CBD 0%, #1976D2 100%);
+            padding: 18px 28px;
+            display: flex; align-items: center; justify-content: space-between;
+            box-shadow: 0 2px 8px rgba(15, 108, 189, 0.15);
+            color: #fff;
+        }
+        .header h1 {
+            font-size: 18px; font-weight: 600;
+            display: flex; align-items: center; gap: 10px;
+        }
+        .header h1::before { content: '💬'; font-size: 22px; }
+        .nav-link {
+            color: rgba(255,255,255,0.85); text-decoration: none;
+            font-size: 13px; font-weight: 500; padding: 8px 16px;
+            border-radius: 6px; transition: all 0.15s;
+            border: 1px solid transparent;
+        }
+        .nav-link:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+        /* Container chatbot — centré + plein écran sur mobile/petit */
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            max-width: 720px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 20px;
+            overflow: hidden;
+        }
+        .chat-card {
+            flex: 1;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 18px;
+            font-size: 13px;
+            line-height: 1.55;
+            background: #fafbfd;
+        }
+        .chat-input-row {
+            border-top: 1px solid #e2e8f0;
+            padding: 12px;
+            display: flex;
+            gap: 8px;
+            background: white;
+        }
+        .chat-input {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1px solid #d6dde7;
+            border-radius: 8px;
+            font-size: 13px;
+            font-family: inherit;
+        }
+        .chat-input:focus {
+            outline: none;
+            border-color: #0F6CBD;
+            box-shadow: 0 0 0 3px rgba(15,108,189,0.1);
+        }
+        .chat-send {
+            background: #0F6CBD;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 0 18px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.15s;
+        }
+        .chat-send:hover { background: #0d5ca3; }
+        .chat-send:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .faq-btn {
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: white;
+            border: 1px solid #d6dde7;
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #2d3548;
+            font-family: inherit;
+            line-height: 1.45;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .faq-btn:hover {
+            border-color: #0F6CBD;
+            background: #f0f6fc;
+        }
+        .faq-btn.inline {
+            background: #f0f6fc;
+            border-color: #0F6CBD;
+            color: #0F6CBD;
+            font-size: 12px;
+            margin-bottom: 6px;
+            padding: 7px 11px;
+        }
+
+        .bubble-user {
+            margin: 10px 0 10px auto;
+            max-width: 85%;
+            background: #0F6CBD;
+            color: white;
+            padding: 9px 14px;
+            border-radius: 12px 12px 2px 12px;
+            font-size: 13px;
+            line-height: 1.5;
+            width: fit-content;
+        }
+        .bubble-ai {
+            margin: 10px auto 10px 0;
+            max-width: 90%;
+            background: white;
+            color: #2d3548;
+            padding: 11px 14px;
+            border-radius: 12px 12px 12px 2px;
+            font-size: 13px;
+            line-height: 1.6;
+            border: 1px solid #e0e7f0;
+            width: fit-content;
+        }
+        .bubble-typing {
+            margin: 10px auto 10px 0;
+            padding: 8px 14px;
+            font-size: 13px;
+            color: #5a6377;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>BoosterMail Assistance</h1>
+    <a href="javascript:window.close();" class="nav-link">✕ Fermer</a>
+</div>
+
+<div class="chat-container">
+    <div class="chat-card">
+        <div id="chatMessages" class="chat-messages">
+            <!-- Message d'accueil + boutons FAQ injectés en JS -->
+        </div>
+        <div class="chat-input-row">
+            <input type="text" id="chatInput" class="chat-input" placeholder="Posez votre question…" autofocus>
+            <button id="chatSend" class="chat-send">Envoyer</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// 8 FAQ — copie identique du chatbot mais en pleine page autonome
+var ASSIST_FAQ = [
+    {
+        id: 'pas-trouve-boostermail',
+        q: 'Je ne trouve pas BoosterMail dans Outlook',
+        a:
+            '🔍 BoosterMail s\'installe à <strong>2 endroits</strong> dans Outlook :<br><br>' +
+            '<strong>1. Dans le ruban</strong> = la grande barre horizontale en haut de la fenêtre Outlook (avec <em>Nouveau message, Répondre, Transférer</em>…). Toujours visible.<br><br>' +
+            '<strong>2. Dans la barre d\'actions</strong> d\'un mail = juste au-dessus du contenu quand vous ouvrez un mail (avec <em>Répondre, Répondre à tous, Transférer</em>, souvent sous forme de flèches).<br><br>' +
+            '<strong>Lequel ne fonctionne pas chez vous ?</strong><br>' +
+            '<div style="margin-top:10px;">' +
+            '<button class="faq-btn inline" data-faq-id="ruban-pas-visible">→ Pas dans le ruban</button>' +
+            '<button class="faq-btn inline" data-faq-id="barre-actions-pas-visible">→ Pas dans la barre d\'actions / l\'épingler</button>' +
+            '</div>',
+    },
+    {
+        id: 'ruban-pas-visible',
+        q: 'Le 🚀 n\'apparaît pas dans le ruban d\'Outlook',
+        a:
+            '📍 <strong>Le ruban</strong> = la grande barre horizontale en haut de la fenêtre Outlook (où se trouvent <em>Nouveau message, Répondre, Transférer</em>…). Toujours visible quand Outlook est ouvert.<br><br>' +
+            'Si le bouton 🚀 n\'apparaît pas dans le ruban :<br>' +
+            '1. <strong>Fermez complètement Outlook</strong> (clic droit dans la barre des tâches → Quitter, pas juste la croix).<br>' +
+            '2. <strong>Rouvrez Outlook.</strong> Le bouton 🚀 doit maintenant apparaître.<br>' +
+            '3. Si toujours invisible : <strong>Profil → 🚀 Bouton Outlook → Réinstaller le bouton</strong>, puis refermez/rouvrez Outlook.<br>' +
+            '4. Si ça persiste : <strong>support@boostermail.ai</strong>',
+    },
+    {
+        id: 'barre-actions-pas-visible',
+        q: 'Le 🚀 n\'apparaît pas dans la barre d\'actions / l\'épingler',
+        a:
+            '📍 <strong>La barre d\'actions du mail</strong> = la ligne de boutons <em>Répondre, Répondre à tous, Transférer</em> (souvent sous forme de flèches) qui apparaît juste au-dessus du contenu d\'un mail quand vous le cliquez.<br><br>' +
+            '<em>(Cette barre existe sur <strong>New Outlook</strong> et <strong>Outlook Web</strong>. Sur <strong>Outlook Classic</strong>, les add-ins se trouvent dans le ruban — voir la question précédente.)</em><br><br>' +
+            'Par défaut, Outlook cache les boutons d\'add-ins (dont 🚀) derrière une <strong>petite icône carrée à 4 sous-carrés (⊞)</strong> à droite de la barre d\'actions. Pour épingler 🚀 BoosterMail :<br>' +
+            '1. Ouvrez n\'importe quel mail<br>' +
+            '2. Repérez l\'<strong>icône carrée à 4 sous-carrés (⊞)</strong> à droite<br>' +
+            '3. Cliquez dessus → vous voyez la liste des add-ins<br>' +
+            '4. <strong>Clic droit</strong> sur 🚀 BoosterMail → <strong>Épingler</strong><br>' +
+            '5. Le bouton est désormais toujours visible',
+    },
+    {
+        id: 'recalibrer-style',
+        q: 'Comment recalibrer mon style d\'écriture',
+        a:
+            'BoosterMail apprend votre style en analysant vos mails envoyés et reçus. Pour relancer l\'analyse :<br><br>' +
+            '<strong>Profil → Style rédactionnel → Recalibrer BoosterMail</strong><br><br>' +
+            'L\'analyse prend quelques minutes. Plus vous envoyez de mails, plus BoosterMail s\'affine.',
+    },
+    {
+        id: 'changer-dossier-pj',
+        q: 'Comment changer mon dossier de classement PJ',
+        a:
+            'Pour modifier le dossier où BoosterMail propose de classer vos pièces jointes :<br><br>' +
+            '<strong>Profil → 📁 Pièces jointes → bouton 📁 Parcourir</strong> → sélectionnez votre nouveau dossier.<br><br>' +
+            'BoosterMail réindexe automatiquement votre arborescence (~quelques secondes).',
+    },
+    {
+        id: 'confidentialite',
+        q: 'Confidentialité : que voit BoosterMail de mes données',
+        a:
+            'Vos mails sont analysés par l\'IA <strong>Claude (Anthropic, USA)</strong> pour générer vos réponses. Nos engagements :<br>' +
+            '• <strong>Chiffrement</strong> en transit (HTTPS) et au repos (serveurs OVH France)<br>' +
+            '• <strong>Pas d\'entraînement IA</strong> sur vos mails (DPA Anthropic signé)<br>' +
+            '• <strong>Logs minimaux</strong> : nous n\'enregistrons pas le contenu de vos mails<br>' +
+            '• <strong>Suppression à la demande</strong> : Profil → exporter ou supprimer toutes vos données<br><br>' +
+            'Politique complète : <a href="https://boostermail.ai/privacy" target="_blank" style="color:#0F6CBD;">boostermail.ai/privacy</a>',
+    },
+    {
+        id: 'tache-de-fond',
+        q: 'Pourquoi BoosterMail tourne en tâche de fond',
+        a:
+            'Pour 3 raisons :<br>' +
+            '1. <strong>Rapidité</strong> : préparer vos réponses à l\'avance → prêtes en 2-3 sec au clic<br>' +
+            '2. <strong>Synchronisation Outlook</strong> : détecter les nouveaux mails et organiser vos PJ<br>' +
+            '3. <strong>Apprentissage continu</strong> : analyser votre style au fil de vos envois<br><br>' +
+            'Consommation très faible : ~30 Mo de RAM, aucun impact CPU notable.',
+    },
+    {
+        id: 'desinstaller',
+        q: 'Comment désinstaller BoosterMail',
+        a:
+            '1. Fermez Outlook<br>' +
+            '2. <strong>Panneau de configuration → Programmes → BoosterMail → Désinstaller</strong><br>' +
+            '3. Le bouton 🚀 disparaît d\'Outlook au prochain démarrage<br><br>' +
+            'Vos données restent <strong>30 jours côté serveur</strong> puis sont supprimées. Pour tout effacer immédiatement : <strong>Profil → Confidentialité → Supprimer mes données</strong>.',
+    },
+];
+
+var _history = [];
+var _backendUrl = window.location.origin;
+
+document.addEventListener('DOMContentLoaded', function() {
+    initMessages();
+    document.getElementById('chatSend').addEventListener('click', sendQuestion);
+    var input = document.getElementById('chatInput');
+    input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); sendQuestion(); }
+    });
+});
+
+function initMessages() {
+    var box = document.getElementById('chatMessages');
+    var html = '';
+    html += '<div style="margin-bottom:14px;">';
+    html += '<div style="font-weight:600; color:#1a1a2e; margin-bottom:4px; font-size:14px;">👋 Bonjour !</div>';
+    html += '<div style="color:#5a6377; font-size:13px;">Sur quoi puis-je vous aider ?</div>';
+    html += '</div>';
+    html += '<div style="font-size:11px; color:#5a6377; font-weight:600; margin:14px 0 8px;">📌 QUESTIONS FRÉQUENTES</div>';
+    ASSIST_FAQ.forEach(function(f) {
+        html += '<button class="faq-btn" data-faq-id="' + f.id + '">' + f.q + '</button>';
+    });
+    box.innerHTML = html;
+
+    // Event delegation pour tous les boutons FAQ (initial + injectés dans réponses)
+    box.addEventListener('click', function(e) {
+        var t = e.target;
+        while (t && t !== box && !t.hasAttribute('data-faq-id')) {
+            t = t.parentElement;
+        }
+        if (!t || !t.hasAttribute('data-faq-id')) return;
+        var fid = t.getAttribute('data-faq-id');
+        var faq = ASSIST_FAQ.find(function(f) { return f.id === fid; });
+        if (!faq) return;
+        addMessage('user', faq.q);
+        addMessage('assistant', faq.a, true);
+    });
+}
+
+function addMessage(role, content, isHtml) {
+    var box = document.getElementById('chatMessages');
+    var b = document.createElement('div');
+    b.className = role === 'user' ? 'bubble-user' : 'bubble-ai';
+    if (isHtml) b.innerHTML = content;
+    else b.textContent = content;
+    box.appendChild(b);
+    box.scrollTop = box.scrollHeight;
+    _history.push({ role: role, content: isHtml ? b.innerText : content });
+    if (_history.length > 20) _history = _history.slice(-20);
+}
+
+function sendQuestion() {
+    var input = document.getElementById('chatInput');
+    var q = (input.value || '').trim();
+    if (!q) return;
+    input.value = '';
+    addMessage('user', q);
+
+    var box = document.getElementById('chatMessages');
+    var typing = document.createElement('div');
+    typing.id = 'typing';
+    typing.className = 'bubble-typing';
+    typing.textContent = '✍️ BoosterMail réfléchit…';
+    box.appendChild(typing);
+    box.scrollTop = box.scrollHeight;
+
+    fetch(_backendUrl + '/api/assist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: _history.slice(-10) }),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        var t = document.getElementById('typing');
+        if (t) t.remove();
+        if (d && d.answer) {
+            addMessage('assistant', d.answer);
+        } else {
+            addMessage('assistant', '⚠️ Désolé, je n\'ai pas pu répondre. Écrivez-nous : support@boostermail.ai');
+        }
+    })
+    .catch(function() {
+        var t = document.getElementById('typing');
+        if (t) t.remove();
+        addMessage('assistant', '⚠️ Service indisponible. Vérifiez votre connexion ou contactez support@boostermail.ai');
+    });
+}
+</script>
+
+</body>
+</html>

@@ -324,28 +324,10 @@
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════════════
-         CHATBOT ASSISTANCE BoosterMail (02/05/2026)
-         Modale flottante 320×460, ouverte au clic du bouton ❓ Aide.
-         7 FAQ statiques + champ libre Claude Haiku.
-         ═══════════════════════════════════════════════════════════════ -->
-    <div id="assistOverlay" style="display:none; position:fixed; bottom:8px; right:8px; left:8px; top:78px; background:white; border:1px solid #d6dde7; border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,0.15); z-index:9999; flex-direction:column; overflow:hidden;">
-        <!-- Header -->
-        <div style="background:linear-gradient(135deg,#0F6CBD 0%,#1976D2 100%); color:white; padding:10px 12px; display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
-            <div style="font-size:13px; font-weight:600;">💬 Assistance BoosterMail</div>
-            <button id="assistCloseBtn" style="background:rgba(255,255,255,0.2); border:none; color:white; width:24px; height:24px; border-radius:4px; cursor:pointer; font-size:12px;">✕</button>
-        </div>
-        <!-- Zone messages -->
-        <div id="assistMessages" style="flex:1; overflow-y:auto; padding:12px; font-size:12px; line-height:1.5; background:#f8fafc;">
-            <!-- Message d'accueil + boutons FAQ injectés en JS -->
-        </div>
-        <!-- Zone input -->
-        <div style="border-top:1px solid #e2e8f0; padding:8px; display:flex; gap:6px; background:white; flex-shrink:0;">
-            <input type="text" id="assistInput" placeholder="Posez votre question…" style="flex:1; padding:7px 10px; border:1px solid #d6dde7; border-radius:6px; font-size:12px; font-family:inherit;">
-            <button id="assistSendBtn" style="background:#0F6CBD; color:white; border:none; border-radius:6px; padding:0 12px; cursor:pointer; font-size:12px;">→</button>
-        </div>
-    </div>
+    <!-- Chatbot Assistance déplacé vers /plugin/help (page autonome) car
+         l'overlay 280×70 px est trop petit pour une modale interne.
+         Voir templates/help.html. -->
 
-    <script src="popup.js?v=v22-chatbot-assist-02-05"></script>
+    <script src="popup.js?v=v23-help-via-dashboard-02-05"></script>
 </body>
 </html>
