@@ -1306,6 +1306,8 @@ function _applyMailPreview(preview) {
     if (clsEl) {
         if (!preview || !preview.classement) {
             clsEl.textContent = 'Néant';
+            _classementCacheData = null;
+            _setClassementFieldClickable(false);
         } else {
             var clsStatus = preview.classement.status;
             var clsData = preview.classement.data;
@@ -1315,6 +1317,9 @@ function _applyMailPreview(preview) {
                 var sugg = clsData.suggestion;
                 var folderPath = sugg.folder_path || sugg.folder_name || sugg.folder_id || 'Dossier suggéré';
                 clsEl.textContent = folderPath;
+                // Étape 4' (02/05 PM) — Stocker pour popup pré-envoi cliquable
+                _classementCacheData = clsData;
+                _setClassementFieldClickable(true);
             } else {
                 // Sujet PLUS_TARD_VF #4 (28/04) — wording transparent selon
                 // la raison pour laquelle aucune suggestion n'est proposée.
@@ -1334,6 +1339,8 @@ function _applyMailPreview(preview) {
                     'self':                'Mail envoyé à toi-même.',
                 };
                 clsEl.textContent = clsMsgs[clsSrc] || 'Néant';
+                _classementCacheData = null;
+                _setClassementFieldClickable(false);
             }
         }
     }
@@ -1479,8 +1486,13 @@ function _applySinglePlate(plateName, res) {
             var sugg = res.data.suggestion;
             var folderPath = sugg.folder_path || sugg.folder_name || sugg.folder_id || 'Dossier suggéré';
             clsEl.textContent = folderPath;
+            // Étape 4' (02/05 PM) — Stocker données pour popup pré-envoi cliquable
+            _classementCacheData = res.data;
+            _setClassementFieldClickable(true);
         } else {
             clsEl.textContent = 'Néant';
+            _classementCacheData = null;
+            _setClassementFieldClickable(false);
         }
     } else if (plateName === 'pj_classement') {
         var pjEl = document.getElementById('infoClassementPJContent');
@@ -2860,6 +2872,18 @@ var _selectedFolderId = '';
 var _postSendEcheances = [];
 var _postSendPJData = null;
 
+// Étape 4'/4' (02/05 PM, vision Yvan) — popup classement pré-envoi cliquable.
+// Le champ #infoClassement en bas du dialog devient cliquable dès que le BG
+// a calculé une suggestion. Au clic → popup classement s'ouvre en mode 'pre'
+// (boutons « Annuler » / « Confirmer »). L'user peut modifier, son choix est
+// mémorisé, puis la popup post-envoi le réutilise comme défaut.
+var _classementCacheData = null;       // {suggestion, suggestions, source} reçu du polling
+var _classementFoldersCache = null;    // folders Graph fetché lazy au 1er clic pré-envoi
+var _classMailMode = 'post';           // 'pre' ou 'post' — détermine boutons popup
+var _preSendFolderId = '';             // choix user pré-envoi (folder_id depuis arbo/sugg)
+var _preSendFolderPath = '';           // path lisible (pour affichage card + manuel)
+var _preSendIsManual = false;          // true si user a tapé un path manuel pré-envoi
+
 function _runPostSendWorkflows() {
     /** Chaîne les 3 workflows : échéances → classement mail → classement PJ → fermeture. */
     if (!_messageId) {
@@ -2940,31 +2964,56 @@ function _startClassMail() {
         .catch(function() { _startClassPJ(); });
 }
 
-function _showClassMailPopup(suggestion, folders) {
+function _showClassMailPopup(suggestion, folders, mode) {
     // Étape 2' (02/05 PM, vision Yvan) — Top 3 suggestions au lieu de #1.
     // suggestion.suggestions = array (top 3 calculé par BG prewarm) ; fallback
     // [#1] si BG ancien ou source != rule/ai. Backend exposé via étape 1'.
     // Affichage : 1 principale (sélectionnée par défaut, gros bandeau bleu)
     // + jusqu'à 2 alternatives (boulettes discrètes ●).
+    //
+    // Étape 4' (02/05 PM) — Param `mode` ∈ {'pre', 'post'} (default 'post').
+    //   Mode 'pre'  = popup ouverte au clic #infoClassement avant envoi.
+    //                 Boutons « Annuler » / « Confirmer ». Confirm mémorise
+    //                 dans _preSendFolderId/Path sans déclencher classement.
+    //   Mode 'post' = popup ouverte après envoi (workflow standard).
+    //                 Boutons « Pas maintenant » / « Classer ici ».
+    //                 Si _preSendFolderId/Path existe (modif user pré-envoi)
+    //                 → pré-sélection de ce choix au lieu de la suggestion BG.
+    mode = mode || 'post';
+    _classMailMode = mode;
+
     var suggestions = (suggestion && suggestion.suggestions && suggestion.suggestions.length)
         ? suggestion.suggestions
         : (suggestion && suggestion.suggestion ? [suggestion.suggestion] : []);
 
+    // Sélection initiale (priorité au choix pré-envoi user en mode 'post')
+    var initialSelectedId = (suggestions.length > 0 && suggestions[0]) ? (suggestions[0].folder_id || '') : '';
+    var initialManualPath = '';
+    if (mode === 'post') {
+        if (_preSendIsManual && _preSendFolderPath) {
+            initialManualPath = _preSendFolderPath;
+            initialSelectedId = '';
+        } else if (_preSendFolderId) {
+            initialSelectedId = _preSendFolderId;
+        }
+    }
+
     var sugHtml = '';
     if (suggestions.length > 0) {
-        // Suggestion principale (top 1 — pré-sélectionnée par défaut)
+        // Suggestion principale (top 1)
         var main = suggestions[0];
         var mainId = main.folder_id || '';
         var mainPath = main.folder_path || main.folder_name || mainId || 'Dossier suggéré';
         var mainReason = main.reason || '';
         var mainPrefix = (suggestion.source === 'ai') ? 'Suggestion IA : ' : '';
-        sugHtml += '<div class="em-folder-suggestion selected" '
+        var mainSelected = (mainId === initialSelectedId) ? ' selected' : '';
+        sugHtml += '<div class="em-folder-suggestion' + mainSelected + '" '
             + 'onclick="_selectFolder(\'' + _escapeAttr(mainId) + '\', this)">'
             + '&#x1f4c1; ' + _escapeHtml(mainPrefix + mainPath)
             + (mainReason ? '<span class="em-suggestion-reason">— ' + _escapeHtml(mainReason) + '</span>' : '')
             + '</div>';
-        _selectedFolderId = mainId;
-        document.getElementById('btnClassMail').disabled = false;
+        _selectedFolderId = initialSelectedId;
+        document.getElementById('btnClassMail').disabled = !(initialSelectedId || initialManualPath);
 
         // Alternatives top 2/3 — boulettes discrètes (max 2)
         var alts = suggestions.slice(1, 3);
@@ -2974,7 +3023,8 @@ function _showClassMailPopup(suggestion, folders) {
                 var altId = s.folder_id || '';
                 var altPath = s.folder_path || s.folder_name || altId || 'Dossier suggéré';
                 var altReason = s.reason || '';
-                sugHtml += '<div class="em-folder-alternative" '
+                var altSelected = (altId === initialSelectedId) ? ' selected' : '';
+                sugHtml += '<div class="em-folder-alternative' + altSelected + '" '
                     + 'onclick="_selectFolder(\'' + _escapeAttr(altId) + '\', this)">'
                     + '<span class="em-folder-alt-bullet">&#x25cf;</span>'
                     + '<span>' + _escapeHtml(altPath)
@@ -3039,14 +3089,30 @@ function _showClassMailPopup(suggestion, folders) {
     }
 
     // Phase 3 (30/04 PM) — brancher l'input de saisie manuelle.
-    // Quand user tape un path → désactive sélection arborescence,
-    // active "Classer ici" qui appellera /api/classify_email_manual.
+    // Étape 4' (02/05 PM) : pré-remplir si l'user avait tapé un path manuel
+    // en mode pré-envoi (cohérence post-envoi avec choix pré-envoi).
     var manualInput = document.getElementById('classMailManualPath');
     if (manualInput) {
-        // Reset à l'ouverture de la popup
-        manualInput.value = '';
+        manualInput.value = initialManualPath || '';
+        if (initialManualPath) {
+            _selectedFolderManualPath = initialManualPath;
+        }
         manualInput.removeEventListener('input', _onManualPathInput);
         manualInput.addEventListener('input', _onManualPathInput);
+    }
+
+    // Étape 4' (02/05 PM) — Adapter libellés des boutons selon le mode.
+    // skipClassMail() / doClassMail() inspectent _classMailMode et
+    // redirigent vers _cancelPreSendChoice() / _confirmPreSendChoice() en
+    // mode 'pre'.
+    var btnSkip = document.querySelector('#popupClassMail .em-popup-btn:not(.primary)');
+    var btnPrimary = document.getElementById('btnClassMail');
+    if (mode === 'pre') {
+        if (btnSkip) btnSkip.textContent = 'Annuler';
+        if (btnPrimary) btnPrimary.textContent = 'Confirmer';
+    } else {
+        if (btnSkip) btnSkip.textContent = 'Pas maintenant';
+        if (btnPrimary) btnPrimary.textContent = 'Classer ici';
     }
 
     document.getElementById('popupClassMail').classList.add('active');
@@ -3152,7 +3218,114 @@ function _toggleFolderChildren(event, parentRow) {
     }
 }
 
+// Étape 4'/4' (02/05 PM) — Active/désactive le clic sur la card #infoClassement.
+// Le champ devient cliquable dès qu'une suggestion est calculée par le BG.
+function _setClassementFieldClickable(clickable) {
+    var card = document.getElementById('infoClassement');
+    if (!card) return;
+    if (clickable) {
+        card.classList.add('clickable');
+        if (!card.dataset.clickHandlerAdded) {
+            card.addEventListener('click', _openPreSendClassPopup);
+            card.dataset.clickHandlerAdded = '1';
+        }
+    } else {
+        card.classList.remove('clickable');
+    }
+}
+
+// Étape 4'/4' (02/05 PM) — Ouvre la popup classement EN MODE PRÉ-ENVOI au clic
+// sur le champ #infoClassement. Les données top 3 viennent de
+// _classementCacheData (peuplé par _applyMailPreview / _applySinglePlate). Les
+// folders Graph sont fetchés lazy au 1er clic via /api/folders puis cachés.
+// L'user peut modifier la sélection ou taper un path manuel — son choix est
+// mémorisé dans _preSendFolderId / _preSendFolderPath / _preSendIsManual.
+function _openPreSendClassPopup() {
+    if (!_classementCacheData || !_classementCacheData.suggestion) return;
+
+    var openWithFolders = function(folders) {
+        _classMailMode = 'pre';
+        _showClassMailPopup({
+            suggestion: _classementCacheData.suggestion,
+            suggestions: _classementCacheData.suggestions || [_classementCacheData.suggestion],
+            source: _classementCacheData.source,
+        }, folders, 'pre');
+    };
+
+    if (_classementFoldersCache && _classementFoldersCache.length) {
+        openWithFolders(_classementFoldersCache);
+    } else {
+        fetch(_backendUrl + '/api/folders')
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(data) {
+                _classementFoldersCache = (data && data.folders) || [];
+                openWithFolders(_classementFoldersCache);
+            })
+            .catch(function() {
+                openWithFolders([]);
+            });
+    }
+}
+
+// Étape 4'/4' (02/05 PM) — Confirme le choix pré-envoi (au clic « Confirmer »).
+// Mémorise dans _preSendFolderId / _preSendFolderPath / _preSendIsManual et
+// MAJ le champ #infoClassement pour afficher le choix retenu.
+function _confirmPreSendChoice() {
+    if (_selectedFolderManualPath) {
+        _preSendFolderId = '';
+        _preSendFolderPath = _selectedFolderManualPath;
+        _preSendIsManual = true;
+    } else if (_selectedFolderId) {
+        _preSendFolderId = _selectedFolderId;
+        _preSendIsManual = false;
+        // Path lisible : on cherche dans _classementFoldersCache, sinon dans
+        // les suggestions (folder_path déjà présent).
+        var found = null;
+        if (_classementFoldersCache) {
+            for (var i = 0; i < _classementFoldersCache.length; i++) {
+                if (_classementFoldersCache[i].id === _selectedFolderId) {
+                    found = _classementFoldersCache[i];
+                    break;
+                }
+            }
+        }
+        if (!found && _classementCacheData && _classementCacheData.suggestions) {
+            for (var j = 0; j < _classementCacheData.suggestions.length; j++) {
+                var s = _classementCacheData.suggestions[j];
+                if (s && s.folder_id === _selectedFolderId) {
+                    _preSendFolderPath = s.folder_path || s.folder_name || _selectedFolderId;
+                    break;
+                }
+            }
+        } else if (found) {
+            _preSendFolderPath = found.name || _selectedFolderId;
+        } else {
+            _preSendFolderPath = _selectedFolderId;
+        }
+    }
+    var clsEl = document.getElementById('infoClassementContent');
+    if (clsEl && _preSendFolderPath) {
+        clsEl.textContent = _preSendFolderPath + ' ✓';
+    }
+    _classMailMode = 'post';
+    document.getElementById('popupClassMail').classList.remove('active');
+}
+
+// Étape 4'/4' (02/05 PM) — Annule le choix pré-envoi (au clic « Annuler »).
+// La popup ferme sans rien sauvegarder. Le champ #infoClassement garde la
+// suggestion BG d'origine.
+function _cancelPreSendChoice() {
+    _classMailMode = 'post';
+    document.getElementById('popupClassMail').classList.remove('active');
+}
+
 function doClassMail() {
+    // Étape 4' (02/05 PM) — En mode pré-envoi : mémoriser le choix sans
+    // déclencher l'API. La popup post-envoi le réutilisera comme défaut.
+    if (_classMailMode === 'pre') {
+        _confirmPreSendChoice();
+        return;
+    }
     // Phase 3 (30/04 PM) : si l'user a tapé un path manuel, on route vers
     // /api/classify_email_manual qui crée récursivement les dossiers manquants.
     // Sinon : path classique (folder_id sélectionné dans l'arborescence/suggestion).
@@ -3232,6 +3405,13 @@ function _doClassMailManual(path) {
 }
 
 function skipClassMail() {
+    // Étape 4' (02/05 PM) — En mode pré-envoi : « Annuler » ferme sans
+    // sauvegarder. _startClassPJ ne doit PAS être appelé (workflow post-envoi
+    // pas encore lancé).
+    if (_classMailMode === 'pre') {
+        _cancelPreSendChoice();
+        return;
+    }
     document.getElementById('popupClassMail').classList.remove('active');
     _startClassPJ();
 }
