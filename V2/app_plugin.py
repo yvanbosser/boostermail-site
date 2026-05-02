@@ -2608,9 +2608,13 @@ def _prewarm_pj_classement_for_mail(mid, mail_data):
                     if isinstance(_sugg, dict) and 'dest_folder' in _sugg and 'folder_path' not in _sugg:
                         _sugg = dict(_sugg)
                         _sugg['folder_path'] = _sugg['dest_folder']
+                    # 02/05 PM tardif — reconstitution top 3 si _suggestions présent
+                    _pj_slist = (_sugg.get('_suggestions', [_sugg])
+                                 if isinstance(_sugg, dict) and '_suggestions' in _sugg
+                                 else ([_sugg] if _sugg else []))
                     _set_mail_preview(mid, 'pj_classement', 'done', {
                         'suggestion': _sugg,
-                        'suggestions': [_sugg] if _sugg else [],
+                        'suggestions': _pj_slist,
                         'source': cached.get('source', 'none'),
                     })
                     return
@@ -2869,65 +2873,70 @@ def _prewarm_unified_for_mail(mid, mail_data):
         if has_pj:
             pj_text = _get_pj_text_for_unified_analyze(mid)
 
-        # === Tier DB pré-check (02/05 PM tardif, désambiguïsation Yvan SCI) ===
-        # Le commis Haiku ne peut pas désambiguïser quand l'arbo Outlook contient
-        # 100 dossiers de même nom (ex : 100 SCI avec sous-dossier "Administratif").
-        # Les règles DB d'historique tranchent via l'ID Graph cryptique exact.
-        # Spec : docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md (pipeline 7 tiers).
+        # === Tier DB pré-check + Top 3 (02/05 PM tardif, vision Yvan) ===
+        # 1. Désambiguïsation : règles DB d'historique tranchent via l'ID Graph
+        #    cryptique exact (le commis ne peut pas distinguer 100 dossiers
+        #    "Administratif" dans 100 SCI différentes).
+        # 2. Top 3 : on accumule jusqu'à 3 suggestions sans doublons (par
+        #    folder_path) à travers tous les tiers + sortie commis. Le frontend
+        #    affiche #1 en principale + #2/#3 en boulettes alternatives.
+        # Spec : docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md.
         try:
             subject_kw = _extract_subject_keywords(mail_data.get('subject', ''))
         except Exception:
             subject_kw = mail_data.get('subject', '')
 
-        # Tier MAIL — Tier 0 thread → 1 mono-dossier → 1bis keywords → 3a domain → 3b cross
-        tier_mail_result = None
-        tier_mail_source = None
+        # Tier MAIL — collecte top 3 sans doublons
+        mail_suggestions = []
+        _seen_mail = set()
+
+        def _add_mail_sug(sug, source):
+            if not sug or not isinstance(sug, dict):
+                return
+            fp = sug.get('folder_path', '')
+            if not fp or fp in _seen_mail or len(mail_suggestions) >= 3:
+                return
+            s = dict(sug)
+            s['source'] = source
+            mail_suggestions.append(s)
+            _seen_mail.add(fp)
+
         try:
-            tier_mail_result = _db.get_folder_by_thread(contact_email, subject_kw)
-            if tier_mail_result:
-                tier_mail_source = 'thread'
-            if not tier_mail_result:
-                tier_mail_result = _db.get_folder_suggestion(contact_email, domain, subject_kw)
-                if tier_mail_result:
-                    tier_mail_source = 'rule'
-            if not tier_mail_result and subject_kw:
-                tier_mail_result = _db.get_folder_by_keywords(contact_email, subject_kw)
-                if tier_mail_result:
-                    tier_mail_source = 'keywords'
-            if not tier_mail_result:
-                tier_mail_result = _db.get_domain_folder_suggestion(domain)
-                if tier_mail_result:
-                    tier_mail_source = 'domain'
-            if not tier_mail_result and subject_kw:
-                tier_mail_result = _db.get_cross_contact_folder(subject_kw)
-                if tier_mail_result:
-                    tier_mail_source = 'cross_contact'
+            _add_mail_sug(_db.get_folder_by_thread(contact_email, subject_kw), 'thread')
+            _add_mail_sug(_db.get_folder_suggestion(contact_email, domain, subject_kw), 'rule')
+            if subject_kw:
+                _add_mail_sug(_db.get_folder_by_keywords(contact_email, subject_kw), 'keywords')
+            _add_mail_sug(_db.get_domain_folder_suggestion(domain), 'domain')
+            if subject_kw:
+                _add_mail_sug(_db.get_cross_contact_folder(subject_kw), 'cross_contact')
         except Exception as _e:
             logger.debug(f"[unified] Tier DB mail: {_e}")
-            tier_mail_result = None
-            tier_mail_source = None
 
-        # Tier PJ — Tier 1 mono-dossier → 1bis keywords (uniquement si has_pj)
-        tier_pj_result = None
-        tier_pj_source = None
+        # Tier PJ — collecte top 3 sans doublons
+        pj_suggestions = []
+        _seen_pj = set()
+
+        def _add_pj_sug(sug, source):
+            if not sug or not isinstance(sug, dict):
+                return
+            s = dict(sug)
+            if 'dest_folder' in s and 'folder_path' not in s:
+                s['folder_path'] = s['dest_folder']
+            fp = s.get('folder_path', '')
+            if not fp or fp in _seen_pj or len(pj_suggestions) >= 3:
+                return
+            s['source'] = source
+            pj_suggestions.append(s)
+            _seen_pj.add(fp)
+
         if has_pj:
             try:
-                tier_pj_result = _db.get_pj_folder_suggestion(
-                    contact_email, domain, subject_keywords=subject_kw)
-                if tier_pj_result:
-                    tier_pj_source = 'rule'
-                if not tier_pj_result and subject_kw:
-                    tier_pj_result = _db.get_pj_folder_by_keywords(contact_email, subject_kw)
-                    if tier_pj_result:
-                        tier_pj_source = 'keywords'
-                if tier_pj_result and isinstance(tier_pj_result, dict):
-                    if 'dest_folder' in tier_pj_result and 'folder_path' not in tier_pj_result:
-                        tier_pj_result = dict(tier_pj_result)
-                        tier_pj_result['folder_path'] = tier_pj_result['dest_folder']
+                _add_pj_sug(_db.get_pj_folder_suggestion(
+                    contact_email, domain, subject_keywords=subject_kw), 'rule')
+                if subject_kw:
+                    _add_pj_sug(_db.get_pj_folder_by_keywords(contact_email, subject_kw), 'keywords')
             except Exception as _e:
                 logger.debug(f"[unified] Tier DB pj: {_e}")
-                tier_pj_result = None
-                tier_pj_source = None
 
         # Appel commis Haiku unifié
         result = None
@@ -2967,70 +2976,81 @@ def _prewarm_unified_for_mail(mid, mail_data):
             logger.debug(f"[unified] save echeance: {_e}")
         _set_mail_preview(mid, 'echeance', 'done', ech_for_cache)
 
-        # 2. Classement mail — Tier DB prioritaire sur commis (désambiguïsation)
-        if tier_mail_result:
+        # Compléter top 3 avec sortie commis si pas encore plein
+        fm = result.get('folder_mail')
+        if fm and fm.get('folder_id') and len(mail_suggestions) < 3:
+            fm_path = fm.get('folder_path', '')
+            if fm_path and fm_path not in _seen_mail:
+                s = dict(fm)
+                s.setdefault('source', 'unified')
+                mail_suggestions.append(s)
+                _seen_mail.add(fm_path)
+
+        fpj = result.get('folder_pj')
+        if has_pj and fpj and fpj.get('folder_path') and len(pj_suggestions) < 3:
+            fpj_path = fpj.get('folder_path', '')
+            if fpj_path and fpj_path not in _seen_pj:
+                s = dict(fpj)
+                s.setdefault('source', 'unified')
+                pj_suggestions.append(s)
+                _seen_pj.add(fpj_path)
+
+        # 2. Classement mail — top 3 (#1 principale + #2/#3 boulettes alternatives)
+        if mail_suggestions:
+            primary = mail_suggestions[0]
+            primary_with_alts = dict(primary)
+            primary_with_alts['_suggestions'] = mail_suggestions
             cls_data = {
-                'suggestion': tier_mail_result,
-                'suggestions': [tier_mail_result],
-                'source': tier_mail_source,
+                'suggestion': primary,
+                'suggestions': mail_suggestions,
+                'source': primary.get('source', 'unified'),
             }
             try:
-                _db.save_mail_classement(mid, tier_mail_result, tier_mail_source)
+                _db.save_mail_classement(mid, primary_with_alts,
+                                         primary.get('source', 'unified'))
             except Exception as _e:
-                logger.debug(f"[unified] save classement (tier {tier_mail_source}): {_e}")
+                logger.debug(f"[unified] save classement: {_e}")
         else:
-            fm = result.get('folder_mail')
-            if fm and fm.get('folder_id'):
-                cls_data = {'suggestion': fm, 'suggestions': [fm], 'source': 'unified'}
-                try:
-                    _db.save_mail_classement(mid, fm, 'unified')
-                except Exception as _e:
-                    logger.debug(f"[unified] save classement: {_e}")
-            else:
-                cls_data = {'suggestion': None, 'suggestions': [], 'source': 'unified_none'}
-                try:
-                    _db.save_mail_classement(mid, None, 'unified_none')
-                except Exception:
-                    pass
+            cls_data = {'suggestion': None, 'suggestions': [], 'source': 'unified_none'}
+            try:
+                _db.save_mail_classement(mid, None, 'unified_none')
+            except Exception:
+                pass
         _set_mail_preview(mid, 'classement', 'done', cls_data)
 
-        # 3. Classement PJ — Tier DB prioritaire sur commis (désambiguïsation)
-        if tier_pj_result:
-            pj_data = {
-                'suggestion': tier_pj_result,
-                'suggestions': [tier_pj_result],
-                'source': tier_pj_source,
-            }
-            try:
-                _db.save_mail_pj_classement(mid, tier_pj_result, tier_pj_source)
-            except Exception as _e:
-                logger.debug(f"[unified] save pj classement (tier {tier_pj_source}): {_e}")
-        elif not has_pj:
+        # 3. Classement PJ — top 3 (#1 principale + #2/#3 boulettes alternatives)
+        if not has_pj:
             pj_data = {'suggestion': None, 'suggestions': [], 'source': 'no_pj'}
             try:
                 _db.save_mail_pj_classement(mid, None, 'no_pj')
             except Exception:
                 pass
+        elif pj_suggestions:
+            pj_primary = pj_suggestions[0]
+            pj_primary_with_alts = dict(pj_primary)
+            pj_primary_with_alts['_suggestions'] = pj_suggestions
+            pj_data = {
+                'suggestion': pj_primary,
+                'suggestions': pj_suggestions,
+                'source': pj_primary.get('source', 'unified'),
+            }
+            try:
+                _db.save_mail_pj_classement(mid, pj_primary_with_alts,
+                                            pj_primary.get('source', 'unified'))
+            except Exception as _e:
+                logger.debug(f"[unified] save pj classement: {_e}")
         else:
-            fpj = result.get('folder_pj')
-            if fpj and fpj.get('folder_path'):
-                pj_data = {'suggestion': fpj, 'suggestions': [fpj], 'source': 'unified'}
-                try:
-                    _db.save_mail_pj_classement(mid, fpj, 'unified')
-                except Exception as _e:
-                    logger.debug(f"[unified] save pj classement: {_e}")
-            else:
-                pj_data = {'suggestion': None, 'suggestions': [], 'source': 'unified_none'}
-                try:
-                    _db.save_mail_pj_classement(mid, None, 'unified_none')
-                except Exception:
-                    pass
+            pj_data = {'suggestion': None, 'suggestions': [], 'source': 'unified_none'}
+            try:
+                _db.save_mail_pj_classement(mid, None, 'unified_none')
+            except Exception:
+                pass
         _set_mail_preview(mid, 'pj_classement', 'done', pj_data)
 
         logger.info(
             f"[unified] OK {mid[:30]} — "
-            f"fm={cls_data.get('source')}, "
-            f"fpj={pj_data.get('source')}, "
+            f"fm={cls_data.get('source')}({len(mail_suggestions)}), "
+            f"fpj={pj_data.get('source')}({len(pj_suggestions)}), "
             f"ech={bool(ech and ech.get('description'))}, "
             f"pj_text={len(pj_text)}c, points={len(result.get('points', []))}"
         )
