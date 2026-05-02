@@ -1571,14 +1571,54 @@ _ipc_bridge = None  # Instance globale (setée au démarrage Qt)
 class _IPCHandler(BaseHTTPRequestHandler):
     """Handler HTTP minimal : GET /ping, POST /open_dialog."""
 
+    # Origines autorisées pour les requêtes cross-origin depuis le frontend
+    # (ajout 02/05/2026 — gap CORS : la page Profil servie par OVH ne pouvait
+    # pas appeler le companion local via fetch sans ces headers).
+    # 'null' couvre les pages servies en file:// (pas notre cas mais standard).
+    _CORS_ALLOWED_ORIGINS = {
+        'https://api.boostermail.ai',
+        'https://localhost:3443',
+        'http://localhost:3443',
+        'null',
+    }
+
     def log_message(self, format, *args):
         # Silence les logs http.server par défaut (bruyant)
         logger.debug(f"[ipc] {format % args}")
+
+    def _resolve_cors_origin(self):
+        """Retourne l'origine à autoriser pour cette requête (ou '' si refus).
+        On miroir l'Origin du request si elle est dans la whitelist (plus
+        sûr qu'un wildcard '*' qui ne marche pas avec credentials)."""
+        origin = self.headers.get('Origin', '')
+        if origin in self._CORS_ALLOWED_ORIGINS:
+            return origin
+        # Sans Origin (ex: appel curl direct) : pas de header CORS
+        return ''
+
+    def _send_cors_headers(self):
+        """Ajoute les headers CORS si Origin est autorisée."""
+        allow_origin = self._resolve_cors_origin()
+        if allow_origin:
+            self.send_header('Access-Control-Allow-Origin', allow_origin)
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            self.send_header('Access-Control-Max-Age', '600')
+
+    def do_OPTIONS(self):
+        """Preflight CORS : le browser envoie OPTIONS avant POST avec
+        Content-Type: application/json. Sans réponse 204 + headers CORS,
+        le browser refuse le POST suivant."""
+        self.send_response(204)
+        self._send_cors_headers()
+        self.send_header('Content-Length', '0')
+        self.end_headers()
 
     def _json_response(self, payload, status=200):
         body = json.dumps(payload).encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
+        self._send_cors_headers()
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
