@@ -1108,9 +1108,23 @@ function _pollOnboarding() {
     // System prompt strict côté backend pour éviter les hallucinations.
     // ═══════════════════════════════════════════════════════════════
 
-    // 7 FAQ pré-rédigées (validées avec Yvan, ne pas modifier sans accord).
+    // 8 FAQ pré-rédigées (validées avec Yvan, ne pas modifier sans accord).
     // Réponses HTML simples (gras + listes) pour rendu propre dans la modale.
     var ASSIST_FAQ = [
+        {
+            // FAQ « parapluie » qui guide vers le bon cas (ruban OU barre)
+            id: 'pas-trouve-boostermail',
+            q: 'Je ne trouve pas BoosterMail dans Outlook',
+            a:
+                '🔍 BoosterMail s\'installe à <strong>2 endroits</strong> dans Outlook :<br><br>' +
+                '<strong>1. Dans le ruban</strong> = la grande barre horizontale en haut de la fenêtre Outlook (avec <em>Nouveau message, Répondre, Transférer</em>…). Toujours visible.<br><br>' +
+                '<strong>2. Dans la barre d\'actions</strong> d\'un mail = juste au-dessus du contenu quand vous ouvrez un mail (avec <em>Répondre, Répondre à tous, Transférer</em>, souvent sous forme de flèches).<br><br>' +
+                '<strong>Lequel ne fonctionne pas chez vous ?</strong><br>' +
+                '<div style="display:flex; flex-direction:column; gap:6px; margin-top:8px;">' +
+                '<button class="assist-faq-btn" data-faq-id="ruban-pas-visible" style="display:block; width:100%; text-align:left; background:#f0f6fc; border:1px solid #0F6CBD; border-radius:6px; padding:7px 10px; cursor:pointer; font-size:11px; color:#0F6CBD; font-family:inherit; line-height:1.4;">→ Pas dans le ruban</button>' +
+                '<button class="assist-faq-btn" data-faq-id="barre-actions-pas-visible" style="display:block; width:100%; text-align:left; background:#f0f6fc; border:1px solid #0F6CBD; border-radius:6px; padding:7px 10px; cursor:pointer; font-size:11px; color:#0F6CBD; font-family:inherit; line-height:1.4;">→ Pas dans la barre d\'actions / l\'épingler</button>' +
+                '</div>',
+        },
         {
             id: 'ruban-pas-visible',
             q: 'Le 🚀 n\'apparaît pas dans le ruban d\'Outlook',
@@ -1214,15 +1228,22 @@ function _pollOnboarding() {
             html += '<button class="assist-faq-btn" data-faq-id="' + f.id + '" style="display:block; width:100%; text-align:left; background:white; border:1px solid #d6dde7; border-radius:6px; padding:8px 10px; margin-bottom:5px; cursor:pointer; font-size:11px; color:#2d3548; font-family:inherit; line-height:1.4;">' + f.q + '</button>';
         });
         box.innerHTML = html;
-        // Hook les boutons FAQ
-        box.querySelectorAll('.assist-faq-btn').forEach(function (b) {
-            b.addEventListener('click', function () {
-                var fid = b.getAttribute('data-faq-id');
-                var faq = ASSIST_FAQ.find(function (f) { return f.id === fid; });
-                if (!faq) return;
-                _assistAddMessage('user', faq.q);
-                _assistAddMessage('assistant', faq.a, true);  // HTML autorisé pour FAQ statiques
-            });
+        // Event delegation : un seul listener sur le container, intercepte
+        // tout clic sur .assist-faq-btn (initial OU injecté plus tard dans
+        // les réponses FAQ parapluie comme « pas-trouve-boostermail »).
+        box.addEventListener('click', function (e) {
+            var t = e.target;
+            // Remonte jusqu'à l'élément avec data-faq-id (au cas où le clic
+            // tape sur un enfant du bouton)
+            while (t && t !== box && !t.hasAttribute('data-faq-id')) {
+                t = t.parentElement;
+            }
+            if (!t || !t.hasAttribute('data-faq-id')) return;
+            var fid = t.getAttribute('data-faq-id');
+            var faq = ASSIST_FAQ.find(function (f) { return f.id === fid; });
+            if (!faq) return;
+            _assistAddMessage('user', faq.q);
+            _assistAddMessage('assistant', faq.a, true);  // HTML autorisé
         });
     }
 

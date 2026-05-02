@@ -51,6 +51,23 @@ var _ccEmail = _params.get('cc') || '';
 var _subject = _params.get('subject') || '';
 var _hasAttachments = _params.get('hasAttachments') === '1';
 
+// 02/05/2026 — Section « Connexion Outlook » dans Profil : on capture la
+// platform Outlook depuis l'URL (ajoutée par le shared runtime Office.js)
+// et on la sauve en setting OVH pour que la page Profil l'affiche même
+// quand le companion local n'est pas disponible (cas Outlook Web).
+(function _saveOutlookPlatform() {
+    try {
+        var platform = (_params.get('platform') || '').trim();
+        // Valeurs attendues : newOutlook, classicOutlook, outlookWeb
+        if (!platform) return;
+        fetch(_backendUrl + '/api/save_setting', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: 'last_outlook_platform', value: platform }),
+        }).catch(function () {});
+    } catch (e) {}
+})();
+
 var _importance = 'S';
 var _undoStack = [];
 var _maxUndo = 10;

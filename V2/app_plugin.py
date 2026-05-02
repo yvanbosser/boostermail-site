@@ -6464,6 +6464,9 @@ _ALLOWED_SETTINGS = {
     'show_marketing_signature',
     'newsletter_optin',
     'onboarding_pj_skipped',
+    # Section Connexion Outlook 02/05/2026 — last_outlook_platform sauvée
+    # à chaque ouverture du dialog (param URL platform=newOutlook|...)
+    'last_outlook_platform',
 }
 
 @app.route('/api/save_setting', methods=['POST'])

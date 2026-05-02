@@ -294,6 +294,61 @@
             <div class="imp-saved" id="imp-saved">Sauvegarde !</div>
         </div>
 
+        <!-- 🔌 Connexion Outlook (02/05/2026) — état de la connexion Microsoft + version Outlook -->
+        <div class="section-title" style="display:flex;align-items:center;gap:12px;">
+            🔌 Connexion Outlook
+            <button class="btn-reanalyze" id="reconnect-btn" onclick="reconnectMicrosoft()">Se reconnecter</button>
+        </div>
+        <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:24px;">
+            <div id="connection-status-line" style="font-size:13px;color:#666;">
+                <span id="connection-status-text">Vérification…</span>
+            </div>
+            <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f0f0f0;font-size:12px;color:#5a6377;line-height:1.7;">
+                <div><strong>Version Outlook :</strong> <span id="outlook-version-text">…</span></div>
+                <div><strong>Mode :</strong> <span id="outlook-mode-text">…</span></div>
+            </div>
+            <!-- Mini-FAQ accordéon : 4 questions courantes sur la connexion -->
+            <details style="margin-top:14px;padding-top:14px;border-top:1px solid #f0f0f0;">
+                <summary style="cursor:pointer;font-size:12px;color:#0F6CBD;font-weight:600;user-select:none;">💬 Problème de connexion ? Voir les solutions</summary>
+                <div style="margin-top:12px;font-size:12px;color:#2d3548;line-height:1.6;">
+                    <details style="margin-bottom:8px;background:#f8fafc;padding:8px 12px;border-radius:6px;">
+                        <summary style="cursor:pointer;font-weight:600;color:#1a1a2e;">Je n'arrive pas à me connecter à mon compte Microsoft</summary>
+                        <div style="margin-top:8px;color:#2d3548;">
+                            1. Vérifiez que vous utilisez bien le compte Microsoft associé à Outlook (et non un compte personnel différent).<br>
+                            2. Cliquez sur <strong>« Se reconnecter »</strong> en haut de cette section.<br>
+                            3. Une fenêtre Microsoft s'ouvre — saisissez votre mot de passe et acceptez les autorisations BoosterMail.<br>
+                            4. Si la fenêtre se ferme avant que vous ayez cliqué sur Accepter, recommencez.
+                        </div>
+                    </details>
+                    <details style="margin-bottom:8px;background:#f8fafc;padding:8px 12px;border-radius:6px;">
+                        <summary style="cursor:pointer;font-weight:600;color:#1a1a2e;">La fenêtre de connexion Microsoft s'est fermée toute seule</summary>
+                        <div style="margin-top:8px;color:#2d3548;">
+                            C'est souvent dû au bloqueur de popups de votre navigateur. Autorisez les popups depuis <em>api.boostermail.ai</em>, puis cliquez sur <strong>« Se reconnecter »</strong>.
+                        </div>
+                    </details>
+                    <details style="margin-bottom:8px;background:#f8fafc;padding:8px 12px;border-radius:6px;">
+                        <summary style="cursor:pointer;font-weight:600;color:#1a1a2e;">Microsoft me dit que mon compte n'a pas Outlook</summary>
+                        <div style="margin-top:8px;color:#2d3548;">
+                            BoosterMail nécessite un compte avec Outlook activé : <strong>Microsoft 365</strong> (perso ou pro), <strong>Outlook.com</strong>, ou un compte Exchange/Office 365 d'entreprise. Si votre compte n'a pas Outlook, contactez votre admin IT ou créez un compte Microsoft 365.
+                        </div>
+                    </details>
+                    <details style="margin-bottom:0;background:#f8fafc;padding:8px 12px;border-radius:6px;">
+                        <summary style="cursor:pointer;font-weight:600;color:#1a1a2e;">Quelle version d'Outlook utiliser avec BoosterMail ?</summary>
+                        <div style="margin-top:8px;color:#2d3548;">
+                            BoosterMail fonctionne avec les <strong>3 versions modernes</strong> d'Outlook :<br>
+                            • <strong>New Outlook</strong> (Monarch — celui par défaut sur Windows 11)<br>
+                            • <strong>Outlook Classic</strong> (l'ancien client desktop)<br>
+                            • <strong>Outlook Web</strong> (outlook.office.com dans votre navigateur)<br><br>
+                            Vous pouvez utiliser celle qui vous convient — BoosterMail s'adapte automatiquement.
+                        </div>
+                    </details>
+                    <div style="margin-top:10px;font-size:11px;color:#888;">
+                        Toujours bloqué ? Écrivez-nous : <a href="mailto:support@boostermail.ai" style="color:#0F6CBD;">support@boostermail.ai</a>
+                    </div>
+                </div>
+            </details>
+        </div>
+
         <!-- 🚀 Bouton Outlook (02/05/2026) — section dédiée pour reinstaller le bouton add-in -->
         <div class="section-title" style="display:flex;align-items:center;gap:12px;">
             🚀 Bouton Outlook
@@ -794,6 +849,91 @@
             });
         }
 
+        // === Section Connexion Outlook (02/05/2026) ===
+
+        var OUTLOOK_VERSION_LABELS = {
+            'newOutlook': 'New Outlook',
+            'classicOutlook': 'Outlook Classic',
+            'outlookWeb': 'Outlook Web',
+        };
+
+        function loadConnectionStatus() {
+            var statusEl = document.getElementById('connection-status-text');
+            var verEl = document.getElementById('outlook-version-text');
+            var modeEl = document.getElementById('outlook-mode-text');
+            if (!statusEl || !verEl || !modeEl) return;
+
+            // 1. Statut de connexion Microsoft (auth + email)
+            fetch('/api/status')
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (d.authenticated && d.mode === 'standard') {
+                        var email = d.email || '';
+                        statusEl.innerHTML = '✓ <strong>Connecté</strong>' + (email ? ' à <em>' + email + '</em>' : '');
+                        statusEl.style.color = '#2e7d32';
+                        modeEl.textContent = 'Standard (Microsoft Graph)';
+                    } else {
+                        statusEl.innerHTML = '⚠️ <strong>Non connecté</strong> — cliquez « Se reconnecter »';
+                        statusEl.style.color = '#c62828';
+                        modeEl.textContent = 'Dégradé (sans Graph)';
+                    }
+                })
+                .catch(function() {
+                    statusEl.innerHTML = '⚠️ Impossible de vérifier la connexion';
+                    statusEl.style.color = '#e65100';
+                });
+
+            // 2. Version Outlook : pipeline en cascade pour ne JAMAIS dire « Inconnu »
+            //    Source 1 : companion local /outlook_version (si Outlook tourne maintenant)
+            //    Source 2 : setting OVH last_outlook_platform (capté lors d'un clic dialog précédent)
+            //    Source 3 : message positif « BoosterMail s'adaptera »
+            fetch('http://127.0.0.1:5052/outlook_version')
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    var ver = d && d.version;
+                    if (ver && OUTLOOK_VERSION_LABELS[ver]) {
+                        verEl.innerHTML = OUTLOOK_VERSION_LABELS[ver] + ' <span style="color:#888;font-size:11px;font-style:italic;">(détecté automatiquement)</span>';
+                        return;
+                    }
+                    // Fallback source 2 : setting OVH
+                    return fetch('/api/settings/last_outlook_platform')
+                        .then(function(r) { return r.json(); })
+                        .then(function(d2) {
+                            var v = d2 && d2.value;
+                            if (v && OUTLOOK_VERSION_LABELS[v]) {
+                                verEl.innerHTML = OUTLOOK_VERSION_LABELS[v] + ' <span style="color:#888;font-size:11px;font-style:italic;">(détecté lors de votre dernière utilisation)</span>';
+                            } else {
+                                // Fallback source 3 : message positif
+                                verEl.innerHTML = '<em style="color:#5a6377;">BoosterMail s\'adaptera à votre version d\'Outlook au premier clic</em>';
+                            }
+                        });
+                })
+                .catch(function() {
+                    // Companion injoignable → fallback source 2 puis 3
+                    fetch('/api/settings/last_outlook_platform')
+                        .then(function(r) { return r.json(); })
+                        .then(function(d2) {
+                            var v = d2 && d2.value;
+                            if (v && OUTLOOK_VERSION_LABELS[v]) {
+                                verEl.innerHTML = OUTLOOK_VERSION_LABELS[v] + ' <span style="color:#888;font-size:11px;font-style:italic;">(détecté lors de votre dernière utilisation)</span>';
+                            } else {
+                                verEl.innerHTML = '<em style="color:#5a6377;">BoosterMail s\'adaptera à votre version d\'Outlook au premier clic</em>';
+                            }
+                        })
+                        .catch(function() {
+                            verEl.innerHTML = '<em style="color:#5a6377;">BoosterMail s\'adaptera à votre version d\'Outlook</em>';
+                        });
+                });
+        }
+
+        function reconnectMicrosoft() {
+            // Ouvre la fenêtre OAuth Microsoft (même flow que l'onboarding)
+            window.open('/auth/login', 'bm-reauth', 'width=520,height=640,scrollbars=yes,resizable=yes');
+            // Refresh status après 5s pour capturer la reconnexion
+            setTimeout(loadConnectionStatus, 5000);
+            setTimeout(loadConnectionStatus, 15000);
+        }
+
         // === Section Bouton Outlook (02/05/2026) ===
 
         function loadAddinStatus() {
@@ -857,8 +997,10 @@
 
         // Charger le statut au chargement de la page (et toutes les 30s)
         document.addEventListener('DOMContentLoaded', function() {
+            loadConnectionStatus();
             loadFolderStatus();
             loadAddinStatus();
+            setInterval(loadConnectionStatus, 30000);
             setInterval(loadFolderStatus, 30000);
             setInterval(loadAddinStatus, 30000);
         });
