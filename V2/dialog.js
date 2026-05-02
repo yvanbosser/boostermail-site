@@ -1144,18 +1144,47 @@ function _loadDialogBundle() {
         });
 }
 
+/** Sanitize email HTML (Word/Outlook) avant injection dans #mailBody.
+ *
+ * Fix 02/05/2026 (signal Yvan : mise en page mail reçu Stéphane Dufau
+ * avec lignes collées « Stephane DufauChef de projetsTél. ») :
+ * Microsoft Word génère un <style> avec `p.MsoNormal { margin:0cm }`
+ * qui, injecté via innerHTML, fuit vers toute la page et écrase les
+ * marges par défaut des paragraphes → toute la signature et les
+ * headers cités se collent sans saut de ligne. Pire, `a:link {color:blue}`
+ * du mail fuit vers les liens de l'app.
+ *
+ * Solution : extraire le <body> du HTML (si présent) et stripper les
+ * éléments qui transportent du CSS global (style, head, meta, link).
+ * Le navigateur applique alors les marges par défaut sur les <p> →
+ * rendu propre.
+ */
+function _sanitizeEmailHtml(html) {
+    if (!html) return '';
+    // 1. Extraire le contenu du <body> si présent (sinon prendre tout)
+    var bodyMatch = html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i);
+    var content = bodyMatch ? bodyMatch[1] : html;
+    // 2. Strip les éléments qui injectent du CSS global ou exécutent du code
+    content = content
+        .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+        .replace(/<head\b[^<]*(?:(?!<\/head>)<[^<]*)*<\/head>/gi, '')
+        .replace(/<meta\b[^>]*\/?>/gi, '')
+        .replace(/<link\b[^>]*\/?>/gi, '')
+        .replace(/<iframe\b[^>]*>/gi, '<!-- blocked -->')
+        .replace(/<object\b[^>]*>/gi, '<!-- blocked -->')
+        .replace(/<embed\b[^>]*>/gi, '<!-- blocked -->')
+        .replace(/on\w+\s*=/gi, 'data-blocked=');
+    return content;
+}
+
 /** Rendu body (extrait de _loadMailBody pour réutilisation dans bundle) */
 function _renderMailBody(data) {
     var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
     var _bodyCached = !!(data && data.cached);
     var _mailBodyEl = document.getElementById('mailBody');
     if (data.html_body) {
-        var sanitized = data.html_body
-            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-            .replace(/<iframe\b[^>]*>/gi, '<!-- blocked -->')
-            .replace(/<object\b[^>]*>/gi, '<!-- blocked -->')
-            .replace(/<embed\b[^>]*>/gi, '<!-- blocked -->')
-            .replace(/on\w+\s*=/gi, 'data-blocked=');
+        var sanitized = _sanitizeEmailHtml(data.html_body);
         if (!_bodyCached && _mailBodyEl) {
             _mailBodyEl.style.opacity = '0';
             _mailBodyEl.style.transition = 'opacity 0.25s ease-in';
@@ -1184,14 +1213,43 @@ function _renderMailBody(data) {
     }
     _perfMonitor.mark('T3_body_rendered', _bodyCached ? 'cache' : 'graph');
     // Meta
+    // Fix 02/05/2026 (signal Yvan : « A : [object Object] » sur screenshot
+    // mail Dufau) : data.to/data.cc peuvent être des listes [{name, address}]
+    // ou dict {name, address} renvoyés par Graph API (pas toujours stringifié
+    // côté backend, cf. mémoire « Graph API types list vs str »). On
+    // normalise en string lisible avant concaténation.
     if (data.date || data.to) {
         var metaParts2 = [];
-        if (data.to) metaParts2.push('A : ' + data.to);
-        else if (_toEmail) metaParts2.push('A : ' + _toEmail);
-        if (data.cc || _ccEmail) metaParts2.push('Cc : ' + (data.cc || _ccEmail));
+        var _toStr = _formatRecipients(data.to) || _toEmail || '';
+        if (_toStr) metaParts2.push('A : ' + _toStr);
+        var _ccStr = _formatRecipients(data.cc) || _ccEmail || '';
+        if (_ccStr) metaParts2.push('Cc : ' + _ccStr);
         if (data.date) metaParts2.push(new Date(data.date).toLocaleString('fr-FR'));
         document.getElementById('mailMeta').textContent = metaParts2.join(' | ') || '—';
     }
+}
+
+/** Normalise un champ recipient (to/cc) qui peut arriver sous 4 formes :
+ *   - string (cas nominal) : « Yvan BOSSER <yvan.bosser@...> »
+ *   - dict {name, address} (Graph API single recipient)
+ *   - list[dict] (Graph API multi recipients)
+ *   - list[string] (backend qui a déjà serialize)
+ * Renvoie une string lisible ou '' si rien d'exploitable. */
+function _formatRecipients(field) {
+    if (!field) return '';
+    if (typeof field === 'string') return field;
+    if (Array.isArray(field)) {
+        return field.map(_formatRecipients).filter(Boolean).join(', ');
+    }
+    if (typeof field === 'object') {
+        // Graph format : {emailAddress: {name, address}} ou {name, address} direct
+        var src = field.emailAddress || field;
+        var name = src.name || '';
+        var addr = src.address || src.email || '';
+        if (name && addr) return name + ' <' + addr + '>';
+        return name || addr || '';
+    }
+    return '';
 }
 
 /** Phase 2.A (24/04) — Applique le preview mail pré-chauffé (échéance + classement)
