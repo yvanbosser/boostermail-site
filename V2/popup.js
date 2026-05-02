@@ -82,6 +82,17 @@ var _companionAvailable = false;
     _btn('navContactsFixed', function () { _openDashboardWindow('contacts'); });
     _btn('navProfilFixed', function () { _openDashboardWindow('profile'); });
 
+    // Phase 02/05/2026 — placeholders pour 2 boutons à activer plus tard :
+    // - navComposeFixed : raccourci composition d'un nouveau mail
+    // - navHelpFixed    : assistance BoosterMail (chatbot hybride FAQ + Claude)
+    _btn('navComposeFixed', function () {
+        alert('✏️ Composition rapide d\'un nouveau message — bientôt disponible.');
+    });
+    _btn('navHelpFixed', function () {
+        alert('❓ Assistance BoosterMail — bientôt disponible.\n\n' +
+              'En attendant, contactez-nous : support@boostermail.ai');
+    });
+
     // Logique ?view=X — démarrer directement sur la vue demandée si param URL.
     // Permet à dialog.html d'ouvrir popup.html?view=profil et de tomber
     // direct sur la page Profil sans passer par le menu intermédiaire.
