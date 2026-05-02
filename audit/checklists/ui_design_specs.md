@@ -30,17 +30,24 @@ Pour chaque écran :
 | Bouton Contacts | `navContactsFixed` | 👤 Contacts |
 | Bouton Profil | `navProfilFixed` | ⚙ Profil |
 
+### Hauteur fenêtre Qt
+
+`popup_pyqt.py:_overlay_h = 70` (logical pixels). Décision Yvan 01/05/2026 itération 4 : **AUCUN espace vide en bas**, l'overlay doit faire EXACTEMENT la hauteur du contenu (header + nav). Si DPI scaling agrandit, réduire encore.
+
 ### Cachés mais OK dans le DOM (legacy, accédés par popup.js)
 
 - `scrollSection` (style `display:none` natif)
 - `contactSection`, `contactAvatar`, `contactName`, `contactOrg`, `contactTags`
 - `btnRepondre`, `btnRepTous`, `btnTransferer`, `btnClasser`
 - `emptyState`, `mailContent`, `setupWizard`, `firstUseState`
+- **`prefetchBar` / `.tp-prefetch`** (barre « BoosterMail prêt » / « Chargement contexte... » — Yvan a explicitement demandé sa suppression 01/05/2026)
 
 ### Interdits absolus (à supprimer si présents)
 
 - Aucun bouton de réponse (`btnRepondre`, `btnRepTous`, `btnTransferer`, `btnClasser`) **VISIBLE**
 - Aucun bandeau identité (`contactSection`) **VISIBLE**
+- Aucune barre prefetch « BoosterMail prêt » **VISIBLE** (`prefetchBar`)
+- Aucun espace vide bleu/blanc sous les 3 boutons (la fenêtre Qt doit fit le contenu)
 
 ### Test associé
 
