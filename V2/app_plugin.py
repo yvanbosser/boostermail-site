@@ -11366,10 +11366,18 @@ def api_classification_post_send(message_id):
                 folders = _get_outlook_folders_cached() or []
             except Exception:
                 folders = []
+            # Étape 1' (02/05 PM) — Vision Yvan top 3 + popup pré-envoi.
+            # Le BG prewarm (_prewarm_classement_for_mail) calcule déjà le
+            # top 3 et le stocke dans _set_mail_preview('classement', 'done',
+            # {suggestion, suggestions, source}). Mais cette route n'exposait
+            # que la #1, perdant le top 3 entre BG et front. Ajout de
+            # `suggestions` à la réponse + fallback [#1] pour rétro-compat.
+            _suggestions_top3 = plate_data.get('suggestions') or [plate_data.get('suggestion')]
             return jsonify({
                 "status": "done",
                 "suggestion": {
                     "suggestion": plate_data.get('suggestion'),
+                    "suggestions": _suggestions_top3,
                     "source": plate_data.get('source', 'rule'),
                     "folders": folders,
                 },
