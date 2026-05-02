@@ -3103,56 +3103,26 @@ function _showClassMailPopup(suggestion, folders, mode) {
     }
     document.getElementById('classMailSuggestion').innerHTML = sugHtml;
 
-    // Arborescence dossiers — affichage type Outlook avec chevrons ▼/▶
-    // (signal Yvan 02/05/2026 : « rajoute des flèches > vers le haut et le
-    // bas pour simuler l'arborescence Outlook »).
-    // Algorithme :
-    //   - Folders sont déjà triés par hiérarchie (parent avant enfants)
-    //   - Un folder a des enfants si le SUIVANT a un depth > au sien
-    //   - Au clic sur chevron : toggle visibilité de tous les descendants
-    //     (lignes consécutives avec depth > depth_courant)
+    // Arborescence Outlook — refonte 02/05 PM tardif (signal Yvan, parallèle
+    // popup PJ) : se déroule UNIQUEMENT sur le chemin de la suggestion
+    // principale, frères repliés, branches hors chemin cachées. Highlight
+    // bleu sur la row de la suggestion. Délégué à _buildOutlookFolderTreeHtml.
     if (folders && folders.length > 0) {
-        var treeHtml = '';
-        folders.forEach(function(f, i) {
-            var depth = f.depth || 0;
-            var next = folders[i + 1];
-            var hasChildren = next && (next.depth || 0) > depth;
-            var indent = depth * 14; // 14px par niveau
-            var chevron = hasChildren
-                ? '<span class="em-folder-chevron expanded" onclick="_toggleFolderChildren(event, this.parentElement)">▼</span>'
-                : '<span class="em-folder-chevron-spacer"></span>';
-            treeHtml += '<div class="em-folder-item" '
-                + 'data-folder-id="' + _escapeAttr(f.id) + '" '
-                + 'data-depth="' + depth + '" '
-                + 'style="padding-left:' + indent + 'px;display:flex;align-items:center;gap:4px;" '
-                + 'onclick="_selectFolderFromRow(event, this)">'
-                + chevron
-                + '<span class="em-folder-name">' + _escapeHtml(f.name) + '</span>'
-                + '</div>';
-        });
-        document.getElementById('classMailTree').innerHTML = treeHtml;
+        var treeHtml = _buildOutlookFolderTreeHtml(folders, _selectedFolderId);
+        var treeEl = document.getElementById('classMailTree');
+        treeEl.innerHTML = treeHtml;
 
-        // Étape 3' (02/05 PM, vision Yvan) — « L'arborescence débute au
-        // niveau de la proposition principale de BoosterMail ». Au load :
-        // - Highlight la row de la suggestion principale (cohérent avec
-        //   le bandeau bleu en haut .em-folder-suggestion.selected)
-        // - Scroll automatique vers cette row (block: center)
-        // L'algo depth-based d'Yvan laisse tout déplié par défaut, donc
-        // la row est forcément visible dans le DOM (on doit juste scroller).
+        // Scroll auto vers la row de la suggestion principale (déjà highlightée
+        // en bleu via .selected dans le helper). L'algo de filtrage garantit
+        // que la row est dans le DOM si la suggestion match l'arbo.
         try {
             if (_selectedFolderId) {
-                var rows = document.querySelectorAll('#classMailTree .em-folder-item');
-                for (var ri = 0; ri < rows.length; ri++) {
-                    if (rows[ri].getAttribute('data-folder-id') === _selectedFolderId) {
-                        rows[ri].classList.add('selected');
-                        if (rows[ri].scrollIntoView) {
-                            rows[ri].scrollIntoView({ block: 'center', behavior: 'auto' });
-                        }
-                        break;
-                    }
+                var rows = treeEl.querySelectorAll('.em-folder-item.selected');
+                if (rows.length > 0 && rows[0].scrollIntoView) {
+                    rows[0].scrollIntoView({ block: 'center', behavior: 'auto' });
                 }
             }
-        } catch (e) { /* scroll non critique, ne pas bloquer le rendu */ }
+        } catch (e) { /* scroll non critique */ }
     }
 
     // Phase 3 (30/04 PM) — brancher l'input de saisie manuelle.
@@ -3284,6 +3254,110 @@ function _toggleFolderChildren(event, parentRow) {
         sibling = sibling.nextElementSibling;
     }
 }
+
+// Étape 02/05 PM tardif (signal Yvan, parallèle popup PJ) — construit l'arbo
+// Outlook avec filtrage sur le chemin de la suggestion principale + highlight
+// bleu sur la row finale. Algorithme symétrique à _buildPJFolderTreeHtml :
+//   - Match folder_id exact ou via name normalisé (fallback)
+//   - Walker parentFolderId pour trouver les ancêtres
+//   - Folders sur le chemin → ▼ expanded + visible
+//   - Frères des ancêtres + top-level hors chemin → ▶ collapsed + visible
+//   - Plus profonds hors chemin → cachés (display:none)
+//   - Si suggestion introuvable même via fallback → no-filter (tout déplié)
+//   - Highlight .selected sur la row exactement à suggestedFolderId
+function _buildOutlookFolderTreeHtml(folders, suggestedFolderId) {
+    if (!folders || !folders.length) return '';
+
+    // Map id → folder pour lookup parentFolderId
+    var byId = {};
+    folders.forEach(function(f) { byId[f.id] = f; });
+
+    // Match exact ou fallback no-filter (commis hallucine un id inexistant
+    // ou la liste folders Graph a changé entre BG et clic user)
+    var realFolderId = '';
+    var pathFound = false;
+    if (suggestedFolderId && byId[suggestedFolderId]) {
+        realFolderId = suggestedFolderId;
+        pathFound = true;
+    }
+
+    // Walker parentFolderId pour collecter les ancêtres du folder suggéré
+    var pathFolderIds = {};
+    if (pathFound) {
+        var cur = byId[realFolderId];
+        while (cur) {
+            pathFolderIds[cur.id] = true;
+            cur = (cur.parentFolderId && byId[cur.parentFolderId]) ? byId[cur.parentFolderId] : null;
+        }
+    }
+    var hasFilter = pathFound;
+
+    var html = '';
+    folders.forEach(function(f, i) {
+        var depth = f.depth || 0;
+        var next = folders[i + 1];
+        var hasChildren = next && (next.depth || 0) > depth;
+        var indent = depth * 14;
+
+        var isOnPath = !!pathFolderIds[f.id];
+        var parentOnPath = !!(f.parentFolderId && pathFolderIds[f.parentFolderId]);
+        // Top-level : parent absent ou pas dans la liste
+        var isTopLevel = !f.parentFolderId || !byId[f.parentFolderId];
+
+        var visible, expanded;
+        if (!hasFilter) {
+            // Pas de suggestion (ou suggestion introuvable) : tout déplié
+            visible = true;
+            expanded = true;
+        } else if (isOnPath) {
+            visible = true;
+            expanded = true;
+        } else if (parentOnPath) {
+            // Frère d'un ancêtre → visible mais replié
+            visible = true;
+            expanded = false;
+        } else if (isTopLevel) {
+            // Top-level pas sur le chemin → visible mais replié
+            // (l'user voit les autres dossiers racine à côté du chemin)
+            visible = true;
+            expanded = false;
+        } else {
+            // Plus profond hors chemin → caché
+            visible = false;
+            expanded = false;
+        }
+
+        var displayCss = visible
+            ? 'display:flex;align-items:center;gap:4px;'
+            : 'display:none;';
+
+        var chevron;
+        if (hasChildren) {
+            chevron = '<span class="em-folder-chevron ' + (expanded ? 'expanded' : 'collapsed') + '" '
+                + 'onclick="_toggleFolderChildren(event, this.parentElement)">'
+                + (expanded ? '&#x25bc;' : '&#x25b6;') + '</span>';
+        } else {
+            chevron = '<span class="em-folder-chevron-spacer"></span>';
+        }
+
+        // Highlight bleu sur la row exacte de la suggestion principale
+        var rowClasses = 'em-folder-item';
+        if (pathFound && f.id === realFolderId) {
+            rowClasses += ' selected';
+        }
+
+        html += '<div class="' + rowClasses + '" '
+            + 'data-folder-id="' + _escapeAttr(f.id) + '" '
+            + 'data-depth="' + depth + '" '
+            + 'style="padding-left:' + indent + 'px;' + displayCss + '" '
+            + 'onclick="_selectFolderFromRow(event, this)">'
+            + chevron
+            + '<span class="em-folder-name">' + _escapeHtml(f.name) + '</span>'
+            + '</div>';
+    });
+    return html;
+}
+
 
 // Étape 4'/4' (02/05 PM) — Active/désactive le clic sur la card #infoClassement.
 // Le champ devient cliquable dès qu'une suggestion est calculée par le BG.
