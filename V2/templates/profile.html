@@ -295,26 +295,23 @@
         </div>
 
         <!-- 📁 Pièces jointes (refonte 02/05/2026 — sous-titre dynamique + bouton Recalibrer) -->
-        <div class="section-title">📁 Pièces jointes</div>
+        <!-- Mise en page calquée sur « Style rédactionnel » : titre + bouton sur la même ligne -->
+        <div class="section-title" style="display:flex;align-items:center;gap:12px;">
+            📁 Pièces jointes
+            <button class="btn-reanalyze" id="pj-recalibrate-btn" onclick="recalibrateFolders()">Recalibrer mon arborescence</button>
+            <span id="pj-recalibrate-spinner" style="display:none;font-size:12px;color:#666;">
+                <span style="display:inline-block;width:10px;height:10px;border:2px solid #ddd;border-top-color:#0F6CBD;border-radius:50%;animation:pj-spin 0.6s linear infinite;vertical-align:middle;"></span>
+                Synchronisation…
+            </span>
+        </div>
         <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:24px;">
             <!-- Sous-titre dynamique : alimenté par /api/windows_folders/status -->
-            <div id="pj-status-line" style="font-size:13px;color:#666;margin-bottom:14px;">
+            <div id="pj-status-line" style="font-size:13px;color:#666;">
                 <span id="pj-status-text">Chargement…</span>
             </div>
 
-            <!-- Bouton Recalibrer -->
-            <button id="pj-recalibrate-btn"
-                    onclick="recalibrateFolders()"
-                    style="background:#0F6CBD;color:white;border:none;border-radius:6px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 1px 3px rgba(15,108,189,0.3);transition:background 0.15s;">
-                🔄 Recalibrer mon arborescence
-            </button>
-            <span id="pj-recalibrate-spinner" style="display:none;margin-left:10px;font-size:12px;color:#666;">
-                <span style="display:inline-block;width:10px;height:10px;border:2px solid #ddd;border-top-color:#0F6CBD;border-radius:50%;animation:pj-spin 0.6s linear infinite;vertical-align:middle;"></span>
-                Synchronisation en cours…
-            </span>
-
             <!-- Dossier principal (path Windows configurable) -->
-            <div style="margin-top:18px;padding-top:14px;border-top:1px solid #f0f0f0;">
+            <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f0f0f0;">
                 <div style="font-size:12px;color:#888;margin-bottom:6px;">Dossier principal de classement :</div>
                 <input type="text" id="pj-root-folder" value="{{ pj_root_folder | e }}"
                        style="width:100%;padding:8px 12px;border:1px solid #e0e0e0;border-radius:6px;font-size:12px;box-sizing:border-box;font-family:monospace;color:#444;"
@@ -325,8 +322,6 @@
         </div>
         <style>
         @keyframes pj-spin { to { transform: rotate(360deg); } }
-        #pj-recalibrate-btn:hover { background: #0d5ca3 !important; }
-        #pj-recalibrate-btn:disabled { background: #ccc !important; cursor: not-allowed; }
         </style>
 
         <!-- Signature marketing -->
