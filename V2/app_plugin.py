@@ -6948,6 +6948,12 @@ def api_classify_email():
     """
     Classe un mail dans un dossier Outlook (move reçu + copy envoyé).
     Mode Standard uniquement.
+
+    Fix 02/05/2026 (signal Yvan « le classement automatique ne fonctionne
+    pas ») : Graph 400 sur /messages/{id}/move quand l'ID passé est un
+    internetMessageId (<...@gmail.com>) au lieu d'un Graph Entry ID. Le
+    frontend dialog.js envoie l'IMID, on résout d'abord en Entry ID via
+    get_email_by_internet_id.
     """
     data = request.get_json() or {}
     message_id = data.get('message_id', '')
@@ -6961,17 +6967,37 @@ def api_classify_email():
     if not graph:
         return jsonify({"error": "Mode Standard requis"}), 403
 
+    def _resolve_entry_id(mid):
+        """IMID (<...@domain>) → Graph Entry ID. Si déjà Entry ID, retour direct."""
+        if not mid:
+            return ''
+        is_imid = mid.startswith('<') and '@' in mid and mid.endswith('>')
+        if not is_imid:
+            return mid
+        try:
+            em = graph.get_email_by_internet_id(mid)
+            return em.get('id', '') if em else ''
+        except Exception as _ex:
+            logger.warning(f"[classify_email] résolution IMID→Entry échouée : {_ex}")
+            return ''
+
     try:
+        # Résoudre IMID → Entry ID avant les appels Graph (sinon 400)
+        graph_id = _resolve_entry_id(message_id)
+        if not graph_id:
+            return jsonify({"error": "Mail introuvable côté Outlook"}), 404
+        sent_graph_id = _resolve_entry_id(sent_message_id) if sent_message_id else ''
+
         # Déplacer le mail reçu
-        move_result = graph.move_to_folder(message_id, folder_id)
+        move_result = graph.move_to_folder(graph_id, folder_id)
 
         # Copier le mail envoyé (si fourni)
         copy_result = None
-        if sent_message_id:
-            copy_result = graph.copy_to_folder(sent_message_id, folder_id)
+        if sent_graph_id:
+            copy_result = graph.copy_to_folder(sent_graph_id, folder_id)
 
         # Sauvegarder en DB pour apprentissage
-        new_id = move_result.get('new_id', '') or message_id
+        new_id = move_result.get('new_id', '') or graph_id
         email = graph.get_email_by_id(new_id)
         folder_name = data.get('folder_name', '')  # Nom du dossier (fourni par le frontend)
         if email:
@@ -7061,16 +7087,35 @@ def api_classify_email_manual():
         final_path = resolve['final_path']
         created_folders = resolve.get('created_folders', [])
 
+        # Fix 02/05/2026 (idem api_classify_email) : résoudre IMID → Entry ID
+        # avant les appels Graph (Graph 400 sinon).
+        def _resolve_entry_id(mid):
+            if not mid:
+                return ''
+            is_imid = mid.startswith('<') and '@' in mid and mid.endswith('>')
+            if not is_imid:
+                return mid
+            try:
+                em = graph.get_email_by_internet_id(mid)
+                return em.get('id', '') if em else ''
+            except Exception:
+                return ''
+
+        graph_id = _resolve_entry_id(message_id)
+        if not graph_id:
+            return jsonify({"error": "Mail introuvable côté Outlook"}), 404
+        sent_graph_id = _resolve_entry_id(sent_message_id) if sent_message_id else ''
+
         # 2) Déplacer le mail reçu
-        move_result = graph.move_to_folder(message_id, folder_id)
+        move_result = graph.move_to_folder(graph_id, folder_id)
 
         # 3) Copier le mail envoyé (si fourni)
         copy_result = None
-        if sent_message_id:
-            copy_result = graph.copy_to_folder(sent_message_id, folder_id)
+        if sent_graph_id:
+            copy_result = graph.copy_to_folder(sent_graph_id, folder_id)
 
         # 4) Sauvegarder en DB pour apprentissage (rule learning)
-        new_id = move_result.get('new_id', '') or message_id
+        new_id = move_result.get('new_id', '') or graph_id
         email = graph.get_email_by_id(new_id)
         if email:
             contact_email = email.get('from_email', '')
