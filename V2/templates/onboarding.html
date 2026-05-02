@@ -552,37 +552,152 @@
         <div class="success-icon">🎉</div>
         <h2 class="step-title">BoosterMail est prêt !</h2>
         <p class="step-subtitle">
-            Tout est configuré. Vous pouvez maintenant générer votre première réponse
-            depuis Outlook en un clic.
+            Tout est configuré. Découvrez où retrouver BoosterMail dans Outlook.
         </p>
 
-        <div class="bullets">
-            <li>Votre style est analysé</li>
-            <li>Vos pièces jointes seront classées intelligemment</li>
-            <li>BoosterMail apprend de chacun de vos envois</li>
-        </div>
-
-        <!-- Statut activation du bouton dans Outlook -->
-        <div id="addin-install-status" style="margin-top:18px; padding:14px 18px; border-radius:8px; background:#f7f9fc; border:1px solid #e0e7f0; font-size:13px; color:#2d3548; text-align:center;">
+        <!-- Statut activation du bouton dans Outlook (compact, en haut) -->
+        <div id="addin-install-status" style="margin-bottom:22px; padding:10px 14px; border-radius:8px; background:#f7f9fc; border:1px solid #e0e7f0; font-size:12px; color:#2d3548; text-align:center;">
             <span id="addin-install-text">⏳ Activation du bouton BoosterMail dans Outlook…</span>
         </div>
 
-        <div class="info-tip" id="addin-restart-tip" style="display:none;">
-            ℹ️ <strong>Pour faire apparaître le bouton BoosterMail :</strong>
-            fermez Outlook puis ré-ouvrez-le. Le bouton 🚀 apparaîtra automatiquement
-            dans le ruban et dans la barre d'actions de chaque mail.
+        <!-- ═══ Section : Où trouver le bouton BoosterMail ═══ -->
+        <div style="background:#f8faff; border:1px solid #d8e4f5; border-radius:12px; padding:18px 20px; margin-bottom:18px;">
+            <div style="font-size:11px; font-weight:700; color:#0F6CBD; letter-spacing:0.5px; margin-bottom:14px;">
+                📍 OÙ TROUVER LE BOUTON BOOSTERMAIL
+            </div>
+
+            <!-- Cas 1 : ruban Outlook -->
+            <div style="display:flex; gap:14px; align-items:center; margin-bottom:14px;">
+                <div style="flex-shrink:0; width:32px; height:32px; border-radius:50%; background:#0F6CBD; color:white; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px;">1</div>
+                <div style="flex:1;">
+                    <div style="font-size:13px; font-weight:600; color:#1a1a2e; margin-bottom:4px;">Dans le ruban Outlook</div>
+                    <div style="font-size:12px; color:#5a6377;">Pour composer un nouveau mail avec BoosterMail.</div>
+                </div>
+            </div>
+            <!-- Illustration SVG ruban -->
+            <div style="background:white; border:1px solid #e0e7f0; border-radius:6px; padding:8px; margin-bottom:18px;">
+                <svg viewBox="0 0 480 60" style="width:100%; height:auto;" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Fond ruban -->
+                    <rect x="0" y="0" width="480" height="60" fill="#f3f6fb"/>
+                    <line x1="0" y1="58" x2="480" y2="58" stroke="#d8dde6" stroke-width="1"/>
+                    <!-- Boutons fictifs du ruban -->
+                    <g fill="#666" font-family="Segoe UI, sans-serif" font-size="9">
+                        <rect x="8" y="8" width="60" height="44" rx="3" fill="#fff" stroke="#d8dde6"/>
+                        <text x="38" y="42" text-anchor="middle">Nouveau</text>
+                        <rect x="76" y="8" width="60" height="44" rx="3" fill="#fff" stroke="#d8dde6"/>
+                        <text x="106" y="42" text-anchor="middle">Répondre</text>
+                        <rect x="144" y="8" width="60" height="44" rx="3" fill="#fff" stroke="#d8dde6"/>
+                        <text x="174" y="42" text-anchor="middle">Transférer</text>
+                        <rect x="212" y="8" width="60" height="44" rx="3" fill="#fff" stroke="#d8dde6"/>
+                        <text x="242" y="42" text-anchor="middle">Supprimer</text>
+                    </g>
+                    <!-- Bouton BoosterMail mis en évidence -->
+                    <rect x="284" y="6" width="64" height="48" rx="5" fill="#fff" stroke="#0F6CBD" stroke-width="2.5"/>
+                    <!-- Logo fusée stylisé -->
+                    <g transform="translate(316, 22)">
+                        <circle cx="0" cy="0" r="11" fill="#0F6CBD"/>
+                        <path d="M 0,-6 L -3,3 L 3,3 Z" fill="white"/>
+                        <path d="M -3,3 L -5,5 L -1,4 Z" fill="#ffa500"/>
+                        <path d="M 3,3 L 5,5 L 1,4 Z" fill="#ffa500"/>
+                    </g>
+                    <text x="316" y="48" text-anchor="middle" fill="#0F6CBD" font-family="Segoe UI" font-size="9" font-weight="700">BoosterMail</text>
+                    <!-- Flèche -->
+                    <g stroke="#e67e22" stroke-width="2" fill="none">
+                        <path d="M 380 30 Q 360 30 350 30" stroke-linecap="round"/>
+                        <path d="M 354 26 L 348 30 L 354 34" stroke-linejoin="round" fill="#e67e22"/>
+                    </g>
+                    <text x="385" y="34" fill="#e67e22" font-family="Segoe UI" font-size="11" font-weight="600">Cliquez ici</text>
+                </svg>
+            </div>
+
+            <!-- Cas 2 : barre d'actions du mail -->
+            <div style="display:flex; gap:14px; align-items:center; margin-bottom:14px;">
+                <div style="flex-shrink:0; width:32px; height:32px; border-radius:50%; background:#0F6CBD; color:white; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px;">2</div>
+                <div style="flex:1;">
+                    <div style="font-size:13px; font-weight:600; color:#1a1a2e; margin-bottom:4px;">Dans la barre d'actions de chaque mail</div>
+                    <div style="font-size:12px; color:#5a6377;">Pour répondre en un clic à un mail reçu.</div>
+                </div>
+            </div>
+            <!-- Illustration SVG barre d'actions -->
+            <div style="background:white; border:1px solid #e0e7f0; border-radius:6px; padding:10px;">
+                <svg viewBox="0 0 480 80" style="width:100%; height:auto;" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Mail header -->
+                    <rect x="0" y="0" width="480" height="80" fill="#fafbfd"/>
+                    <text x="14" y="20" fill="#1a1a2e" font-family="Segoe UI" font-size="12" font-weight="700">RE: Procédure import PST</text>
+                    <text x="14" y="36" fill="#5a6377" font-family="Segoe UI" font-size="10">Stéphane Dufau &lt;stephane.dufau@coaxis.com&gt;</text>
+                    <!-- Barre d'actions -->
+                    <line x1="0" y1="48" x2="480" y2="48" stroke="#e0e7f0"/>
+                    <g fill="#5a6377" font-family="Segoe UI" font-size="10">
+                        <rect x="14" y="56" width="64" height="20" rx="3" fill="#fff" stroke="#d8dde6"/>
+                        <text x="46" y="70" text-anchor="middle">Répondre</text>
+                        <rect x="86" y="56" width="80" height="20" rx="3" fill="#fff" stroke="#d8dde6"/>
+                        <text x="126" y="70" text-anchor="middle">Répondre à tous</text>
+                        <rect x="174" y="56" width="64" height="20" rx="3" fill="#fff" stroke="#d8dde6"/>
+                        <text x="206" y="70" text-anchor="middle">Transférer</text>
+                    </g>
+                    <!-- Bouton BoosterMail mis en évidence -->
+                    <rect x="248" y="54" width="80" height="24" rx="4" fill="#fff" stroke="#0F6CBD" stroke-width="2.5"/>
+                    <g transform="translate(263, 66)">
+                        <circle cx="0" cy="0" r="7" fill="#0F6CBD"/>
+                        <path d="M 0,-4 L -2,2 L 2,2 Z" fill="white"/>
+                    </g>
+                    <text x="288" y="70" fill="#0F6CBD" font-family="Segoe UI" font-size="10" font-weight="700">BoosterMail</text>
+                    <!-- Flèche -->
+                    <g stroke="#e67e22" stroke-width="2" fill="none">
+                        <path d="M 360 66 Q 340 66 332 66" stroke-linecap="round"/>
+                        <path d="M 336 62 L 330 66 L 336 70" stroke-linejoin="round" fill="#e67e22"/>
+                    </g>
+                    <text x="365" y="70" fill="#e67e22" font-family="Segoe UI" font-size="11" font-weight="600">Cliquez ici</text>
+                </svg>
+            </div>
         </div>
 
-        <div class="info-tip" id="addin-tip-success" style="display:none;">
-            💡 Le bouton 🚀 BoosterMail est prêt. Ouvrez un mail et cliquez dessus
-            pour voir la magie opérer.
+        <!-- ═══ Section : troubleshooting bouton non visible ═══ -->
+        <div style="background:#fff8e1; border:1px solid #ffd180; border-radius:12px; padding:18px 20px; margin-bottom:22px;">
+            <div style="font-size:11px; font-weight:700; color:#bf6c00; letter-spacing:0.5px; margin-bottom:12px;">
+                ❓ LE BOUTON 🚀 N'APPARAÎT PAS ?
+            </div>
+            <div style="font-size:12px; color:#5a4a1a; line-height:1.55; margin-bottom:14px;">
+                C'est très souvent un problème de redémarrage. Suivez ces étapes dans l'ordre :
+            </div>
+            <ol style="margin-left:18px; padding-left:0; font-size:12px; color:#2d3548; line-height:1.7;">
+                <li style="margin-bottom:6px;">
+                    <strong>Fermez complètement Outlook</strong> (clic droit dans la barre des tâches → Quitter), puis rouvrez-le.
+                </li>
+                <li style="margin-bottom:6px;">
+                    Si toujours absent, cliquez sur le bouton ci-dessous pour réinstaller :
+                    <div style="margin:8px 0;">
+                        <button class="btn btn-secondary" onclick="reinstallAddin()" id="btn-reinstall-addin"
+                                style="padding:8px 16px; font-size:12px;">
+                            🔄 Réinstaller le bouton dans Outlook
+                        </button>
+                        <span id="reinstall-status" style="margin-left:10px; font-size:11px; color:#5a6377;"></span>
+                    </div>
+                </li>
+                <li>
+                    Si le problème persiste, contactez-nous :
+                    <a href="mailto:support@boostermail.ai" style="color:#0F6CBD; text-decoration:none; font-weight:600;">support@boostermail.ai</a>
+                </li>
+            </ol>
         </div>
 
+        <!-- ═══ Bouton final ═══ -->
         <div class="btn-row center">
             <button class="btn btn-primary" onclick="finishOnboarding()"
                     id="btn-finish" style="padding: 14px 36px;" disabled>
-                Commencer à utiliser BoosterMail
+                J'ai compris, j'utilise BoosterMail
             </button>
+        </div>
+
+        <!-- État final après clic du bouton (statique, pas de redirect) -->
+        <div id="step-5-final" style="display:none; text-align:center; margin-top:20px; padding:24px; background:#e8f5e9; border:1px solid #4caf50; border-radius:10px;">
+            <div style="font-size:32px; margin-bottom:8px;">✓</div>
+            <div style="font-size:15px; font-weight:600; color:#1b5e20; margin-bottom:6px;">
+                Vous pouvez fermer cette fenêtre.
+            </div>
+            <div style="font-size:13px; color:#2e7d32;">
+                Retournez dans Outlook pour utiliser BoosterMail.
+            </div>
         </div>
     </div>
 
@@ -990,8 +1105,6 @@
         if (_addinInstallTried) return;
         _addinInstallTried = true;
         var statusEl = document.getElementById('addin-install-text');
-        var tipRestart = document.getElementById('addin-restart-tip');
-        var tipSuccess = document.getElementById('addin-tip-success');
         var btnFinish = document.getElementById('btn-finish');
 
         fetch('http://127.0.0.1:5052/install_addin', {
@@ -1003,44 +1116,82 @@
         .then(function(d) {
             if (d.ok) {
                 if (d.has_warnings) {
-                    statusEl.innerHTML = '✓ <strong>Bouton BoosterMail activé</strong> (avec avertissements — voir support si le bouton n\'apparaît pas)';
+                    statusEl.innerHTML = '✓ Bouton BoosterMail activé (avec avertissements mineurs)';
                     statusEl.parentElement.style.background = '#fff8e1';
                     statusEl.parentElement.style.borderColor = '#ffa726';
                 } else {
-                    statusEl.innerHTML = '✓ <strong>Bouton BoosterMail activé</strong> dans le ruban et la barre d\'actions des mails';
+                    statusEl.innerHTML = '✓ Bouton BoosterMail activé — redémarrez Outlook pour le voir apparaître';
                     statusEl.parentElement.style.background = '#e8f5e9';
                     statusEl.parentElement.style.borderColor = '#4caf50';
                     statusEl.style.color = '#1b5e20';
                 }
-                // Affiche le tip de redémarrage Outlook
-                if (tipRestart) tipRestart.style.display = 'block';
             } else {
-                statusEl.innerHTML = '⚠️ <strong>Activation partielle.</strong> Vous pourrez relancer l\'installation depuis Profil si le bouton n\'apparaît pas.';
+                statusEl.innerHTML = '⚠️ Activation partielle — utilisez « Réinstaller le bouton » ci-dessous si besoin';
                 statusEl.parentElement.style.background = '#fff0f0';
                 statusEl.parentElement.style.borderColor = '#c62828';
                 statusEl.style.color = '#6f1818';
-                if (tipRestart) tipRestart.style.display = 'block';
             }
             // Activation du bouton de finalisation dans tous les cas
-            // (l'user peut fermer même si l'install a foiré, on log)
             if (btnFinish) btnFinish.disabled = false;
         })
         .catch(function(err) {
-            statusEl.innerHTML = '⚠️ Service local BoosterMail injoignable. Le bouton sera activé au prochain démarrage.';
+            statusEl.innerHTML = '⚠️ Service local injoignable — utilisez « Réinstaller le bouton » ci-dessous';
             statusEl.parentElement.style.background = '#fff8e1';
             statusEl.parentElement.style.borderColor = '#ffa726';
             if (btnFinish) btnFinish.disabled = false;
-            // Affiche le tip de redémarrage quand même
-            if (tipRestart) tipRestart.style.display = 'block';
         });
     }
 
     function finishOnboarding() {
+        var btn = document.getElementById('btn-finish');
+        if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
         fetch('/api/setup/complete', { method: 'POST' })
             .finally(function() {
-                // Rediriger vers la popup normale (overlay)
-                window.location.href = '/plugin/popup.html?container=pyqt';
+                // Fix 02/05/2026 (signal Yvan « fenêtre toute bleue ») : on
+                // ne redirige plus vers /plugin/popup.html (qui active le
+                // mode strict overlay tout bleu en plein écran browser).
+                // Au lieu de ça, on affiche un état final stable invitant
+                // l'user à fermer la fenêtre et retourner dans Outlook.
+                var finalEl = document.getElementById('step-5-final');
+                if (finalEl) finalEl.style.display = 'block';
+                if (btn) btn.style.display = 'none';
+                // Tenter window.close() au cas où la page aurait été ouverte
+                // par script (popup OAuth ou similaire). Ne fait rien si
+                // ouverte manuellement par l'user.
+                try { window.close(); } catch(e) {}
             });
+    }
+
+    // Bouton de réinstallation depuis l'étape 5 (cas où le bouton n'apparaît
+    // pas dans Outlook après le redémarrage)
+    function reinstallAddin() {
+        var btn = document.getElementById('btn-reinstall-addin');
+        var statusEl = document.getElementById('reinstall-status');
+        btn.disabled = true;
+        var oldText = btn.innerHTML;
+        btn.innerHTML = '⏳ Réinstallation…';
+        statusEl.textContent = '';
+
+        fetch('http://127.0.0.1:5052/install_addin', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({}),
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            btn.disabled = false;
+            btn.innerHTML = oldText;
+            if (d.ok) {
+                statusEl.innerHTML = '<span style="color:#2e7d32;">✓ Réinstallé. Fermez et rouvrez Outlook.</span>';
+            } else {
+                statusEl.innerHTML = '<span style="color:#c62828;">⚠️ Échec — contactez le support.</span>';
+            }
+        })
+        .catch(function() {
+            btn.disabled = false;
+            btn.innerHTML = oldText;
+            statusEl.innerHTML = '<span style="color:#c62828;">⚠️ Service local injoignable.</span>';
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════
