@@ -18,6 +18,7 @@ import sys
 import json
 import logging
 import ssl
+import subprocess
 import threading
 import time
 import urllib.request
@@ -1751,6 +1752,59 @@ class _IPCHandler(BaseHTTPRequestHandler):
             self._json_response({"error": "not found"}, 404)
 
     def do_POST(self):
+        if self.path == '/install_addin':
+            # Phase D 02/05/2026 — force le sideload de l'add-in BoosterMail
+            # à la fin de l'onboarding (registry + manifest dans Wef\Developer
+            # + cert TrustedRoot).
+            # Le bouton apparaîtra dans le ruban Outlook + barre d'actions
+            # des mails après redémarrage d'Outlook.
+            try:
+                # Localise install_outlook_addin.py (racine du projet)
+                _here = os.path.dirname(os.path.abspath(__file__))
+                _root = os.path.dirname(_here)
+                _installer = os.path.join(_root, 'install_outlook_addin.py')
+                if not os.path.isfile(_installer):
+                    self._json_response({'ok': False, 'error': 'installer_missing',
+                                         'detail': _installer}, 500)
+                    return
+                # Trouve un Python utilisable (le même qu'on tourne)
+                _py = sys.executable
+                # Lance avec timeout 30s
+                logger.info(f"[install-addin] lancement : {_py} {_installer}")
+                proc = subprocess.run(
+                    [_py, _installer],
+                    capture_output=True, text=True,
+                    timeout=30,
+                    cwd=_root,
+                )
+                stdout = (proc.stdout or '')[:4000]
+                stderr = (proc.stderr or '')[:2000]
+                ok = (proc.returncode == 0)
+                # Détecte les warnings (cert doublon, etc.) sans bloquer
+                has_warn = '[WARN]' in stdout or 'WARN' in stderr
+                logger.info(
+                    f"[install-addin] rc={proc.returncode} ok={ok} warn={has_warn}"
+                )
+                if ok:
+                    self._json_response({
+                        'ok': True,
+                        'has_warnings': has_warn,
+                        'stdout_tail': stdout[-500:] if has_warn else '',
+                    })
+                else:
+                    self._json_response({
+                        'ok': False,
+                        'error': 'install_failed',
+                        'rc': proc.returncode,
+                        'stdout_tail': stdout[-1000:],
+                        'stderr_tail': stderr[-500:],
+                    }, 500)
+            except subprocess.TimeoutExpired:
+                self._json_response({'ok': False, 'error': 'timeout'}, 500)
+            except Exception as e:
+                logger.warning(f"[install-addin] exception : {e}")
+                self._json_response({'ok': False, 'error': str(e)[:200]}, 500)
+            return
         if self.path == '/pick_folder':
             # Phase Bouton Parcourir 02/05/2026 — ouvre une fenêtre native
             # Windows (QFileDialog) pour que l'user choisisse son dossier

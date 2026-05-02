@@ -551,13 +551,25 @@
             <li>BoosterMail apprend de chacun de vos envois</li>
         </div>
 
-        <div class="info-tip">
-            💡 Astuce : ouvrez un mail dans Outlook et cliquez sur le bouton BoosterMail
+        <!-- Statut activation du bouton dans Outlook -->
+        <div id="addin-install-status" style="margin-top:18px; padding:14px 18px; border-radius:8px; background:#f7f9fc; border:1px solid #e0e7f0; font-size:13px; color:#2d3548; text-align:center;">
+            <span id="addin-install-text">⏳ Activation du bouton BoosterMail dans Outlook…</span>
+        </div>
+
+        <div class="info-tip" id="addin-restart-tip" style="display:none;">
+            ℹ️ <strong>Pour faire apparaître le bouton BoosterMail :</strong>
+            fermez Outlook puis ré-ouvrez-le. Le bouton 🚀 apparaîtra automatiquement
+            dans le ruban et dans la barre d'actions de chaque mail.
+        </div>
+
+        <div class="info-tip" id="addin-tip-success" style="display:none;">
+            💡 Le bouton 🚀 BoosterMail est prêt. Ouvrez un mail et cliquez dessus
             pour voir la magie opérer.
         </div>
 
         <div class="btn-row center">
-            <button class="btn btn-primary" onclick="finishOnboarding()" style="padding: 14px 36px;">
+            <button class="btn btn-primary" onclick="finishOnboarding()"
+                    id="btn-finish" style="padding: 14px 36px;" disabled>
                 Commencer à utiliser BoosterMail
             </button>
         </div>
@@ -592,6 +604,7 @@
         // Hooks d'entrée par étape
         if (n === 2) startStyleAnalysis();
         if (n === 3) preloadStep3();
+        if (n === 5) startAddinInstall();
         // Scroll en haut
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -873,8 +886,59 @@
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // ÉTAPE 5 — FINALISATION
+    // ÉTAPE 5 — INSTALL ADDIN + FINALISATION
     // ═══════════════════════════════════════════════════════════════
+
+    var _addinInstallTried = false;
+
+    function startAddinInstall() {
+        if (_addinInstallTried) return;
+        _addinInstallTried = true;
+        var statusEl = document.getElementById('addin-install-text');
+        var tipRestart = document.getElementById('addin-restart-tip');
+        var tipSuccess = document.getElementById('addin-tip-success');
+        var btnFinish = document.getElementById('btn-finish');
+
+        fetch('http://127.0.0.1:5052/install_addin', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({}),
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.ok) {
+                if (d.has_warnings) {
+                    statusEl.innerHTML = '✓ <strong>Bouton BoosterMail activé</strong> (avec avertissements — voir support si le bouton n\'apparaît pas)';
+                    statusEl.parentElement.style.background = '#fff8e1';
+                    statusEl.parentElement.style.borderColor = '#ffa726';
+                } else {
+                    statusEl.innerHTML = '✓ <strong>Bouton BoosterMail activé</strong> dans le ruban et la barre d\'actions des mails';
+                    statusEl.parentElement.style.background = '#e8f5e9';
+                    statusEl.parentElement.style.borderColor = '#4caf50';
+                    statusEl.style.color = '#1b5e20';
+                }
+                // Affiche le tip de redémarrage Outlook
+                if (tipRestart) tipRestart.style.display = 'block';
+            } else {
+                statusEl.innerHTML = '⚠️ <strong>Activation partielle.</strong> Vous pourrez relancer l\'installation depuis Profil si le bouton n\'apparaît pas.';
+                statusEl.parentElement.style.background = '#fff0f0';
+                statusEl.parentElement.style.borderColor = '#c62828';
+                statusEl.style.color = '#6f1818';
+                if (tipRestart) tipRestart.style.display = 'block';
+            }
+            // Activation du bouton de finalisation dans tous les cas
+            // (l'user peut fermer même si l'install a foiré, on log)
+            if (btnFinish) btnFinish.disabled = false;
+        })
+        .catch(function(err) {
+            statusEl.innerHTML = '⚠️ Service local BoosterMail injoignable. Le bouton sera activé au prochain démarrage.';
+            statusEl.parentElement.style.background = '#fff8e1';
+            statusEl.parentElement.style.borderColor = '#ffa726';
+            if (btnFinish) btnFinish.disabled = false;
+            // Affiche le tip de redémarrage quand même
+            if (tipRestart) tipRestart.style.display = 'block';
+        });
+    }
 
     function finishOnboarding() {
         fetch('/api/setup/complete', { method: 'POST' })
