@@ -1313,6 +1313,7 @@ function _applyMailPreview(preview) {
             var clsData = preview.classement.data;
             if (clsStatus === 'running' || clsStatus === 'miss') {
                 clsEl.textContent = 'Analyse en cours…';
+                _setClassementFieldClickable(false);
             } else if (clsData && clsData.suggestion) {
                 var sugg = clsData.suggestion;
                 var folderPath = sugg.folder_path || sugg.folder_name || sugg.folder_id || 'Dossier suggéré';
@@ -1339,8 +1340,12 @@ function _applyMailPreview(preview) {
                     'self':                'Mail envoyé à toi-même.',
                 };
                 clsEl.textContent = clsMsgs[clsSrc] || 'Néant';
-                _classementCacheData = null;
-                _setClassementFieldClickable(false);
+                // Étape 4' fix (02/05 PM signal Yvan) — Champ cliquable AUSSI
+                // sans suggestion BG (cas 'none' / 'none_*' / 'self') pour
+                // permettre classement manuel via arbo + saisie path. La popup
+                // s'ouvre alors sans bandeau bleu, juste arbo + manuel.
+                _classementCacheData = clsData || { suggestion: null, suggestions: [], source: clsSrc };
+                _setClassementFieldClickable(true);
             }
         }
     }
@@ -1482,6 +1487,7 @@ function _applySinglePlate(plateName, res) {
         if (!clsEl) return;
         if (res.status === 'running' || res.status === 'miss') {
             clsEl.textContent = 'Analyse en cours…';
+            _setClassementFieldClickable(false);
         } else if (res.data && res.data.suggestion) {
             var sugg = res.data.suggestion;
             var folderPath = sugg.folder_path || sugg.folder_name || sugg.folder_id || 'Dossier suggéré';
@@ -1490,9 +1496,22 @@ function _applySinglePlate(plateName, res) {
             _classementCacheData = res.data;
             _setClassementFieldClickable(true);
         } else {
-            clsEl.textContent = 'Néant';
-            _classementCacheData = null;
-            _setClassementFieldClickable(false);
+            // Étape 4' fix (02/05 PM signal Yvan) — Wording « Néant » +
+            // messages contextuels MAIS champ cliquable (cas 'none'/'self'/
+            // 'none_*') pour permettre classement manuel via arbo + saisie
+            // path. Avant : champ désactivé → l'user ne pouvait pas classer
+            // manuellement quand BoosterMail n'avait rien à proposer.
+            var clsSrc2 = (res.data && res.data.source) || 'none';
+            var clsMsgs2 = {
+                'none_auto_email':     'Mail automatique — pas de dossier métier évident.',
+                'none_new_sender':     "Premier mail de ce contact — je m'inspirerai de ton classement.",
+                'none_unknown_domain': 'Domaine que je découvre — apprends-moi en classant.',
+                'none_low_signal':     'Mail trop court pour suggérer un dossier.',
+                'self':                'Mail envoyé à toi-même.',
+            };
+            clsEl.textContent = clsMsgs2[clsSrc2] || 'Néant';
+            _classementCacheData = res.data || { suggestion: null, suggestions: [], source: clsSrc2 };
+            _setClassementFieldClickable(true);
         }
     } else if (plateName === 'pj_classement') {
         var pjEl = document.getElementById('infoClassementPJContent');
@@ -3241,13 +3260,20 @@ function _setClassementFieldClickable(clickable) {
 // L'user peut modifier la sélection ou taper un path manuel — son choix est
 // mémorisé dans _preSendFolderId / _preSendFolderPath / _preSendIsManual.
 function _openPreSendClassPopup() {
-    if (!_classementCacheData || !_classementCacheData.suggestion) return;
+    // Étape 4' fix (02/05 PM signal Yvan) — Permettre l'ouverture même sans
+    // suggestion BG (cas 'none' / 'self' / 'none_*'). La popup s'ouvre alors
+    // avec juste l'arborescence + saisie manuelle (pas de bandeau bleu).
+    if (!_classementCacheData) {
+        _classementCacheData = { suggestion: null, suggestions: [], source: 'none' };
+    }
 
     var openWithFolders = function(folders) {
         _classMailMode = 'pre';
+        var suggestionsArr = _classementCacheData.suggestions
+            || (_classementCacheData.suggestion ? [_classementCacheData.suggestion] : []);
         _showClassMailPopup({
             suggestion: _classementCacheData.suggestion,
-            suggestions: _classementCacheData.suggestions || [_classementCacheData.suggestion],
+            suggestions: suggestionsArr,
             source: _classementCacheData.source,
         }, folders, 'pre');
     };
