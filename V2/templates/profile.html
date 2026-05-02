@@ -294,6 +294,27 @@
             <div class="imp-saved" id="imp-saved">Sauvegarde !</div>
         </div>
 
+        <!-- 🚀 Bouton Outlook (02/05/2026) — section dédiée pour reinstaller le bouton add-in -->
+        <div class="section-title" style="display:flex;align-items:center;gap:12px;">
+            🚀 Bouton Outlook
+            <button class="btn-reanalyze" id="addin-reinstall-btn" onclick="reinstallOutlookButton()">Réinstaller le bouton</button>
+            <span id="addin-reinstall-spinner" style="display:none;font-size:12px;color:#666;">
+                <span style="display:inline-block;width:10px;height:10px;border:2px solid #ddd;border-top-color:#0F6CBD;border-radius:50%;animation:pj-spin 0.6s linear infinite;vertical-align:middle;"></span>
+                Réinstallation…
+            </span>
+        </div>
+        <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:24px;">
+            <div id="addin-status-line" style="font-size:13px;color:#666;">
+                <span id="addin-status-text">Vérification…</span>
+            </div>
+            <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f0f0f0;font-size:12px;color:#888;line-height:1.5;">
+                Si le bouton 🚀 BoosterMail n'apparaît pas dans Outlook
+                (ruban ou barre d'actions des mails), cliquez sur
+                <strong>Réinstaller le bouton</strong> ci-dessus, puis fermez
+                et rouvrez Outlook.
+            </div>
+        </div>
+
         <!-- 📁 Pièces jointes (refonte 02/05/2026 — sous-titre dynamique + bouton Recalibrer) -->
         <!-- Mise en page calquée sur « Style rédactionnel » : titre + bouton sur la même ligne -->
         <div class="section-title" style="display:flex;align-items:center;gap:12px;">
@@ -773,10 +794,73 @@
             });
         }
 
+        // === Section Bouton Outlook (02/05/2026) ===
+
+        function loadAddinStatus() {
+            var statusEl = document.getElementById('addin-status-text');
+            if (!statusEl) return;
+            fetch('http://127.0.0.1:5052/addin_status')
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (d.verified) {
+                        statusEl.innerHTML = '✓ <strong>Bouton activé</strong> · Outlook a confirmé l\'installation';
+                        statusEl.style.color = '#2e7d32';
+                    } else {
+                        statusEl.innerHTML = '⚠️ <strong>Bouton non vérifié</strong> · cliquez « Réinstaller le bouton »';
+                        statusEl.style.color = '#e65100';
+                    }
+                })
+                .catch(function() {
+                    statusEl.innerHTML = '⚠️ Service local injoignable — vérifiez que BoosterMail est lancé';
+                    statusEl.style.color = '#c62828';
+                });
+        }
+
+        function reinstallOutlookButton() {
+            var btn = document.getElementById('addin-reinstall-btn');
+            var spinner = document.getElementById('addin-reinstall-spinner');
+            var statusEl = document.getElementById('addin-status-text');
+            btn.disabled = true;
+            spinner.style.display = 'inline';
+            statusEl.innerHTML = '🔄 <strong>Réinstallation en cours…</strong>';
+            statusEl.style.color = '#0F6CBD';
+
+            fetch('http://127.0.0.1:5052/install_addin', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({}),
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                spinner.style.display = 'none';
+                btn.disabled = false;
+                if (d.ok && d.registry_verified) {
+                    statusEl.innerHTML = '✓ <strong>Bouton réinstallé</strong> · fermez et rouvrez Outlook pour le voir';
+                    statusEl.style.color = '#2e7d32';
+                } else if (d.ok) {
+                    statusEl.innerHTML = 'ℹ️ <strong>Réinstallation lancée</strong> · fermez et rouvrez Outlook. Si le bouton n\'apparaît toujours pas, contactez support@boostermail.ai';
+                    statusEl.style.color = '#e65100';
+                } else {
+                    statusEl.innerHTML = '⚠️ Échec — contactez support@boostermail.ai';
+                    statusEl.style.color = '#c62828';
+                }
+                // Refresh le statut depuis le check registry après 1s
+                setTimeout(loadAddinStatus, 1500);
+            })
+            .catch(function() {
+                spinner.style.display = 'none';
+                btn.disabled = false;
+                statusEl.innerHTML = '⚠️ Service local injoignable — vérifiez que BoosterMail est lancé';
+                statusEl.style.color = '#c62828';
+            });
+        }
+
         // Charger le statut au chargement de la page (et toutes les 30s)
         document.addEventListener('DOMContentLoaded', function() {
             loadFolderStatus();
+            loadAddinStatus();
             setInterval(loadFolderStatus, 30000);
+            setInterval(loadAddinStatus, 30000);
         });
 
         // Relancer l'analyse

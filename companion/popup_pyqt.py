@@ -1740,6 +1740,55 @@ class _IPCHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/ping':
             self._json_response({"alive": True, "pid": os.getpid()})
+        elif self.path == '/addin_status':
+            # Phase D bis 02/05/2026 — état du sideload de l'add-in dans
+            # Outlook. Lecture seule du registry (pas de relance install).
+            # Utilisé par la section « 🚀 Bouton Outlook » de Profil.
+            try:
+                import xml.etree.ElementTree as _ET
+                import winreg as _winreg
+                _here = os.path.dirname(os.path.abspath(__file__))
+                _root = os.path.dirname(_here)
+                _manifest_path = os.path.join(_root, 'V2', 'manifest.xml')
+                manifest_id = ''
+                if os.path.isfile(_manifest_path):
+                    try:
+                        _tree = _ET.parse(_manifest_path)
+                        _r = _tree.getroot()
+                        for _child in _r:
+                            if _child.tag.endswith('Id'):
+                                if _child.text:
+                                    manifest_id = _child.text.strip()
+                                break
+                    except Exception:
+                        pass
+                registry_verified = False
+                registry_path = ''
+                if manifest_id:
+                    try:
+                        _key = _winreg.OpenKey(
+                            _winreg.HKEY_CURRENT_USER,
+                            r'Software\Microsoft\Office\16.0\Wef\Developer',
+                            0, _winreg.KEY_READ,
+                        )
+                        try:
+                            _val, _vtype = _winreg.QueryValueEx(_key, manifest_id)
+                            if _vtype == _winreg.REG_SZ and _val:
+                                registry_verified = True
+                                registry_path = _val
+                        finally:
+                            _winreg.CloseKey(_key)
+                    except FileNotFoundError:
+                        pass
+                    except Exception as _ex:
+                        logger.debug(f"[addin_status] erreur read : {_ex}")
+                self._json_response({
+                    'verified': registry_verified,
+                    'manifest_id': manifest_id[:8] if manifest_id else '',
+                    'registered_path': registry_path,
+                })
+            except Exception as _ex:
+                self._json_response({'verified': False, 'error': str(_ex)[:200]})
         elif self.path == '/folder_sync_status':
             # Phase B 02/05/2026 — état du dernier sync arborescence
             self._json_response({
@@ -1758,6 +1807,11 @@ class _IPCHandler(BaseHTTPRequestHandler):
             # + cert TrustedRoot).
             # Le bouton apparaîtra dans le ruban Outlook + barre d'actions
             # des mails après redémarrage d'Outlook.
+            #
+            # Phase D bis 02/05/2026 — check post-install :
+            # après l'install, on relit la clé registry HKCU\...\Wef\Developer\<id>
+            # pour vérifier qu'elle est bien présente avec le bon path.
+            # → Donne une certitude technique au lieu de "croisons les doigts".
             try:
                 # Localise install_outlook_addin.py (racine du projet)
                 _here = os.path.dirname(os.path.abspath(__file__))
@@ -1785,16 +1839,68 @@ class _IPCHandler(BaseHTTPRequestHandler):
                 logger.info(
                     f"[install-addin] rc={proc.returncode} ok={ok} warn={has_warn}"
                 )
+
+                # Check post-install : la clé registry est-elle bien présente ?
+                registry_verified = False
+                manifest_id = ''
+                try:
+                    import xml.etree.ElementTree as _ET
+                    import winreg as _winreg
+                    _manifest_path = os.path.join(_root, 'V2', 'manifest.xml')
+                    if os.path.isfile(_manifest_path):
+                        # Lit l'<Id> du manifest XML
+                        try:
+                            _tree = _ET.parse(_manifest_path)
+                            _r = _tree.getroot()
+                            _ns = {'o': 'http://schemas.microsoft.com/office/appforoffice/1.1'}
+                            _id_el = _r.find('o:Id', _ns)
+                            if _id_el is None:
+                                # Tag racine peut directement contenir <Id>
+                                for _child in _r:
+                                    if _child.tag.endswith('Id'):
+                                        _id_el = _child
+                                        break
+                            if _id_el is not None and _id_el.text:
+                                manifest_id = _id_el.text.strip()
+                        except Exception as _ex:
+                            logger.debug(f"[install-addin] parse manifest échec : {_ex}")
+                    if manifest_id:
+                        # Lit la valeur registry HKCU\Software\...\Wef\Developer\<id>
+                        try:
+                            _key = _winreg.OpenKey(
+                                _winreg.HKEY_CURRENT_USER,
+                                r'Software\Microsoft\Office\16.0\Wef\Developer',
+                                0, _winreg.KEY_READ,
+                            )
+                            try:
+                                _val, _vtype = _winreg.QueryValueEx(_key, manifest_id)
+                                if _vtype == _winreg.REG_SZ and _val:
+                                    registry_verified = True
+                                    logger.info(
+                                        f"[install-addin] check registry OK : "
+                                        f"{manifest_id} → {_val}"
+                                    )
+                            finally:
+                                _winreg.CloseKey(_key)
+                        except FileNotFoundError:
+                            logger.warning("[install-addin] check registry : clé absente")
+                        except Exception as _ex:
+                            logger.warning(f"[install-addin] check registry erreur : {_ex}")
+                except Exception as _ex:
+                    logger.debug(f"[install-addin] check post-install impossible : {_ex}")
+
                 if ok:
                     self._json_response({
                         'ok': True,
                         'has_warnings': has_warn,
+                        'registry_verified': registry_verified,
                         'stdout_tail': stdout[-500:] if has_warn else '',
                     })
                 else:
                     self._json_response({
                         'ok': False,
                         'error': 'install_failed',
+                        'registry_verified': registry_verified,
                         'rc': proc.returncode,
                         'stdout_tail': stdout[-1000:],
                         'stderr_tail': stderr[-500:],

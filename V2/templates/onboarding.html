@@ -602,33 +602,13 @@
             </div>
         </div>
 
-        <!-- ═══ Section : troubleshooting bouton non visible ═══ -->
-        <div style="background:#fff8e1; border:1px solid #ffd180; border-radius:12px; padding:18px 20px; margin-bottom:22px;">
-            <div style="font-size:11px; font-weight:700; color:#bf6c00; letter-spacing:0.5px; margin-bottom:12px;">
-                ❓ LE BOUTON 🚀 N'APPARAÎT PAS ?
+        <!-- ═══ Section : troubleshooting bouton non visible (simplifiée) ═══ -->
+        <div style="background:#fff8e1; border:1px solid #ffd180; border-radius:12px; padding:14px 18px; margin-bottom:22px;">
+            <div style="font-size:12px; color:#5a4a1a; line-height:1.55;">
+                💡 <strong>Si le bouton 🚀 n'apparaît pas dans Outlook</strong> après redémarrage,
+                allez dans <strong>BoosterMail → Profil → Bouton Outlook</strong> et cliquez
+                sur <em>« Réinstaller le bouton »</em>.
             </div>
-            <div style="font-size:12px; color:#5a4a1a; line-height:1.55; margin-bottom:14px;">
-                C'est très souvent un problème de redémarrage. Suivez ces étapes dans l'ordre :
-            </div>
-            <ol style="margin-left:18px; padding-left:0; font-size:12px; color:#2d3548; line-height:1.7;">
-                <li style="margin-bottom:6px;">
-                    <strong>Fermez complètement Outlook</strong> (clic droit dans la barre des tâches → Quitter), puis rouvrez-le.
-                </li>
-                <li style="margin-bottom:6px;">
-                    Si toujours absent, cliquez sur le bouton ci-dessous pour réinstaller :
-                    <div style="margin:8px 0;">
-                        <button class="btn btn-secondary" onclick="reinstallAddin()" id="btn-reinstall-addin"
-                                style="padding:8px 16px; font-size:12px;">
-                            🔄 Réinstaller le bouton dans Outlook
-                        </button>
-                        <span id="reinstall-status" style="margin-left:10px; font-size:11px; color:#5a6377;"></span>
-                    </div>
-                </li>
-                <li>
-                    Si le problème persiste, contactez-nous :
-                    <a href="mailto:support@boostermail.ai" style="color:#0F6CBD; text-decoration:none; font-weight:600;">support@boostermail.ai</a>
-                </li>
-            </ol>
         </div>
 
         <!-- ═══ Bouton final ═══ -->
@@ -1046,37 +1026,26 @@
         var statusEl = document.getElementById('addin-install-text');
         var btnFinish = document.getElementById('btn-finish');
 
+        // Message unique rassurant : on lance l'install en arrière-plan,
+        // on affiche TOUJOURS le même message positif. Si l'install foire
+        // techniquement, l'user le verra plus tard dans Profil → Bouton
+        // Outlook (avec bouton Réinstaller). Pas d'alerte intrusive ici
+        // qui obligerait l'user à revenir dans l'onboarding.
+        // Décision Yvan 02/05/2026 : éviter la friction « ferme cette
+        // fenêtre / vérifie Outlook / reviens si problème ».
+
         fetch('http://127.0.0.1:5052/install_addin', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({}),
         })
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-            if (d.ok) {
-                if (d.has_warnings) {
-                    statusEl.innerHTML = '✓ Bouton BoosterMail activé (avec avertissements mineurs)';
-                    statusEl.parentElement.style.background = '#fff8e1';
-                    statusEl.parentElement.style.borderColor = '#ffa726';
-                } else {
-                    statusEl.innerHTML = '✓ Bouton BoosterMail activé — redémarrez Outlook pour le voir apparaître';
-                    statusEl.parentElement.style.background = '#e8f5e9';
-                    statusEl.parentElement.style.borderColor = '#4caf50';
-                    statusEl.style.color = '#1b5e20';
-                }
-            } else {
-                statusEl.innerHTML = '⚠️ Activation partielle — utilisez « Réinstaller le bouton » ci-dessous si besoin';
-                statusEl.parentElement.style.background = '#fff0f0';
-                statusEl.parentElement.style.borderColor = '#c62828';
-                statusEl.style.color = '#6f1818';
-            }
-            // Activation du bouton de finalisation dans tous les cas
-            if (btnFinish) btnFinish.disabled = false;
-        })
-        .catch(function(err) {
-            statusEl.innerHTML = '⚠️ Service local injoignable — utilisez « Réinstaller le bouton » ci-dessous';
-            statusEl.parentElement.style.background = '#fff8e1';
-            statusEl.parentElement.style.borderColor = '#ffa726';
+        .finally(function() {
+            // Toujours le même message, succès ou silence (le check fin
+            // se fait dans Profil)
+            statusEl.innerHTML = '✓ BoosterMail est prêt à démarrer dans Outlook';
+            statusEl.parentElement.style.background = '#e8f5e9';
+            statusEl.parentElement.style.borderColor = '#4caf50';
+            statusEl.style.color = '#1b5e20';
             if (btnFinish) btnFinish.disabled = false;
         });
     }
@@ -1101,37 +1070,10 @@
             });
     }
 
-    // Bouton de réinstallation depuis l'étape 5 (cas où le bouton n'apparaît
-    // pas dans Outlook après le redémarrage)
-    function reinstallAddin() {
-        var btn = document.getElementById('btn-reinstall-addin');
-        var statusEl = document.getElementById('reinstall-status');
-        btn.disabled = true;
-        var oldText = btn.innerHTML;
-        btn.innerHTML = '⏳ Réinstallation…';
-        statusEl.textContent = '';
-
-        fetch('http://127.0.0.1:5052/install_addin', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({}),
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-            btn.disabled = false;
-            btn.innerHTML = oldText;
-            if (d.ok) {
-                statusEl.innerHTML = '<span style="color:#2e7d32;">✓ Réinstallé. Fermez et rouvrez Outlook.</span>';
-            } else {
-                statusEl.innerHTML = '<span style="color:#c62828;">⚠️ Échec — contactez le support.</span>';
-            }
-        })
-        .catch(function() {
-            btn.disabled = false;
-            btn.innerHTML = oldText;
-            statusEl.innerHTML = '<span style="color:#c62828;">⚠️ Service local injoignable.</span>';
-        });
-    }
+    // Note 02/05/2026 : la fonction reinstallAddin de l'onboarding a été
+    // déplacée dans Profil (section « 🚀 Bouton Outlook ») pour éviter la
+    // friction « ferme onboarding / vérifie Outlook / reviens dans onboarding ».
+    // Voir reinstallOutlookButton() dans templates/profile.html.
 
     // ═══════════════════════════════════════════════════════════════
     // HELPERS
