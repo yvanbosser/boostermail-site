@@ -1157,9 +1157,21 @@ class GraphClient(EmailProvider):
         GET /me/messages/{id}/attachments
         Liste les PJ d'un mail (métadonnées, pas le contenu binaire).
         Distingue inline (images dans le body) vs document.
+
+        Fix 02/05/2026 : accepte aussi un internetMessageId (<...@domain>)
+        et le résout en Graph Entry ID avant l'appel. Évite Graph 400 «Id
+        is malformed» sur 4 sites (api_attachments, api_extract_attachments,
+        api_suggest_pj_folder, api_pj_classification_post_send).
         """
         try:
-            data = self._get(f'/me/messages/{message_id}/attachments')
+            real_id = message_id
+            if message_id and message_id.startswith('<') and '@' in message_id and message_id.endswith('>'):
+                em = self.get_email_by_internet_id(message_id)
+                if not em or not em.get('id'):
+                    logger.warning(f"get_attachments : IMID introuvable côté Graph : {message_id[:60]}")
+                    return []
+                real_id = em['id']
+            data = self._get(f'/me/messages/{real_id}/attachments')
             result = []
             for att in data.get('value', []):
                 result.append({

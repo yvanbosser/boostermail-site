@@ -8230,9 +8230,20 @@ def api_suggest_pj_folder(email_id):
     if not folders:
         return jsonify({"status": "no_folders", "attachments": [], "folders": []})
 
+    # Resolution IMID -> Graph Entry ID (idem fix 02/05/2026 sur autres routes)
+    real_id = email_id
+    if email_id.startswith('<') and '@' in email_id and email_id.endswith('>'):
+        try:
+            em = graph.get_email_by_internet_id(email_id)
+            real_id = em.get('id', '') if em else ''
+        except Exception:
+            real_id = ''
+        if not real_id:
+            return jsonify({"status": "no_attachments", "attachments": [], "folders": []})
+
     # Recuperer les PJ depuis Graph
     try:
-        attachments = graph.get_attachments(email_id)
+        attachments = graph.get_attachments(real_id)
     except Exception:
         attachments = []
     # Cleanup 27/04 PM (audit kit #10) — _attachment_cache supprime (write-only,
