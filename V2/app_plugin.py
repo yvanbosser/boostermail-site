@@ -2719,6 +2719,263 @@ def _prewarm_pj_classement_for_mail(mid, mail_data):
         _set_mail_preview(mid, 'pj_classement', 'error', None)
 
 
+def _extract_attachment_text_inmem(filename, content_bytes):
+    """Étape 3 (02/05 PM tardif, vision Yvan Devoteam) — extraction texte
+    depuis bytes en mémoire (PDF/DOCX/XLSX/TXT/CSV). Pattern aligné sur
+    l'extraction filesystem existante (ligne ~7295). Tolérant aux erreurs
+    (return '' si échec)."""
+    if not filename or not content_bytes:
+        return ''
+    ext = ('.' + filename.rsplit('.', 1)[-1].lower()) if '.' in filename else ''
+    text = ''
+    try:
+        if ext in ('.txt', '.csv'):
+            text = content_bytes.decode('utf-8', errors='ignore')[:10000]
+        elif ext == '.pdf':
+            try:
+                import PyPDF2
+                from io import BytesIO
+                reader = PyPDF2.PdfReader(BytesIO(content_bytes))
+                # Limite 10 pages comme l'extraction filesystem
+                text = '\n'.join(page.extract_text() or '' for page in reader.pages[:10])[:10000]
+            except ImportError:
+                pass
+        elif ext == '.docx':
+            try:
+                import docx as _docx
+                from io import BytesIO
+                _doc = _docx.Document(BytesIO(content_bytes))
+                text = '\n'.join(p.text for p in _doc.paragraphs)[:10000]
+            except ImportError:
+                pass
+        elif ext == '.xlsx':
+            try:
+                import openpyxl
+                from io import BytesIO
+                _wb = openpyxl.load_workbook(BytesIO(content_bytes), read_only=True, data_only=True)
+                try:
+                    rows = []
+                    for ws in _wb.worksheets[:3]:
+                        for row in ws.iter_rows(max_row=50, values_only=True):
+                            rows.append(' | '.join(str(c or '') for c in row))
+                    text = '\n'.join(rows)[:10000]
+                finally:
+                    _wb.close()
+            except ImportError:
+                pass
+    except Exception as e:
+        logger.debug(f"[unified-extract-pj] {filename}: {e}")
+    return text
+
+
+def _get_pj_text_for_unified_analyze(message_id):
+    """Étape 3 (02/05 PM tardif) — télécharge les PJ via Graph + extrait
+    le texte pour passer au commis Haiku. Permet la résolution Devoteam
+    (mot-clé métier uniquement dans le PDF). Limite : 3 PJ max, 5000 chars
+    total. Tolérant aux erreurs."""
+    try:
+        graph = get_graph()
+        if not graph:
+            return ''
+        attachments = graph.get_attachments(message_id) or []
+        if not attachments:
+            return ''
+        texts = []
+        for att in attachments[:3]:
+            if att.get('is_inline'):
+                continue
+            try:
+                content = graph.get_attachment_content(message_id, att.get('id'))
+                if not content:
+                    continue
+                t = _extract_attachment_text_inmem(att.get('name', ''), content)
+                if t.strip():
+                    texts.append(f"[PJ : {att.get('name', '')}]\n{t[:1500]}")
+            except Exception as _e:
+                logger.debug(f"[unified-pj] {att.get('name', '')}: {_e}")
+        return '\n\n'.join(texts)[:5000]
+    except Exception as e:
+        logger.debug(f"[unified-pj-text] failed: {e}")
+        return ''
+
+
+def _prewarm_unified_for_mail(mid, mail_data):
+    """Étape 2+3 (02/05 PM tardif, vision Yvan « Cuisinier + Commis ») —
+    appel commis Haiku unifié qui produit P/A/E/F/J en 1 appel, puis
+    remplit les 3 caches DB + RAM (mail_classement_cache,
+    mail_pj_classement_cache, mail_echeance_cache).
+
+    Si l'appel échoue (timeout, parsing error, etc.) → fallback automatique
+    sur les 3 sub-prewarms originaux (Audit recommandation : préserver la
+    couverture pour les mails non-cliqués).
+
+    Bénéfices vs 4 appels Haiku séparés (summarize + scan_echeances +
+    suggest_folder + suggest_pj_folder) :
+    - ~75 % d'économie sur les appels Haiku (4 → 1)
+    - Le commis voit le contenu PJ extrait → résolution Devoteam
+    - Cohérence : Claude a tous les signaux en même temps
+    """
+    try:
+        builder = _get_prompt_builder()
+        if not builder or not hasattr(builder, 'analyze_one_mail_stream'):
+            raise Exception('analyze_one_mail_stream non disponible')
+
+        # Skip mail à soi-même (cohérent avec _prewarm_classement_for_mail)
+        contact_email = (mail_data.get('from_email', '') or '').lower()
+        try:
+            _user_email = _normalize_email(_db.get_setting('auth_user_email'))
+        except Exception:
+            _user_email = None
+        if _user_email and contact_email == _user_email:
+            _set_mail_preview(mid, 'classement', 'done', {
+                'suggestion': None, 'suggestions': [], 'source': 'self'})
+            _set_mail_preview(mid, 'pj_classement', 'done', {
+                'suggestion': None, 'suggestions': [], 'source': 'self'})
+            _set_mail_preview(mid, 'echeance', 'done', [])
+            try:
+                _db.save_mail_classement(mid, None, 'self')
+                _db.save_mail_pj_classement(mid, None, 'self')
+            except Exception:
+                pass
+            return
+
+        # Récupérer le contexte (folders + contact + history)
+        try:
+            folders_outlook = _get_outlook_folders_cached() or []
+        except Exception:
+            folders_outlook = []
+        try:
+            wf_row = _db.get_user_windows_folders()
+            folders_windows = wf_row.get('folders', []) if wf_row else []
+        except Exception:
+            folders_windows = []
+        try:
+            contact_profile = _db.get_contact_profile(contact_email)
+        except Exception:
+            contact_profile = None
+        domain = _extract_email_domain(contact_email)
+        try:
+            recent_class = _db.get_recent_classifications(contact_email, domain, limit=5)
+        except Exception:
+            recent_class = []
+        try:
+            recent_pj = _db.get_recent_pj_classifications(contact_email, domain, limit=5)
+        except Exception:
+            recent_pj = []
+
+        # Étape 3 — Extraire contenu PJ pour résolution Devoteam
+        pj_text = ''
+        has_pj = bool(mail_data.get('has_attachments') or (mail_data.get('attachments') or []))
+        if has_pj:
+            pj_text = _get_pj_text_for_unified_analyze(mid)
+
+        # Appel commis Haiku unifié
+        result = None
+        for kind, payload in builder.analyze_one_mail_stream(
+            mail=mail_data,
+            folders_outlook=folders_outlook,
+            folders_windows=folders_windows,
+            pj_text=pj_text,
+            contact_profile=contact_profile,
+            recent_classifications=recent_class,
+            recent_pj_classifications=recent_pj,
+        ):
+            if kind == 'end':
+                result = payload
+                break
+            elif kind == 'error':
+                raise Exception(f'Analyze stream error: {payload}')
+
+        if not result:
+            raise Exception('No end event from analyze_one_mail_stream')
+
+        # === Remplir les 3 caches DB + RAM ===
+
+        # 1. Échéance
+        ech = result.get('echeance')
+        if ech and ech.get('description'):
+            ech_for_cache = [{
+                'description': ech.get('description', ''),
+                'date_echeance': ech.get('date', ''),
+            }]
+        else:
+            ech_for_cache = []
+        try:
+            # save_mail_echeance(mid, echeances) — pas de param source
+            _db.save_mail_echeance(mid, ech_for_cache)
+        except Exception as _e:
+            logger.debug(f"[unified] save echeance: {_e}")
+        _set_mail_preview(mid, 'echeance', 'done', ech_for_cache)
+
+        # 2. Classement mail
+        fm = result.get('folder_mail')
+        if fm and fm.get('folder_id'):
+            cls_data = {'suggestion': fm, 'suggestions': [fm], 'source': 'unified'}
+            try:
+                _db.save_mail_classement(mid, fm, 'unified')
+            except Exception as _e:
+                logger.debug(f"[unified] save classement: {_e}")
+        else:
+            cls_data = {'suggestion': None, 'suggestions': [], 'source': 'unified_none'}
+            try:
+                _db.save_mail_classement(mid, None, 'unified_none')
+            except Exception:
+                pass
+        _set_mail_preview(mid, 'classement', 'done', cls_data)
+
+        # 3. Classement PJ
+        fpj = result.get('folder_pj')
+        if fpj and fpj.get('folder_path'):
+            pj_data = {'suggestion': fpj, 'suggestions': [fpj], 'source': 'unified'}
+            try:
+                _db.save_mail_pj_classement(mid, fpj, 'unified')
+            except Exception as _e:
+                logger.debug(f"[unified] save pj classement: {_e}")
+        elif not has_pj:
+            pj_data = {'suggestion': None, 'suggestions': [], 'source': 'no_pj'}
+            try:
+                _db.save_mail_pj_classement(mid, None, 'no_pj')
+            except Exception:
+                pass
+        else:
+            pj_data = {'suggestion': None, 'suggestions': [], 'source': 'unified_none'}
+            try:
+                _db.save_mail_pj_classement(mid, None, 'unified_none')
+            except Exception:
+                pass
+        _set_mail_preview(mid, 'pj_classement', 'done', pj_data)
+
+        logger.info(
+            f"[unified] OK {mid[:30]} — "
+            f"fm={bool(fm and fm.get('folder_id'))}, "
+            f"fpj={bool(fpj and fpj.get('folder_path'))}, "
+            f"ech={bool(ech and ech.get('description'))}, "
+            f"pj_text={len(pj_text)}c, points={len(result.get('points', []))}"
+        )
+
+    except Exception as e:
+        logger.warning(f"[unified] FAILED {mid[:30]}: {e} — fallback sub-prewarms")
+        # Étape 4 — Fallback : lancer les 3 sub-prewarms originaux comme avant
+        try:
+            threading.Thread(target=_prewarm_echeance_for_mail,
+                             args=(mid, mail_data), daemon=True,
+                             name='prewarm-ech-fb').start()
+        except Exception:
+            pass
+        try:
+            threading.Thread(target=_prewarm_classement_for_mail,
+                             args=(mid, mail_data), daemon=True,
+                             name='prewarm-cls-fb').start()
+        except Exception:
+            pass
+        try:
+            threading.Thread(target=_prewarm_pj_classement_for_mail,
+                             args=(mid, mail_data), daemon=True,
+                             name='prewarm-pj-fb').start()
+        except Exception:
+            pass
+
+
 def _prewarm_mail_preview(mail_data):
     """Lance la pré-chauffe échéance + classement pour UN mail.
     Skip si déjà en cache récent (<TTL) avec status done/running.
@@ -2730,6 +2987,13 @@ def _prewarm_mail_preview(mail_data):
     Phase 2 (25/04 soir) — Filtre unifié Smart Speculative : 1 filtre = 5
     décisions identiques. Si filtré → aucun plat préparé en BG (tout sera
     généré à la commande au clic user, en parallèle, en streaming).
+
+    Phase 3 (02/05 PM tardif, vision Yvan « Cuisinier + Commis ») —
+    Au lieu de lancer 3 sub-prewarms en parallèle (échéance + classement
+    + classement PJ = 4 appels Haiku séparés avec le résumé), on lance 1
+    seul appel Haiku unifié (analyze_one_mail_stream → P/A/E/F/J) qui
+    remplit les 3 caches en une fois. En cas d'erreur, fallback auto sur
+    les 3 sub-prewarms originaux (préservation couverture audit).
     """
     mid = _canonical_mid(mail_data)
     if not mid:
@@ -2784,19 +3048,16 @@ def _prewarm_mail_preview(mail_data):
             entry['pj_classement']['status'] = 'running'
             entry['pj_classement']['ts'] = now
         _mail_preview_cache[mid] = entry
-    # Threads daemon parallèles
-    if not skip_ech:
-        threading.Thread(target=_prewarm_echeance_for_mail,
+    # Phase 3 (02/05 PM tardif, vision Yvan « Cuisinier + Commis ») —
+    # 1 seul thread daemon qui appelle analyze_one_mail_stream (Haiku
+    # unifié P/A/E/F/J) au lieu des 3 sub-prewarms séparés. Si erreur,
+    # fallback automatique sur les 3 sub-prewarms originaux dans
+    # _prewarm_unified_for_mail.
+    # Lancé si au moins 1 plat n'est pas déjà en cache running/done.
+    if not (skip_ech and skip_cls and skip_pj):
+        threading.Thread(target=_prewarm_unified_for_mail,
                          args=(mid, mail_data), daemon=True,
-                         name='prewarm-ech').start()
-    if not skip_cls:
-        threading.Thread(target=_prewarm_classement_for_mail,
-                         args=(mid, mail_data), daemon=True,
-                         name='prewarm-cls').start()
-    if not skip_pj:
-        threading.Thread(target=_prewarm_pj_classement_for_mail,
-                         args=(mid, mail_data), daemon=True,
-                         name='prewarm-pj').start()
+                         name='prewarm-unified').start()
 
 
 def _prewarm_mail_previews_batch(mails):
