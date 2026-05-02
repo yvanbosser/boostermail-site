@@ -1193,17 +1193,38 @@ class GraphClient(EmailProvider):
 
         Pour les PJ < 3 Mo, on pourrait aussi utiliser contentBytes (base64) dans
         la réponse /attachments, mais /$value est plus fiable et universel.
+
+        Fix 02/05/2026 PM tardif (signal Yvan : PDF chip Resume ne s'ouvre
+        pas + commis BG reçoit pj_text=0c) : résout IMID en Graph Entry ID
+        comme get_attachments le fait déjà (commit d17764a). Évite
+        Graph 400 « Id is malformed » sur :
+        - api_download_attachment (preview chip PJ Resume cliquable)
+        - _get_pj_text_for_unified_analyze (commis BG voit contenu PDF →
+          résolution Devoteam)
         """
+        # Résolution IMID → Entry ID (parallèle get_attachments ligne 1167+)
+        real_id = message_id
+        if message_id and message_id.startswith('<') and '@' in message_id and message_id.endswith('>'):
+            try:
+                em = self.get_email_by_internet_id(message_id)
+                if not em or not em.get('id'):
+                    logger.warning(f"get_attachment_content : IMID introuvable : {message_id[:60]}")
+                    return b''
+                real_id = em['id']
+            except Exception as e:
+                logger.error(f"get_attachment_content IMID resolve: {e}")
+                return b''
+
         try:
             resp = self._request(
                 'GET',
-                f'/me/messages/{message_id}/attachments/{attachment_id}/$value'
+                f'/me/messages/{real_id}/attachments/{attachment_id}/$value'
             )
             return resp.content
         except requests.HTTPError:
             # Fallback : récupérer via contentBytes (base64 dans le JSON)
             try:
-                data = self._get(f'/me/messages/{message_id}/attachments/{attachment_id}')
+                data = self._get(f'/me/messages/{real_id}/attachments/{attachment_id}')
                 content_b64 = data.get('contentBytes', '')
                 if content_b64:
                     return base64.b64decode(content_b64)
