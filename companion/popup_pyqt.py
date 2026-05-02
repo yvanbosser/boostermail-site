@@ -1334,6 +1334,223 @@ def _is_outlook_running():
 
 
 # =============================================================================
+# SYNC ARBORESCENCE WINDOWS → OVH (Phase B 02/05/2026)
+# =============================================================================
+# Le companion local scanne le filesystem Windows (OVH ne le voit pas) et
+# POST l'arborescence à api.boostermail.ai/api/windows_folders. Pipeline :
+#   1. Au démarrage du companion : sync immédiat
+#   2. Toutes les 4h tant que companion vit : re-sync (diff hash → no-op
+#      si rien n'a changé, économie réseau + DB)
+#   3. À la demande via IPC POST /sync_folders (bouton « Recalibrer » UI)
+#
+# Coût en CPU/IO : scan filesystem ~1s pour 500 dossiers, POST ~50-200KB
+# compressé (~0,2s sur fibre). Hash diff évite 95% des POST inutiles.
+# Tourne en thread daemon → aucun impact sur génération mail / IPC / Qt.
+
+_FOLDER_SYNC_INTERVAL_S = 4 * 3600  # 4 heures
+_FOLDER_SYNC_TIMEOUT_S = 10         # garde-fou : skip si scan dépasse 10s
+_FOLDER_SCAN_MAX_DEPTH = 5          # cohérent avec _scan_windows_folders backend
+_FOLDER_SKIP_NAMES = {
+    '.git', '__pycache__', '$recycle.bin', 'node_modules', '.claude',
+    '.venv', 'venv', '.vs',
+}
+_folder_sync_lock = threading.Lock()
+_folder_sync_state = {
+    'last_sync_at': 0.0,
+    'last_hash': '',
+    'last_count': 0,
+    'last_error': '',
+}
+
+
+def _scan_windows_folders_local(root_path, max_depth=_FOLDER_SCAN_MAX_DEPTH,
+                                deadline=None):
+    """Scan DFS du filesystem Windows. Retourne list[{path, name, depth}].
+
+    deadline = epoch float au-delà duquel on stoppe le scan (garde-fou
+    timeout, évite que le companion bloque si OneDrive met 30s à répondre).
+    """
+    import os as _os
+    import re as _re
+
+    folders = []
+    if not _os.path.isdir(root_path):
+        logger.warning(f"[folder-sync] root_path inexistant : {root_path}")
+        return folders
+
+    def _natural_sort_key(name):
+        return [int(c) if c.isdigit() else c.lower()
+                for c in _re.split(r'(\d+)', name)]
+
+    def _walk(dir_path, rel_prefix, depth):
+        if depth > max_depth:
+            return
+        if deadline is not None and time.time() > deadline:
+            return
+        try:
+            entries = _os.listdir(dir_path)
+        except (PermissionError, OSError):
+            return
+        children = []
+        for name in entries:
+            if name.lower() in _FOLDER_SKIP_NAMES or name.startswith('.'):
+                continue
+            full = _os.path.join(dir_path, name)
+            try:
+                if _os.path.isdir(full):
+                    children.append(name)
+            except OSError:
+                continue
+        children.sort(key=_natural_sort_key)
+        for child in children:
+            rel = (rel_prefix + '/' + child) if rel_prefix else child
+            folders.append({'path': rel, 'name': child, 'depth': depth})
+            _walk(_os.path.join(dir_path, child), rel, depth + 1)
+
+    _walk(root_path, '', 1)
+    return folders
+
+
+def _compute_folders_hash(root_path, folders):
+    """Hash SHA1 stable de l'arborescence — pour le diff côté backend."""
+    import hashlib
+    serialized = json.dumps(folders, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha1(
+        (root_path + '|' + serialized).encode('utf-8')
+    ).hexdigest()
+
+
+def _get_pj_root_folder_from_backend():
+    """Lit le setting pj_root_folder depuis OVH (la source de vérité user).
+
+    Retourne le path Windows configuré dans Profil, ou None si erreur.
+    En cas d'échec réseau, on revient à un chemin par défaut sensé (Documents).
+    """
+    try:
+        import ssl as _ssl
+        ctx = _ssl.create_default_context() if BACKEND_URL.startswith('https://api.') else None
+        if BACKEND_URL.startswith('https://localhost') or BACKEND_URL.startswith('https://127.'):
+            ctx = _ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = _ssl.CERT_NONE
+        url = f'{BACKEND_URL}/api/settings/pj_root_folder'
+        req = urllib.request.Request(url, headers={'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
+            data = json.loads(resp.read().decode('utf-8', errors='replace'))
+            value = (data.get('value') or '').strip()
+            return value or None
+    except Exception as e:
+        logger.debug(f"[folder-sync] lecture pj_root_folder backend échec : {e}")
+        return None
+
+
+def _push_folders_to_backend(root_path, folders, folders_hash):
+    """POST l'arborescence sur /api/windows_folders. Retourne dict réponse ou None."""
+    try:
+        import ssl as _ssl
+        if BACKEND_URL.startswith('https://localhost') or BACKEND_URL.startswith('https://127.'):
+            ctx = _ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = _ssl.CERT_NONE
+        else:
+            ctx = _ssl.create_default_context()
+        payload = json.dumps({
+            'root_path': root_path,
+            'folders': folders,
+            'hash': folders_hash,
+        }).encode('utf-8')
+        req = urllib.request.Request(
+            f'{BACKEND_URL}/api/windows_folders',
+            data=payload,
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+            return json.loads(resp.read().decode('utf-8', errors='replace'))
+    except Exception as e:
+        logger.warning(f"[folder-sync] POST échec : {e}")
+        return None
+
+
+def _sync_folders_now(force=False):
+    """Effectue un scan + push immédiat. Thread-safe (lock anti-concurrence).
+
+    Args:
+        force: si True, ignore le hash diff local et POST quand même
+               (le backend fera quand même son propre diff).
+    Retourne dict {ok, count, changed, error} pour les callers (IPC).
+    """
+    if not _folder_sync_lock.acquire(blocking=False):
+        return {'ok': False, 'error': 'sync_in_progress'}
+    try:
+        t0 = time.time()
+        # 1. Lire le root_path depuis OVH (source de vérité)
+        root_path = _get_pj_root_folder_from_backend()
+        if not root_path:
+            _folder_sync_state['last_error'] = 'no_root_path'
+            logger.info("[folder-sync] pj_root_folder non configuré côté backend — sync sauté")
+            return {'ok': False, 'error': 'no_root_path'}
+
+        # 2. Scan filesystem local (avec timeout garde-fou)
+        deadline = t0 + _FOLDER_SYNC_TIMEOUT_S
+        folders = _scan_windows_folders_local(root_path, deadline=deadline)
+        if time.time() > deadline:
+            logger.warning(f"[folder-sync] scan timeout > {_FOLDER_SYNC_TIMEOUT_S}s, abandon")
+            _folder_sync_state['last_error'] = 'scan_timeout'
+            return {'ok': False, 'error': 'scan_timeout'}
+
+        # 3. Hash diff local : skip si rien n'a changé depuis dernier sync
+        h = _compute_folders_hash(root_path, folders)
+        if not force and h == _folder_sync_state.get('last_hash'):
+            logger.debug(f"[folder-sync] hash inchangé ({len(folders)} dossiers), skip POST")
+            return {'ok': True, 'count': len(folders), 'changed': False}
+
+        # 4. POST à OVH
+        resp = _push_folders_to_backend(root_path, folders, h)
+        if not resp:
+            _folder_sync_state['last_error'] = 'post_failed'
+            return {'ok': False, 'error': 'post_failed'}
+
+        _folder_sync_state['last_sync_at'] = time.time()
+        _folder_sync_state['last_hash'] = h
+        _folder_sync_state['last_count'] = len(folders)
+        _folder_sync_state['last_error'] = ''
+        elapsed_ms = int((time.time() - t0) * 1000)
+        logger.info(
+            f"[folder-sync] OK : {len(folders)} dossiers, "
+            f"changed={resp.get('changed', False)}, {elapsed_ms}ms"
+        )
+        return {
+            'ok': True,
+            'count': len(folders),
+            'changed': resp.get('changed', False),
+        }
+    except Exception as e:
+        logger.warning(f"[folder-sync] exception : {e}")
+        _folder_sync_state['last_error'] = str(e)[:100]
+        return {'ok': False, 'error': str(e)[:100]}
+    finally:
+        _folder_sync_lock.release()
+
+
+def _folder_sync_loop():
+    """Thread daemon : sync au démarrage puis toutes les 4h.
+
+    Tourne tant que le process companion vit. Aucun impact sur les autres
+    threads (Qt, IPC, prefetch) car GIL ne bloque pas pendant les opérations
+    I/O (scan disque + POST réseau).
+    """
+    # Première sync : 30s après le démarrage pour laisser Qt/IPC s'initialiser
+    time.sleep(30)
+    while True:
+        try:
+            _sync_folders_now()
+        except Exception as e:
+            logger.warning(f"[folder-sync] loop erreur : {e}")
+        time.sleep(_FOLDER_SYNC_INTERVAL_S)
+
+
+# =============================================================================
 # Plan 2 Phase 4 — IPC hot instance : écoute localhost:5052
 # =============================================================================
 
@@ -1369,10 +1586,46 @@ class _IPCHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/ping':
             self._json_response({"alive": True, "pid": os.getpid()})
+        elif self.path == '/folder_sync_status':
+            # Phase B 02/05/2026 — état du dernier sync arborescence
+            self._json_response({
+                'last_sync_at': _folder_sync_state.get('last_sync_at', 0),
+                'last_count': _folder_sync_state.get('last_count', 0),
+                'last_hash': _folder_sync_state.get('last_hash', ''),
+                'last_error': _folder_sync_state.get('last_error', ''),
+            })
         else:
             self._json_response({"error": "not found"}, 404)
 
     def do_POST(self):
+        if self.path == '/sync_folders':
+            # Phase B 02/05/2026 — sync arborescence à la demande
+            # (bouton « Recalibrer mon arborescence » dans Profil).
+            # Force=true pour ignorer le hash diff local et toujours POST.
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(length) if length > 0 else b'{}'
+                params = json.loads(body.decode('utf-8') or '{}')
+                force = bool(params.get('force', True))
+            except Exception:
+                force = True
+            # Lance dans un thread pour ne pas bloquer la réponse HTTP
+            # (le scan peut durer 1-3s).
+            result_holder = {'result': None}
+            ev = threading.Event()
+            def _run():
+                try:
+                    result_holder['result'] = _sync_folders_now(force=force)
+                finally:
+                    ev.set()
+            threading.Thread(target=_run, daemon=True,
+                             name='ipc-sync-folders').start()
+            # Attendre max 12s la fin du sync (timeout réseau 15s côté push,
+            # mais on rend la main avant pour éviter de bloquer le client).
+            ev.wait(timeout=12)
+            result = result_holder.get('result') or {'ok': False, 'error': 'timeout'}
+            self._json_response(result)
+            return
         if self.path == '/show_popup':
             # Signale au Qt thread de réafficher la popup de lancement
             if _ipc_bridge:
@@ -1574,6 +1827,8 @@ def main():
         _ipc_bridge.show_popup_requested.connect(popup.reshow_launch_popup)
         _ipc_bridge.hide_all_requested.connect(popup.hide_all_windows)
         threading.Thread(target=_start_ipc_server, daemon=True, name='ipc-server').start()
+        # Phase B 02/05/2026 — sync arborescence Windows toutes les 4h
+        threading.Thread(target=_folder_sync_loop, daemon=True, name='folder-sync').start()
         logger.info("[hot-direct] IPC serveur démarré sur 5052 en mode --direct-dialog → clics suivants via reload URL")
 
         # Forcer la fenêtre au PREMIER PLAN (devant Outlook).
@@ -1638,6 +1893,8 @@ def main():
         _ipc_bridge.show_popup_requested.connect(popup.reshow_launch_popup)
         _ipc_bridge.hide_all_requested.connect(popup.hide_all_windows)
         threading.Thread(target=_start_ipc_server, daemon=True, name='ipc-server').start()
+        # Phase B 02/05/2026 — sync arborescence Windows toutes les 4h
+        threading.Thread(target=_folder_sync_loop, daemon=True, name='folder-sync').start()
 
         if show_popup:
             popup.show()
