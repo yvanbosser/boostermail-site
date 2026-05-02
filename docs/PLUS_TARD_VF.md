@@ -9,11 +9,27 @@
 > - **✅ Redaction PII logs RGPD** (Phase 4 commit `91b5de1`) — helpers `_hash_email_partial` / `_redact_url_pii` / `_redact_pii_for_log` dans `app_plugin.py`. Route `/api/debug_addin_log` redacte avant écriture sur disque. 7 sites `logger.info` avec emails patchés. Pattern #23 + I-SEC-07.
 > - **✅ Endpoint GDPR Export** (Phase 5 commit `91b5de1+`) — `/api/gdpr/export` lecture seule retourne ZIP/JSON avec toutes les données user (10 tables + metadata). Article 15 + 20 RGPD. Validation prod : 4229 rows / 3.6 MB exportés OK.
 >
-> **🆕 Bugs détectés en autonomie 30/04 PM tardif (à investiguer)** :
-> - **MEDIUM** « Pas de popup de lancement et pas d'overlay » au clic BoosterMail dans Outlook (signal Yvan post-purge cache WebView2). Logs montrent `dialog_js_error: Script error line 0 cross_origin: true` à 12:36:38 UTC. Erreur JS dans le dialog mais cross-origin invisible. Génération marche quand même (Yvan a confirmé). À investiguer : peut-être lié au refactor LEAK #1 (Sessions HTTP class-level) ou Phase 4 PII redaction (changement schema des events `display_dialog_attempt`, `item_changed_fired`, etc. côté autorunshared.js qui peut s'attendre à des champs en clair). Reproductible facilement, à fix au prochain cycle.
+> **🆕 Sujets traités en session 01/05/2026 PM (Yvan retour de fièvre)** :
+> - **✅ #1 Fix dialog onglets** — revert `window.open` vers iframe overlay (commit `eae23e9`). Test `test_dialog_no_window_open_for_dashboard` passe (était SKIP).
+> - **✅ #8 Fix Graph 400** — URL-encode `$search` query, fini les sujets avec `&` `#` `(` qui plantaient (commit `9a01097`).
+> - **✅ #9 Fix 2 threads db-gc** — `_gc_started` + `_all_conns` class-level dans `Database` (commit `7a4f51f`). Validation prod : 1 seul thread db-gc.
+> - **✅ #10 STAND-BY S10 + S11** — webhook ThreadPoolExecutor (max_workers=10) + `_shutdown_event` global (commit `61049bb`). S12 reporté (refactor LRU `_warmup_cache` trop risqué pour gain marginal).
+> - **✅ #6 DPO Yvan Bosser** — désigné dans `legal/POLITIQUE_CONFIDENTIALITE.md`, `MENTIONS_LEGALES.md`, `REGISTRE_TRAITEMENTS.md` (commit `0163445`).
 >
-> **🆕 Nouveau bug détecté en kit audit Phase 2 (autonomie 30/04 PM)** :
-> - **MEDIUM** Graph 400 sur `$search="subject:..."` quand le sujet contient caractères spéciaux (`&`, `#`, `(`, etc.). Cause : Graph interprète `&` comme séparateur QueryString. Symptôme observé sur 3 mails (Surfaces du Cardo, Payment Netlify, Secure your account). Pre-existing, pas dû au refactor LEAK #1. Fix : URL-encoder les caractères dangereux dans le query `$search` côté `outlook_graph.py:search_emails`. Estimé 30 min.
+> **🆕 Sujets en attente côté Yvan (business)** :
+> - **#4 DPA Anthropic** — récupérer via formulaire enterprise. **Bloquant pré-beta payante**.
+> - **#5 Compléter `[À COMPLÉTER]` dans `legal/`** — identité éditeur (forme juridique, SIREN, RCS), siège social, médiateur consommation (si B2C), tribunal compétent.
+> - **#7 Marque INPI BoosterMail** — dépôt ~250€. Recommandé avant beta payante.
+> - **Mailbox `dpo@boostermail.ai`** — créer (ou rediriger vers `contact@`) pour cohérence avec les docs juridiques.
+>
+> **🆕 Sujets reportés (à planifier ensemble)** :
+> - **#11 Découper `app_plugin.py` 11700 lignes** en modules thématiques (`flows/`, `caches/`, `bg/`, `routes/`). Gros chantier ~1 journée, low risk si tests E2E couvrent les 5 flux critiques. Recommandé pré-beta payante pour maintenabilité.
+> - **#12 Préparation soumission AppSource Microsoft** (4-8 semaines validation Microsoft). Pré-requis : marque INPI déposée + 2 docs juridiques publiés (politique de confidentialité + mentions légales) + screenshots add-in.
+> - **STAND-BY S12** : `_warmup_cache` éviction LRU au lieu de FIFO. Refactor du `_UserScopedDict` multi-tenant (22 caches partagés). Gain marginal (1-2s sur vieux mails consultés régulièrement). Reporté car risque de régression > gain.
+> - **STAND-BY S8** : threads `.join(timeout=3)` au shutdown (~1-2s de perte BG max, négligeable). Reporté.
+>
+> **🆕 Bugs déjà résolus 30/04 PM → 01/05 PM** (historique pour mémoire) :
+> - ~~« Pas de popup de lancement et pas d'overlay »~~ ✅ FIX 01/05 : `boostermail_service.py` arrêté (tâche planifiée non re-déclenchée après reboot) + overlay 7 boutons → fix tâche planifiée + overlay strict 3 boutons + popup_pyqt h=70px (commits série 30/04 PM → 01/05 PM, top `e18c7b3`).
 >
 > **Backlog STAND-BY restants 4/12** (décision Yvan 30/04 matin, à traiter si symptômes observables) :
 > - **S8** : threads `.join(timeout=3)` au shutdown (~1-2s perte BG, négligeable)
