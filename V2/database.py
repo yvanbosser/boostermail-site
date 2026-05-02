@@ -23,21 +23,23 @@ def _is_date_token(w):
 
 
 class Database:
+    # Fix 01/05/2026 (signal Yvan : 2 threads db-gc dans /api/admin/db_conns_stats).
+    # Cause : `user_context.py:101` crée une 2e instance Database() pour lire
+    # auth_user_id. Avec _gc_started instance-level, chaque instance lançait
+    # son propre thread db-gc → doublons.
+    # Fix : passer _all_conns + _gc_started en class-level (partagés entre
+    # toutes les instances). Un seul thread db-gc itère sur les conn de
+    # TOUTES les instances. Les conn restent keyed par TID, le GC reste
+    # correct même si plusieurs Database() pointent vers la même DB.
+    _all_conns = {}  # dict[int (TID), sqlite3.Connection] — class-level
+    _all_conns_lock = threading.Lock()
+    _gc_started = False  # class-level : un seul thread db-gc pour le process
+
     def __init__(self, db_path):
         self.db_path = db_path
         self._local = threading.local()
         # Tracker keyed par thread_id pour cleanup runtime des conn
-        # zombies. Le pattern persistent par thread (l.40-51) garde une
-        # conn dans `_local.conn` pour eviter open/close a chaque requete,
-        # mais les ~80 sites `threading.Thread(...).start()` du backend
-        # spawnent des threads daemon transitoires. Quand un thread meurt,
-        # `_local` ne ferme pas la conn => leak FD progressif.
-        # Cf bilan 30/04 : 200 FDs/min observes, saturation LimitNOFILE
-        # en ~1h16. Fix : thread BG `db-gc` ferme toutes les 60s les conn
-        # dont le TID n'est plus vivant.
-        self._all_conns = {}  # dict[int (TID), sqlite3.Connection]
-        self._all_conns_lock = threading.Lock()
-        self._gc_started = False
+        # zombies. Cf commentaire class-level ci-dessus + bilan 30/04 PM.
 
     def _conn(self):
         """Connection persistante par thread (evite open/close a chaque requete)."""
@@ -52,14 +54,18 @@ class Database:
             tid = threading.get_ident()
             old_conn = None
             start_gc = False
-            with self._all_conns_lock:
+            with Database._all_conns_lock:
                 # TID reutilise (rare avec daemon threads CPython, mais
                 # possible) : l'ancienne conn n'est plus accessible via
                 # _local.conn donc on la ferme nous-meme.
-                old_conn = self._all_conns.get(tid)
-                self._all_conns[tid] = conn
-                if not self._gc_started:
-                    self._gc_started = True
+                old_conn = Database._all_conns.get(tid)
+                Database._all_conns[tid] = conn
+                # Note : on ecrit sur la CLASSE (Database._gc_started) et
+                # pas sur self._gc_started, sinon Python creerait un
+                # attribut instance qui shadowe le class-level → bug
+                # 2 threads db-gc si plusieurs Database() instanciees.
+                if not Database._gc_started:
+                    Database._gc_started = True
                     start_gc = True
             if old_conn is not None:
                 try:
@@ -93,10 +99,10 @@ class Database:
         """Un passage de GC. Ferme les conn des TID non vivants."""
         live_tids = {t.ident for t in threading.enumerate()}
         zombies = []
-        with self._all_conns_lock:
-            for tid in list(self._all_conns.keys()):
+        with Database._all_conns_lock:
+            for tid in list(Database._all_conns.keys()):
                 if tid not in live_tids:
-                    zombies.append(self._all_conns.pop(tid))
+                    zombies.append(Database._all_conns.pop(tid))
         for conn in zombies:
             try:
                 conn.close()
@@ -109,13 +115,13 @@ class Database:
         """Ferme TOUTES les connections (tous threads). Pour atexit/shutdown.
         Preserve le pattern persistent en runtime — appelee uniquement au
         shutdown du process via atexit.register dans app_plugin.py."""
-        with self._all_conns_lock:
-            for conn in self._all_conns.values():
+        with Database._all_conns_lock:
+            for conn in Database._all_conns.values():
                 try:
                     conn.close()
                 except Exception:
                     pass
-            self._all_conns = {}
+            Database._all_conns = {}
 
     def init(self):
         conn = sqlite3.connect(self.db_path)
