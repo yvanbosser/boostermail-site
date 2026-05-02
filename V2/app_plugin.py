@@ -2824,6 +2824,43 @@ def _prewarm_unified_for_mail(mid, mail_data):
         if not builder or not hasattr(builder, 'analyze_one_mail_stream'):
             raise Exception('analyze_one_mail_stream non disponible')
 
+        # === Audit Fix A2 (02/05 fin) : idempotence DB cache ===
+        # Si les 3 caches DB sont déjà remplis pour ce mid, restaure la RAM
+        # et skip le commis (économie ~75 appels Haiku par restart).
+        try:
+            _cls_cached = _db.get_mail_classement(mid)
+            _pj_cached = _db.get_mail_pj_classement(mid)
+            _ech_cached = _db.get_mail_echeance(mid)
+            if _cls_cached is not None and _pj_cached is not None and _ech_cached is not None:
+                # Reconstruction RAM cache à partir DB
+                _cs = _cls_cached.get('suggestion')
+                _cls_list = (_cs.get('_suggestions', [_cs])
+                             if isinstance(_cs, dict) and '_suggestions' in _cs
+                             else ([_cs] if _cs else []))
+                _set_mail_preview(mid, 'classement', 'done', {
+                    'suggestion': _cs,
+                    'suggestions': _cls_list,
+                    'source': _cls_cached.get('source', 'none'),
+                })
+                _ps = _pj_cached.get('suggestion')
+                if isinstance(_ps, dict) and 'dest_folder' in _ps and 'folder_path' not in _ps:
+                    _ps = dict(_ps)
+                    _ps['folder_path'] = _ps['dest_folder']
+                _pj_list = (_ps.get('_suggestions', [_ps])
+                            if isinstance(_ps, dict) and '_suggestions' in _ps
+                            else ([_ps] if _ps else []))
+                _set_mail_preview(mid, 'pj_classement', 'done', {
+                    'suggestion': _ps,
+                    'suggestions': _pj_list,
+                    'source': _pj_cached.get('source', 'none'),
+                })
+                _set_mail_preview(mid, 'echeance', 'done',
+                                  _ech_cached.get('echeances', []))
+                logger.debug(f"[unified] cache DB HIT pour {mid[:30]} → skip commis")
+                return
+        except Exception as _e:
+            logger.debug(f"[unified] check DB idempotent: {_e}")
+
         # Skip mail à soi-même (cohérent avec _prewarm_classement_for_mail)
         contact_email = (mail_data.get('from_email', '') or '').lower()
         try:
@@ -2839,8 +2876,35 @@ def _prewarm_unified_for_mail(mid, mail_data):
             try:
                 _db.save_mail_classement(mid, None, 'self')
                 _db.save_mail_pj_classement(mid, None, 'self')
+                _db.save_mail_echeance(mid, [])
             except Exception:
                 pass
+            return
+
+        # === Audit Fix A3 (02/05 fin) : skip mails automatiques ===
+        # Parité avec _prewarm_classement_for_mail : noreply / mailer-daemon
+        # / newsletters → Claude rendrait 'none' presque toujours, économie API.
+        _AUTO_PATTERNS = (
+            'noreply', 'no-reply', 'no_reply',
+            'donotreply', 'do-not-reply', 'do_not_reply',
+            'nepasrepondre', 'ne-pas-repondre', 'ne_pas_repondre',
+            'mailer-daemon', 'postmaster',
+            'notifications@', 'notification@',
+            'newsletter@', 'mailing@',
+        )
+        if contact_email and any(p in contact_email for p in _AUTO_PATTERNS):
+            _set_mail_preview(mid, 'classement', 'done', {
+                'suggestion': None, 'suggestions': [], 'source': 'none_auto_email'})
+            _set_mail_preview(mid, 'pj_classement', 'done', {
+                'suggestion': None, 'suggestions': [], 'source': 'none_auto_email'})
+            _set_mail_preview(mid, 'echeance', 'done', [])
+            try:
+                _db.save_mail_classement(mid, None, 'none_auto_email')
+                _db.save_mail_pj_classement(mid, None, 'none_auto_email')
+                _db.save_mail_echeance(mid, [])
+            except Exception as _e:
+                logger.debug(f"[unified] save auto_email: {_e}")
+            logger.debug(f"[unified] mail automatique détecté ({contact_email}) → skip commis")
             return
 
         # Récupérer le contexte (folders + contact + history)
@@ -2890,6 +2954,15 @@ def _prewarm_unified_for_mail(mid, mail_data):
         mail_suggestions = []
         _seen_mail = set()
 
+        # Audit Fix A14 (02/05 fin) : reason lisible par tier (UX)
+        _TIER_REASONS = {
+            'thread': 'thread déjà classé',
+            'rule': 'classement habituel pour ce contact',
+            'keywords': 'mots-clés du sujet',
+            'domain': 'domaine récurrent',
+            'cross_contact': 'sujet récurrent',
+        }
+
         def _add_mail_sug(sug, source):
             if not sug or not isinstance(sug, dict):
                 return
@@ -2898,6 +2971,8 @@ def _prewarm_unified_for_mail(mid, mail_data):
                 return
             s = dict(sug)
             s['source'] = source
+            if not s.get('reason') and source in _TIER_REASONS:
+                s['reason'] = _TIER_REASONS[source]
             mail_suggestions.append(s)
             _seen_mail.add(fp)
 
@@ -2916,6 +2991,11 @@ def _prewarm_unified_for_mail(mid, mail_data):
         pj_suggestions = []
         _seen_pj = set()
 
+        _TIER_PJ_REASONS = {
+            'rule': 'classement PJ habituel',
+            'keywords': 'mots-clés du sujet',
+        }
+
         def _add_pj_sug(sug, source):
             if not sug or not isinstance(sug, dict):
                 return
@@ -2926,6 +3006,8 @@ def _prewarm_unified_for_mail(mid, mail_data):
             if not fp or fp in _seen_pj or len(pj_suggestions) >= 3:
                 return
             s['source'] = source
+            if not s.get('reason') and source in _TIER_PJ_REASONS:
+                s['reason'] = _TIER_PJ_REASONS[source]
             pj_suggestions.append(s)
             _seen_pj.add(fp)
 

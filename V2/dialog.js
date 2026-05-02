@@ -3171,8 +3171,11 @@ var _classMailFolders = [];
 var _classMailInitialSelectedId = '';
 
 function _normalizeForSearch(s) {
+    // Normalize NFD + strip diacritiques (U+0300..U+036F).
+    // Audit 02/05 fin : escape \u explicite (la regex avec chars bruts est
+    // fragile au copy-paste / transcodeurs ASCII).
     var ss = (s || '').toLowerCase().trim();
-    return ss.normalize ? ss.normalize('NFD').replace(/[̀-ͯ]/g, '') : ss;
+    return ss.normalize ? ss.normalize('NFD').replace(/[\u0300-\u036f]/g, '') : ss;
 }
 
 function _findFolderMatch(folders, query) {
@@ -3349,10 +3352,10 @@ function _buildOutlookFolderTreeHtml(folders, suggestedFolderId) {
         } else {
             var needle = (suggestedFolderId || '').toLowerCase().trim();
             // Strip accents (À classer / A CLASSER / a classer doivent matcher)
-            var needleNorm = needle.normalize ? needle.normalize('NFD').replace(/[̀-ͯ]/g, '') : needle;
+            var needleNorm = needle.normalize ? needle.normalize('NFD').replace(/[\u0300-\u036f]/g, '') : needle;
             for (var ix = 0; ix < folders.length; ix++) {
                 var fname = (folders[ix].name || '').toLowerCase().trim();
-                var fnameNorm = fname.normalize ? fname.normalize('NFD').replace(/[̀-ͯ]/g, '') : fname;
+                var fnameNorm = fname.normalize ? fname.normalize('NFD').replace(/[\u0300-\u036f]/g, '') : fname;
                 if (fnameNorm === needleNorm) {
                     realFolderId = folders[ix].id;
                     pathFound = true;
