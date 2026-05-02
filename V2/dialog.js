@@ -707,6 +707,21 @@ function _shouldShowPjPopup() {
     return _hasAttachments && !_pjChoiceMade && _attachmentsList.length > 0;
 }
 
+/** Helper 02/05/2026 — éditeur a-t-il un contenu réel non placeholder ?
+ * Utilisé par les handlers de la popup PJ pour décider s'il faut regénérer
+ * (cache miss → oui) ou laisser la réponse cachée affichée (cache HIT → non,
+ * la réponse cachée intègre déjà l'analyse PJ côté backend). */
+function _editorHasRealContent() {
+    var editor = document.getElementById('editor');
+    if (!editor) return false;
+    // Placeholder actif → pas de contenu réel
+    if (_progressPlaceholderActive && document.getElementById('progressPlaceholder')) {
+        return false;
+    }
+    var text = (editor.innerText || '').trim();
+    return text.length > 0;
+}
+
 function _showPjAnalysisPopup() {
     var list = document.getElementById('pjAnalysisList');
     list.innerHTML = '';
@@ -744,7 +759,12 @@ function skipPjAnalysis() {
     _pjChoiceMade = true;
     _extractedPjContext = '';
     _closePjOverlay();
-    // Continuer la génération
+    // Décision Yvan 02/05/2026 : si une réponse cachée est déjà affichée
+    // (instant_reply HIT déclenché en parallèle de la popup PJ proactive),
+    // on ne regénère PAS. La réponse cachée intègre déjà l'analyse PJ
+    // côté backend.
+    if (_editorHasRealContent()) return;
+    // Sinon (cache miss) : continuer le flow normal de génération
     generateReply();
 }
 
@@ -764,6 +784,8 @@ async function acceptPjAnalysis() {
 
     if (selected.length === 0) {
         _closePjOverlay();
+        // Décision Yvan 02/05/2026 : idem skipPjAnalysis (cf. helper ci-dessous).
+        if (_editorHasRealContent()) return;
         generateReply();
         return;
     }
@@ -880,10 +902,14 @@ async function acceptPjAnalysis() {
 }
 
 function _onPjValidate() {
-    /** Clic « Valider et générer » : ferme la popup et lance generate. */
+    /** Clic « Valider et générer » : ferme la popup et lance generate.
+     * Décision Yvan 02/05/2026 : si une réponse cachée est déjà affichée
+     * (instant_reply HIT pendant l'extraction PJ), on ne regénère PAS —
+     * la réponse cachée intègre déjà l'analyse PJ côté backend. */
     var validateRow = document.getElementById('pj-validate-row');
     if (validateRow) validateRow.remove();
     _closePjOverlay();
+    if (_editorHasRealContent()) return;
     generateReply();
 }
 
@@ -1542,6 +1568,19 @@ function _renderAttachments(attachments) {
             resumePJList.appendChild(chip);
         });
         resumePJ.style.display = hasPJ ? 'block' : 'none';
+    }
+
+    // D\u00E9cision Yvan 02/05/2026 : afficher la popup PJ proactivement \u00E0
+    // l'ouverture du dialog d\u00E8s que les attachments sont charg\u00E9s, M\u00CAME si
+    // la r\u00E9ponse a \u00E9t\u00E9 servie depuis le cache (instant_reply HIT).
+    // Objectif UX : informer l'user que BoosterMail a d\u00E9tect\u00E9 les PJ et
+    // qu'il peut les analyser \u2014 montre la puissance du produit. Quel que
+    // soit le clic Oui/Non, la r\u00E9ponse cach\u00E9e s'affiche derri\u00E8re (elle
+    // int\u00E8gre d\u00E9j\u00E0 l'analyse PJ c\u00F4t\u00E9 backend).
+    // Conditions : mode reply (forward a sa propre popup), pas encore
+    // choisi, au moins une PJ non-inline visible.
+    if (_mode === 'reply' && !_pjChoiceMade && pjList.children.length > 0) {
+        _showPjAnalysisPopup();
     }
 }
 
@@ -2323,6 +2362,14 @@ function refineReply() {
                             var last = JSON.parse(_lineBufferRefine.substring(6));
                             if (last.chunk) {
                                 if (_progressPlaceholderActive) _clearProgressPlaceholder();
+                                // Fix 02/05/2026 (signal Yvan : doublon Bonjour/Cdlt sur
+                                // refine d'un mail déjà en cache) : même garde anti-doublon
+                                // que dans _fetchGenerateReply (cas SSE court terminé en
+                                // 1 read, current_reply non vidé).
+                                if (streamedText === '') {
+                                    editor.innerHTML = '';
+                                    _progressPlaceholderActive = false;
+                                }
                                 editor.insertAdjacentText('beforeend', last.chunk);
                                 streamedText += last.chunk;
                             }
@@ -2343,6 +2390,16 @@ function refineReply() {
                             if (data.chunk) {
                                 if (_progressPlaceholderActive) _clearProgressPlaceholder();
                                 document.getElementById('genSpinner').classList.remove('active');
+                                // Fix 02/05/2026 (signal Yvan : doublon Bonjour/Cdlt sur
+                                // refine d'un mail déjà en cache) : au 1er chunk, garantir
+                                // un editor vide indépendamment du flag placeholder. Le
+                                // backend renvoie une réponse COMPLÈTE (pas un diff),
+                                // donc l'editor doit partir d'un état propre. Symétrique
+                                // au fix _fetchGenerateReply (30/04 PM).
+                                if (streamedText === '') {
+                                    editor.innerHTML = '';
+                                    _progressPlaceholderActive = false;
+                                }
                                 editor.insertAdjacentText('beforeend', data.chunk);
                                 streamedText += data.chunk;
                             }
