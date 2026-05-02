@@ -3884,6 +3884,32 @@ def api_auth_issue_token():
 _GRAPH_WEBHOOKS_NOTIFICATION_URL = 'https://api.boostermail.ai/api/webhooks/graph'
 
 
+# STAND-BY S10 (01/05/2026) — ThreadPoolExecutor partagé pour traiter les
+# notifications webhooks Graph. Avant : 1 thread daemon spawné PAR notif.
+# Si Microsoft envoie une rafale (sync mailbox, restoration), on créait
+# des centaines de threads transitoires en quelques secondes.
+# Après : pool avec max_workers=10 → bornage strict du parallélisme.
+# Cleanup au shutdown via atexit.
+_webhook_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=10,
+    thread_name_prefix='webhook',
+)
+atexit.register(lambda: _webhook_executor.shutdown(wait=False, cancel_futures=True))
+
+
+# STAND-BY S11 (01/05/2026) — signal d'arrêt global pour les boucles BG.
+# Aujourd'hui les 7 boucles `while True:` (cont-spec, cache-cohesion,
+# reply-cache-sn, etc.) sont toutes en daemon=True donc killées
+# brutalement au shutdown du process. Le gain pratique d'un shutdown
+# propre est marginal (pas de travail BG critique en cours).
+# On définit l'infrastructure ici pour qu'une future refacto puisse
+# brancher progressivement les boucles. Au shutdown, l'event est setté
+# automatiquement → les boucles qui CHECKENT cet event peuvent quitter
+# proprement avant le kill daemon.
+_shutdown_event = threading.Event()
+atexit.register(_shutdown_event.set)
+
+
 @app.route('/api/webhooks/graph', methods=['POST'])
 def api_webhooks_graph():
     """Receiver des notifications Microsoft Graph webhooks.
@@ -3927,12 +3953,10 @@ def api_webhooks_graph():
 
     # Pour chaque mail créé : récupérer via Graph + déclencher _run_prefetch
     # (le pré-génération existant qui peuple _reply_cache + _prefetch_cache).
-    threading.Thread(
-        target=_handle_graph_webhook_notifications,
-        args=(valid_ids,),
-        daemon=True,
-        name='graph-webhook-handler',
-    ).start()
+    # STAND-BY S10 (01/05/2026) — utiliser ThreadPoolExecutor partagé au lieu
+    # d'un nouveau thread par notification. Évite spawn massif si Microsoft
+    # envoie une rafale de notifs (sync initial, restoration mailbox).
+    _webhook_executor.submit(_handle_graph_webhook_notifications, valid_ids)
 
     return jsonify({"status": "ok", "queued": len(valid_ids)}), 200
 
