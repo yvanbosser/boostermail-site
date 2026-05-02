@@ -3107,9 +3107,13 @@ function _showClassMailPopup(suggestion, folders, mode) {
     // popup PJ) : se déroule UNIQUEMENT sur le chemin de la suggestion
     // principale, frères repliés, branches hors chemin cachées. Highlight
     // bleu sur la row de la suggestion. Délégué à _buildOutlookFolderTreeHtml.
+    // 02/05 fin : on stocke folders globalement pour la recherche live.
+    _classMailFolders = folders || [];
+    _classMailInitialSelectedId = _selectedFolderId || '';
     if (folders && folders.length > 0) {
         var treeHtml = _buildOutlookFolderTreeHtml(folders, _selectedFolderId);
         var treeEl = document.getElementById('classMailTree');
+        treeEl.style.display = '';
         treeEl.innerHTML = treeHtml;
 
         // Scroll auto vers la row de la suggestion principale (déjà highlightée
@@ -3160,20 +3164,79 @@ function _showClassMailPopup(suggestion, folders, mode) {
 // active le bouton "Classer ici" qui passera en mode manual_classify.
 var _selectedFolderManualPath = '';
 
+// 02/05 fin — Recherche live (signal Yvan) : si l'input matche un dossier
+// existant → arbo affichée + row bleue sur le match. Sinon → arbo cachée
+// (mode création nouveau dossier).
+var _classMailFolders = [];
+var _classMailInitialSelectedId = '';
+
+function _normalizeForSearch(s) {
+    var ss = (s || '').toLowerCase().trim();
+    return ss.normalize ? ss.normalize('NFD').replace(/[̀-ͯ]/g, '') : ss;
+}
+
+function _findFolderMatch(folders, query) {
+    if (!folders || !folders.length || !query) return null;
+    var qNorm = _normalizeForSearch(query);
+    if (!qNorm) return null;
+    var i;
+    // Priorité 1 : match exact sur name
+    for (i = 0; i < folders.length; i++) {
+        if (_normalizeForSearch(folders[i].name) === qNorm) return folders[i];
+    }
+    // Priorité 2 : starts with
+    for (i = 0; i < folders.length; i++) {
+        if (_normalizeForSearch(folders[i].name).indexOf(qNorm) === 0) return folders[i];
+    }
+    // Priorité 3 : contains
+    for (i = 0; i < folders.length; i++) {
+        if (_normalizeForSearch(folders[i].name).indexOf(qNorm) !== -1) return folders[i];
+    }
+    return null;
+}
+
 function _onManualPathInput(e) {
     var val = (e && e.target && e.target.value || '').trim();
     var btn = document.getElementById('btnClassMail');
-    if (val.length > 0) {
-        _selectedFolderManualPath = val;
-        _selectedFolderId = '';  // mode manual prend le pas
-        // Highlight off (arbo/suggestion/alternative neutralisées) — étape 2'
-        document.querySelectorAll('.em-folder-item, .em-folder-suggestion, .em-folder-alternative').forEach(function(el) {
+    var treeEl = document.getElementById('classMailTree');
+
+    if (val.length === 0) {
+        // Vide : restaure l'état initial (suggestion principale)
+        _selectedFolderManualPath = '';
+        _selectedFolderId = _classMailInitialSelectedId || '';
+        if (treeEl && _classMailFolders.length > 0) {
+            treeEl.style.display = '';
+            treeEl.innerHTML = _buildOutlookFolderTreeHtml(
+                _classMailFolders, _classMailInitialSelectedId);
+        }
+        if (btn) btn.disabled = (_selectedFolderId ? false : true);
+        return;
+    }
+
+    _selectedFolderManualPath = val;
+    var match = _findFolderMatch(_classMailFolders, val);
+
+    if (match) {
+        // Match arbo : highlight bleu + row visible + scroll
+        _selectedFolderId = match.id;
+        _selectedFolderManualPath = '';  // arbo l'emporte
+        if (treeEl) {
+            treeEl.style.display = '';
+            treeEl.innerHTML = _buildOutlookFolderTreeHtml(_classMailFolders, match.id);
+            var sel = treeEl.querySelector('.em-folder-item.selected');
+            if (sel && sel.scrollIntoView) {
+                sel.scrollIntoView({ block: 'center', behavior: 'auto' });
+            }
+        }
+        if (btn) btn.disabled = false;
+    } else {
+        // Pas de match : mode création — arbo cachée, highlight neutralisé
+        _selectedFolderId = '';
+        if (treeEl) treeEl.style.display = 'none';
+        document.querySelectorAll('#popupClassMail .em-folder-item, #popupClassMail .em-folder-suggestion, #popupClassMail .em-folder-alternative').forEach(function(el) {
             el.classList.remove('selected');
         });
         if (btn) btn.disabled = false;
-    } else {
-        _selectedFolderManualPath = '';
-        if (btn) btn.disabled = (_selectedFolderId ? false : true);
     }
 }
 
@@ -3770,7 +3833,10 @@ function _showClassPJPopup(pjData, mode) {
     // Étape 02/05 PM tardif (signal Yvan) — l'arbo se déroule UNIQUEMENT
     // sur le chemin de la suggestion principale. _buildPJFolderTreeHtml
     // reçoit le path principal pour calculer le filtrage.
+    // 02/05 fin : on stocke folders globalement pour la recherche live.
     var folders = pjData.folders || [];
+    _classPJFolders = folders;
+    _classPJInitialSelectedPath = initialSelectedPath || '';
     if (folders.length > 0) {
         // Path principal = celui de la suggestion top 1 (ou _selectedPJFolderPath
         // si déjà initialisé via pré-envoi user)
@@ -3783,8 +3849,10 @@ function _showClassPJPopup(pjData, mode) {
         if (initialSelectedPath) {
             mainPathForTree = initialSelectedPath;
         }
+        if (!_classPJInitialSelectedPath) _classPJInitialSelectedPath = mainPathForTree;
         var treeHtml = _buildPJFolderTreeHtml(folders, mainPathForTree);
         var treeEl = document.getElementById('classPJTree');
+        treeEl.style.display = '';
         treeEl.innerHTML = treeHtml;
 
         // Étape 3'' — Scroll auto vers la suggestion (parallèle mail)
@@ -4036,19 +4104,86 @@ function _togglePJFolderChildren(event, parentRow) {
 // Désactive sélection arbo/suggestion + active btnClassPJ. Au confirm,
 // le Companion local crée le dossier sous pj_root_folder s'il n'existe
 // pas (os.makedirs exist_ok=True déjà géré).
+// 02/05 fin — Recherche live PJ (parallèle popup mail)
+var _classPJFolders = [];
+var _classPJInitialSelectedPath = '';
+
+function _findPJFolderMatch(folders, query) {
+    if (!folders || !folders.length || !query) return null;
+    var qNorm = _normalizeForSearch(query);
+    if (!qNorm) return null;
+    var i;
+    // Priorité 1 : path complet exact (ex: "Madame Truc/Factures")
+    for (i = 0; i < folders.length; i++) {
+        if (_normalizeForSearch(folders[i].path) === qNorm) return folders[i];
+    }
+    // Priorité 2 : name exact
+    for (i = 0; i < folders.length; i++) {
+        if (_normalizeForSearch(folders[i].name) === qNorm) return folders[i];
+    }
+    // Priorité 3 : path starts with
+    for (i = 0; i < folders.length; i++) {
+        if (_normalizeForSearch(folders[i].path).indexOf(qNorm) === 0) return folders[i];
+    }
+    // Priorité 4 : name starts with
+    for (i = 0; i < folders.length; i++) {
+        if (_normalizeForSearch(folders[i].name).indexOf(qNorm) === 0) return folders[i];
+    }
+    // Priorité 5 : path contains
+    for (i = 0; i < folders.length; i++) {
+        if (_normalizeForSearch(folders[i].path).indexOf(qNorm) !== -1) return folders[i];
+    }
+    return null;
+}
+
 function _onManualPJPathInput(e) {
     var val = (e && e.target && e.target.value || '').trim();
     var btn = document.getElementById('btnClassPJ');
-    if (val.length > 0) {
-        _selectedPJFolderManualPath = val;
-        _selectedPJFolderPath = '';  // mode manual prend le pas
+    var treeEl = document.getElementById('classPJTree');
+
+    if (val.length === 0) {
+        // Vide : restaure état initial (suggestion principale)
+        _selectedPJFolderManualPath = '';
+        _selectedPJFolderPath = _classPJInitialSelectedPath || '';
+        if (treeEl && _classPJFolders.length > 0) {
+            treeEl.style.display = '';
+            treeEl.innerHTML = _buildPJFolderTreeHtml(
+                _classPJFolders, _classPJInitialSelectedPath);
+        }
+        if (btn) btn.disabled = (_selectedPJFolderPath ? false : true);
+        return;
+    }
+
+    _selectedPJFolderManualPath = val;
+    var match = _findPJFolderMatch(_classPJFolders, val);
+
+    if (match) {
+        // Match arbo : highlight bleu + row visible + scroll
+        _selectedPJFolderPath = match.path;
+        _selectedPJFolderManualPath = '';  // arbo l'emporte
+        if (treeEl) {
+            treeEl.style.display = '';
+            treeEl.innerHTML = _buildPJFolderTreeHtml(_classPJFolders, match.path);
+            var rows = treeEl.querySelectorAll('.em-folder-item');
+            for (var ri = 0; ri < rows.length; ri++) {
+                if (rows[ri].getAttribute('data-folder-path') === match.path) {
+                    rows[ri].classList.add('selected');
+                    if (rows[ri].scrollIntoView) {
+                        rows[ri].scrollIntoView({ block: 'center', behavior: 'auto' });
+                    }
+                    break;
+                }
+            }
+        }
+        if (btn) btn.disabled = false;
+    } else {
+        // Pas de match : mode création — arbo cachée, highlight neutralisé
+        _selectedPJFolderPath = '';
+        if (treeEl) treeEl.style.display = 'none';
         document.querySelectorAll('#popupClassPJ .em-folder-item, #popupClassPJ .em-folder-suggestion, #popupClassPJ .em-folder-alternative').forEach(function(el) {
             el.classList.remove('selected');
         });
         if (btn) btn.disabled = false;
-    } else {
-        _selectedPJFolderManualPath = '';
-        if (btn) btn.disabled = (_selectedPJFolderPath ? false : true);
     }
 }
 
