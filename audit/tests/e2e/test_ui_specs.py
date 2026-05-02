@@ -202,13 +202,12 @@ def test_dialog_no_window_open_for_dashboard():
     )
     if fn_match:
         fn_body = fn_match.group(1)
-        if 'window.open(' in fn_body:
-            pytest.skip(
-                "REGRESSION CONNUE : _openDashboard utilise window.open() "
-                "au lieu de l'iframe overlay. À fixer (cf bilan autonomie "
-                "30/04 PM + ui_design_specs.md). Test passé en SKIP en "
-                "attendant le fix pour ne pas bloquer la CI."
-            )
+        assert 'window.open(' not in fn_body, (
+            "REGRESSION : _openDashboard utilise window.open(). "
+            "Yvan a tranché 01/05/2026 : iframe overlay au-dessus du dialog "
+            "uniquement. window.open() = fenêtre browser détachée = mauvais UX. "
+            "Cf ui_design_specs.md."
+        )
 
 
 # =============================================================================

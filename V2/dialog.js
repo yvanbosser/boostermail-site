@@ -3094,42 +3094,19 @@ function _showSuccessOverlay() {
 // Le brouillon en cours est préservé (overlay z-index:200 par-dessus).
 
 function _openDashboard(view) {
-    /** Ouvre la page dashboard dans une nouvelle fenêtre browser centrée
-     * (style proto). view ∈ {'profile', 'contacts', 'echeances'}.
+    /** Affiche le dashboard (Profil/Contacts/Échéances) dans un overlay
+     * iframe AU-DESSUS du dialog principal. view ∈ {'profile', 'contacts', 'echeances'}.
      *
-     * Refonte 30/04 PM (signal Yvan) : avant on chargeait dans une iframe
-     * overlay du dialog (taskpane à droite, contraint par la zone Outlook).
-     * Maintenant : `window.open()` → nouvelle fenêtre browser plein-écran,
-     * comme le proto port 5050 où chaque vue était une page autonome.
-     * Fallback : si window.open est bloqué (CSP, popup blocker), on
-     * retombe sur l'overlay iframe in-place. */
+     * Décision Yvan 01/05/2026 — REVERT du commit ec6d009 (window.open).
+     * L'ancienne implémentation iframe overlay au-dessus du dialog est
+     * la bonne UX. Le window.open ouvrait une fenêtre browser détachée,
+     * gênante en pratique. */
     var VALID_VIEWS = {'profile': 1, 'contacts': 1, 'echeances': 1};
     if (!VALID_VIEWS[view]) {
         console.warn('[dashboard] view non autorisée :', view);
         return;
     }
 
-    var url = _backendUrl + '/plugin/' + view;
-    var winName = 'boostermail_dashboard_' + view;
-    // Tente d'ouvrir une nouvelle fenêtre centrée (~80% écran).
-    var w = Math.min(1200, (screen.availWidth || 1200) - 80);
-    var h = Math.min(800, (screen.availHeight || 800) - 80);
-    var x = ((screen.availWidth || 1200) - w) / 2;
-    var y = ((screen.availHeight || 800) - h) / 2;
-    var features = 'width=' + w + ',height=' + h + ',left=' + x + ',top=' + y +
-                   ',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no';
-    var newWin = null;
-    try {
-        newWin = window.open(url, winName, features);
-        if (newWin) {
-            newWin.focus();
-            return;
-        }
-    } catch (e) {
-        // window.open peut throw en context Office strict — fallback overlay.
-    }
-
-    // Fallback overlay iframe (ancien comportement) si window.open bloqué.
     var titles = {
         'profile':   '👤 Profil',
         'contacts':  '📑 Contacts',
@@ -3137,10 +3114,12 @@ function _openDashboard(view) {
     };
     var titleEl = document.getElementById('dashboardTitle');
     if (titleEl) titleEl.textContent = titles[view] || 'Tableau de bord';
+
     var frame = document.getElementById('dashboardFrame');
     var overlay = document.getElementById('dashboardOverlay');
     if (!frame || !overlay) return;
-    frame.src = url;
+
+    frame.src = _backendUrl + '/plugin/' + view;
     overlay.style.display = 'block';
 }
 
