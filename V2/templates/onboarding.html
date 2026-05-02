@@ -593,12 +593,20 @@
                     </g>
                     <!-- Bouton BoosterMail mis en évidence -->
                     <rect x="284" y="6" width="64" height="48" rx="5" fill="#fff" stroke="#0F6CBD" stroke-width="2.5"/>
-                    <!-- Logo fusée stylisé -->
-                    <g transform="translate(316, 22)">
-                        <circle cx="0" cy="0" r="11" fill="#0F6CBD"/>
-                        <path d="M 0,-6 L -3,3 L 3,3 Z" fill="white"/>
-                        <path d="M -3,3 L -5,5 L -1,4 Z" fill="#ffa500"/>
-                        <path d="M 3,3 L 5,5 L 1,4 Z" fill="#ffa500"/>
+                    <!-- Logo fusée stylisé (corps blanc, pointe rouge, hublots bleus, ailerons rouges, flamme orange) -->
+                    <g transform="translate(316, 24)">
+                        <!-- Pointe rouge -->
+                        <path d="M -5,-7 L 0,-14 L 5,-7 Z" fill="#e74c3c"/>
+                        <!-- Corps blanc -->
+                        <path d="M -5,-7 L 5,-7 L 5,7 L -5,7 Z" fill="#ecf0f1" stroke="#bdc3c7" stroke-width="0.4"/>
+                        <!-- Hublot bleu -->
+                        <circle cx="0" cy="-2" r="2.5" fill="#3498db" stroke="#2980b9" stroke-width="0.4"/>
+                        <!-- Ailerons rouges -->
+                        <path d="M -5,4 L -8,9 L -5,8 Z" fill="#e74c3c"/>
+                        <path d="M 5,4 L 8,9 L 5,8 Z" fill="#e74c3c"/>
+                        <!-- Flamme orange -->
+                        <path d="M -3,8 L 0,13 L 3,8 Z" fill="#f39c12"/>
+                        <path d="M -1.5,9 L 0,11 L 1.5,9 Z" fill="#f1c40f"/>
                     </g>
                     <text x="316" y="48" text-anchor="middle" fill="#0F6CBD" font-family="Segoe UI" font-size="9" font-weight="700">BoosterMail</text>
                     <!-- Flèche -->
@@ -637,9 +645,14 @@
                     </g>
                     <!-- Bouton BoosterMail mis en évidence -->
                     <rect x="248" y="54" width="80" height="24" rx="4" fill="#fff" stroke="#0F6CBD" stroke-width="2.5"/>
+                    <!-- Logo fusée stylisé (version mini pour barre d'actions) -->
                     <g transform="translate(263, 66)">
-                        <circle cx="0" cy="0" r="7" fill="#0F6CBD"/>
-                        <path d="M 0,-4 L -2,2 L 2,2 Z" fill="white"/>
+                        <path d="M -3,-4 L 0,-8 L 3,-4 Z" fill="#e74c3c"/>
+                        <path d="M -3,-4 L 3,-4 L 3,4 L -3,4 Z" fill="#ecf0f1" stroke="#bdc3c7" stroke-width="0.3"/>
+                        <circle cx="0" cy="-1" r="1.5" fill="#3498db"/>
+                        <path d="M -3,2 L -5,5 L -3,4.5 Z" fill="#e74c3c"/>
+                        <path d="M 3,2 L 5,5 L 3,4.5 Z" fill="#e74c3c"/>
+                        <path d="M -2,5 L 0,8 L 2,5 Z" fill="#f39c12"/>
                     </g>
                     <text x="288" y="70" fill="#0F6CBD" font-family="Segoe UI" font-size="10" font-weight="700">BoosterMail</text>
                     <!-- Flèche -->
