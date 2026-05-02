@@ -294,15 +294,40 @@
             <div class="imp-saved" id="imp-saved">Sauvegarde !</div>
         </div>
 
-        <!-- Dossier racine PJ -->
-        <div class="section-title">Classement des pieces jointes</div>
+        <!-- 📁 Pièces jointes (refonte 02/05/2026 — sous-titre dynamique + bouton Recalibrer) -->
+        <div class="section-title">📁 Pièces jointes</div>
         <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:24px;">
-            <div style="font-size:13px;color:#666;margin-bottom:8px;">Dossier racine pour le classement des PJ dans l'explorateur Windows :</div>
-            <input type="text" id="pj-root-folder" value="{{ pj_root_folder | e }}"
-                   style="width:100%;padding:8px 12px;border:1px solid #e0e0e0;border-radius:6px;font-size:13px;box-sizing:border-box;font-family:monospace;"
-                   onblur="savePjRootFolder(this.value)">
-            <div id="pj-root-saved" style="display:none;color:#4caf50;font-size:12px;margin-top:4px;">Sauvegarde !</div>
+            <!-- Sous-titre dynamique : alimenté par /api/windows_folders/status -->
+            <div id="pj-status-line" style="font-size:13px;color:#666;margin-bottom:14px;">
+                <span id="pj-status-text">Chargement…</span>
+            </div>
+
+            <!-- Bouton Recalibrer -->
+            <button id="pj-recalibrate-btn"
+                    onclick="recalibrateFolders()"
+                    style="background:#0F6CBD;color:white;border:none;border-radius:6px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 1px 3px rgba(15,108,189,0.3);transition:background 0.15s;">
+                🔄 Recalibrer mon arborescence
+            </button>
+            <span id="pj-recalibrate-spinner" style="display:none;margin-left:10px;font-size:12px;color:#666;">
+                <span style="display:inline-block;width:10px;height:10px;border:2px solid #ddd;border-top-color:#0F6CBD;border-radius:50%;animation:pj-spin 0.6s linear infinite;vertical-align:middle;"></span>
+                Synchronisation en cours…
+            </span>
+
+            <!-- Dossier principal (path Windows configurable) -->
+            <div style="margin-top:18px;padding-top:14px;border-top:1px solid #f0f0f0;">
+                <div style="font-size:12px;color:#888;margin-bottom:6px;">Dossier principal de classement :</div>
+                <input type="text" id="pj-root-folder" value="{{ pj_root_folder | e }}"
+                       style="width:100%;padding:8px 12px;border:1px solid #e0e0e0;border-radius:6px;font-size:12px;box-sizing:border-box;font-family:monospace;color:#444;"
+                       onblur="savePjRootFolder(this.value)">
+                <div id="pj-root-saved" style="display:none;color:#4caf50;font-size:11px;margin-top:4px;">Enregistré ✓</div>
+                <div style="font-size:11px;color:#999;margin-top:4px;">Le dossier qui contient toutes vos catégories. BoosterMail explorera ses sous-dossiers.</div>
+            </div>
         </div>
+        <style>
+        @keyframes pj-spin { to { transform: rotate(360deg); } }
+        #pj-recalibrate-btn:hover { background: #0d5ca3 !important; }
+        #pj-recalibrate-btn:disabled { background: #ccc !important; cursor: not-allowed; }
+        </style>
 
         <!-- Signature marketing -->
         <div class="section-title">Signature BoosterMail</div>
@@ -599,6 +624,101 @@
                 setTimeout(function() { el.style.display = 'none'; }, 2000);
             });
         }
+
+        // === Phase C 02/05/2026 — UI section Pièces jointes ===
+
+        // Charge le statut de l'arborescence depuis OVH et alimente le sous-titre dynamique
+        function loadFolderStatus() {
+            fetch('/api/windows_folders/status')
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    var el = document.getElementById('pj-status-text');
+                    var btn = document.getElementById('pj-recalibrate-btn');
+                    if (!el) return;
+                    if (!d.synced) {
+                        el.innerHTML = '⚠️ <strong>Aucune arborescence détectée</strong> — recalibrez maintenant pour activer le classement automatique';
+                        el.style.color = '#c62828';
+                        if (btn) btn.disabled = false;
+                        return;
+                    }
+                    var icon = '✓';
+                    var color = '#2e7d32';
+                    if (d.freshness === 'stale') { icon = '⚠️'; color = '#e65100'; }
+                    else if (d.freshness === 'recent') { icon = 'ℹ️'; color = '#666'; }
+                    el.innerHTML = icon + ' <strong>' + d.count + ' dossiers détectés</strong> '
+                                 + '• synchronisé ' + (d.synced_at_human || '');
+                    el.style.color = color;
+                    if (btn) btn.disabled = false;
+                })
+                .catch(function() {
+                    var el = document.getElementById('pj-status-text');
+                    if (el) {
+                        el.textContent = '⚠️ Impossible de charger le statut. Réessayez.';
+                        el.style.color = '#c62828';
+                    }
+                });
+        }
+
+        // Bouton « Recalibrer mon arborescence » : appelle le companion local sur 5052
+        function recalibrateFolders() {
+            var btn = document.getElementById('pj-recalibrate-btn');
+            var spinner = document.getElementById('pj-recalibrate-spinner');
+            var statusEl = document.getElementById('pj-status-text');
+            btn.disabled = true;
+            spinner.style.display = 'inline';
+            statusEl.innerHTML = '🔄 <strong>Synchronisation en cours…</strong>';
+            statusEl.style.color = '#0F6CBD';
+
+            // Appel direct au companion local (port 5052). Limite 25s pour le scan.
+            var ctrl = new AbortController();
+            var timer = setTimeout(function() { ctrl.abort(); }, 25000);
+            fetch('http://127.0.0.1:5052/sync_folders', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ force: true }),
+                signal: ctrl.signal,
+            })
+            .then(function(r) { clearTimeout(timer); return r.json(); })
+            .then(function(d) {
+                spinner.style.display = 'none';
+                if (d.ok) {
+                    // Le sync a réussi — refresh le sous-titre depuis OVH (vérité)
+                    setTimeout(loadFolderStatus, 500);
+                } else {
+                    // Erreur : afficher le message
+                    var msg = '⚠️ Échec de la synchronisation';
+                    if (d.error === 'no_root_path') {
+                        msg = '⚠️ Configurez d\'abord le dossier principal ci-dessous, puis recalibrez';
+                    } else if (d.error === 'scan_timeout') {
+                        msg = '⚠️ Le scan a pris trop de temps. Vérifiez que OneDrive est synchronisé.';
+                    } else if (d.error === 'sync_in_progress') {
+                        msg = 'ℹ️ Une synchronisation est déjà en cours, patientez quelques secondes';
+                    } else if (d.error) {
+                        msg = '⚠️ Erreur : ' + d.error;
+                    }
+                    statusEl.innerHTML = msg;
+                    statusEl.style.color = '#c62828';
+                    btn.disabled = false;
+                }
+            })
+            .catch(function(err) {
+                clearTimeout(timer);
+                spinner.style.display = 'none';
+                btn.disabled = false;
+                var msg = '⚠️ Le service local BoosterMail n\'est pas joignable. Vérifiez qu\'il est lancé.';
+                if (err.name === 'AbortError') {
+                    msg = '⚠️ Délai dépassé (>25s). Réessayez.';
+                }
+                statusEl.innerHTML = msg;
+                statusEl.style.color = '#c62828';
+            });
+        }
+
+        // Charger le statut au chargement de la page (et toutes les 30s)
+        document.addEventListener('DOMContentLoaded', function() {
+            loadFolderStatus();
+            setInterval(loadFolderStatus, 30000);
+        });
 
         // Relancer l'analyse
         function toggleStyle() {
