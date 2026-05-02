@@ -1,6 +1,26 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 02/05/2026 fin de journée (3 axes session : rattrapage Workflow 7 + récupération session parallèle Yvan + 4 étapes classement « top 3 + popup pré-envoi cliquable » greffées par-dessus l'arbo chevrons d'Yvan, déployées sur OVH ; bilan complet [`OUTLOOK_BILAN_SESSION_20260502_3axes.md`](sessions/OUTLOOK_BILAN_SESSION_20260502_3axes.md))
+> **Dernière mise à jour** : 02/05/2026 fin de soirée (session continuée après le bilan 3 axes : refonte **Cuisinier+Commis** unifiée + **Tier DB prioritaire** + **top 3 boulettes** + **barre de recherche live** + audit complet 4 anomalies fixées ; bilan complet [`OUTLOOK_BILAN_SESSION_20260502_soiree.md`](sessions/OUTLOOK_BILAN_SESSION_20260502_soiree.md))
+>
+> **🆕 Sujets traités session 02/05/2026 fin de soirée (~21 commits)** :
+> - **✅ Cuisinier + Commis** (commits `d6043ab` `00971ee`) — 5 appels Haiku (résumé + échéance + folder mail + folder PJ + draft) ramenés à 1 appel Haiku unifié `analyze_one_mail_stream` qui produit P/A/E/F/J en multi-output streaming. Économie ~75% appels Haiku. Fallback automatique sur les 3 sub-prewarms originaux si erreur.
+> - **✅ Robustesse IMID** (commits `4090c32` `67e3eb2`) — gardes `_is_canonical_imid()` dans `save_mail_*()` + `get_attachment_content` résout IMID → Entry ID (fix bug Devoteam : commis recevait `pj_text=0c`).
+> - **✅ Arbo classement déroulée** (commits `15aa922` `a1f732e` `bb6771a` `bb5efd3` `31181f7`) — algo depth-based : se déroule UNIQUEMENT sur le chemin de la suggestion principale, frères repliés, branches hors chemin cachées, highlight bleu sur la row. Matching tolérant préfixes numériques + name fallback. Symétrique mail/PJ.
+> - **✅ Désambiguïsation Tier DB** (commit `787fc12`) — bug Yvan : 100 SCI avec sous-dossier "Administratif" chacune → le commis pioche au hasard. Fix : restaurer Tier 0/1/1bis/3a/3b avant la sortie commis. Règles DB tranchent via l'ID Graph cryptique exact.
+> - **✅ Top 3 suggestions** (commit `641301a`) — accumulation jusqu'à 3 suggestions sans doublons (par folder_path) à travers tous les tiers + sortie commis. Frontend déjà capable d'afficher les boulettes alternatives, c'est le backend qui ne renvoyait qu'1 suggestion.
+> - **✅ Barre de recherche live** (commit `7de4997`) — input "Rechercher ou créer un dossier" double rôle : match arbo (case+accent insensitive) → row bleue + scroll auto, pas de match → arbo cachée mode création. Symétrique mail/PJ.
+> - **✅ Audit complet** (commits `ccdf06f` `bbea1f7`) — 4 anomalies fixées :
+>   - **A2 HIGH** : `_prewarm_unified_for_mail` ne checkait pas DB cache → ~75 appels Haiku gaspillés par restart. Validation prod : 63 mails → 0 appel commis.
+>   - **A3 HIGH** : pas de skip noreply / mailer-daemon (parité comportement)
+>   - **A1 LOW** : regex normalize chars Unicode bruts → escape `̀-ͯ` explicite (3 occurrences corrigées)
+>   - **A14 LOW** : reason lisible par tier DB pour boulettes alternatives
+>
+> Cache busting bumpé : `dialog.js v50 → v51-audit-fixes`.
+> **Test côté Yvan attendu** : popup classement avec top 3 boulettes alternatives (`reason` lisible visible), recherche live qui highlighte bleu sur match dans l'arbo, vérification désambiguïsation 100 SCI.
+>
+> ---
+>
+> **Dernière mise à jour précédente** : 02/05/2026 fin de journée (3 axes session : rattrapage Workflow 7 + récupération session parallèle Yvan + 4 étapes classement « top 3 + popup pré-envoi cliquable » greffées par-dessus l'arbo chevrons d'Yvan, déployées sur OVH ; bilan complet [`OUTLOOK_BILAN_SESSION_20260502_3axes.md`](sessions/OUTLOOK_BILAN_SESSION_20260502_3axes.md))
 >
 > **🆕 Sujets traités session 02/05/2026 PM (4 étapes classement « top 3 + popup pré-envoi »)** :
 > - **✅ Étape 1' Backend top 3** (commit `99e0c12`) — `api_classification_post_send` expose maintenant l'array `suggestions` (top 3 calculé par BG prewarm) en plus de `suggestion` (top 1). Avant : top 3 perdu entre BG et front. Fallback `[#1]` rétro-compat.

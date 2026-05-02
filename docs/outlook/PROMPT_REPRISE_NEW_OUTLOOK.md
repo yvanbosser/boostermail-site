@@ -1,6 +1,6 @@
 # Prompt de reprise — Session « New Outlook via OVH »
 
-> **Dernière mise à jour** : 02/05/2026 fin de journée — session à 3 axes parallèles fusionnée : (1) rattrapage Workflow 7 (16 commits 01/05 PM → 02/05 AM) + (2) refonte specs classement (3 docs → 1 [`SPEC_CLASSEMENT_BOOSTERMAIL.md`](../specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md)) + (3) **session parallèle d'Yvan récupérée** (~30 commits onboarding 5 étapes + chatbot help/FAQ + companion sync filesystem + arbo classement chevrons togglables + fixes PJ Graph) **PUIS 4 étapes classement « top 3 + popup pré-envoi »** greffées propre par-dessus l'arbo d'Yvan ; tout déployé OVH ([bilan complet](../sessions/OUTLOOK_BILAN_SESSION_20260502_3axes.md)) ; **prochaine session : retour Yvan sur les 4 étapes classement après usage quotidien + sujets ouverts business (DPA Anthropic, INPI, mailbox dpo)**
+> **Dernière mise à jour** : 02/05/2026 fin de soirée — session continuation après le bilan 3 axes : refonte **Cuisinier+Commis** unifiée (5 appels Haiku → 2) + **Tier DB prioritaire** sur commis (désambiguïsation 100 SCI homonymes) + **top 3 boulettes** alternatives + **barre de recherche live** dans popups classement + audit complet 4 anomalies fixées + ~75 appels Haiku par restart économisés (validation prod) ; tout déployé OVH ([bilan soirée](../sessions/OUTLOOK_BILAN_SESSION_20260502_soiree.md)) ; **prochaine session : retour Yvan sur recherche live + désambiguïsation Tier DB + sujets ouverts business**
 >
 > **Mode d'emploi** : à chaque démarrage d'une nouvelle session Claude sur le sujet « New Outlook via OVH », **copier-coller le bloc ci-dessous en intégralité**. Il référence tous les docs nécessaires et donne le contexte de la session précédente.
 >
@@ -15,12 +15,12 @@
 
 Test rapide :
   git -C C:/EasyMail branch --show-current   # doit retourner `master`
-  git -C C:/EasyMail log --oneline -5        # le top doit afficher les commits du 28/04 PM (session 3)
+  git -C C:/EasyMail log --oneline -5        # le top doit afficher les commits 02/05 fin de soirée (audit + Tier DB + top 3 + recherche live)
 
 Si ton worktree est différent (auto-créé style `claude/happy-XXXX`), exécute en début de session :
   git fetch && git merge master --no-edit
 puis :
-  git log --oneline -5    # doit afficher au minimum `3fdb2c6 feat(classement): champ #infoClassement cliquable + popup pré-envoi` (top commit 02/05 fin de journée)
+  git log --oneline -5    # le top commit master doit être un commit de la session 02/05 soirée (audit + recherche live), cf bilan soirée pour le détail dynamique
 
 ---
 
@@ -31,36 +31,32 @@ CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
 - Toutes les modifs (UX/UI/data) déployées sur OVH dans la foulée — plus de WIP local persistant
 - Yvan utilise BoosterMail au quotidien depuis https://api.boostermail.ai/
 
-ÉTAT DE FIN DE LA DERNIÈRE SESSION (02/05/2026 fin de journée — ~6h cumulées, 3 axes parallèles fusionnés)
+ÉTAT DE FIN DE LA DERNIÈRE SESSION (02/05/2026 fin de soirée — continuation du bilan 3 axes)
 
-- **Top commit master** : `3fdb2c6` (étape 4'/4' classement champ cliquable + popup pré-envoi)
-- **Bilan complet** : [`docs/sessions/OUTLOOK_BILAN_SESSION_20260502_3axes.md`](../sessions/OUTLOOK_BILAN_SESSION_20260502_3axes.md)
+- **Bilan complet** : [`docs/sessions/OUTLOOK_BILAN_SESSION_20260502_soiree.md`](../sessions/OUTLOOK_BILAN_SESSION_20260502_soiree.md)
+- Top commit master : voir `git log --oneline -1` (formulation dynamique pour respecter I-SESS-03)
 
-**Axe A — Rattrapage Workflow 7** (matin) : bilan rétroactif des 16 commits 01/05 PM → 02/05 AM (Workflow 9 PLAYBOOK + overlay PyQt strict 3 boutons + 4 quick wins UI). Ces commits (01/05) ne sont plus dans la fenêtre des 20 derniers car `git reset --hard` à midi a remplacé.
+**Refonte Cuisinier + Commis** : 5 appels Haiku séparés (résumé + échéance + folder mail + folder PJ + draft) ramenés à 1 appel Haiku unifié `analyze_one_mail_stream` qui produit P/A/E/F/J en multi-output streaming. Économie ~75% appels Haiku. Le Cuisinier (Sonnet pour la réponse) reste inchangé.
 
-**Axe B — Refonte specs classement** (matin/midi) : 3 docs `SPEC_CLASSIFICATION_*` (12/04/2026) consolidés en un seul [`SPEC_CLASSEMENT_BOOSTERMAIL.md`](../specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md) (11 sections, ~340 lignes). Pipeline 7 tiers unifié + gardes communes centralisées + matrice proto vs V2 SaaS + décisions archivées. Les 3 anciens docs portent un bandeau OBSOLÈTE.
+**Robustesse IMID** : gardes `_is_canonical_imid()` dans `save_mail_*()` + `get_attachment_content` résout IMID → Entry ID (fix bug Devoteam où le commis recevait `pj_text=0c`).
 
-**Axe C — Récupération session parallèle d'Yvan** (midi) : découverte d'une autre session worktree `claude/amazing-kilby-66bab1` avec ~30 commits non mergés. Reset master vers `d17764a` (HEAD de cette branche) après backup git (cf bilan). Récupération couvre :
-- **Onboarding 5 étapes** (page `onboarding.html` + logo fusée + script `tools/generate_icons.py`)
-- **Chatbot help/FAQ** (page `help.html` + endpoint `/api/assist` Claude Haiku)
-- **Companion sync filesystem** (scan + push OVH via `/api/windows_folders`)
-- **Profil — boutons admin** (« Se reconnecter », « Réinstaller le bouton », « Recalibrer »)
-- **Classement** (commit `2e426c3` arbo Outlook avec chevrons ▼/▶ togglables)
-- **Fixes PJ Graph** (résolution IMID → Entry ID partout, commits `bff9375` `9425d52` `d17764a`)
-- **Divers** : fix DB closed connection après recalibrage, overlay nouveaux boutons Nouveau/Aide
+**Arbo classement déroulée** (mail + PJ symétrique) : se déroule UNIQUEMENT sur le chemin de la suggestion principale, frères repliés, branches hors chemin cachées, highlight bleu sur la row. Matching tolérant préfixes numériques (`1. IMMOBILIER` ≡ `IMMOBILIER`) + name fallback (cas commis qui abrège).
 
-**4 étapes classement « top 3 + popup pré-envoi »** (après-midi) — greffées propre par-dessus le travail d'Yvan, déployées OVH :
-- `99e0c12` étape 1' : backend `api_classification_post_send` expose `suggestions` array (top 3)
-- `97b6a2a` étape 2' : popup post-envoi top 3 (1 principale + 2 boulettes ●)
-- `85f6b0d` étape 3' : arbo scroll auto sur la suggestion (greffé sur l'algo depth-based d'Yvan, sans le modifier)
-- `3fdb2c6` étape 4' : champ `#infoClassement` cliquable + popup pré-envoi avec mode `'pre'`/`'post'`
+**Désambiguïsation Tier DB** : bug Yvan = 100 SCI avec sous-dossier "Administratif" chacune → le commis pioche au hasard. Solution = restaurer Tier 0/1/1bis/3a/3b avant la sortie commis. Les règles DB tranchent via l'ID Graph cryptique exact.
 
-Cache busting bumpé : `dialog.css v27`, `dialog.js v41`.
+**Top 3 boulettes** : accumulation jusqu'à 3 suggestions sans doublons (par folder_path) à travers tous les tiers + sortie commis. Frontend `dialog.js` était déjà capable d'afficher les boulettes alternatives, c'était le backend qui ne renvoyait qu'1 suggestion.
 
-**Filets de sécurité en place** (détails dans le bilan complet) :
-- Branche backup git pré-merge (ancien master) — nom dans le bilan
-- 2 backups OVH tar.gz (pré-deploy travail Yvan + pré-deploy 4 étapes)
-- Branche `claude/stoic-bhaskara-9dc6e9` qui archive les 4 commits originaux étapes 1-4 (remplacés par étapes 1'-4' propres sur master)
+**Barre de recherche live** : input "Rechercher ou créer un dossier" double rôle : match arbo (case+accent insensitive) → row bleue + scroll auto, pas de match → arbo cachée mode création.
+
+**Audit complet ciblé** (Workflow 1 PLAYBOOK adapté) : 4 anomalies fixées :
+- A2 HIGH : `_prewarm_unified_for_mail` ne checkait pas DB cache → ~75 appels Haiku gaspillés par restart. Validation prod : 63 mails warmup → 0 appel commis confirmé.
+- A3 HIGH : pas de skip noreply / mailer-daemon (parité comportement avec `_prewarm_classement_for_mail`)
+- A1 LOW : regex normalize chars Unicode bruts → escape `̀-ͯ` explicite (3 occurrences corrigées)
+- A14 LOW : reason lisible par tier DB pour boulettes alternatives (UX)
+
+Cache busting bumpé : `dialog.js v51`. Rapport audit dans `audit/rapports/2026-05-02_audit_classement_mail_pj.md`.
+
+**Pattern récurrent identifié** : A2 et A3 sont une récidive du Pattern #2 (patch-on-patch sans audit de l'existant). La nouvelle pipeline unifiée a omis 2 comportements de la pipeline qu'elle remplaçait.
 
 🎯 PROCHAINE SESSION
 
@@ -68,11 +64,13 @@ Cache busting bumpé : `dialog.css v27`, `dialog.js v41`.
    - Vérifier OVH : `curl -sk https://api.boostermail.ai/api/warmup_status` (HTTP 200 attendu)
    - Vérifier service : `ssh ubuntu@51.178.162.208 "sudo systemctl is-active boostermail"`
 
-2. **Si Yvan signale un bug sur les 4 étapes classement** :
-   - Test attendu côté lui : champ « Classement suggéré » cliquable → popup ouverte avec top 3 + arbo scroll auto + boutons « Annuler »/« Confirmer »
-   - Test post-envoi : popup réapparaît avec choix pré-sélectionné si user a modifié pré-envoi
-   - Diagnostic via `journalctl -u boostermail` + logs OVH
-   - Rollback en 1 commande (chemin tar.gz dans le bilan) : `ssh ubuntu@51.178.162.208 "sudo tar -xzf <chemin tar.gz> -C / && sudo systemctl restart boostermail"`
+2. **Si Yvan signale un bug sur le flux classement (mail/PJ)** :
+   - Test attendu côté lui : champ « Classement suggéré » cliquable → popup ouverte avec **top 3** (#1 principale + #2/#3 boulettes ● avec `reason` lisible « thread déjà classé », « classement habituel pour ce contact », etc.) + arbo déroulée sur le chemin de la suggestion + barre de recherche live (highlight bleu sur match) + saisie manuelle pour créer un nouveau dossier
+   - Test 100 SCI homonymes : vérifier que Tier DB tranche correctement vers la bonne SCI (pas le premier "Administratif" venu)
+   - Test mail noreply : doit être skip silencieusement (source `none_auto_email`)
+   - Diagnostic via `journalctl -u boostermail` filtré sur `[unified]` + logs OVH
+   - Logs attendus : `[unified] OK <imid> — fm=thread/rule/keywords/domain/cross_contact/unified, fpj=..., ech=...`
+   - Si user signale "j'ai pas le top 3 sur un mail" → vérifier que ce n'est pas un mail déjà en cache DB avant le fix (re-classification nécessaire pour avoir `_suggestions[]`)
 
 3. **Sujets ouverts business** (côté Yvan, pas de code Claude) :
    - Mailbox `dpo@boostermail.ai` à créer/rediriger
@@ -89,7 +87,7 @@ AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 
 1. **`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** ⭐ — référence vivante (workflow OVH-first, scope, interdits, profil Yvan, procédure purge cache WebView2)
 2. **`docs/PLUS_TARD_VF.md`** ⭐ — référentiel UNIQUE des sujets « plus tard » avec en-tête mis à jour 02/05 fin de journée
-3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260502_3axes.md`** ⭐ — bilan complet session 02/05 (3 axes : rattrapage Workflow 7 + récup session Yvan + 4 étapes classement)
+3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260502_soiree.md`** ⭐ — bilan session 02/05 fin de soirée (Cuisinier+Commis + Tier DB + top 3 + recherche live + audit). Pour le bilan du matin/midi, voir `OUTLOOK_BILAN_SESSION_20260502_3axes.md`.
 4. **`docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md`** — source de vérité unique du classement (mail + PJ + joindre fichier)
 5. **`docs/saas/ONBOARDING_SESSION_SAAS.md`** — référence infra OVH partagée
 6. **`audit/INVARIANTS.md`** + **`audit/ANOMALIES_RECURRENTES.md`** — invariants + Patterns
