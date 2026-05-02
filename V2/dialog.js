@@ -3272,13 +3272,31 @@ function _buildOutlookFolderTreeHtml(folders, suggestedFolderId) {
     var byId = {};
     folders.forEach(function(f) { byId[f.id] = f; });
 
-    // Match exact ou fallback no-filter (commis hallucine un id inexistant
-    // ou la liste folders Graph a changé entre BG et clic user)
+    // Matching robuste — 3 niveaux (cas commis qui sort le name au lieu
+    // de l'id Graph crypté, signal Yvan 02/05 PM tardif sur "A CLASSER") :
+    // 1. Match exact par id Graph (cas normal)
+    // 2. Sinon match par name case-insensitive (commis abrégé)
+    // 3. Sinon no-filter (tout déplié, évite arbo blanche)
     var realFolderId = '';
     var pathFound = false;
-    if (suggestedFolderId && byId[suggestedFolderId]) {
-        realFolderId = suggestedFolderId;
-        pathFound = true;
+    if (suggestedFolderId) {
+        if (byId[suggestedFolderId]) {
+            realFolderId = suggestedFolderId;
+            pathFound = true;
+        } else {
+            var needle = (suggestedFolderId || '').toLowerCase().trim();
+            // Strip accents (À classer / A CLASSER / a classer doivent matcher)
+            var needleNorm = needle.normalize ? needle.normalize('NFD').replace(/[̀-ͯ]/g, '') : needle;
+            for (var ix = 0; ix < folders.length; ix++) {
+                var fname = (folders[ix].name || '').toLowerCase().trim();
+                var fnameNorm = fname.normalize ? fname.normalize('NFD').replace(/[̀-ͯ]/g, '') : fname;
+                if (fnameNorm === needleNorm) {
+                    realFolderId = folders[ix].id;
+                    pathFound = true;
+                    break;
+                }
+            }
+        }
     }
 
     // Walker parentFolderId pour collecter les ancêtres du folder suggéré
