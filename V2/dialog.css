@@ -861,13 +861,38 @@ body {
     border-left: 3px solid #0F6CBD;
     border-radius: 6px;
     padding: 10px 12px;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     font-size: 12px;
     color: #0F6CBD;
     font-weight: 500;
     cursor: pointer;
 }
 .em-folder-suggestion:hover { background: #bbdefb; }
+.em-folder-suggestion.selected { background: #bbdefb; box-shadow: 0 0 0 2px #0F6CBD inset; }
+
+/* Étape 2' (02/05 PM) — Boulettes alternatives top 2/3 (style discret) */
+.em-folder-alternatives {
+    margin-top: 4px;
+    margin-bottom: 8px;
+    padding-left: 6px;
+}
+.em-folder-alternative {
+    background: #f5f9fd;
+    border-left: 2px solid #90caf9;
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin-bottom: 4px;
+    font-size: 11px;
+    color: #555;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.em-folder-alternative:hover { background: #e3f2fd; color: #0F6CBD; }
+.em-folder-alternative.selected { background: #bbdefb; color: #0F6CBD; font-weight: 600; box-shadow: 0 0 0 2px #0F6CBD inset; }
+.em-folder-alt-bullet { color: #90caf9; font-size: 10px; }
+.em-suggestion-reason { color: #888; font-size: 10px; font-weight: 400; margin-left: 6px; }
 
 /* Arborescence dossiers dans popup */
 .em-folder-tree {

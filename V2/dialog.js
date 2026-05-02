@@ -2941,25 +2941,48 @@ function _startClassMail() {
 }
 
 function _showClassMailPopup(suggestion, folders) {
+    // Étape 2' (02/05 PM, vision Yvan) — Top 3 suggestions au lieu de #1.
+    // suggestion.suggestions = array (top 3 calculé par BG prewarm) ; fallback
+    // [#1] si BG ancien ou source != rule/ai. Backend exposé via étape 1'.
+    // Affichage : 1 principale (sélectionnée par défaut, gros bandeau bleu)
+    // + jusqu'à 2 alternatives (boulettes discrètes ●).
+    var suggestions = (suggestion && suggestion.suggestions && suggestion.suggestions.length)
+        ? suggestion.suggestions
+        : (suggestion && suggestion.suggestion ? [suggestion.suggestion] : []);
+
     var sugHtml = '';
-    if (suggestion.suggestion && suggestion.source === 'rule') {
-        var s = suggestion.suggestion;
-        sugHtml = '<div class="em-folder-suggestion" onclick="_selectFolder(\'' + _escapeAttr(s.folder_id || '') + '\', this)">'
-            + '&#x1f4c1; ' + _escapeHtml(s.folder_path || s.folder_id || 'Dossier suggere')
+    if (suggestions.length > 0) {
+        // Suggestion principale (top 1 — pré-sélectionnée par défaut)
+        var main = suggestions[0];
+        var mainId = main.folder_id || '';
+        var mainPath = main.folder_path || main.folder_name || mainId || 'Dossier suggéré';
+        var mainReason = main.reason || '';
+        var mainPrefix = (suggestion.source === 'ai') ? 'Suggestion IA : ' : '';
+        sugHtml += '<div class="em-folder-suggestion selected" '
+            + 'onclick="_selectFolder(\'' + _escapeAttr(mainId) + '\', this)">'
+            + '&#x1f4c1; ' + _escapeHtml(mainPrefix + mainPath)
+            + (mainReason ? '<span class="em-suggestion-reason">— ' + _escapeHtml(mainReason) + '</span>' : '')
             + '</div>';
-        _selectedFolderId = s.folder_id || '';
+        _selectedFolderId = mainId;
         document.getElementById('btnClassMail').disabled = false;
-    } else if (suggestion.suggestion && suggestion.source === 'ai') {
-        var fid = suggestion.suggestion.folder_id || '';
-        // Fix 30/04 PM (signal Yvan) : utiliser folder_path lisible (« Boîte
-        // de réception ») au lieu du folder_id brut (« AQMkAD…lgAAAgEMAAAA »).
-        // Symétrique avec la branche source==='rule' au-dessus.
-        var fpath = suggestion.suggestion.folder_path || fid || 'Dossier suggéré';
-        sugHtml = '<div class="em-folder-suggestion" onclick="_selectFolder(\'' + _escapeAttr(fid) + '\', this)">'
-            + '&#x1f4c1; Suggestion IA : ' + _escapeHtml(fpath)
-            + '</div>';
-        _selectedFolderId = fid;
-        document.getElementById('btnClassMail').disabled = false;
+
+        // Alternatives top 2/3 — boulettes discrètes (max 2)
+        var alts = suggestions.slice(1, 3);
+        if (alts.length > 0) {
+            sugHtml += '<div class="em-folder-alternatives">';
+            alts.forEach(function(s) {
+                var altId = s.folder_id || '';
+                var altPath = s.folder_path || s.folder_name || altId || 'Dossier suggéré';
+                var altReason = s.reason || '';
+                sugHtml += '<div class="em-folder-alternative" '
+                    + 'onclick="_selectFolder(\'' + _escapeAttr(altId) + '\', this)">'
+                    + '<span class="em-folder-alt-bullet">&#x25cf;</span>'
+                    + '<span>' + _escapeHtml(altPath)
+                    + (altReason ? '<span class="em-suggestion-reason">— ' + _escapeHtml(altReason) + '</span>' : '')
+                    + '</span></div>';
+            });
+            sugHtml += '</div>';
+        }
     }
     document.getElementById('classMailSuggestion').innerHTML = sugHtml;
 
@@ -3018,8 +3041,8 @@ function _onManualPathInput(e) {
     if (val.length > 0) {
         _selectedFolderManualPath = val;
         _selectedFolderId = '';  // mode manual prend le pas
-        // Highlight off (sélection arbo/suggestion neutralisée)
-        document.querySelectorAll('.em-folder-item, .em-folder-suggestion').forEach(function(el) {
+        // Highlight off (arbo/suggestion/alternative neutralisées) — étape 2'
+        document.querySelectorAll('.em-folder-item, .em-folder-suggestion, .em-folder-alternative').forEach(function(el) {
             el.classList.remove('selected');
         });
         if (btn) btn.disabled = false;
@@ -3035,8 +3058,9 @@ function _selectFolder(folderId, element) {
     var manualInput = document.getElementById('classMailManualPath');
     if (manualInput) manualInput.value = '';
     document.getElementById('btnClassMail').disabled = false;
-    // Highlight
-    document.querySelectorAll('.em-folder-item, .em-folder-suggestion').forEach(function(el) {
+    // Highlight — étape 2' (02/05 PM) : ajout em-folder-alternative au reset
+    // selector pour cohérence avec les boulettes top 2/3.
+    document.querySelectorAll('.em-folder-item, .em-folder-suggestion, .em-folder-alternative').forEach(function(el) {
         el.classList.remove('selected');
     });
     if (element && element.classList) {
