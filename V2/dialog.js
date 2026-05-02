@@ -3675,9 +3675,23 @@ function _showClassPJPopup(pjData, mode) {
     document.getElementById('classPJSuggestion').innerHTML = sugHtml;
 
     // Arborescence Windows (algo depth-based comme l'arbo mail d'Yvan)
+    // Étape 02/05 PM tardif (signal Yvan) — l'arbo se déroule UNIQUEMENT
+    // sur le chemin de la suggestion principale. _buildPJFolderTreeHtml
+    // reçoit le path principal pour calculer le filtrage.
     var folders = pjData.folders || [];
     if (folders.length > 0) {
-        var treeHtml = _buildPJFolderTreeHtml(folders);
+        // Path principal = celui de la suggestion top 1 (ou _selectedPJFolderPath
+        // si déjà initialisé via pré-envoi user)
+        var mainPathForTree = '';
+        if (suggestions.length > 0 && suggestions[0]) {
+            mainPathForTree = suggestions[0].folder_path
+                || suggestions[0].dest_folder
+                || suggestions[0].folder_name || '';
+        }
+        if (initialSelectedPath) {
+            mainPathForTree = initialSelectedPath;
+        }
+        var treeHtml = _buildPJFolderTreeHtml(folders, mainPathForTree);
         var treeEl = document.getElementById('classPJTree');
         treeEl.innerHTML = treeHtml;
 
@@ -3731,21 +3745,83 @@ function _showClassPJPopup(pjData, mode) {
 // plate {path, name, depth} (poussée par Companion). Algo depth-based
 // identique à l'arbo mail d'Yvan, mais identifie par data-folder-path
 // (les dossiers Windows n'ont pas d'id, juste un path).
-function _buildPJFolderTreeHtml(folders) {
+function _buildPJFolderTreeHtml(folders, suggestedPath) {
     if (!folders || !folders.length) return '';
+
+    // Étape 02/05 PM tardif (signal Yvan) — l'arbo se déroule UNIQUEMENT
+    // sur le chemin de la suggestion principale. Les autres branches
+    // sont repliées (chevron ▶) et leurs enfants cachés (display:none).
+    // L'user peut toujours déplier manuellement les autres branches en
+    // cliquant sur leurs chevrons (_togglePJFolderChildren gère le reveal).
+    //
+    // Algo :
+    // 1. Calculer les "préfixes du chemin" = tous les dossiers ancêtres
+    //    du folder suggéré (ex: pour A/B/C/D → {A, A/B, A/B/C, A/B/C/D})
+    // 2. Pour chaque dossier de l'arbo :
+    //    - Sur le chemin → expanded ▼ + visible
+    //    - Frère d'un ancêtre (parent direct sur le chemin) → visible mais
+    //      collapsed ▶ (ses enfants cachés)
+    //    - Plus profond hors chemin → caché (display:none)
+    var pathPrefixes = {};
+    if (suggestedPath) {
+        var parts = suggestedPath.split('/');
+        for (var i = 0; i < parts.length; i++) {
+            pathPrefixes[parts.slice(0, i + 1).join('/')] = true;
+        }
+    }
+    var hasFilter = !!suggestedPath;
+
     var html = '';
     folders.forEach(function(f, i) {
         var depth = f.depth || 0;
         var next = folders[i + 1];
         var hasChildren = next && (next.depth || 0) > depth;
         var indent = depth * 14;
-        var chevron = hasChildren
-            ? '<span class="em-folder-chevron expanded" onclick="_togglePJFolderChildren(event, this.parentElement)">&#x25bc;</span>'
-            : '<span class="em-folder-chevron-spacer"></span>';
+
+        var isOnPath = !!pathPrefixes[f.path];
+        // Parent path = path sans le dernier segment
+        var slashIdx = f.path.lastIndexOf('/');
+        var parentPath = (slashIdx > 0) ? f.path.substring(0, slashIdx) : '';
+        var parentOnPath = !!pathPrefixes[parentPath];
+        // Top-level (depth=1) sans parent = visible si pas de filtre OU sur path
+        var topLevel = (depth <= 1);
+
+        var visible, expanded;
+        if (!hasFilter) {
+            // Pas de suggestion : comportement initial (tout déplié)
+            visible = true;
+            expanded = true;
+        } else if (isOnPath) {
+            // Sur le chemin de la suggestion → visible + déplié
+            visible = true;
+            expanded = true;
+        } else if (parentOnPath || (topLevel && !slashIdx)) {
+            // Frère d'un ancêtre (visible mais replié, ses enfants cachés)
+            visible = true;
+            expanded = false;
+        } else {
+            // Branche hors chemin → caché (l'user peut déplier le parent
+            // manuellement pour le voir)
+            visible = false;
+            expanded = false;
+        }
+
+        var displayCss = visible
+            ? 'display:flex;align-items:center;gap:4px;'
+            : 'display:none;';
+
+        var chevron;
+        if (hasChildren) {
+            chevron = '<span class="em-folder-chevron ' + (expanded ? 'expanded' : 'collapsed') + '" '
+                + 'onclick="_togglePJFolderChildren(event, this.parentElement)">'
+                + (expanded ? '&#x25bc;' : '&#x25b6;') + '</span>';
+        } else {
+            chevron = '<span class="em-folder-chevron-spacer"></span>';
+        }
         html += '<div class="em-folder-item" '
             + 'data-folder-path="' + _escapeAttr(f.path) + '" '
             + 'data-depth="' + depth + '" '
-            + 'style="padding-left:' + indent + 'px;display:flex;align-items:center;gap:4px;" '
+            + 'style="padding-left:' + indent + 'px;' + displayCss + '" '
             + 'onclick="_selectPJFolderFromRow(event, this)">'
             + chevron
             + '<span class="em-folder-name">' + _escapeHtml(f.name) + '</span>'
