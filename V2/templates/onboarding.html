@@ -430,8 +430,10 @@
             </div>
         </div>
 
-        <div id="step-2-buttons" style="display:none; margin-top: 24px; text-align:center;">
-            <button class="btn btn-primary" onclick="goToStep(3)">Continuer →</button>
+        <div style="margin-top: 28px; text-align:center;">
+            <button class="btn btn-primary" id="btn-step2-next" onclick="goToStep(3)" disabled>
+                Continuer →
+            </button>
         </div>
     </div>
 
@@ -724,7 +726,11 @@
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // ÉTAPE 2 — ANALYSE DE STYLE (copie EXACTE de la fonction reanalyze() du proto)
+    // ÉTAPE 2 — ANALYSE DE STYLE
+    // Endpoint SaaS V2 : POST /api/setup/onboarding (récupère 800 mails
+    // envoyés via Graph et les indexe). Polling via
+    // /api/setup/onboarding/status qui retourne {status, total, indexed}.
+    // /api/reanalyze_style est désactivé en SaaS (stub return unavailable).
     // ═══════════════════════════════════════════════════════════════
 
     var _styleStarted = false;
@@ -734,19 +740,20 @@
         if (_styleStarted) return;
         _styleStarted = true;
 
-        // Reset barre et textes (au cas où on revient en arrière)
+        // Reset visuel
         var barEl = document.getElementById('style-bar');
         var stepEl = document.getElementById('style-step');
         var phaseEl = document.getElementById('style-phase');
         var elapsedEl = document.getElementById('style-elapsed');
+        var nextBtn = document.getElementById('btn-step2-next');
         if (barEl) barEl.style.width = '0%';
         if (stepEl) { stepEl.textContent = 'Démarrage...'; stepEl.style.color = '#0078d4'; }
         if (phaseEl) phaseEl.textContent = '';
         if (elapsedEl) elapsedEl.textContent = '';
+        if (nextBtn) nextBtn.disabled = true;
 
-        // Lance l'analyse via /api/reanalyze_style (même endpoint que le proto
-        // utilise pour le bouton "Recalibrer BoosterMail" dans Profil)
-        fetch('/api/reanalyze_style', { method: 'POST' })
+        // Lance l'analyse — SaaS V2 endpoint
+        fetch('/api/setup/onboarding', { method: 'POST' })
             .then(function(r) { return r.json(); })
             .then(function() {
                 var t0 = Date.now();
@@ -754,55 +761,89 @@
                     var elapsed = Math.floor((Date.now() - t0) / 1000);
                     var elEl = document.getElementById('style-elapsed');
                     if (elEl) elEl.textContent = elapsed + 's';
-                    fetch('/api/style_status').then(function(r) { return r.json(); }).then(function(d) {
-                        if (d.ready) {
+
+                    fetch('/api/setup/onboarding/status').then(function(r) { return r.json(); }).then(function(d) {
+                        var sEl = document.getElementById('style-step');
+                        var bEl = document.getElementById('style-bar');
+                        var pEl = document.getElementById('style-phase');
+                        var status = d.status || 'idle';
+                        var total = d.total || 0;
+                        var indexed = d.indexed || 0;
+
+                        // Statut terminal : done
+                        if (status === 'done') {
                             clearInterval(_analysisPoll);
                             _analysisPoll = null;
-                            // Bascule UI : barre à 100%, message succès, bouton Continuer
-                            var bEl = document.getElementById('style-bar');
                             if (bEl) bEl.style.width = '100%';
-                            var sEl = document.getElementById('style-step');
-                            if (sEl) { sEl.textContent = '✓ Style analysé'; sEl.style.color = '#28a745'; }
-                            document.getElementById('step-2-buttons').style.display = 'block';
+                            if (pEl) pEl.textContent = '100%';
+                            if (sEl) {
+                                sEl.textContent = '✓ Analyse terminée — ' + indexed + ' mails indexés';
+                                sEl.style.color = '#28a745';
+                            }
+                            if (nextBtn) nextBtn.disabled = false;
                             saveSetupStep(3);
                             return;
                         }
-                        var sEl = document.getElementById('style-step');
-                        if (sEl && d.step) sEl.textContent = d.step;
-                        // Barre de progression par phase + chunks (mapping identique au proto)
-                        var bEl = document.getElementById('style-bar');
-                        var pEl = document.getElementById('style-phase');
-                        if (bEl && d.step) {
-                            if (d.step.indexOf('envoyés lus') > -1) { bEl.style.width = '20%'; if (pEl) pEl.textContent = '20%'; }
-                            else if (d.step.indexOf('reçus lus') > -1) { bEl.style.width = '40%'; if (pEl) pEl.textContent = '40%'; }
-                            else if (d.step.indexOf('Analyse') > -1 && d.step.indexOf('style') > -1) {
-                                var chunkPct = d.chunks ? Math.min(d.chunks / 130, 1) : 0;
-                                var pct = 50 + Math.floor(chunkPct * 35);
-                                bEl.style.width = pct + '%';
-                                if (pEl) pEl.textContent = pct + '%';
-                            }
-                            else if (d.step.indexOf('Indexation') > -1) { bEl.style.width = '92%'; if (pEl) pEl.textContent = '92%'; }
-                        }
-                        // Si pas analyzing et pas ready → erreur
-                        if (!d.analyzing && !d.ready) {
+
+                        // Statut terminal : erreur
+                        if (status === 'no_mails') {
                             clearInterval(_analysisPoll);
                             _analysisPoll = null;
-                            if (sEl) { sEl.textContent = d.step || 'Erreur lors de l\'analyse'; sEl.style.color = '#dc3545'; }
-                            document.getElementById('step-2-buttons').style.display = 'block';
+                            if (sEl) { sEl.textContent = 'Aucun mail trouvé dans votre boîte. Continuons.'; sEl.style.color = '#e65100'; }
+                            // On laisse l'user continuer même sans mails
+                            if (nextBtn) nextBtn.disabled = false;
+                            return;
+                        }
+                        if (status.indexOf('error') === 0) {
+                            clearInterval(_analysisPoll);
+                            _analysisPoll = null;
+                            if (sEl) { sEl.textContent = 'Erreur : ' + status.replace('error: ', ''); sEl.style.color = '#dc3545'; }
+                            if (nextBtn) nextBtn.disabled = false;
+                            return;
+                        }
+
+                        // Statut intermédiaire : running
+                        if (status === 'running') {
+                            // Phase 1 : récupération Graph (avant que total soit connu)
+                            if (total === 0) {
+                                if (sEl) sEl.textContent = 'Récupération de vos mails Outlook…';
+                                if (bEl) bEl.style.width = '15%';
+                                if (pEl) pEl.textContent = '15%';
+                            } else {
+                                // Phase 2 : indexation des X mails
+                                var pct = Math.min(100, Math.round(15 + (indexed / total) * 80));
+                                if (sEl) sEl.textContent = 'Indexation : ' + indexed + ' / ' + total + ' mails analysés';
+                                if (bEl) bEl.style.width = pct + '%';
+                                if (pEl) pEl.textContent = pct + '%';
+                            }
+                            return;
+                        }
+
+                        // Statut idle (avant que le BG ait écrit running)
+                        if (status === 'idle') {
+                            if (sEl) sEl.textContent = 'Démarrage de l\'analyse…';
+                            // Si toujours idle après 30s → déclarer une erreur
+                            if (elapsed > 30) {
+                                clearInterval(_analysisPoll);
+                                _analysisPoll = null;
+                                if (sEl) { sEl.textContent = 'L\'analyse n\'a pas démarré. Vérifiez votre connexion Microsoft.'; sEl.style.color = '#dc3545'; }
+                                if (nextBtn) nextBtn.disabled = false;
+                            }
+                            return;
                         }
                     }).catch(function() {
                         clearInterval(_analysisPoll);
                         _analysisPoll = null;
                         var sEl = document.getElementById('style-step');
                         if (sEl) { sEl.textContent = 'Erreur de connexion'; sEl.style.color = '#dc3545'; }
-                        document.getElementById('step-2-buttons').style.display = 'block';
+                        if (nextBtn) nextBtn.disabled = false;
                     });
                 }, 2000);
             })
             .catch(function() {
                 var sEl = document.getElementById('style-step');
                 if (sEl) { sEl.textContent = 'Impossible de lancer l\'analyse'; sEl.style.color = '#dc3545'; }
-                document.getElementById('step-2-buttons').style.display = 'block';
+                if (nextBtn) nextBtn.disabled = false;
             });
     }
 

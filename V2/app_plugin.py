@@ -12419,9 +12419,11 @@ def api_setup_onboarding():
         try:
             sent_mails = []
             # Source 1 : Graph API (Mode Standard)
+            # Limite alignée sur le proto : 800 mails (cohérent avec le
+            # setting onboarding_mail_count par défaut, signal Yvan 02/05).
             if graph:
                 try:
-                    sent_mails = graph.get_sent_emails(limit=300)
+                    sent_mails = graph.get_sent_emails(limit=800)
                     logger.info(f"Onboarding : {len(sent_mails)} mails envoyés via Graph")
                 except Exception as e:
                     logger.warning(f"Onboarding Graph erreur: {e}")
@@ -12457,8 +12459,9 @@ def api_setup_onboarding():
             _db.save_setting('onboarding_total', str(len(sent_mails)))
 
             # Indexer les mails dans la DB (threads)
+            # Limite 800 alignée sur le proto (signal Yvan 02/05).
             indexed = 0
-            for mail in sent_mails[:300]:
+            for mail in sent_mails[:800]:
                 try:
                     _db.save_to_thread(
                         project=None,
