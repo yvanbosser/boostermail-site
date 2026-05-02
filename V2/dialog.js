@@ -2903,6 +2903,17 @@ var _preSendFolderId = '';             // choix user pré-envoi (folder_id depui
 var _preSendFolderPath = '';           // path lisible (pour affichage card + manuel)
 var _preSendIsManual = false;          // true si user a tapé un path manuel pré-envoi
 
+// Étape 1''-4''/4'' (02/05 PM, vision Yvan) — équivalents pour CLASSEMENT PJ.
+// Folders Windows (path/name/depth) lus depuis user_windows_folders OVH
+// (poussés par Companion local). Saisie manuelle path → Companion local
+// crée le dossier sous pj_root_folder.
+var _selectedPJFolderPath = '';            // path Windows sélectionné (arbo ou suggestion)
+var _selectedPJFolderManualPath = '';      // path manuel tapé par user (Q2=OUI)
+var _classementPJCacheData = null;         // {suggestion, suggestions, source, attachments, folders}
+var _classMailPJMode = 'post';             // 'pre' ou 'post'
+var _preSendPJFolderPath = '';             // choix user pré-envoi PJ
+var _preSendPJIsManual = false;            // true si manual
+
 function _runPostSendWorkflows() {
     /** Chaîne les 3 workflows : échéances → classement mail → classement PJ → fermeture. */
     if (!_messageId) {
@@ -3473,31 +3484,277 @@ function _startClassPJ() {
         .catch(function() { _finalClose(); });
 }
 
-function _showClassPJPopup(pjData) {
+function _showClassPJPopup(pjData, mode) {
+    // Étape 2''/4'' (02/05 PM, vision Yvan) — Refonte complète parallèle
+    // popup classement mail :
+    //   - Liste des PJ (header inchangé)
+    //   - Top 3 suggestions (1 principale + 2 boulettes ●) basé sur
+    //     pjData.suggestions (exposé par étape 1'' backend)
+    //   - Arborescence Windows (chevrons togglables, algo depth-based)
+    //     issue de pjData.folders
+    //   - Saisie manuelle path (input Q2=OUI)
+    //   - Mode 'pre' / 'post' (étape 4'') adapte les boutons
+    mode = mode || 'post';
+    _classMailPJMode = mode;
+
+    // Liste des PJ à classer (inchangé)
     var listHtml = '<p style="margin-bottom:8px;">Pieces jointes a classer :</p>';
-    pjData.attachments.forEach(function(att) {
+    (pjData.attachments || []).forEach(function(att) {
         listHtml += '<div class="pj-chip" style="margin-bottom:4px;">&#x1f4c4; '
             + _escapeHtml(att.name) + '</div>';
     });
     document.getElementById('classPJList').innerHTML = listHtml;
 
-    if (pjData.suggestion) {
-        document.getElementById('classPJSuggestion').innerHTML =
-            '<div class="em-folder-suggestion">&#x1f4c1; ' + _escapeHtml(pjData.suggestion.folder_path || 'Dossier suggere') + '</div>';
-        document.getElementById('btnClassPJ').disabled = false;
+    // Top 3 suggestions
+    var suggestions = (pjData.suggestions && pjData.suggestions.length)
+        ? pjData.suggestions
+        : (pjData.suggestion ? [pjData.suggestion] : []);
+
+    // Sélection initiale (priorité au choix pré-envoi user en mode 'post')
+    var initialSelectedPath = '';
+    if (suggestions.length > 0 && suggestions[0]) {
+        initialSelectedPath = suggestions[0].folder_path
+            || suggestions[0].dest_folder
+            || suggestions[0].folder_name || '';
+    }
+    var initialManualPath = '';
+    if (mode === 'post') {
+        if (_preSendPJIsManual && _preSendPJFolderPath) {
+            initialManualPath = _preSendPJFolderPath;
+            initialSelectedPath = '';
+        } else if (_preSendPJFolderPath) {
+            initialSelectedPath = _preSendPJFolderPath;
+        }
+    }
+
+    var sugHtml = '';
+    if (suggestions.length > 0) {
+        var main = suggestions[0];
+        var mainPath = main.folder_path || main.dest_folder || main.folder_name || 'Dossier suggéré';
+        var mainReason = main.reason || '';
+        var mainPrefix = (pjData.source === 'ai') ? 'Suggestion IA : ' : '';
+        var mainSelected = (mainPath === initialSelectedPath) ? ' selected' : '';
+        sugHtml += '<div class="em-folder-suggestion' + mainSelected + '" '
+            + 'onclick="_selectPJFolder(\'' + _escapeAttr(mainPath) + '\', this)">'
+            + '&#x1f4c1; ' + _escapeHtml(mainPrefix + mainPath)
+            + (mainReason ? '<span class="em-suggestion-reason">— ' + _escapeHtml(mainReason) + '</span>' : '')
+            + '</div>';
+        _selectedPJFolderPath = initialSelectedPath;
+        document.getElementById('btnClassPJ').disabled = !(initialSelectedPath || initialManualPath);
+
+        // Alternatives top 2/3 — boulettes (max 2)
+        var alts = suggestions.slice(1, 3);
+        if (alts.length > 0) {
+            sugHtml += '<div class="em-folder-alternatives">';
+            alts.forEach(function(s) {
+                var altPath = s.folder_path || s.dest_folder || s.folder_name || 'Dossier suggéré';
+                var altReason = s.reason || '';
+                var altSelected = (altPath === initialSelectedPath) ? ' selected' : '';
+                sugHtml += '<div class="em-folder-alternative' + altSelected + '" '
+                    + 'onclick="_selectPJFolder(\'' + _escapeAttr(altPath) + '\', this)">'
+                    + '<span class="em-folder-alt-bullet">&#x25cf;</span>'
+                    + '<span>' + _escapeHtml(altPath)
+                    + (altReason ? '<span class="em-suggestion-reason">— ' + _escapeHtml(altReason) + '</span>' : '')
+                    + '</span></div>';
+            });
+            sugHtml += '</div>';
+        }
+    }
+    document.getElementById('classPJSuggestion').innerHTML = sugHtml;
+
+    // Arborescence Windows (algo depth-based comme l'arbo mail d'Yvan)
+    var folders = pjData.folders || [];
+    if (folders.length > 0) {
+        var treeHtml = _buildPJFolderTreeHtml(folders);
+        var treeEl = document.getElementById('classPJTree');
+        treeEl.innerHTML = treeHtml;
+
+        // Étape 3'' — Scroll auto vers la suggestion (parallèle mail)
+        try {
+            if (_selectedPJFolderPath) {
+                var rows = treeEl.querySelectorAll('.em-folder-item');
+                for (var ri = 0; ri < rows.length; ri++) {
+                    if (rows[ri].getAttribute('data-folder-path') === _selectedPJFolderPath) {
+                        rows[ri].classList.add('selected');
+                        if (rows[ri].scrollIntoView) {
+                            rows[ri].scrollIntoView({ block: 'center', behavior: 'auto' });
+                        }
+                        break;
+                    }
+                }
+            }
+        } catch (e) { /* scroll non critique */ }
+    } else {
+        document.getElementById('classPJTree').innerHTML = '';
+    }
+
+    // Saisie manuelle (Q2=OUI) — pré-remplir si choix pré-envoi manuel
+    var manualInput = document.getElementById('classPJManualPath');
+    if (manualInput) {
+        manualInput.value = initialManualPath || '';
+        if (initialManualPath) {
+            _selectedPJFolderManualPath = initialManualPath;
+        } else {
+            _selectedPJFolderManualPath = '';
+        }
+        manualInput.removeEventListener('input', _onManualPJPathInput);
+        manualInput.addEventListener('input', _onManualPJPathInput);
+    }
+
+    // Adapter libellés boutons selon mode (étape 4'')
+    var btnSkipPJ = document.querySelector('#popupClassPJ .em-popup-btn:not(.primary)');
+    var btnPrimaryPJ = document.getElementById('btnClassPJ');
+    if (mode === 'pre') {
+        if (btnSkipPJ) btnSkipPJ.textContent = 'Annuler';
+        if (btnPrimaryPJ) btnPrimaryPJ.textContent = 'Confirmer';
+    } else {
+        if (btnSkipPJ) btnSkipPJ.textContent = 'Pas maintenant';
+        if (btnPrimaryPJ) btnPrimaryPJ.textContent = 'Classer ici';
     }
 
     document.getElementById('popupClassPJ').classList.add('active');
 }
 
+// Étape 2''/4'' (02/05 PM) — Construit l'arbo Windows à partir d'une liste
+// plate {path, name, depth} (poussée par Companion). Algo depth-based
+// identique à l'arbo mail d'Yvan, mais identifie par data-folder-path
+// (les dossiers Windows n'ont pas d'id, juste un path).
+function _buildPJFolderTreeHtml(folders) {
+    if (!folders || !folders.length) return '';
+    var html = '';
+    folders.forEach(function(f, i) {
+        var depth = f.depth || 0;
+        var next = folders[i + 1];
+        var hasChildren = next && (next.depth || 0) > depth;
+        var indent = depth * 14;
+        var chevron = hasChildren
+            ? '<span class="em-folder-chevron expanded" onclick="_togglePJFolderChildren(event, this.parentElement)">&#x25bc;</span>'
+            : '<span class="em-folder-chevron-spacer"></span>';
+        html += '<div class="em-folder-item" '
+            + 'data-folder-path="' + _escapeAttr(f.path) + '" '
+            + 'data-depth="' + depth + '" '
+            + 'style="padding-left:' + indent + 'px;display:flex;align-items:center;gap:4px;" '
+            + 'onclick="_selectPJFolderFromRow(event, this)">'
+            + chevron
+            + '<span class="em-folder-name">' + _escapeHtml(f.name) + '</span>'
+            + '</div>';
+    });
+    return html;
+}
+
+// Étape 2''/4'' (02/05 PM) — Wrapper distinguant clic chevron vs clic ligne
+// pour l'arbo PJ (parallèle _selectFolderFromRow pour mail).
+function _selectPJFolderFromRow(event, rowEl) {
+    if (event && event.target && event.target.classList &&
+        event.target.classList.contains('em-folder-chevron')) {
+        return;
+    }
+    var folderPath = rowEl.getAttribute('data-folder-path');
+    _selectPJFolder(folderPath, rowEl);
+}
+
+// Étape 2''/4'' (02/05 PM) — Sélectionne un folder PJ (depuis arbo, sugg,
+// ou alternative). Reset sélection précédente + saisie manuelle. Identique
+// à _selectFolder mais pour PJ (path au lieu de folder_id).
+function _selectPJFolder(folderPath, element) {
+    _selectedPJFolderPath = folderPath;
+    _selectedPJFolderManualPath = '';
+    var manualInput = document.getElementById('classPJManualPath');
+    if (manualInput) manualInput.value = '';
+    document.getElementById('btnClassPJ').disabled = false;
+    // Highlight (cible #popupClassPJ uniquement pour ne pas affecter mail)
+    document.querySelectorAll('#popupClassPJ .em-folder-item, #popupClassPJ .em-folder-suggestion, #popupClassPJ .em-folder-alternative').forEach(function(el) {
+        el.classList.remove('selected');
+    });
+    if (element && element.classList) {
+        element.classList.add('selected');
+    }
+}
+
+// Étape 2''/4'' (02/05 PM) — Toggle expand/collapse arbo PJ (parallèle
+// _toggleFolderChildren mail).
+function _togglePJFolderChildren(event, parentRow) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    var depth = parseInt(parentRow.getAttribute('data-depth'), 10);
+    if (isNaN(depth)) return;
+    var chevron = parentRow.querySelector('.em-folder-chevron');
+    var collapsing = chevron && chevron.classList.contains('expanded');
+    if (chevron) {
+        chevron.classList.toggle('expanded', !collapsing);
+        chevron.classList.toggle('collapsed', collapsing);
+        chevron.textContent = collapsing ? '▶' : '▼';
+    }
+    var sibling = parentRow.nextElementSibling;
+    while (sibling) {
+        var sd = parseInt(sibling.getAttribute('data-depth'), 10);
+        if (isNaN(sd) || sd <= depth) break;
+        if (collapsing) {
+            sibling.style.display = 'none';
+        } else {
+            if (sd === depth + 1) {
+                sibling.style.display = '';
+            } else {
+                var anc = sibling.previousElementSibling;
+                while (anc) {
+                    var ad = parseInt(anc.getAttribute('data-depth'), 10);
+                    if (!isNaN(ad) && ad === depth + 1) {
+                        var ancChev = anc.querySelector('.em-folder-chevron');
+                        var ancExpanded = ancChev && ancChev.classList.contains('expanded');
+                        sibling.style.display = ancExpanded ? '' : 'none';
+                        break;
+                    }
+                    anc = anc.previousElementSibling;
+                }
+            }
+        }
+        sibling = sibling.nextElementSibling;
+    }
+}
+
+// Étape 2''/4'' (02/05 PM) — Handler input saisie manuelle path PJ.
+// Désactive sélection arbo/suggestion + active btnClassPJ. Au confirm,
+// le Companion local crée le dossier sous pj_root_folder s'il n'existe
+// pas (os.makedirs exist_ok=True déjà géré).
+function _onManualPJPathInput(e) {
+    var val = (e && e.target && e.target.value || '').trim();
+    var btn = document.getElementById('btnClassPJ');
+    if (val.length > 0) {
+        _selectedPJFolderManualPath = val;
+        _selectedPJFolderPath = '';  // mode manual prend le pas
+        document.querySelectorAll('#popupClassPJ .em-folder-item, #popupClassPJ .em-folder-suggestion, #popupClassPJ .em-folder-alternative').forEach(function(el) {
+            el.classList.remove('selected');
+        });
+        if (btn) btn.disabled = false;
+    } else {
+        _selectedPJFolderManualPath = '';
+        if (btn) btn.disabled = (_selectedPJFolderPath ? false : true);
+    }
+}
+
 function doClassPJ() {
+    // Étape 4''/4'' (02/05 PM) — En mode pré-envoi : mémoriser le choix
+    // sans déclencher la copie. La popup post-envoi le réutilisera comme
+    // défaut.
+    if (_classMailPJMode === 'pre') {
+        _confirmPreSendPJChoice();
+        return;
+    }
     if (!_postSendPJData) return;
     document.getElementById('btnClassPJ').disabled = true;
     document.getElementById('btnClassPJ').textContent = 'Classement...';
 
-    var pjDestFolder = _postSendPJData.suggestion ? (_postSendPJData.suggestion.folder_path || '') : '';
+    // Étape 2'' (02/05 PM) — Source du dest_folder (ordre de priorité) :
+    // 1. Saisie manuelle (Q2=OUI, le Companion crée le dossier si manquant)
+    // 2. Sélection arbo / suggestion / boulette (path Windows depuis
+    //    user_windows_folders OVH)
+    // 3. Fallback : suggestion.folder_path du cache BG (rétro-compat)
+    var pjDestFolder = _selectedPJFolderManualPath
+        || _selectedPJFolderPath
+        || (_postSendPJData.suggestion ? (_postSendPJData.suggestion.folder_path || '') : '');
     if (!pjDestFolder) {
-        // Pas de dossier sélectionné → skip
         document.getElementById('popupClassPJ').classList.remove('active');
         _finalClose();
         return;
@@ -3544,6 +3801,12 @@ function doClassPJ() {
 }
 
 function skipClassPJ() {
+    // Étape 4''/4'' (02/05 PM) — En mode pré-envoi : « Annuler » ferme
+    // sans rien sauvegarder. _finalClose ne doit PAS être appelé.
+    if (_classMailPJMode === 'pre') {
+        _cancelPreSendPJChoice();
+        return;
+    }
     document.getElementById('popupClassPJ').classList.remove('active');
     _finalClose();
 }
