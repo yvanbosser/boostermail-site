@@ -74,6 +74,39 @@ def _backend_host():
 _BACKEND_HOST = _backend_host()
 _INTERNAL_HOSTS = {'localhost', '127.0.0.1', '', _BACKEND_HOST}
 
+# URL de l'onboarding (Phase D 02/05/2026). Affiché à la place de l'overlay
+# tant que onboarding_done=false. Voir _is_onboarding_done().
+ONBOARDING_URL = f'{BACKEND_URL}/plugin/onboarding'
+
+
+def _is_onboarding_done(timeout=2.0):
+    """Vérifie côté backend si l'utilisateur a terminé l'onboarding.
+
+    Phase D8 (02/05/2026) — la popup de lancement classique (bouton « Lancer »
+    → overlay 3 boutons) ne doit s'afficher que si l'user a déjà finalisé
+    son onboarding. Sinon on charge le flux 5 étapes.
+
+    En cas d'erreur réseau / timeout, on retourne True (fail-open) pour
+    ne pas bloquer un user déjà installé. Le pire cas : l'onboarding
+    réapparaîtra au prochain démarrage si nécessaire.
+    """
+    try:
+        import ssl as _ssl
+        if BACKEND_URL.startswith('https://localhost') or BACKEND_URL.startswith('https://127.'):
+            ctx = _ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = _ssl.CERT_NONE
+        else:
+            ctx = _ssl.create_default_context()
+        url = f'{BACKEND_URL}/api/setup/status'
+        req = urllib.request.Request(url, headers={'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            data = json.loads(resp.read().decode('utf-8', errors='replace'))
+            return bool(data.get('onboarding_done', True))  # fail-open
+    except Exception as e:
+        logger.debug(f"[onboarding-check] échec, fail-open : {e}")
+        return True  # fail-open
+
 
 # =============================================================================
 # PAGE PERSONNALISEE — accepte le certificat auto-signe localhost (P10)
@@ -488,13 +521,45 @@ class EasyMailPopup(QMainWindow):
         return widget
 
     def _on_launch_click(self):
-        """Clic 'Lancer' : transition vers l'overlay (popup.html) haut-droite."""
-        logger.info('[popup] Lancer cliqué → overlay popup.html')
+        """Clic 'Lancer' :
+        - Si onboarding pas terminé → bascule vers l'onboarding 5 étapes
+        - Sinon → transition vers l'overlay (popup.html) haut-droite
+        """
         if hasattr(self, '_flash_timer') and self._flash_timer.isActive():
             self._flash_timer.stop()
         if hasattr(self, '_warmup_timer') and self._warmup_timer.isActive():
             self._warmup_timer.stop()
+        # Phase D8 (02/05/2026) : check onboarding avant d'afficher l'overlay
+        if not _is_onboarding_done():
+            logger.info('[popup] Lancer cliqué → onboarding (pas encore terminé)')
+            self._transition_to_onboarding()
+            return
+        logger.info('[popup] Lancer cliqué → overlay popup.html')
         self._transition_to_overlay()
+
+    def _transition_to_onboarding(self):
+        """Bascule vers le flux onboarding (Phase D8). Affiche l'onboarding
+        en grand format centré (640×720) au lieu de l'overlay 280×70."""
+        try:
+            self._unlock_size()
+        except Exception:
+            pass
+        ow, oh = 640, 720
+        # Tailles min : ne dépasse pas l'écran
+        ow = min(ow, max(420, self._screen.width() - 80))
+        oh = min(oh, max(560, self._screen.height() - 80))
+        self.resize(ow, oh)
+        self.move(
+            (self._screen.width() - ow) // 2,
+            (self._screen.height() - oh) // 2,
+        )
+        self._popup_view.load(QUrl(ONBOARDING_URL))
+        self._stack.setCurrentIndex(1)
+        try:
+            self.raise_()
+            self.activateWindow()
+        except Exception:
+            pass
 
     # -------- Mode FLASH (user activé, cache chaud) --------------------------
 
@@ -726,14 +791,18 @@ class EasyMailPopup(QMainWindow):
     # -------- Handler : clic "Lancer" ---------------------------------------
 
     def _on_activate_click(self):
+        """CTA marketing :
+        - Si onboarding pas terminé → bascule vers le flow onboarding 5 étapes
+        - Sinon → bascule vers l'overlay (cas user déjà installé qui revient)
+
+        Phase D8 (02/05/2026) : le TODO « déclencher le flow d'onboarding
+        complet » est désormais résolu.
         """
-        Le user clique sur le CTA : on ouvre le flow d'onboarding dans le dialog.
-        Le reste (OAuth, etc.) se fait côté web — la popup laisse la main.
-        """
-        logger.info('CTA marketing cliqué → bascule onboarding')
-        # TODO Phase 5 : déclencher le flow d'onboarding complet.
-        # Pour l'instant, on bascule vers popup.html (Etat 1 overlay) qui
-        # contient déjà le bouton d'activation Microsoft.
+        if not _is_onboarding_done():
+            logger.info('CTA marketing cliqué → onboarding (pas encore terminé)')
+            self._transition_to_onboarding()
+            return
+        logger.info('CTA marketing cliqué → overlay (onboarding déjà fait)')
         self._transition_to_overlay()
 
     # =========================================================================

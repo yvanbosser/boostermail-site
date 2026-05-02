@@ -12561,6 +12561,20 @@ def api_apply_update():
 # post-it BoosterMail (overlay PyQt) et l'overlay iframe interne du dialog.
 # =============================================================================
 
+@app.route('/plugin/onboarding')
+def page_onboarding():
+    """Onboarding — flux 5 étapes pour les nouveaux users (Phase D 02/05/2026).
+
+    Servi quand le companion détecte que onboarding_done=false. La page est
+    une SPA autonome qui guide l'user à travers : Bienvenue + Microsoft,
+    analyse de style, dossier de classement PJ, personnalisation/CGU,
+    activation finale. À l'issue, /api/setup/complete est appelé et
+    onboarding_done passe à true → la prochaine ouverture d'Outlook
+    affichera la popup de lancement classique.
+    """
+    return render_template('onboarding.html')
+
+
 @app.route('/plugin/profile')
 def page_profile():
     """Tableau de bord — vue Profil. Port du proto app.py:4315."""

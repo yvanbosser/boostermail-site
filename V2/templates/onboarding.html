@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BoosterMail — Bienvenue</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(180deg, #f5f8fc 0%, #e8eef6 100%);
+            min-height: 100vh;
+            color: #1a1a2e;
+        }
+
+        /* ─── Header ─── */
+        .header {
+            background: linear-gradient(135deg, #0F6CBD 0%, #1976D2 100%);
+            padding: 20px 32px;
+            color: #fff;
+            box-shadow: 0 2px 12px rgba(15, 108, 189, 0.2);
+        }
+        .header h1 {
+            font-size: 18px; font-weight: 600;
+            display: flex; align-items: center; gap: 10px;
+        }
+        .header h1::before { content: '✉'; font-size: 22px; }
+
+        /* ─── Barre de progression ─── */
+        .progress-bar {
+            background: white;
+            padding: 16px 32px;
+            border-bottom: 1px solid #e6ecf3;
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            position: sticky; top: 0; z-index: 5;
+        }
+        .progress-step {
+            flex: 0 1 100px;
+            height: 4px;
+            background: #e0e7f0;
+            border-radius: 2px;
+            transition: background 0.3s;
+        }
+        .progress-step.active { background: #0F6CBD; }
+        .progress-step.done { background: #43a047; }
+
+        /* ─── Conteneur principal ─── */
+        .container {
+            max-width: 640px;
+            margin: 40px auto;
+            padding: 0 24px;
+        }
+        .step {
+            display: none;
+            background: white;
+            border-radius: 16px;
+            padding: 40px 36px;
+            box-shadow: 0 2px 16px rgba(15, 108, 189, 0.08);
+            animation: fadeIn 0.35s ease-out;
+        }
+        .step.active { display: block; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ─── Typographie ─── */
+        .step-icon {
+            font-size: 48px;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+        .step-title {
+            font-size: 24px;
+            font-weight: 700;
+            text-align: center;
+            color: #1a1a2e;
+            margin-bottom: 10px;
+            line-height: 1.25;
+        }
+        .step-subtitle {
+            font-size: 14px;
+            color: #5a6377;
+            text-align: center;
+            margin-bottom: 28px;
+            line-height: 1.55;
+        }
+
+        /* ─── Cases à cocher ─── */
+        .consent-box {
+            background: #f7f9fc;
+            border: 1px solid #e0e7f0;
+            border-radius: 10px;
+            padding: 16px 18px;
+            margin-bottom: 20px;
+        }
+        .consent-row {
+            display: flex; align-items: flex-start; gap: 10px;
+            font-size: 13px; color: #2d3548; line-height: 1.5;
+            cursor: pointer;
+        }
+        .consent-row input[type="checkbox"] {
+            margin-top: 2px;
+            width: 16px; height: 16px;
+            cursor: pointer; accent-color: #0F6CBD;
+        }
+        .consent-links {
+            font-size: 11px; color: #888;
+            margin-top: 6px; padding-left: 26px;
+        }
+        .consent-links a {
+            color: #0F6CBD; text-decoration: none;
+        }
+        .consent-links a:hover { text-decoration: underline; }
+
+        /* ─── Boutons ─── */
+        .btn-row {
+            display: flex; justify-content: space-between;
+            margin-top: 28px; gap: 12px;
+        }
+        .btn-row.center { justify-content: center; }
+        .btn {
+            padding: 12px 28px;
+            border: none; border-radius: 8px;
+            font-size: 14px; font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-family: inherit;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #0F6CBD 0%, #1976D2 100%);
+            color: #fff;
+            box-shadow: 0 2px 6px rgba(15, 108, 189, 0.3);
+        }
+        .btn-primary:hover:not(:disabled) {
+            box-shadow: 0 3px 10px rgba(15, 108, 189, 0.4);
+            transform: translateY(-1px);
+        }
+        .btn-primary:disabled {
+            background: #c4cbd6;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        .btn-secondary {
+            background: transparent;
+            color: #5a6377;
+            border: 1px solid #d6dde7;
+        }
+        .btn-secondary:hover { background: #f0f4fa; }
+
+        /* ─── Microsoft button (étape 1) ─── */
+        .btn-microsoft {
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+            width: 100%;
+            padding: 14px 20px;
+            background: #fff;
+            border: 1px solid #d6dde7;
+            border-radius: 8px;
+            font-size: 14px; font-weight: 500; color: #2d3548;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-family: inherit;
+        }
+        .btn-microsoft:hover:not(:disabled) {
+            border-color: #0F6CBD;
+            box-shadow: 0 2px 8px rgba(15, 108, 189, 0.15);
+        }
+        .btn-microsoft:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-microsoft .ms-logo {
+            display: inline-block;
+            width: 18px; height: 18px;
+            background: linear-gradient(135deg, #f25022 0%, #f25022 50%, #00a4ef 50%, #00a4ef 100%);
+            background:
+              linear-gradient(to right, #f25022 50%, #7fba00 50%) top / 100% 50% no-repeat,
+              linear-gradient(to right, #00a4ef 50%, #ffb900 50%) bottom / 100% 50% no-repeat;
+        }
+
+        /* ─── Bullet list (permissions Microsoft) ─── */
+        .bullets {
+            background: #f7f9fc;
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin: 20px 0;
+        }
+        .bullets li {
+            list-style: none;
+            font-size: 13px; color: #2d3548;
+            padding: 6px 0;
+            display: flex; align-items: flex-start; gap: 10px;
+        }
+        .bullets li::before {
+            content: '✓';
+            color: #43a047;
+            font-weight: bold;
+        }
+        .info-tip {
+            background: #fff8e1;
+            border-left: 3px solid #ffa726;
+            padding: 10px 14px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #5a4a1a;
+            margin: 16px 0;
+            line-height: 1.5;
+        }
+        .info-secure {
+            text-align: center;
+            font-size: 12px;
+            color: #5a6377;
+            margin-top: 16px;
+        }
+
+        /* ─── Spinner étape connexion en cours ─── */
+        .spinner {
+            display: inline-block;
+            width: 36px; height: 36px;
+            border: 3px solid #e0e7f0;
+            border-top-color: #0F6CBD;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ─── Étape 2 (analyse style) ─── */
+        .progress-track {
+            background: #e0e7f0;
+            border-radius: 999px;
+            height: 8px;
+            overflow: hidden;
+            margin: 20px 0 12px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #0F6CBD 0%, #1976D2 100%);
+            border-radius: 999px;
+            width: 0%;
+            transition: width 0.4s ease;
+        }
+        .progress-label {
+            font-size: 12px;
+            color: #5a6377;
+            text-align: center;
+            min-height: 16px;
+        }
+
+        /* ─── Étape 3 (dossier PJ) ─── */
+        .field-row {
+            display: flex; gap: 10px;
+            margin: 16px 0;
+        }
+        .field-input {
+            flex: 1;
+            padding: 12px 14px;
+            border: 1px solid #d6dde7;
+            border-radius: 8px;
+            font-size: 13px;
+            font-family: 'Consolas', monospace;
+            color: #2d3548;
+        }
+        .field-input:focus {
+            outline: none;
+            border-color: #0F6CBD;
+            box-shadow: 0 0 0 3px rgba(15, 108, 189, 0.1);
+        }
+        .field-help {
+            font-size: 12px;
+            color: #5a6377;
+            margin-top: 4px;
+            line-height: 1.5;
+        }
+
+        /* ─── Étape 5 (success) ─── */
+        .success-icon {
+            font-size: 64px;
+            text-align: center;
+            margin-bottom: 16px;
+            animation: pop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        @keyframes pop {
+            from { opacity: 0; transform: scale(0.5); }
+            to   { opacity: 1; transform: scale(1); }
+        }
+
+        /* ─── Erreur ─── */
+        .error-banner {
+            background: #fff0f0;
+            border-left: 3px solid #c62828;
+            padding: 10px 14px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #6f1818;
+            margin: 16px 0;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>BoosterMail</h1>
+</div>
+
+<div class="progress-bar">
+    <div class="progress-step active" data-step="1"></div>
+    <div class="progress-step" data-step="2"></div>
+    <div class="progress-step" data-step="3"></div>
+    <div class="progress-step" data-step="4"></div>
+    <div class="progress-step" data-step="5"></div>
+</div>
+
+<div class="container">
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- ÉTAPE 1 — Bienvenue + Connexion Microsoft -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="step active" id="step-1">
+        <div id="step-1-intro">
+            <div class="step-icon">👋</div>
+            <h2 class="step-title">Bienvenue dans BoosterMail</h2>
+            <p class="step-subtitle">
+                Répondez à vos mails 5× plus vite.<br>
+                BoosterMail apprend votre style et prépare vos réponses à votre place
+                — vous n'avez plus qu'à valider et envoyer.
+            </p>
+
+            <div class="consent-box">
+                <label class="consent-row">
+                    <input type="checkbox" id="consent-ai" onchange="updateMicrosoftButton()">
+                    <span>
+                        J'autorise BoosterMail à analyser mes mails par IA (Anthropic)
+                        pour générer des réponses adaptées à mon style.
+                    </span>
+                </label>
+                <div class="consent-links">
+                    <a href="#" onclick="showLegal('rgpd'); return false;">Détails RGPD</a>
+                    &nbsp;·&nbsp;
+                    <a href="#" onclick="showLegal('privacy'); return false;">Politique de confidentialité</a>
+                </div>
+            </div>
+
+            <button class="btn-microsoft" id="btn-microsoft" onclick="startMicrosoftAuth()" disabled>
+                <span class="ms-logo"></span>
+                Se connecter avec Microsoft
+            </button>
+
+            <div class="info-secure">
+                🔒 BoosterMail ne stocke jamais votre mot de passe.
+                Microsoft gère seul l'authentification.
+            </div>
+        </div>
+
+        <!-- État : connexion en cours -->
+        <div id="step-1-connecting" style="display:none; text-align: center; padding: 20px 0;">
+            <div class="spinner" style="margin: 0 auto 20px;"></div>
+            <h2 class="step-title">Connexion en cours…</h2>
+            <p class="step-subtitle">
+                Une fenêtre Microsoft s'est ouverte.<br>
+                Suivez les étapes dans cette fenêtre.
+            </p>
+            <div class="info-tip">
+                ℹ️ La fenêtre Microsoft est introuvable ?<br>
+                → Cherchez-la dans votre barre des tâches Windows
+            </div>
+            <button class="btn btn-secondary" onclick="cancelMicrosoftAuth()">
+                Annuler
+            </button>
+        </div>
+
+        <!-- État : succès -->
+        <div id="step-1-success" style="display:none; text-align: center;">
+            <div class="success-icon">✅</div>
+            <h2 class="step-title">Connexion réussie !</h2>
+            <p class="step-subtitle">
+                Vous êtes connecté en tant que :<br>
+                <strong id="connected-email">…</strong>
+            </p>
+            <ul class="bullets">
+                <li>Lecture des mails</li>
+                <li>Brouillons et envoi</li>
+                <li>Signature</li>
+            </ul>
+            <button class="btn btn-primary" onclick="goToStep(2)">
+                Continuer →
+            </button>
+        </div>
+
+        <!-- État : échec -->
+        <div id="step-1-error" style="display:none;">
+            <div class="step-icon">⚠️</div>
+            <h2 class="step-title" id="error-title">Connexion échouée</h2>
+            <p class="step-subtitle" id="error-message">…</p>
+            <div class="btn-row center">
+                <button class="btn btn-secondary" onclick="resetStep1()">← Recommencer</button>
+                <button class="btn btn-primary" onclick="startMicrosoftAuth()">Réessayer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- ÉTAPE 2 — Analyse de votre style -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="step" id="step-2">
+        <div class="step-icon">✍️</div>
+        <h2 class="step-title">BoosterMail apprend votre plume</h2>
+        <p class="step-subtitle">
+            Dans quelques instants, il écrira exactement comme vous.
+        </p>
+
+        <div class="progress-track">
+            <div class="progress-fill" id="style-progress"></div>
+        </div>
+        <div class="progress-label" id="style-label">Préparation…</div>
+
+        <div class="info-tip" style="margin-top: 24px;">
+            💡 BoosterMail analyse vos derniers mails envoyés et reçus pour comprendre :
+            votre ton, vos formules de politesse, votre signature, vos contacts récurrents.
+        </div>
+
+        <div id="step-2-buttons" style="display:none; margin-top: 24px; text-align:center;">
+            <button class="btn btn-primary" onclick="goToStep(3)">Continuer →</button>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- ÉTAPE 3 — Dossier de classement des PJ -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="step" id="step-3">
+        <div class="step-icon">📁</div>
+        <h2 class="step-title">Classez 5× plus vite vos pièces jointes</h2>
+        <p class="step-subtitle">
+            À chaque mail avec pièce jointe, BoosterMail propose en un clic le bon dossier
+            dans votre arborescence Windows. Plus de glisser-déposer, plus de fenêtres
+            ouvertes inutilement.
+        </p>
+
+        <label style="display:block; font-size:13px; font-weight:600; color:#2d3548; margin-bottom:6px;">
+            Votre dossier de classement principal
+        </label>
+        <div class="field-help" style="margin-top:0; margin-bottom:8px;">
+            Indiquez le dossier le plus haut de votre arborescence.
+            BoosterMail suggérera automatiquement le bon sous-dossier de cet emplacement.
+        </div>
+        <div class="field-row">
+            <input type="text" id="pj-folder-input" class="field-input"
+                   placeholder="C:\Users\votre_nom\OneDrive\Desktop\2. Professionnel">
+            <button class="btn btn-secondary" onclick="pickFolderOnboarding()" id="btn-pick-folder"
+                    style="padding: 12px 18px;">
+                📁 Parcourir
+            </button>
+        </div>
+        <div id="pj-scan-status" class="field-help" style="margin-top:10px; min-height:18px;"></div>
+
+        <div class="info-tip">
+            🔒 Confidentialité : seuls les noms de dossiers sont utilisés pour la suggestion.
+            Aucun fichier n'est lu ni envoyé.
+        </div>
+
+        <div class="btn-row">
+            <button class="btn btn-secondary" onclick="skipStep3()">Plus tard</button>
+            <button class="btn btn-primary" onclick="confirmStep3()" id="btn-step3-next">C'est parti →</button>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- ÉTAPE 4 — Personnalisation + CGU -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="step" id="step-4">
+        <div class="step-icon">⚙️</div>
+        <h2 class="step-title">Personnalisez votre BoosterMail</h2>
+        <p class="step-subtitle">Quelques options pour aller plus loin.</p>
+
+        <div style="margin-bottom: 22px;">
+            <label style="display:block; font-size:13px; font-weight:600; color:#2d3548; margin-bottom:8px;">
+                📧 Importance par défaut des réponses
+            </label>
+            <div style="display:flex; gap:8px;">
+                <label style="flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; padding:10px; border:1px solid #d6dde7; border-radius:8px; cursor:pointer; font-size:12px;">
+                    <input type="radio" name="importance" value="0" style="margin:0;">
+                    <span><strong>Rapide</strong></span>
+                    <span style="color:#5a6377; font-size:11px;">Court</span>
+                </label>
+                <label style="flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; padding:10px; border:1px solid #0F6CBD; border-radius:8px; cursor:pointer; font-size:12px; background:#f0f6fc;">
+                    <input type="radio" name="importance" value="1" checked style="margin:0;">
+                    <span><strong>Standard</strong></span>
+                    <span style="color:#5a6377; font-size:11px;">Recommandé</span>
+                </label>
+                <label style="flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; padding:10px; border:1px solid #d6dde7; border-radius:8px; cursor:pointer; font-size:12px;">
+                    <input type="radio" name="importance" value="2" style="margin:0;">
+                    <span><strong>Travaillée</strong></span>
+                    <span style="color:#5a6377; font-size:11px;">Long</span>
+                </label>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 22px;">
+            <label class="consent-row">
+                <input type="checkbox" id="signature-marketing" checked>
+                <span>
+                    <strong>Afficher la mention « Généré avec BoosterMail »</strong> en bas de mes mails<br>
+                    <span style="font-size:11px; color:#5a6377;">Aide à faire connaître BoosterMail. Vous pouvez le désactiver à tout moment.</span>
+                </span>
+            </label>
+        </div>
+
+        <div style="margin-bottom: 22px;">
+            <label class="consent-row">
+                <input type="checkbox" id="newsletter-optin">
+                <span>
+                    <strong>Recevoir les conseils & nouveautés</strong> (1 mail/mois max)
+                </span>
+            </label>
+        </div>
+
+        <div class="consent-box" style="border-color:#ffa726; background:#fff8e1;">
+            <label class="consent-row">
+                <input type="checkbox" id="consent-cgu" onchange="updateStep4Button()">
+                <span>
+                    <strong>J'accepte les Conditions Générales d'Utilisation</strong>
+                </span>
+            </label>
+            <div class="consent-links">
+                <a href="#" onclick="showLegal('cgu'); return false;">Lire les CGU complètes</a>
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <button class="btn btn-secondary" onclick="goToStep(3)">← Retour</button>
+            <button class="btn btn-primary" onclick="confirmStep4()" id="btn-step4-next" disabled>Continuer →</button>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- ÉTAPE 5 — C'est prêt -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="step" id="step-5">
+        <div class="success-icon">🎉</div>
+        <h2 class="step-title">BoosterMail est prêt !</h2>
+        <p class="step-subtitle">
+            Tout est configuré. Vous pouvez maintenant générer votre première réponse
+            depuis Outlook en un clic.
+        </p>
+
+        <div class="bullets">
+            <li>Votre style est analysé</li>
+            <li>Vos pièces jointes seront classées intelligemment</li>
+            <li>BoosterMail apprend de chacun de vos envois</li>
+        </div>
+
+        <div class="info-tip">
+            💡 Astuce : ouvrez un mail dans Outlook et cliquez sur le bouton BoosterMail
+            pour voir la magie opérer.
+        </div>
+
+        <div class="btn-row center">
+            <button class="btn btn-primary" onclick="finishOnboarding()" style="padding: 14px 36px;">
+                Commencer à utiliser BoosterMail
+            </button>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    // ═══════════════════════════════════════════════════════════════
+    // NAVIGATION ENTRE LES ÉTAPES
+    // ═══════════════════════════════════════════════════════════════
+
+    var currentStep = 1;
+    var TOTAL_STEPS = 5;
+
+    function goToStep(n) {
+        if (n < 1 || n > TOTAL_STEPS) return;
+        // Masquer toutes les étapes
+        document.querySelectorAll('.step').forEach(function(el) {
+            el.classList.remove('active');
+        });
+        // Afficher l'étape demandée
+        var el = document.getElementById('step-' + n);
+        if (el) el.classList.add('active');
+        // Mettre à jour la barre de progression
+        document.querySelectorAll('.progress-step').forEach(function(s, i) {
+            s.classList.remove('active', 'done');
+            if (i + 1 < n) s.classList.add('done');
+            else if (i + 1 === n) s.classList.add('active');
+        });
+        currentStep = n;
+        // Hooks d'entrée par étape
+        if (n === 2) startStyleAnalysis();
+        if (n === 3) preloadStep3();
+        // Scroll en haut
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ÉTAPE 1 — CONNEXION MICROSOFT
+    // ═══════════════════════════════════════════════════════════════
+
+    function updateMicrosoftButton() {
+        var consent = document.getElementById('consent-ai').checked;
+        document.getElementById('btn-microsoft').disabled = !consent;
+    }
+
+    var _authPollInterval = null;
+    var _authPopupRef = null;
+
+    function startMicrosoftAuth() {
+        // Bascule vers l'état "connexion en cours"
+        document.getElementById('step-1-intro').style.display = 'none';
+        document.getElementById('step-1-error').style.display = 'none';
+        document.getElementById('step-1-connecting').style.display = 'block';
+
+        // Ouvre l'OAuth dans une popup
+        try {
+            _authPopupRef = window.open('/auth/login', 'bm-auth',
+                'width=520,height=640,scrollbars=yes,resizable=yes');
+        } catch(e) {
+            showAuthError('popup_blocked');
+            return;
+        }
+
+        // Poll toutes les 1.5s pour détecter la fin de l'auth
+        if (_authPollInterval) clearInterval(_authPollInterval);
+        _authPollInterval = setInterval(function() {
+            fetch('/api/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.authenticated && data.mode === 'standard') {
+                        // Connexion réussie
+                        clearInterval(_authPollInterval);
+                        _authPollInterval = null;
+                        var emailEl = document.getElementById('connected-email');
+                        if (emailEl) emailEl.textContent = data.email || '(votre boîte Outlook)';
+                        document.getElementById('step-1-connecting').style.display = 'none';
+                        document.getElementById('step-1-success').style.display = 'block';
+                        // Sauvegarder le step actuel
+                        saveSetupStep(2);
+                        try { if (_authPopupRef) _authPopupRef.close(); } catch(e) {}
+                    }
+                })
+                .catch(function() {});
+        }, 1500);
+
+        // Timeout 5 min : si pas authentifié, on stoppe le poll
+        setTimeout(function() {
+            if (_authPollInterval) {
+                clearInterval(_authPollInterval);
+                _authPollInterval = null;
+                if (document.getElementById('step-1-connecting').style.display !== 'none') {
+                    showAuthError('timeout');
+                }
+            }
+        }, 5 * 60 * 1000);
+    }
+
+    function cancelMicrosoftAuth() {
+        if (_authPollInterval) {
+            clearInterval(_authPollInterval);
+            _authPollInterval = null;
+        }
+        try { if (_authPopupRef) _authPopupRef.close(); } catch(e) {}
+        resetStep1();
+    }
+
+    function resetStep1() {
+        document.getElementById('step-1-intro').style.display = 'block';
+        document.getElementById('step-1-connecting').style.display = 'none';
+        document.getElementById('step-1-success').style.display = 'none';
+        document.getElementById('step-1-error').style.display = 'none';
+    }
+
+    function showAuthError(code) {
+        document.getElementById('step-1-connecting').style.display = 'none';
+        document.getElementById('step-1-intro').style.display = 'none';
+        document.getElementById('step-1-error').style.display = 'block';
+        var titles = {
+            'popup_blocked': 'Popup bloquée par votre navigateur',
+            'cancelled': 'Connexion annulée',
+            'wrong_account': 'Mauvais compte sélectionné',
+            'permissions_refused': 'Autorisations refusées',
+            'no_outlook': 'Compte sans Outlook',
+            'network': 'Problème de connexion',
+            'timeout': 'Délai dépassé',
+            'unknown': 'Erreur inconnue',
+        };
+        var messages = {
+            'popup_blocked': 'Autorisez les popups depuis ce site puis réessayez.',
+            'cancelled': 'Vous avez fermé la fenêtre Microsoft. On peut réessayer quand vous voulez.',
+            'wrong_account': 'Le compte choisi n\'est pas celui d\'Outlook. Réessayez en choisissant le bon compte.',
+            'permissions_refused': 'BoosterMail a besoin de toutes les autorisations. Si vous avez décoché l\'une d\'entre elles, il faut les accepter.',
+            'no_outlook': 'Ce compte Microsoft n\'a pas de boîte Outlook. BoosterMail nécessite un compte Microsoft 365 ou Outlook.com.',
+            'network': 'Microsoft ne répond pas. Vérifiez votre connexion internet et réessayez.',
+            'timeout': 'Vous avez mis trop de temps. Pas grave, on recommence.',
+            'unknown': 'Quelque chose s\'est mal passé. Réessayez.',
+        };
+        document.getElementById('error-title').textContent = titles[code] || titles['unknown'];
+        document.getElementById('error-message').textContent = messages[code] || messages['unknown'];
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ÉTAPE 2 — ANALYSE DE STYLE
+    // ═══════════════════════════════════════════════════════════════
+
+    var _styleStarted = false;
+    var _styleProgressTimer = null;
+
+    function startStyleAnalysis() {
+        if (_styleStarted) return;
+        _styleStarted = true;
+
+        // Lance l'analyse côté backend
+        fetch('/api/setup/onboarding', { method: 'POST' })
+            .catch(function() {});
+
+        // Poll progression toutes les 2s
+        _styleProgressTimer = setInterval(function() {
+            fetch('/api/style_status')
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    var pct = Math.round((d.progress || 0));
+                    document.getElementById('style-progress').style.width = pct + '%';
+                    document.getElementById('style-label').textContent = d.label || ('Analyse… ' + pct + '%');
+                    if (d.status === 'done' || pct >= 100) {
+                        clearInterval(_styleProgressTimer);
+                        _styleProgressTimer = null;
+                        document.getElementById('style-progress').style.width = '100%';
+                        document.getElementById('style-label').textContent = '✓ Style analysé';
+                        document.getElementById('step-2-buttons').style.display = 'block';
+                        saveSetupStep(3);
+                    }
+                })
+                .catch(function() {});
+        }, 2000);
+
+        // Auto-progression visuelle si le backend ne renvoie rien (mode dégradé)
+        var fakeP = 0;
+        var fakeTimer = setInterval(function() {
+            if (!_styleProgressTimer) { clearInterval(fakeTimer); return; }
+            fakeP = Math.min(fakeP + 2, 90);
+            var current = parseInt(document.getElementById('style-progress').style.width) || 0;
+            if (current < fakeP) {
+                document.getElementById('style-progress').style.width = fakeP + '%';
+            }
+        }, 600);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ÉTAPE 3 — DOSSIER PJ
+    // ═══════════════════════════════════════════════════════════════
+
+    function preloadStep3() {
+        // Pré-remplit le champ avec la valeur courante (si déjà configurée)
+        fetch('/api/settings/pj_root_folder')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.value) {
+                    document.getElementById('pj-folder-input').value = d.value;
+                }
+            })
+            .catch(function() {});
+    }
+
+    function pickFolderOnboarding() {
+        var input = document.getElementById('pj-folder-input');
+        var btn = document.getElementById('btn-pick-folder');
+        var initialDir = (input && input.value) ? input.value.trim() : '';
+
+        btn.disabled = true;
+        var oldText = btn.innerHTML;
+        btn.innerHTML = '⏳';
+
+        fetch('http://127.0.0.1:5052/pick_folder', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ initial_dir: initialDir }),
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            btn.disabled = false; btn.innerHTML = oldText;
+            if (d.ok && d.path) {
+                input.value = d.path;
+            }
+        })
+        .catch(function() {
+            btn.disabled = false; btn.innerHTML = oldText;
+            document.getElementById('pj-scan-status').innerHTML =
+                '<span style="color:#c62828;">⚠️ Sélecteur indisponible. Tapez le chemin manuellement.</span>';
+        });
+    }
+
+    function skipStep3() {
+        // L'user peut configurer plus tard via Profil
+        saveSetting('onboarding_pj_skipped', '1');
+        goToStep(4);
+    }
+
+    function confirmStep3() {
+        var path = document.getElementById('pj-folder-input').value.trim();
+        if (!path) {
+            // Pas de path → équivalent à skip
+            skipStep3();
+            return;
+        }
+        var btn = document.getElementById('btn-step3-next');
+        btn.disabled = true;
+        var status = document.getElementById('pj-scan-status');
+        status.innerHTML = '<span style="color:#0F6CBD;">🔄 Sauvegarde et synchronisation…</span>';
+
+        // 1. Sauvegarder le setting
+        fetch('/api/save_setting', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ key: 'pj_root_folder', value: path }),
+        })
+        .then(function() {
+            // 2. Déclencher un sync immédiat côté companion
+            return fetch('http://127.0.0.1:5052/sync_folders', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ force: true }),
+            });
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            btn.disabled = false;
+            if (d && d.ok) {
+                var n = d.count || 0;
+                status.innerHTML = '<span style="color:#2e7d32;">✓ ' + n + ' dossiers détectés</span>';
+                setTimeout(function() { goToStep(4); }, 700);
+            } else {
+                status.innerHTML = '<span style="color:#c62828;">⚠️ Impossible de scanner. Vérifiez le chemin ou réessayez.</span>';
+            }
+        })
+        .catch(function() {
+            btn.disabled = false;
+            // En cas d'erreur companion, on continue quand même (l'user pourra
+            // re-synchroniser plus tard via Profil → Recalibrer)
+            status.innerHTML = '<span style="color:#e65100;">ℹ️ Configuration enregistrée. Synchronisation reportée.</span>';
+            setTimeout(function() { goToStep(4); }, 1200);
+        });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ÉTAPE 4 — PERSONNALISATION + CGU
+    // ═══════════════════════════════════════════════════════════════
+
+    function updateStep4Button() {
+        var consent = document.getElementById('consent-cgu').checked;
+        document.getElementById('btn-step4-next').disabled = !consent;
+    }
+
+    function confirmStep4() {
+        // Sauvegarde toutes les préférences en parallèle
+        var importance = document.querySelector('input[name="importance"]:checked');
+        var imp = importance ? importance.value : '1';
+        var sigChecked = document.getElementById('signature-marketing').checked;
+        var newsletterChecked = document.getElementById('newsletter-optin').checked;
+
+        Promise.all([
+            saveSetting('default_importance', imp),
+            saveSetting('show_marketing_signature', sigChecked ? '1' : '0'),
+            saveSetting('newsletter_optin', newsletterChecked ? '1' : '0'),
+            saveSetting('cgu_accepted', '1'),
+        ]).then(function() {
+            goToStep(5);
+        }).catch(function() {
+            goToStep(5); // ne pas bloquer
+        });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ÉTAPE 5 — FINALISATION
+    // ═══════════════════════════════════════════════════════════════
+
+    function finishOnboarding() {
+        fetch('/api/setup/complete', { method: 'POST' })
+            .finally(function() {
+                // Rediriger vers la popup normale (overlay)
+                window.location.href = '/plugin/popup.html?container=pyqt';
+            });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    function saveSetting(key, value) {
+        return fetch('/api/save_setting', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ key: key, value: value }),
+        });
+    }
+
+    function saveSetupStep(n) {
+        saveSetting('setup_step', String(n)).catch(function() {});
+    }
+
+    function showLegal(kind) {
+        var urls = {
+            'rgpd': '/legal/rgpd',
+            'privacy': '/legal/privacy',
+            'cgu': '/legal/cgu',
+        };
+        window.open(urls[kind] || '/legal/privacy', '_blank');
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // INITIALISATION
+    // ═══════════════════════════════════════════════════════════════
+
+    document.addEventListener('DOMContentLoaded', function() {
+        // Si l'user est déjà connecté Microsoft, sauter l'étape 1
+        fetch('/api/status')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.authenticated && data.mode === 'standard') {
+                    // On charge l'email connecté pour info
+                    var emailEl = document.getElementById('connected-email');
+                    if (emailEl && data.email) emailEl.textContent = data.email;
+                    // On reprend là où on en était
+                    var step = parseInt(data.setup_step || '1', 10);
+                    if (step >= 2) goToStep(step);
+                }
+            })
+            .catch(function() {});
+    });
+</script>
+
+</body>
+</html>
