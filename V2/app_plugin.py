@@ -8034,14 +8034,20 @@ def api_windows_folders_push():
             (root_path + '|' + _serialized).encode('utf-8')
         ).hexdigest()
 
-        # Diff : si même hash que celui en DB, on n'écrit pas (économie I/O)
+        # Diff : si même hash que celui en DB, on n'écrit pas le contenu
+        # mais on met à jour synced_at quand même (= « j'ai vérifié à cette
+        # heure »). Sinon le sous-titre du Profil resterait figé sur
+        # l'ancien horodatage quand l'user clique « Recalibrer » volontaire-
+        # ment. Fix 02/05/2026 (signal Yvan : « le message synchronisé il
+        # y a 17 min reste, or il devrait être modifié »).
         existing = _db.get_user_windows_folders()
         if existing and existing.get('hash') == server_hash:
+            # Re-save : même contenu, mais synced_at refresh (datetime now)
+            _db.save_user_windows_folders(root_path, folders, server_hash)
             return jsonify({
                 "status": "ok",
                 "count": existing.get('count', 0),
                 "changed": False,
-                "synced_at": existing.get('synced_at', ''),
             })
 
         # Sauvegarde + invalidation cache RAM

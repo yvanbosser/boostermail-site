@@ -42,42 +42,66 @@ class Database:
         # zombies. Cf commentaire class-level ci-dessus + bilan 30/04 PM.
 
     def _conn(self):
-        """Connection persistante par thread (evite open/close a chaque requete)."""
-        if not hasattr(self._local, 'conn') or self._local.conn is None:
-            conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA cache_size=-8000")  # 8MB cache
-            conn.execute("PRAGMA busy_timeout=5000")  # audit I4 : 5s avant erreur locked
-            conn.row_factory = sqlite3.Row
-            self._local.conn = conn
-            tid = threading.get_ident()
-            old_conn = None
-            start_gc = False
-            with Database._all_conns_lock:
-                # TID reutilise (rare avec daemon threads CPython, mais
-                # possible) : l'ancienne conn n'est plus accessible via
-                # _local.conn donc on la ferme nous-meme.
-                old_conn = Database._all_conns.get(tid)
-                Database._all_conns[tid] = conn
-                # Note : on ecrit sur la CLASSE (Database._gc_started) et
-                # pas sur self._gc_started, sinon Python creerait un
-                # attribut instance qui shadowe le class-level → bug
-                # 2 threads db-gc si plusieurs Database() instanciees.
-                if not Database._gc_started:
-                    Database._gc_started = True
-                    start_gc = True
-            if old_conn is not None:
-                try:
-                    old_conn.close()
-                except Exception:
-                    pass
-            if start_gc:
-                threading.Thread(
-                    target=self._gc_zombie_conns_loop,
-                    daemon=True,
-                    name='db-gc'
-                ).start()
+        """Connection persistante par thread (evite open/close a chaque requete).
+
+        Fix 02/05/2026 (signal Yvan : « Internal Server Error » intermittent
+        sur /plugin/profile, trace `sqlite3.ProgrammingError: Cannot operate
+        on a closed database`) : avant, _conn() retournait self._local.conn
+        sans vérifier si la conn était encore ouverte. Si le GC zombie ou
+        un autre code fermait la conn, le thread Werkzeug suivant tombait
+        sur l'erreur. Désormais on teste la conn avant de la retourner et
+        on en recrée une si elle est fermée.
+        """
+        existing = getattr(self._local, 'conn', None)
+        if existing is not None:
+            # Vérifier que la conn est encore vivante (un autre code ou le
+            # GC peut l'avoir fermée si TID a été réutilisé / process en
+            # cours de shutdown) — coût ~10 µs.
+            try:
+                existing.execute("SELECT 1").fetchone()
+                return existing
+            except sqlite3.ProgrammingError:
+                # « Cannot operate on a closed database » → on recrée
+                self._local.conn = None
+            except sqlite3.Error:
+                # Toute autre erreur DB → on recrée par sécurité
+                self._local.conn = None
+
+        # Création d'une nouvelle conn
+        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA cache_size=-8000")  # 8MB cache
+        conn.execute("PRAGMA busy_timeout=5000")  # audit I4 : 5s avant erreur locked
+        conn.row_factory = sqlite3.Row
+        self._local.conn = conn
+        tid = threading.get_ident()
+        old_conn = None
+        start_gc = False
+        with Database._all_conns_lock:
+            # TID reutilise (rare avec daemon threads CPython, mais
+            # possible) : l'ancienne conn n'est plus accessible via
+            # _local.conn donc on la ferme nous-meme.
+            old_conn = Database._all_conns.get(tid)
+            Database._all_conns[tid] = conn
+            # Note : on ecrit sur la CLASSE (Database._gc_started) et
+            # pas sur self._gc_started, sinon Python creerait un
+            # attribut instance qui shadowe le class-level → bug
+            # 2 threads db-gc si plusieurs Database() instanciees.
+            if not Database._gc_started:
+                Database._gc_started = True
+                start_gc = True
+        if old_conn is not None and old_conn is not conn:
+            try:
+                old_conn.close()
+            except Exception:
+                pass
+        if start_gc:
+            threading.Thread(
+                target=self._gc_zombie_conns_loop,
+                daemon=True,
+                name='db-gc'
+            ).start()
         return self._local.conn
 
     def _gc_zombie_conns_loop(self):
