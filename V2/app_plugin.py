@@ -6458,6 +6458,12 @@ _ALLOWED_SETTINGS = {
     'graph_subscription_id',
     'graph_subscription_expiration',
     'graph_subscription_client_state',
+    # Onboarding 02/05/2026 — consentements légaux pour traçabilité RGPD
+    'cgu_accepted',
+    'rgpd_ai_consent',
+    'show_marketing_signature',
+    'newsletter_optin',
+    'onboarding_pj_skipped',
 }
 
 @app.route('/api/save_setting', methods=['POST'])

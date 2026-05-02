@@ -310,7 +310,6 @@
     <div class="progress-step" data-step="2"></div>
     <div class="progress-step" data-step="3"></div>
     <div class="progress-step" data-step="4"></div>
-    <div class="progress-step" data-step="5"></div>
 </div>
 
 <div class="container">
@@ -341,6 +340,12 @@
                     &nbsp;·&nbsp;
                     <a href="#" onclick="showLegal('privacy'); return false;">Politique de confidentialité</a>
                 </div>
+                <label class="consent-row" style="margin-top:10px; padding-top:10px; border-top:1px solid #e0e7f0;">
+                    <input type="checkbox" id="consent-cgu" onchange="updateMicrosoftButton()">
+                    <span>
+                        J'accepte les <a href="#" onclick="showLegal('cgu'); return false;" style="color:#0F6CBD;">Conditions Générales d'Utilisation</a>.
+                    </span>
+                </label>
             </div>
 
             <button class="btn-microsoft" id="btn-microsoft" onclick="startMicrosoftAuth()" disabled>
@@ -478,77 +483,9 @@
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
-    <!-- ÉTAPE 4 — Personnalisation + CGU -->
+    <!-- ÉTAPE 4 — C'est prêt (anciennement étape 5, étape 4 supprimée 02/05) -->
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <div class="step" id="step-4">
-        <div class="step-icon">⚙️</div>
-        <h2 class="step-title">Personnalisez votre BoosterMail</h2>
-        <p class="step-subtitle">Quelques options pour aller plus loin.</p>
-
-        <div style="margin-bottom: 22px;">
-            <label style="display:block; font-size:13px; font-weight:600; color:#2d3548; margin-bottom:8px;">
-                📧 Importance par défaut des réponses
-            </label>
-            <div style="display:flex; gap:8px;">
-                <label style="flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; padding:10px; border:1px solid #d6dde7; border-radius:8px; cursor:pointer; font-size:12px;">
-                    <input type="radio" name="importance" value="0" style="margin:0;">
-                    <span><strong>Rapide</strong></span>
-                    <span style="color:#5a6377; font-size:11px;">Court</span>
-                </label>
-                <label style="flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; padding:10px; border:1px solid #0F6CBD; border-radius:8px; cursor:pointer; font-size:12px; background:#f0f6fc;">
-                    <input type="radio" name="importance" value="1" checked style="margin:0;">
-                    <span><strong>Standard</strong></span>
-                    <span style="color:#5a6377; font-size:11px;">Recommandé</span>
-                </label>
-                <label style="flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; padding:10px; border:1px solid #d6dde7; border-radius:8px; cursor:pointer; font-size:12px;">
-                    <input type="radio" name="importance" value="2" style="margin:0;">
-                    <span><strong>Travaillée</strong></span>
-                    <span style="color:#5a6377; font-size:11px;">Long</span>
-                </label>
-            </div>
-        </div>
-
-        <div style="margin-bottom: 22px;">
-            <label class="consent-row">
-                <input type="checkbox" id="signature-marketing" checked>
-                <span>
-                    <strong>Afficher la mention « Généré avec BoosterMail »</strong> en bas de mes mails<br>
-                    <span style="font-size:11px; color:#5a6377;">Aide à faire connaître BoosterMail. Vous pouvez le désactiver à tout moment.</span>
-                </span>
-            </label>
-        </div>
-
-        <div style="margin-bottom: 22px;">
-            <label class="consent-row">
-                <input type="checkbox" id="newsletter-optin">
-                <span>
-                    <strong>Recevoir les conseils & nouveautés</strong> (1 mail/mois max)
-                </span>
-            </label>
-        </div>
-
-        <div class="consent-box" style="border-color:#ffa726; background:#fff8e1;">
-            <label class="consent-row">
-                <input type="checkbox" id="consent-cgu" onchange="updateStep4Button()">
-                <span>
-                    <strong>J'accepte les Conditions Générales d'Utilisation</strong>
-                </span>
-            </label>
-            <div class="consent-links">
-                <a href="#" onclick="showLegal('cgu'); return false;">Lire les CGU complètes</a>
-            </div>
-        </div>
-
-        <div class="btn-row">
-            <button class="btn btn-secondary" onclick="goToStep(3)">← Retour</button>
-            <button class="btn btn-primary" onclick="confirmStep4()" id="btn-step4-next" disabled>Continuer →</button>
-        </div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════ -->
-    <!-- ÉTAPE 5 — C'est prêt -->
-    <!-- ═══════════════════════════════════════════════════════════════ -->
-    <div class="step" id="step-5">
         <div class="success-icon">🎉</div>
         <h2 class="step-title">BoosterMail est prêt !</h2>
         <p class="step-subtitle">
@@ -703,7 +640,7 @@
         </div>
 
         <!-- État final après clic du bouton (statique, pas de redirect) -->
-        <div id="step-5-final" style="display:none; text-align:center; margin-top:20px; padding:24px; background:#e8f5e9; border:1px solid #4caf50; border-radius:10px;">
+        <div id="step-4-final" style="display:none; text-align:center; margin-top:20px; padding:24px; background:#e8f5e9; border:1px solid #4caf50; border-radius:10px;">
             <div style="font-size:32px; margin-bottom:8px;">✓</div>
             <div style="font-size:15px; font-weight:600; color:#1b5e20; margin-bottom:6px;">
                 Vous pouvez fermer cette fenêtre.
@@ -722,7 +659,7 @@
     // ═══════════════════════════════════════════════════════════════
 
     var currentStep = 1;
-    var TOTAL_STEPS = 5;
+    var TOTAL_STEPS = 4;
 
     function goToStep(n) {
         if (n < 1 || n > TOTAL_STEPS) return;
@@ -743,7 +680,7 @@
         // Hooks d'entrée par étape
         if (n === 2) startStyleAnalysis();
         if (n === 3) preloadStep3();
-        if (n === 5) startAddinInstall();
+        if (n === 4) startAddinInstall();
         // Scroll en haut
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -753,14 +690,23 @@
     // ═══════════════════════════════════════════════════════════════
 
     function updateMicrosoftButton() {
-        var consent = document.getElementById('consent-ai').checked;
-        document.getElementById('btn-microsoft').disabled = !consent;
+        // Bouton actif seulement si les 2 cases (RGPD IA + CGU) sont cochées
+        var consentAi = document.getElementById('consent-ai').checked;
+        var consentCgu = document.getElementById('consent-cgu').checked;
+        document.getElementById('btn-microsoft').disabled = !(consentAi && consentCgu);
     }
 
     var _authPollInterval = null;
     var _authPopupRef = null;
 
     function startMicrosoftAuth() {
+        // Sauvegarde des consentements (RGPD IA + CGU) cochés à l'étape 1.
+        // Cas où ils étaient à l'étape 4 avant la simplification 02/05/2026.
+        try {
+            saveSetting('cgu_accepted', '1');
+            saveSetting('rgpd_ai_consent', '1');
+        } catch(e) {}
+
         // Bascule vers l'état "connexion en cours"
         document.getElementById('step-1-intro').style.display = 'none';
         document.getElementById('step-1-error').style.display = 'none';
@@ -1081,35 +1027,15 @@
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // ÉTAPE 4 — PERSONNALISATION + CGU
+    // CGU acceptance saved at step 1 (consent-cgu checkbox) — flagged
+    // when user clicks "Se connecter avec Microsoft" in startMicrosoftAuth.
+    // L'étape 4 « Personnalisation » a été supprimée le 02/05/2026 (signal
+    // Yvan : « ne sert à rien »). Importance / signature marketing /
+    // newsletter restent accessibles dans Profil après l'onboarding.
     // ═══════════════════════════════════════════════════════════════
 
-    function updateStep4Button() {
-        var consent = document.getElementById('consent-cgu').checked;
-        document.getElementById('btn-step4-next').disabled = !consent;
-    }
-
-    function confirmStep4() {
-        // Sauvegarde toutes les préférences en parallèle
-        var importance = document.querySelector('input[name="importance"]:checked');
-        var imp = importance ? importance.value : '1';
-        var sigChecked = document.getElementById('signature-marketing').checked;
-        var newsletterChecked = document.getElementById('newsletter-optin').checked;
-
-        Promise.all([
-            saveSetting('default_importance', imp),
-            saveSetting('show_marketing_signature', sigChecked ? '1' : '0'),
-            saveSetting('newsletter_optin', newsletterChecked ? '1' : '0'),
-            saveSetting('cgu_accepted', '1'),
-        ]).then(function() {
-            goToStep(5);
-        }).catch(function() {
-            goToStep(5); // ne pas bloquer
-        });
-    }
-
     // ═══════════════════════════════════════════════════════════════
-    // ÉTAPE 5 — INSTALL ADDIN + FINALISATION
+    // ÉTAPE 4 — INSTALL ADDIN + FINALISATION
     // ═══════════════════════════════════════════════════════════════
 
     var _addinInstallTried = false;
@@ -1165,7 +1091,7 @@
                 // mode strict overlay tout bleu en plein écran browser).
                 // Au lieu de ça, on affiche un état final stable invitant
                 // l'user à fermer la fenêtre et retourner dans Outlook.
-                var finalEl = document.getElementById('step-5-final');
+                var finalEl = document.getElementById('step-4-final');
                 if (finalEl) finalEl.style.display = 'block';
                 if (btn) btn.style.display = 'none';
                 // Tenter window.close() au cas où la page aurait été ouverte
