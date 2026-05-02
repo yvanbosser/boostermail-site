@@ -2586,17 +2586,34 @@ def _prewarm_pj_classement_for_mail(mid, mail_data):
         try:
             cached = _db.get_mail_pj_classement(mid)
             if cached is not None:
-                _sugg = cached.get('suggestion')
-                # Fix 3 (25/04) : normaliser dest_folder → folder_path (ancienne structure DB rules)
-                if isinstance(_sugg, dict) and 'dest_folder' in _sugg and 'folder_path' not in _sugg:
-                    _sugg = dict(_sugg)
-                    _sugg['folder_path'] = _sugg['dest_folder']
-                _set_mail_preview(mid, 'pj_classement', 'done', {
-                    'suggestion': _sugg,
-                    'suggestions': [_sugg] if _sugg else [],
-                    'source': cached.get('source', 'none'),
-                })
-                return
+                # Fix 02/05/2026 (signal Yvan mail Dufau, cf.
+                # _fetch_single_preview_plate) : si cache dit no_pj mais
+                # mail_data a maintenant des attachments → invalider et
+                # continuer le pipeline. Évite les 80% de no_pj erronés
+                # observés sur OVH au warmup initial.
+                if cached.get('source') == 'no_pj':
+                    _live_has_pj = bool(
+                        mail_data.get('has_attachments')
+                        or (mail_data.get('attachments') or [])
+                    )
+                    if _live_has_pj:
+                        logger.info(
+                            f"[prewarm-pj] cache no_pj invalide pour "
+                            f"{mid[:30]}... (attachments live) → re-calcul"
+                        )
+                        cached = None  # fall through au pipeline
+                if cached is not None:
+                    _sugg = cached.get('suggestion')
+                    # Fix 3 (25/04) : normaliser dest_folder → folder_path (ancienne structure DB rules)
+                    if isinstance(_sugg, dict) and 'dest_folder' in _sugg and 'folder_path' not in _sugg:
+                        _sugg = dict(_sugg)
+                        _sugg['folder_path'] = _sugg['dest_folder']
+                    _set_mail_preview(mid, 'pj_classement', 'done', {
+                        'suggestion': _sugg,
+                        'suggestions': [_sugg] if _sugg else [],
+                        'source': cached.get('source', 'none'),
+                    })
+                    return
         except Exception as _e:
             logger.debug(f"[prewarm-pj] check DB : {_e}")
 
@@ -7734,6 +7751,34 @@ def _fetch_single_preview_plate(message_id, plate):
         elif plate == 'pj_classement':
             db_row = _db.get_mail_pj_classement(message_id)
             if db_row is not None:
+                # Fix 02/05/2026 (signal Yvan : mail Dufau classement_pj
+                # = no_pj alors qu'il a 1 PJ « Procedure import pst.docx »).
+                # Cause : au warmup BG initial, mail_data n'avait pas
+                # toujours les attachments peuplés (Graph $select sans
+                # détail) → save no_pj faussement → cache idempotent →
+                # blocage permanent. Constat DB OVH : 100/125 entrées en
+                # no_pj (80%) ce qui est anormal.
+                # Fix : si cache dit no_pj MAIS email_cache a maintenant
+                # des attachments → invalider et passer à l'étape 3
+                # (re-trigger BG avec mail_data correct).
+                if db_row.get('source') == 'no_pj':
+                    try:
+                        _cached_email = _db.get_cached_email(message_id)
+                        _has_pj = bool(
+                            (_cached_email or {}).get('has_attachments')
+                            or ((_cached_email or {}).get('attachments') or [])
+                        )
+                        if _has_pj:
+                            logger.info(
+                                f"[preview-pj] cache no_pj invalide pour "
+                                f"{message_id[:30]}... (attachments détectés "
+                                f"dans email_cache) → re-trigger pipeline"
+                            )
+                            # Skip return → tombe dans l'étape 3 (re-trigger BG)
+                            db_row = None
+                    except Exception as _e:
+                        logger.debug(f"[preview-pj] no_pj recheck : {_e}")
+            if db_row is not None:
                 _sp = db_row.get('suggestion')
                 pj_data = {
                     'suggestion': _sp,
@@ -7952,6 +7997,142 @@ def api_windows_folders():
         folders = _get_windows_folders_cached()
         root = _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
         return jsonify({"folders": folders or [], "root": root})
+    except Exception as e:
+        return jsonify({"error": _safe_err(e)}), 500
+
+
+@app.route('/api/windows_folders', methods=['POST'])
+def api_windows_folders_push():
+    """Phase A1 (02/05/2026) — receveur du push d'arborescence par le companion.
+
+    Le companion local scanne le filesystem Windows (OVH ne le voit pas) et
+    POST l'arborescence ici. Format payload :
+      {
+        "root_path": "C:\\\\Users\\\\xxx\\\\OneDrive\\\\Desktop\\\\2. Professionnel",
+        "folders": [{"path": "Clients/Acme", "name": "Acme", "depth": 2}, ...],
+        "hash": "abc123..."  (optionnel, sinon recalculé)
+      }
+
+    Réponse : {status, count, changed} où changed=true si l'arborescence
+    a effectivement changé (sinon le push est ignoré pour économiser DB I/O).
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        root_path = (data.get('root_path') or '').strip()
+        folders = data.get('folders') or []
+        client_hash = (data.get('hash') or '').strip()
+
+        if not root_path:
+            return jsonify({"error": "root_path requis"}), 400
+        if not isinstance(folders, list):
+            return jsonify({"error": "folders doit être une liste"}), 400
+
+        # Recalcul du hash côté serveur (vérité) pour le diff
+        import hashlib
+        _serialized = json.dumps(folders, sort_keys=True, ensure_ascii=False)
+        server_hash = hashlib.sha1(
+            (root_path + '|' + _serialized).encode('utf-8')
+        ).hexdigest()
+
+        # Diff : si même hash que celui en DB, on n'écrit pas (économie I/O)
+        existing = _db.get_user_windows_folders()
+        if existing and existing.get('hash') == server_hash:
+            return jsonify({
+                "status": "ok",
+                "count": existing.get('count', 0),
+                "changed": False,
+                "synced_at": existing.get('synced_at', ''),
+            })
+
+        # Sauvegarde + invalidation cache RAM
+        _db.save_user_windows_folders(root_path, folders, server_hash)
+        global _windows_folders_cache
+        _windows_folders_cache = None
+
+        # Aussi mettre à jour le setting pj_root_folder si différent
+        # (utile pour la cohérence avec la page Profil)
+        try:
+            current_root = _db.get_setting('pj_root_folder')
+            if current_root != root_path:
+                _db.save_setting('pj_root_folder', root_path)
+        except Exception:
+            pass
+
+        logger.info(
+            f"[windows_folders] sync companion : {len(folders)} dossiers "
+            f"depuis {root_path} (hash={server_hash[:12]})"
+        )
+        return jsonify({
+            "status": "ok",
+            "count": len(folders),
+            "changed": True,
+            "hash": server_hash,
+        })
+    except Exception as e:
+        logger.warning(f"[windows_folders POST] erreur : {e}")
+        return jsonify({"error": _safe_err(e)}), 500
+
+
+@app.route('/api/windows_folders/status', methods=['GET'])
+def api_windows_folders_status():
+    """Phase A3 (02/05/2026) — état de l'arborescence pour la page Profil.
+
+    Retourne un dict prêt à afficher dans le sous-titre dynamique de la
+    section « Pièces jointes » :
+      - synced=true si une arborescence est en DB (pushée par le companion)
+      - count : nombre de dossiers
+      - root_path : chemin Windows scanné
+      - synced_at : date ISO du dernier sync
+      - synced_at_human : « il y a 2 h », « à l'instant », « il y a 3 jours »
+      - freshness : 'fresh' (<24h), 'recent' (1-7j), 'stale' (>7j), 'missing'
+    """
+    try:
+        row = _db.get_user_windows_folders()
+        if not row:
+            return jsonify({
+                "synced": False,
+                "count": 0,
+                "root_path": _db.get_setting('pj_root_folder') or '',
+                "synced_at": None,
+                "synced_at_human": "Aucune arborescence détectée",
+                "freshness": "missing",
+            })
+        # Calcul "il y a X" en français
+        synced_at_str = row.get('synced_at') or ''
+        try:
+            synced_dt = datetime.strptime(synced_at_str, "%Y-%m-%d %H:%M:%S")
+            delta = datetime.now() - synced_dt
+            secs = int(delta.total_seconds())
+            if secs < 60:
+                human = "à l'instant"
+                freshness = "fresh"
+            elif secs < 3600:
+                m = secs // 60
+                human = f"il y a {m} min"
+                freshness = "fresh"
+            elif secs < 86400:
+                h = secs // 3600
+                human = f"il y a {h} h"
+                freshness = "fresh"
+            elif secs < 86400 * 7:
+                d = secs // 86400
+                human = f"il y a {d} jour{'s' if d > 1 else ''}"
+                freshness = "recent"
+            else:
+                d = secs // 86400
+                human = f"il y a {d} jours"
+                freshness = "stale"
+        except Exception:
+            human = synced_at_str or ""
+            freshness = "fresh"
+        return jsonify({
+            "synced": True,
+            "count": row.get('count', 0),
+            "root_path": row.get('root_path', ''),
+            "synced_at": synced_at_str,
+            "synced_at_human": human,
+            "freshness": freshness,
+        })
     except Exception as e:
         return jsonify({"error": _safe_err(e)}), 500
 
@@ -8436,7 +8617,14 @@ def _scan_windows_folders(root_path, max_depth=5):
 
 
 def _get_windows_folders_cached():
-    """Retourne l'arborescence Windows (cache session, invalide si pj_root_folder change)."""
+    """Retourne l'arborescence Windows (cache session, invalide si pj_root_folder change).
+
+    Phase A2 (02/05/2026) — gap SaaS : OVH ne voit pas le filesystem du PC user.
+    Pipeline 2 sources :
+      1. PRIORITÉ : DB user_windows_folders (poussée par le companion local)
+      2. FALLBACK : scan filesystem local (utile en mode dev local uniquement,
+         retourne [] sur OVH Linux car le path Windows n'existe pas)
+    """
     global _windows_folders_cache
     # Lecture rapide sans lock (double-check pattern)
     if _windows_folders_cache is not None:
@@ -8445,6 +8633,15 @@ def _get_windows_folders_cached():
         # Re-vérifier sous le lock (un autre thread a pu remplir entre les deux)
         if _windows_folders_cache is not None:
             return _windows_folders_cache
+        # [1] DB en priorité (companion push)
+        try:
+            row = _db.get_user_windows_folders()
+            if row and row.get('folders'):
+                _windows_folders_cache = row['folders']
+                return _windows_folders_cache
+        except Exception as _e:
+            logger.debug(f"[windows_folders] DB read échec : {_e}")
+        # [2] Fallback scan filesystem local (mode dev seulement)
         root = _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
         _windows_folders_cache = _scan_windows_folders(root)
     return _windows_folders_cache

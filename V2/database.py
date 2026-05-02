@@ -406,6 +406,25 @@ class Database:
             )
         """)
 
+        # Cache arborescence Windows pushée par le companion (Phase A1
+        # 02/05/2026 — gap SaaS : OVH ne voit pas le filesystem du PC user).
+        # Le companion local scanne pj_root_folder au démarrage + toutes les
+        # 4h, hash diff, et POST sur /api/windows_folders. Ce cache sert à
+        # _get_windows_folders_cached pour proposer le classement PJ par
+        # IA (suggest_pj_folder).
+        # Single-row table (1 user actuellement, multi-tenant futur via
+        # user_id PK). Le companion peut écraser la row complète à chaque sync.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS user_windows_folders (
+                user_id TEXT PRIMARY KEY DEFAULT 'default',
+                root_path TEXT NOT NULL,
+                folders_json TEXT NOT NULL,
+                folders_count INTEGER DEFAULT 0,
+                folders_hash TEXT,
+                synced_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+
         # Migration: ajouter nb_relances et relances_dates si manquant
         try:
             c.execute("ALTER TABLE echeances ADD COLUMN nb_relances INTEGER DEFAULT 0")
@@ -959,6 +978,54 @@ class Database:
         conn = self._conn()
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
         conn.commit()
+
+    # --- ARBORESCENCE WINDOWS (Phase A1 02/05/2026) -----------------------
+    # Le companion local push l'arborescence ici. Lu par
+    # _get_windows_folders_cached() pour suggest_pj_folder.
+
+    def save_user_windows_folders(self, root_path, folders, folders_hash, user_id='default'):
+        """Sauvegarde l'arborescence Windows poussée par le companion.
+
+        Args:
+            root_path: chemin racine scanné côté Windows (ex: C:\\Users\\.../Documents)
+            folders: list[dict] avec {path, name, depth} (format _scan_windows_folders)
+            folders_hash: hash MD5/SHA1 pour le diff
+            user_id: pour multi-tenant futur, 'default' en single-user
+        """
+        import json
+        conn = self._conn()
+        conn.execute(
+            "INSERT OR REPLACE INTO user_windows_folders "
+            "(user_id, root_path, folders_json, folders_count, folders_hash, synced_at) "
+            "VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))",
+            (user_id, root_path, json.dumps(folders, ensure_ascii=False),
+             len(folders or []), folders_hash),
+        )
+        conn.commit()
+
+    def get_user_windows_folders(self, user_id='default'):
+        """Retourne {root_path, folders, count, hash, synced_at} ou None si jamais sync."""
+        import json
+        c = self._conn().cursor()
+        c.execute(
+            "SELECT root_path, folders_json, folders_count, folders_hash, synced_at "
+            "FROM user_windows_folders WHERE user_id = ?",
+            (user_id,),
+        )
+        row = c.fetchone()
+        if not row:
+            return None
+        try:
+            folders = json.loads(row[1] or '[]')
+        except Exception:
+            folders = []
+        return {
+            'root_path': row[0],
+            'folders': folders,
+            'count': row[2] or 0,
+            'hash': row[3] or '',
+            'synced_at': row[4] or '',
+        }
 
     # --- TEMPLATES APPRIS (Plan 2 Phase 1.B) ------------------------------
 
