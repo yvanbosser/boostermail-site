@@ -3,7 +3,7 @@
 > **Version** : 1.0 — Brouillon Claude 30/04/2026 PM
 > **Statut** : DOCUMENT INTERNE (non public). À tenir à jour. À présenter à la CNIL en cas de contrôle (Art. 30 RGPD).
 > **Responsable du traitement** : `[À COMPLÉTER — éditeur BoosterMail]`
-> **DPO** : `[À COMPLÉTER si désigné]`
+> **DPO** : Yvan Bosser (désigné volontairement par l'éditeur — `dpo@boostermail.ai` à confirmer)
 
 ---
 

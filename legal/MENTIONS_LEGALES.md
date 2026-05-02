@@ -92,7 +92,7 @@ Conformément aux articles L.611-1 et R.612-1 du Code de la consommation, le con
 
 Pour toute question :
 - **Email général** : `contact@boostermail.ai`
-- **Questions RGPD** : `dpo@boostermail.ai` (à confirmer)
+- **Questions RGPD** : `dpo@boostermail.ai` (à confirmer) — DPO désigné : **Yvan Bosser**
 - **Adresse postale** : `[À COMPLÉTER]`
 
 ---

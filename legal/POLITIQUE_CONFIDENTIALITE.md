@@ -25,9 +25,11 @@ En utilisant BoosterMail, vous acceptez les pratiques décrites dans cette polit
 **SIREN** : `[À COMPLÉTER]`
 
 **Délégué à la protection des données (DPO)** :
-> Note : la désignation d'un DPO n'est obligatoire que si le traitement implique un suivi régulier et systématique à grande échelle, ou des données sensibles. À ce stade (beta limitée), un DPO n'est pas obligatoire mais peut être désigné volontairement.
->
-> Contact RGPD : `dpo@boostermail.ai` ou `contact@boostermail.ai`
+
+- **Identité** : Yvan Bosser
+- **Contact RGPD** : `dpo@boostermail.ai` (à confirmer)
+
+Désigné volontairement par l'éditeur (la désignation d'un DPO n'est obligatoire que si le traitement implique un suivi régulier et systématique à grande échelle, ou des données sensibles — pas le cas à ce stade).
 
 ---
 
