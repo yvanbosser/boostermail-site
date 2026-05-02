@@ -103,54 +103,84 @@ def render_rocket_emoji(size, font_path):
 
 
 def render_rocket_vector(size):
-    """Fallback : dessin vectoriel simple d'une fusée blanche.
+    """Dessin vectoriel d'une fusée stylisée (cohérent avec l'onboarding).
 
-    Pour les très petites tailles (16 px) où l'emoji rendu est illisible,
-    on dessine une silhouette stylisée plus claire visuellement.
+    Reproduit le visuel demandé par Yvan 02/05/2026 :
+    - Pointe rouge (triangle haut)
+    - Corps blanc/gris clair (rectangle)
+    - Hublot bleu (cercle)
+    - Ailerons rouges (triangles latéraux)
+    - Flamme orange/jaune (triangle bas)
+
+    Sur fond gradient bleu BoosterMail arrondi.
     """
+    RED = (231, 76, 60, 255)        # #e74c3c (pointe + ailerons)
+    WHITE_BODY = (236, 240, 241, 255)  # #ecf0f1 (corps)
+    BLUE_HUBLOT = (52, 152, 219, 255)  # #3498db (hublot)
+    ORANGE = (243, 156, 18, 255)       # #f39c12 (flamme externe)
+    YELLOW = (241, 196, 15, 255)       # #f1c40f (flamme interne)
+
     bg = make_rounded_gradient(size)
     draw = ImageDraw.Draw(bg)
+
+    # Coordonnées normalisées sur la base d'un canvas size×size
+    # La fusée occupe ~70% du canvas, centrée et inclinée légèrement
     cx = size / 2
-    cy = size / 2
+    cy = size * 0.50  # centre du corps légèrement au-dessus du milieu
 
-    # Corps (triangle isocèle pointe vers le haut)
-    body_h = size * 0.55
+    # Corps : rectangle haut
     body_w = size * 0.28
-    top = (cx, cy - body_h * 0.55)
-    bot_l = (cx - body_w / 2, cy + body_h * 0.30)
-    bot_r = (cx + body_w / 2, cy + body_h * 0.30)
-    draw.polygon([top, bot_l, bot_r], fill=WHITE)
-
-    # Hublot circulaire (sur le corps)
+    body_h = size * 0.42
+    body_top = cy - body_h / 2
+    body_bot = cy + body_h / 2
+    # Corps blanc
+    draw.rectangle(
+        (cx - body_w / 2, body_top, cx + body_w / 2, body_bot),
+        fill=WHITE_BODY,
+    )
+    # Pointe rouge (triangle au-dessus du corps)
+    nose_h = size * 0.20
+    draw.polygon([
+        (cx - body_w / 2, body_top),
+        (cx, body_top - nose_h),
+        (cx + body_w / 2, body_top),
+    ], fill=RED)
+    # Hublot bleu (cercle au centre du corps)
     hublot_r = size * 0.06
     draw.ellipse(
-        (cx - hublot_r, cy - hublot_r * 1.2, cx + hublot_r, cy + hublot_r * 0.8),
-        fill=(15, 108, 189, 255),
+        (cx - hublot_r, cy - hublot_r * 0.4 - hublot_r,
+         cx + hublot_r, cy - hublot_r * 0.4 + hublot_r),
+        fill=BLUE_HUBLOT,
     )
-
-    # Ailerons (deux petits triangles latéraux)
-    fin_w = size * 0.10
+    # Ailerons rouges (2 triangles latéraux pointant vers le bas)
+    fin_w = size * 0.13
     fin_h = size * 0.18
     # Aileron gauche
     draw.polygon([
-        (bot_l[0], bot_l[1] - fin_h * 0.5),
-        (bot_l[0] - fin_w, bot_l[1] + fin_h * 0.5),
-        (bot_l[0] + fin_w * 0.2, bot_l[1] + fin_h * 0.2),
-    ], fill=WHITE)
+        (cx - body_w / 2, body_bot - fin_h * 0.4),
+        (cx - body_w / 2 - fin_w, body_bot + fin_h * 0.5),
+        (cx - body_w / 2, body_bot),
+    ], fill=RED)
     # Aileron droit (miroir)
     draw.polygon([
-        (bot_r[0], bot_r[1] - fin_h * 0.5),
-        (bot_r[0] + fin_w, bot_r[1] + fin_h * 0.5),
-        (bot_r[0] - fin_w * 0.2, bot_r[1] + fin_h * 0.2),
-    ], fill=WHITE)
-
-    # Flamme (petite forme orangée sous la fusée)
-    flame_h = size * 0.20
-    flame_top_l = (cx - body_w / 2 + size * 0.02, cy + body_h * 0.30)
-    flame_top_r = (cx + body_w / 2 - size * 0.02, cy + body_h * 0.30)
-    flame_bot = (cx, cy + body_h * 0.30 + flame_h)
-    draw.polygon([flame_top_l, flame_top_r, flame_bot],
-                 fill=(255, 165, 50, 255))
+        (cx + body_w / 2, body_bot - fin_h * 0.4),
+        (cx + body_w / 2 + fin_w, body_bot + fin_h * 0.5),
+        (cx + body_w / 2, body_bot),
+    ], fill=RED)
+    # Flamme orange (triangle pointe vers le bas)
+    flame_h = size * 0.16
+    draw.polygon([
+        (cx - body_w / 2 + size * 0.02, body_bot),
+        (cx + body_w / 2 - size * 0.02, body_bot),
+        (cx, body_bot + flame_h),
+    ], fill=ORANGE)
+    # Flamme interne jaune (plus petite)
+    if size >= 32:  # détail à omettre en 16px
+        draw.polygon([
+            (cx - body_w / 4, body_bot + size * 0.02),
+            (cx + body_w / 4, body_bot + size * 0.02),
+            (cx, body_bot + flame_h * 0.7),
+        ], fill=YELLOW)
 
     return bg
 
@@ -160,7 +190,12 @@ def generate(size, output_path, source_for_downscale=None):
 
     Si source_for_downscale (PIL Image plus grande) est fourni, on
     downscale avec LANCZOS — meilleur rendu en petite taille que de
-    re-rasteriser l'emoji ou que le dessin vectoriel maison.
+    re-rasteriser le dessin vectoriel directement.
+
+    Décision Yvan 02/05/2026 : on utilise UNIQUEMENT le dessin vectoriel
+    de la fusée stylisée (cohérent avec les SVG de l'onboarding). Plus
+    d'emoji 🚀 (qui rendait différemment et perdait les détails en petite
+    taille).
     """
     print(f"Génération {size}×{size} → {output_path}")
 
@@ -172,16 +207,8 @@ def generate(size, output_path, source_for_downscale=None):
         print(f"  ✓ {final_size} bytes")
         return img
 
-    font_path = find_emoji_font()
-    img = None
-    if font_path:
-        print(f"  via emoji font : {font_path}")
-        img = render_rocket_emoji(size, font_path)
-
-    if img is None:
-        print(f"  fallback dessin vectoriel")
-        img = render_rocket_vector(size)
-
+    print(f"  via dessin vectoriel fusée stylisée")
+    img = render_rocket_vector(size)
     img.save(output_path, 'PNG', optimize=True)
     final_size = os.path.getsize(output_path)
     print(f"  ✓ {final_size} bytes")
@@ -191,9 +218,9 @@ def generate(size, output_path, source_for_downscale=None):
 def main():
     if not os.path.isdir(ASSETS_DIR):
         os.makedirs(ASSETS_DIR, exist_ok=True)
-    # On rend d'abord la version haute résolution, puis on downscale les
-    # plus petites tailles. Donne un rendu net en 16×16 et 32×32 sans
-    # avoir à re-rasteriser l'emoji (qui s'écrase mal en petites tailles).
+    # On rend d'abord la version haute résolution (80px) en vectoriel,
+    # puis on downscale les plus petites tailles. Donne un rendu net en
+    # 16×16 et 32×32 grâce au LANCZOS (anti-aliasing).
     big = generate(80, os.path.join(ASSETS_DIR, 'icon-80.png'))
     generate(32, os.path.join(ASSETS_DIR, 'icon-32.png'), source_for_downscale=big)
     generate(16, os.path.join(ASSETS_DIR, 'icon-16.png'), source_for_downscale=big)
