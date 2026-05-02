@@ -3,7 +3,24 @@ import json
 import re
 import os
 import threading
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+
+def _is_canonical_imid(message_id):
+    """Vérifie qu'un message_id est un IMID RFC 2822 canonique strict
+    (`<...@domain>`). Aligné sur `_canonical_mid()` de V2/app_plugin.py:772.
+
+    Garde ajoutée 02/05/2026 PM tardif (vision Yvan « robustesse étiquetage ») :
+    refuse au niveau DB le stockage avec une clé non-canonique (Graph
+    entry_id qui change au move, message_id legacy, chaîne vide, etc.).
+    """
+    if not isinstance(message_id, str):
+        return False
+    mid = message_id.strip()
+    return bool(mid.startswith('<') and '@' in mid and mid.endswith('>'))
 
 
 # Regex précompilées (29/04 PM audit perf — Hotspot DB) :
@@ -1767,6 +1784,10 @@ class Database:
         message_id = (data.get('message_id') or '').strip()
         if not message_id:
             return False
+        # Garde robustesse 02/05 PM tardif — refuser clés non-canoniques
+        if not _is_canonical_imid(message_id):
+            logger.warning(f"[save_mail_summary] clé non-canonique refusée : {message_id!r}")
+            return False
         conn = self._conn()
         c = conn.cursor()
         c.execute("""
@@ -1827,6 +1848,10 @@ class Database:
         import json as _json
         if not message_id:
             return False
+        # Garde robustesse 02/05 PM tardif — refuser clés non-canoniques
+        if not _is_canonical_imid(message_id):
+            logger.warning(f"[save_mail_classement] clé non-canonique refusée : {message_id!r}")
+            return False
         conn = self._conn()
         c = conn.cursor()
         c.execute("""
@@ -1875,6 +1900,10 @@ class Database:
         echeances : list[dict] (échéances détectées) ou [] si néant"""
         import json as _json
         if not message_id:
+            return False
+        # Garde robustesse 02/05 PM tardif — refuser clés non-canoniques
+        if not _is_canonical_imid(message_id):
+            logger.warning(f"[save_mail_echeance] clé non-canonique refusée : {message_id!r}")
             return False
         conn = self._conn()
         c = conn.cursor()
@@ -1925,6 +1954,10 @@ class Database:
         source ∈ ('rule', 'ai', 'none', 'no_pj')"""
         import json as _json
         if not message_id:
+            return False
+        # Garde robustesse 02/05 PM tardif — refuser clés non-canoniques
+        if not _is_canonical_imid(message_id):
+            logger.warning(f"[save_mail_pj_classement] clé non-canonique refusée : {message_id!r}")
             return False
         conn = self._conn()
         c = conn.cursor()
