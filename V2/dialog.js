@@ -3014,6 +3014,28 @@ function _showClassMailPopup(suggestion, folders) {
                 + '</div>';
         });
         document.getElementById('classMailTree').innerHTML = treeHtml;
+
+        // Étape 3' (02/05 PM, vision Yvan) — « L'arborescence débute au
+        // niveau de la proposition principale de BoosterMail ». Au load :
+        // - Highlight la row de la suggestion principale (cohérent avec
+        //   le bandeau bleu en haut .em-folder-suggestion.selected)
+        // - Scroll automatique vers cette row (block: center)
+        // L'algo depth-based d'Yvan laisse tout déplié par défaut, donc
+        // la row est forcément visible dans le DOM (on doit juste scroller).
+        try {
+            if (_selectedFolderId) {
+                var rows = document.querySelectorAll('#classMailTree .em-folder-item');
+                for (var ri = 0; ri < rows.length; ri++) {
+                    if (rows[ri].getAttribute('data-folder-id') === _selectedFolderId) {
+                        rows[ri].classList.add('selected');
+                        if (rows[ri].scrollIntoView) {
+                            rows[ri].scrollIntoView({ block: 'center', behavior: 'auto' });
+                        }
+                        break;
+                    }
+                }
+            }
+        } catch (e) { /* scroll non critique, ne pas bloquer le rendu */ }
     }
 
     // Phase 3 (30/04 PM) — brancher l'input de saisie manuelle.
