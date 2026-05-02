@@ -1405,7 +1405,12 @@ function _applyContactProfile(p) {
     if (tagReg && p.register) { tagReg.textContent = p.register; tagReg.style.display = ''; }
     var tagConf = document.getElementById('tagConfidence');
     if (tagConf && p.confidence !== undefined) {
-        tagConf.textContent = 'confiance ' + p.confidence + '%';
+        // Fix 01/05/2026 (signal Yvan : Stephane Dufau affichait 1% au lieu
+        // de 100%) : la confidence en DB est sur l'échelle 0-1 (float). Il
+        // faut la multiplier par 100 pour avoir le pourcentage. Cohérent
+        // avec d'autres sites qui font Math.round(confidence * 100) + '%'.
+        var pct = (p.confidence > 1) ? p.confidence : Math.round(p.confidence * 100);
+        tagConf.textContent = 'confiance ' + pct + '%';
         tagConf.style.display = '';
     }
     _perfMonitor.mark('T6_contact_profile');

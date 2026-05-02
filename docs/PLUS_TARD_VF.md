@@ -9,6 +9,10 @@
 > - **✅ Redaction PII logs RGPD** (Phase 4 commit `91b5de1`) — helpers `_hash_email_partial` / `_redact_url_pii` / `_redact_pii_for_log` dans `app_plugin.py`. Route `/api/debug_addin_log` redacte avant écriture sur disque. 7 sites `logger.info` avec emails patchés. Pattern #23 + I-SEC-07.
 > - **✅ Endpoint GDPR Export** (Phase 5 commit `91b5de1+`) — `/api/gdpr/export` lecture seule retourne ZIP/JSON avec toutes les données user (10 tables + metadata). Article 15 + 20 RGPD. Validation prod : 4229 rows / 3.6 MB exportés OK.
 >
+> **🆕 2 bugs PJ à investiguer en live avec Yvan (signalés 01/05 PM)** :
+> - **MEDIUM** Mail Mélissa avec PJ : la popup d'analyse PJ n'est PAS apparue à l'ouverture du mail. Cause probable : PJ déjà extraites lors d'une session précédente, cache HIT → `_shouldShowPjPopup()` retourne false. **Action** : reproduire avec Yvan en live, regarder les logs `/api/dialog_init` + `/api/extract_attachments` côté nginx OVH au moment du test. Vérifier la logique `_shouldShowPjPopup()` dans `dialog.js`.
+> - **MEDIUM** Mail Rafael Gomes avec PJ : la PJ est déjà analysée en cache, mais la rédaction du mail se fait en streaming (Claude SSE) au lieu d'instant. Attendu : `instant_reply` doit retourner source=`preemptive` (réponse pré-générée trouvée en cache). Cause probable : pré-génération BG (`_continuous_speculation_loop`) n'a pas eu le temps de calculer la réponse pour ce mail OU le filtre Smart Speculative l'a écarté. **Action** : observer logs `/api/instant_reply` + `_reply_cache` au moment du clic Yvan sur ce mail.
+
 > **🆕 Sujets traités en session 01/05/2026 PM (Yvan retour de fièvre)** :
 > - **✅ #1 Fix dialog onglets** — revert `window.open` vers iframe overlay (commit `eae23e9`). Test `test_dialog_no_window_open_for_dashboard` passe (était SKIP).
 > - **✅ #8 Fix Graph 400** — URL-encode `$search` query, fini les sujets avec `&` `#` `(` qui plantaient (commit `9a01097`).
