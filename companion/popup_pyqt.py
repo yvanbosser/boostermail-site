@@ -916,14 +916,32 @@ class EasyMailPopup(QMainWindow):
     # =========================================================================
 
     def _check_outlook_alive(self):
-        """Detecte si Outlook tourne encore. Sinon ferme la popup."""
+        """Filet de secours : si le superviseur n'a pas envoyé /hide_all
+        (process superviseur planté ou non démarré), on cache nous-mêmes
+        l'overlay quand Outlook a disparu pendant ≥ 15s.
+
+        Renforcement 02/05/2026 :
+        - Avant : appelait self.close() au bout de 10s → stoppe les timers
+          + détruit potentiellement la fenêtre → race avec /show_popup au
+          prochain cycle d'Outlook (overlay ne réapparaissait plus).
+        - Après : appelle hide_all_windows() (= ce que fait /hide_all) →
+          juste cacher, on reste vivant et prêt à servir /show_popup.
+        - Seuil élevé à 3 misses (15s) pour éviter de déclencher en parallèle
+          du superviseur (qui détecte en ≤2s grâce au debounce). Ce filet
+          n'agit que si le superviseur est mort.
+        """
         if _is_outlook_running():
             self._outlook_fail_count = 0
             return
         self._outlook_fail_count += 1
-        if self._outlook_fail_count >= 2:
-            logger.info("Outlook ferme depuis 10s — fermeture automatique popup")
-            self.close()
+        if self._outlook_fail_count >= 3:
+            logger.info("Outlook absent depuis 15s — filet de secours, hide overlay")
+            try:
+                self.hide_all_windows()
+            except Exception as e:
+                logger.warning(f"_check_outlook_alive hide_all_windows erreur: {e}")
+            # Reset compteur pour ne pas refire en boucle
+            self._outlook_fail_count = 0
 
     # =========================================================================
     # NAVIGATION easymail:// (A6)

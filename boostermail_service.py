@@ -904,16 +904,24 @@ def run_supervisor(first_launch=True):
             logger.info("Classic Outlook NON detecte → Proto et tray desactives")
 
     # =========================================================
-    # PHASE 3 : Surveillance (audit 20/04)
+    # PHASE 3 : Surveillance (audit 20/04 + renforcement 02/05/2026)
     # Backends tournent en permanence. On surveille Outlook :
     #   - Outlook ouvre (après être fermé) → show_pyqt_popup (si pas montrée aujourd'hui)
     #   - Outlook fermé 30 min → stop backends (économie RAM)
     #   - Outlook réouvre alors que backends stopped → respawn
+    #
+    # Renforcement 02/05/2026 (debounce anti-flicker) :
+    # - Transition ouvert→fermé exige 2 lectures consécutives False (= 2s)
+    #   pour absorber les transients (ex: Outlook hide momentanée pendant
+    #   une opération COM, résize d'une fenêtre, etc.).
+    # - Transition fermé→ouvert reste immédiate (latence perçue user).
     # =========================================================
     _health_counter = 0
-    _was_running = is_outlook_running()
-    _closed_since = None   # epoch du moment où Outlook a fermé (None = pas fermé)
-    BACKENDS_IDLE_TIMEOUT = 30 * 60  # 30 min après fermeture Outlook → stop backends
+    _stable_state = is_outlook_running()  # état confirmé (après debounce)
+    _closed_streak = 0                    # lectures consécutives "absent"
+    _closed_since = None                  # epoch du moment où Outlook a fermé
+    BACKENDS_IDLE_TIMEOUT = 30 * 60       # 30 min après fermeture → stop backends
+    DEBOUNCE_CLOSE_TICKS = 2              # 2 ticks × 1s = 2s confirmation absence
     while True:
         time.sleep(1)  # Audit 20/04 : 5s → 1s, détection re-ouverture Outlook rapide
 
@@ -923,18 +931,25 @@ def run_supervisor(first_launch=True):
 
         running = is_outlook_running()
 
-        # Transition : ouvert → fermé
-        if _was_running and not running:
-            logger.info("Outlook fermé — décompte 30 min avant arrêt backends")
+        # Mise à jour streak d'absence (sert au debounce ouvert→fermé)
+        if not running:
+            _closed_streak += 1
+        else:
+            _closed_streak = 0
+
+        # Transition : ouvert → fermé (debounce 2s pour éviter les flickers)
+        if _stable_state and not running and _closed_streak >= DEBOUNCE_CLOSE_TICKS:
+            logger.info(f"Outlook fermé (confirmé après {_closed_streak}s) — décompte 30 min avant arrêt backends")
             _closed_since = time.time()
             # Décision user 24/04 : cacher immédiatement overlay + dialog
             # + child windows. Le process popup_pyqt reste vivant pour
             # ré-affichage instantané au prochain démarrage d'Outlook.
             # Les BG loops V2 + Companion continuent de tourner.
             _popup_hide_all()
+            _stable_state = False
 
-        # Transition : fermé → ouvert (y compris si backends stopped)
-        if running and not _was_running:
+        # Transition : fermé → ouvert (immédiate — latence perçue user)
+        elif running and not _stable_state:
             logger.info("Outlook ré-ouvert — popup si applicable")
             _closed_since = None
             # Si backends stoppés pendant idle → respawn (mode local seulement)
@@ -950,6 +965,7 @@ def run_supervisor(first_launch=True):
                         break
                     time.sleep(1)
             show_pyqt_popup()
+            _stable_state = True
 
         # Outlook fermé depuis trop longtemps → stop backends
         if _closed_since and (time.time() - _closed_since > BACKENDS_IDLE_TIMEOUT):
@@ -960,8 +976,6 @@ def run_supervisor(first_launch=True):
                 managers = []
                 write_pid_file(os.getpid(), [])
             # On ne break pas : le superviseur continue de surveiller
-
-        _was_running = running
 
         # Health check backends (toutes les 30 s = 30 × 1 s) — seulement si actifs
         _health_counter += 1
