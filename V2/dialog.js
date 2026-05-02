@@ -3754,22 +3754,52 @@ function _buildPJFolderTreeHtml(folders, suggestedPath) {
     // L'user peut toujours déplier manuellement les autres branches en
     // cliquant sur leurs chevrons (_togglePJFolderChildren gère le reveal).
     //
-    // Algo :
-    // 1. Calculer les "préfixes du chemin" = tous les dossiers ancêtres
-    //    du folder suggéré (ex: pour A/B/C/D → {A, A/B, A/B/C, A/B/C/D})
-    // 2. Pour chaque dossier de l'arbo :
-    //    - Sur le chemin → expanded ▼ + visible
-    //    - Frère d'un ancêtre (parent direct sur le chemin) → visible mais
-    //      collapsed ▶ (ses enfants cachés)
-    //    - Plus profond hors chemin → caché (display:none)
-    var pathPrefixes = {};
+    // Fix 02/05 PM tardif (signal Yvan : arbo vide après filtre) — le commis
+    // Haiku abrège parfois les préfixes numériques ("1. IMMOBILIER" → "IMMOBILIER").
+    // → matching robuste : (1) exact, sinon (2) normalisé sans préfixes numériques
+    // "N. ", sinon (3) fallback no-filter (afficher tout déplié comme avant).
+    function _normalizeSegment(s) {
+        return (s || '').replace(/^\d+\.\s*/, '').trim();
+    }
+    function _normalizePath(p) {
+        return (p || '').split('/').map(_normalizeSegment).join('/');
+    }
+    var realPath = '';
+    var pathFound = false;
     if (suggestedPath) {
-        var parts = suggestedPath.split('/');
+        // 1. Match exact
+        for (var ie = 0; ie < folders.length; ie++) {
+            if (folders[ie].path === suggestedPath) {
+                realPath = suggestedPath;
+                pathFound = true;
+                break;
+            }
+        }
+        // 2. Match normalisé (sans préfixes numériques)
+        if (!pathFound) {
+            var normSuggested = _normalizePath(suggestedPath);
+            for (var inn = 0; inn < folders.length; inn++) {
+                if (_normalizePath(folders[inn].path) === normSuggested) {
+                    realPath = folders[inn].path;
+                    pathFound = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Algo de filtrage :
+    // - Si on a trouvé le path réel → calculer ses préfixes (ancêtres)
+    // - Sinon (pas de suggestion OU suggestion introuvable même normalisée) :
+    //   pas de filtrage, tout déplié (comportement original)
+    var pathPrefixes = {};
+    if (pathFound) {
+        var parts = realPath.split('/');
         for (var i = 0; i < parts.length; i++) {
             pathPrefixes[parts.slice(0, i + 1).join('/')] = true;
         }
     }
-    var hasFilter = !!suggestedPath;
+    var hasFilter = pathFound;
 
     var html = '';
     folders.forEach(function(f, i) {
