@@ -27,7 +27,8 @@ from PyQt6.QtCore import Qt, QUrl, QTimer, QPropertyAnimation, QEasingCurve, pyq
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
                               QWidget, QStackedWidget, QLabel, QProgressBar,
-                              QPushButton, QGraphicsOpacityEffect, QSizePolicy)
+                              QPushButton, QGraphicsOpacityEffect, QSizePolicy,
+                              QFileDialog)
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1098,6 +1099,40 @@ class EasyMailPopup(QMainWindow):
         except Exception as e:
             logger.warning(f"hide_all_windows erreur: {e}")
 
+    def pick_folder_via_ipc(self, request_id, initial_dir):
+        """Phase Bouton Parcourir 02/05/2026 — slot Qt thread.
+
+        Ouvre QFileDialog.getExistingDirectory() (fenêtre native Windows)
+        pour que l'user choisisse son dossier principal de classement.
+        Le résultat est stocké dans _pick_folder_results et l'Event
+        correspondant est set pour libérer le HTTP thread qui attend.
+
+        Le path est renvoyé tel quel (avec backslash Windows) — le frontend
+        et le backend OVH le normalisent si besoin.
+        """
+        try:
+            logger.info(f"[pick-folder] requête {request_id[:8]} initial={initial_dir!r}")
+            # initial_dir vide → laisser Qt choisir un dossier par défaut
+            # (typiquement Documents). Sinon utiliser le path actuel comme
+            # point de départ.
+            path = QFileDialog.getExistingDirectory(
+                self,
+                "Choisissez le dossier principal de classement",
+                initial_dir or '',
+                QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontResolveSymlinks,
+            )
+            # path == '' si l'user a cliqué Annuler
+            logger.info(f"[pick-folder] {request_id[:8]} → {path!r}")
+        except Exception as e:
+            logger.warning(f"[pick-folder] {request_id[:8]} erreur : {e}")
+            path = ''
+        finally:
+            with _pick_folder_lock:
+                _pick_folder_results[request_id] = path
+                ev = _pick_folder_events.get(request_id)
+            if ev is not None:
+                ev.set()
+
     def reshow_launch_popup(self):
         """Audit 20/04 : re-affiche la popup de lancement (centrée) quand
         Outlook ré-ouvre. Évite de respawner Python+Qt → gain ~5 s."""
@@ -1563,9 +1598,18 @@ class _IPCBridge(QObject):
     open_dialog_requested = pyqtSignal(dict)
     show_popup_requested = pyqtSignal()   # Réaffiche la popup de lancement
     hide_all_requested = pyqtSignal()     # Cache popup + dialog + child windows (Outlook fermé)
+    pick_folder_requested = pyqtSignal(str, str)  # (request_id, initial_dir) — dossier picker natif
 
 
 _ipc_bridge = None  # Instance globale (setée au démarrage Qt)
+
+# Phase Bouton Parcourir 02/05/2026 — synchro entre thread HTTP et Qt thread
+# pour QFileDialog. Le HTTP thread émet le signal pick_folder_requested et
+# attend sur un Event indexé par request_id. Le Qt slot ouvre QFileDialog,
+# stocke le path choisi dans _pick_folder_results et set l'Event.
+_pick_folder_results = {}   # request_id → path (str, vide si annulé)
+_pick_folder_events = {}    # request_id → threading.Event
+_pick_folder_lock = threading.Lock()
 
 
 class _IPCHandler(BaseHTTPRequestHandler):
@@ -1638,6 +1682,47 @@ class _IPCHandler(BaseHTTPRequestHandler):
             self._json_response({"error": "not found"}, 404)
 
     def do_POST(self):
+        if self.path == '/pick_folder':
+            # Phase Bouton Parcourir 02/05/2026 — ouvre une fenêtre native
+            # Windows (QFileDialog) pour que l'user choisisse son dossier
+            # principal de classement sans avoir à taper le path à la main.
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(length) if length > 0 else b'{}'
+                params = json.loads(body.decode('utf-8') or '{}')
+                initial_dir = (params.get('initial_dir') or '').strip()
+            except Exception:
+                initial_dir = ''
+            if not _ipc_bridge:
+                self._json_response({'ok': False, 'error': 'bridge_not_ready'}, 503)
+                return
+            # Génère un request_id unique pour synchroniser HTTP thread ↔ Qt slot
+            import uuid
+            request_id = uuid.uuid4().hex
+            ev = threading.Event()
+            with _pick_folder_lock:
+                _pick_folder_events[request_id] = ev
+            try:
+                _ipc_bridge.pick_folder_requested.emit(request_id, initial_dir)
+                # Timeout 90s : laisse le temps à l'user de naviguer dans
+                # ses dossiers et choisir, mais évite un blocage indéfini.
+                ev.wait(timeout=90)
+                with _pick_folder_lock:
+                    path = _pick_folder_results.pop(request_id, None)
+                    _pick_folder_events.pop(request_id, None)
+                if path is None:
+                    self._json_response({'ok': False, 'error': 'timeout'})
+                elif path == '':
+                    # Empty string = user a cliqué Annuler dans la fenêtre
+                    self._json_response({'ok': False, 'cancelled': True})
+                else:
+                    self._json_response({'ok': True, 'path': path})
+            except Exception as e:
+                with _pick_folder_lock:
+                    _pick_folder_results.pop(request_id, None)
+                    _pick_folder_events.pop(request_id, None)
+                self._json_response({'ok': False, 'error': str(e)[:200]}, 500)
+            return
         if self.path == '/sync_folders':
             # Phase B 02/05/2026 — sync arborescence à la demande
             # (bouton « Recalibrer mon arborescence » dans Profil).
@@ -1866,6 +1951,7 @@ def main():
         _ipc_bridge.open_dialog_requested.connect(popup.open_dialog_via_ipc)
         _ipc_bridge.show_popup_requested.connect(popup.reshow_launch_popup)
         _ipc_bridge.hide_all_requested.connect(popup.hide_all_windows)
+        _ipc_bridge.pick_folder_requested.connect(popup.pick_folder_via_ipc)
         threading.Thread(target=_start_ipc_server, daemon=True, name='ipc-server').start()
         # Phase B 02/05/2026 — sync arborescence Windows toutes les 4h
         threading.Thread(target=_folder_sync_loop, daemon=True, name='folder-sync').start()
@@ -1932,6 +2018,7 @@ def main():
         _ipc_bridge.open_dialog_requested.connect(popup.open_dialog_via_ipc)
         _ipc_bridge.show_popup_requested.connect(popup.reshow_launch_popup)
         _ipc_bridge.hide_all_requested.connect(popup.hide_all_windows)
+        _ipc_bridge.pick_folder_requested.connect(popup.pick_folder_via_ipc)
         threading.Thread(target=_start_ipc_server, daemon=True, name='ipc-server').start()
         # Phase B 02/05/2026 — sync arborescence Windows toutes les 4h
         threading.Thread(target=_folder_sync_loop, daemon=True, name='folder-sync').start()

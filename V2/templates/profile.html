@@ -313,9 +313,18 @@
             <!-- Dossier principal (path Windows configurable) -->
             <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f0f0f0;">
                 <div style="font-size:12px;color:#888;margin-bottom:6px;">Dossier principal de classement :</div>
-                <input type="text" id="pj-root-folder" value="{{ pj_root_folder | e }}"
-                       style="width:100%;padding:8px 12px;border:1px solid #e0e0e0;border-radius:6px;font-size:12px;box-sizing:border-box;font-family:monospace;color:#444;"
-                       onblur="savePjRootFolder(this.value)">
+                <div style="display:flex;gap:8px;align-items:stretch;">
+                    <input type="text" id="pj-root-folder" value="{{ pj_root_folder | e }}"
+                           style="flex:1;padding:8px 12px;border:1px solid #e0e0e0;border-radius:6px;font-size:12px;box-sizing:border-box;font-family:monospace;color:#444;"
+                           onblur="savePjRootFolder(this.value)">
+                    <button type="button" onclick="pickFolderNative()"
+                            id="pj-browse-btn"
+                            style="padding:8px 14px;border:1px solid #e0e0e0;border-radius:6px;background:#f5f5f5;font-size:12px;cursor:pointer;color:#333;white-space:nowrap;transition:background 0.15s;"
+                            onmouseover="this.style.background='#e8e8e8'"
+                            onmouseout="this.style.background='#f5f5f5'">
+                        📁 Parcourir
+                    </button>
+                </div>
                 <div id="pj-root-saved" style="display:none;color:#4caf50;font-size:11px;margin-top:4px;">Enregistré ✓</div>
                 <div style="font-size:11px;color:#999;margin-top:4px;">Le dossier qui contient toutes vos catégories. BoosterMail explorera ses sous-dossiers.</div>
             </div>
@@ -706,6 +715,61 @@
                 }
                 statusEl.innerHTML = msg;
                 statusEl.style.color = '#c62828';
+            });
+        }
+
+        // Bouton « 📁 Parcourir » : ouvre une fenêtre native Windows via le companion
+        function pickFolderNative() {
+            var input = document.getElementById('pj-root-folder');
+            var btn = document.getElementById('pj-browse-btn');
+            var initialDir = (input && input.value) ? input.value.trim() : '';
+
+            btn.disabled = true;
+            var oldText = btn.innerHTML;
+            btn.innerHTML = '⏳ Sélection…';
+
+            var ctrl = new AbortController();
+            var timer = setTimeout(function() { ctrl.abort(); }, 95000);
+            fetch('http://127.0.0.1:5052/pick_folder', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ initial_dir: initialDir }),
+                signal: ctrl.signal,
+            })
+            .then(function(r) { clearTimeout(timer); return r.json(); })
+            .then(function(d) {
+                btn.disabled = false;
+                btn.innerHTML = oldText;
+                if (d.ok && d.path) {
+                    // Path choisi : update le champ + sauvegarde + re-sync
+                    input.value = d.path;
+                    savePjRootFolder(d.path);
+                    // Trigger un Recalibrage automatique sur le nouveau dossier
+                    setTimeout(recalibrateFolders, 600);
+                } else if (d.cancelled) {
+                    // L'user a cliqué Annuler — pas d'action
+                    return;
+                } else {
+                    var statusEl = document.getElementById('pj-status-text');
+                    if (statusEl) {
+                        statusEl.innerHTML = '⚠️ Impossible d\'ouvrir le sélecteur de dossier (' + (d.error || 'erreur') + ')';
+                        statusEl.style.color = '#c62828';
+                    }
+                }
+            })
+            .catch(function(err) {
+                clearTimeout(timer);
+                btn.disabled = false;
+                btn.innerHTML = oldText;
+                var statusEl = document.getElementById('pj-status-text');
+                var msg = '⚠️ Le service local BoosterMail n\'est pas joignable. Vérifiez qu\'il est lancé.';
+                if (err.name === 'AbortError') {
+                    msg = '⚠️ Délai dépassé. Réessayez.';
+                }
+                if (statusEl) {
+                    statusEl.innerHTML = msg;
+                    statusEl.style.color = '#c62828';
+                }
             });
         }
 
