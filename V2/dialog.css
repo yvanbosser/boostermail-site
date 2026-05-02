@@ -888,6 +888,35 @@ body {
 .em-folder-item:hover { background: #f0f6ff; color: #0F6CBD; }
 .em-folder-item.selected { background: #e3f2fd; color: #0F6CBD; font-weight: 600; }
 
+/* Chevrons d'arborescence (02/05/2026 — style Outlook) */
+.em-folder-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    font-size: 9px;
+    color: #5a6377;
+    cursor: pointer;
+    border-radius: 2px;
+    flex-shrink: 0;
+    user-select: none;
+    transition: color 0.15s, background 0.15s;
+}
+.em-folder-chevron:hover { background: rgba(15, 108, 189, 0.12); color: #0F6CBD; }
+.em-folder-chevron-spacer {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+.em-folder-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* === CARDS INFO BAS (mockup v14) === */
 .em-info-row {
     display: flex;

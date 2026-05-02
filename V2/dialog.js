@@ -2963,13 +2963,32 @@ function _showClassMailPopup(suggestion, folders) {
     }
     document.getElementById('classMailSuggestion').innerHTML = sugHtml;
 
-    // Arborescence dossiers
+    // Arborescence dossiers — affichage type Outlook avec chevrons ▼/▶
+    // (signal Yvan 02/05/2026 : « rajoute des flèches > vers le haut et le
+    // bas pour simuler l'arborescence Outlook »).
+    // Algorithme :
+    //   - Folders sont déjà triés par hiérarchie (parent avant enfants)
+    //   - Un folder a des enfants si le SUIVANT a un depth > au sien
+    //   - Au clic sur chevron : toggle visibilité de tous les descendants
+    //     (lignes consécutives avec depth > depth_courant)
     if (folders && folders.length > 0) {
         var treeHtml = '';
-        folders.forEach(function(f) {
-            var indent = '&nbsp;'.repeat((f.depth || 0) * 4);
-            treeHtml += '<div class="em-folder-item" onclick="_selectFolder(\'' + _escapeAttr(f.id) + '\', this)">'
-                + indent + _escapeHtml(f.name) + '</div>';
+        folders.forEach(function(f, i) {
+            var depth = f.depth || 0;
+            var next = folders[i + 1];
+            var hasChildren = next && (next.depth || 0) > depth;
+            var indent = depth * 14; // 14px par niveau
+            var chevron = hasChildren
+                ? '<span class="em-folder-chevron expanded" onclick="_toggleFolderChildren(event, this.parentElement)">▼</span>'
+                : '<span class="em-folder-chevron-spacer"></span>';
+            treeHtml += '<div class="em-folder-item" '
+                + 'data-folder-id="' + _escapeAttr(f.id) + '" '
+                + 'data-depth="' + depth + '" '
+                + 'style="padding-left:' + indent + 'px;display:flex;align-items:center;gap:4px;" '
+                + 'onclick="_selectFolderFromRow(event, this)">'
+                + chevron
+                + '<span class="em-folder-name">' + _escapeHtml(f.name) + '</span>'
+                + '</div>';
         });
         document.getElementById('classMailTree').innerHTML = treeHtml;
     }
@@ -3022,6 +3041,68 @@ function _selectFolder(folderId, element) {
     });
     if (element && element.classList) {
         element.classList.add('selected');
+    }
+}
+
+// 02/05/2026 — Wrapper qui distingue clic chevron (toggle) vs clic ligne
+// (sélection). Utilisé par le rendu arbre Outlook avec chevrons ▼/▶.
+function _selectFolderFromRow(event, rowEl) {
+    // Si le clic vient du chevron, on ne sélectionne pas (le chevron a son
+    // propre handler avec stopPropagation, mais double sécurité ici).
+    if (event && event.target && event.target.classList &&
+        event.target.classList.contains('em-folder-chevron')) {
+        return;
+    }
+    var folderId = rowEl.getAttribute('data-folder-id');
+    _selectFolder(folderId, rowEl);
+}
+
+// 02/05/2026 — Toggle l'affichage des sous-dossiers d'un dossier parent
+// dans la popup de classement. Reproduit le comportement Outlook (chevron
+// ▼ ouvert / ▶ fermé). On masque/montre tous les frères suivants jusqu'à
+// trouver un élément avec depth ≤ depth_courant.
+function _toggleFolderChildren(event, parentRow) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    var depth = parseInt(parentRow.getAttribute('data-depth'), 10);
+    if (isNaN(depth)) return;
+    var chevron = parentRow.querySelector('.em-folder-chevron');
+    var collapsing = chevron && chevron.classList.contains('expanded');
+    if (chevron) {
+        chevron.classList.toggle('expanded', !collapsing);
+        chevron.classList.toggle('collapsed', collapsing);
+        chevron.textContent = collapsing ? '▶' : '▼'; // ▶ ou ▼
+    }
+    // Parcourt les frères suivants : tant que depth > depth_courant, on toggle
+    var sibling = parentRow.nextElementSibling;
+    while (sibling) {
+        var sd = parseInt(sibling.getAttribute('data-depth'), 10);
+        if (isNaN(sd) || sd <= depth) break;
+        if (collapsing) {
+            sibling.style.display = 'none';
+        } else {
+            // Pour ne pas re-déplier des sous-dossiers qui étaient repliés
+            // manuellement, on ne montre que ceux du niveau immédiat (depth+1).
+            if (sd === depth + 1) {
+                sibling.style.display = '';
+            } else {
+                // Vérifie si l'ancêtre direct (depth+1) est expanded
+                var anc = sibling.previousElementSibling;
+                while (anc) {
+                    var ad = parseInt(anc.getAttribute('data-depth'), 10);
+                    if (!isNaN(ad) && ad === depth + 1) {
+                        var ancChev = anc.querySelector('.em-folder-chevron');
+                        var ancExpanded = ancChev && ancChev.classList.contains('expanded');
+                        sibling.style.display = ancExpanded ? '' : 'none';
+                        break;
+                    }
+                    anc = anc.previousElementSibling;
+                }
+            }
+        }
+        sibling = sibling.nextElementSibling;
     }
 }
 
