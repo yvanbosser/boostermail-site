@@ -1,6 +1,6 @@
 # Prompt de reprise — Session « New Outlook via OVH »
 
-> **Dernière mise à jour** : 30/04/2026 PM autonomie totale (Yvan convalescence, **9 commits autonomie** + 4 sujets choisis post-validation : RGPD complet (audit + 4 docs juridiques + export + delete 30j grâce + redaction logs PII + logrotate) + LEAK #1/#2 fixes + classement saisie manuelle + batch recalibrate contacts + tests E2E 10/10 PASS + Patterns #21-23 + Invariants I-DB-06/I-RES-05/I-SEC-07 ; **prochaine session : investiguer bug overlay Outlook signalé par Yvan + compléter placeholders docs juridiques + récupérer DPA Anthropic**)
+> **Dernière mise à jour** : 02/05/2026 fin de journée — session à 3 axes parallèles fusionnée : (1) rattrapage Workflow 7 (16 commits 01/05 PM → 02/05 AM) + (2) refonte specs classement (3 docs → 1 [`SPEC_CLASSEMENT_BOOSTERMAIL.md`](../specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md)) + (3) **session parallèle d'Yvan récupérée** (~30 commits onboarding 5 étapes + chatbot help/FAQ + companion sync filesystem + arbo classement chevrons togglables + fixes PJ Graph) **PUIS 4 étapes classement « top 3 + popup pré-envoi »** greffées propre par-dessus l'arbo d'Yvan ; tout déployé OVH ([bilan complet](../sessions/OUTLOOK_BILAN_SESSION_20260502_3axes.md)) ; **prochaine session : retour Yvan sur les 4 étapes classement après usage quotidien + sujets ouverts business (DPA Anthropic, INPI, mailbox dpo)**
 >
 > **Mode d'emploi** : à chaque démarrage d'une nouvelle session Claude sur le sujet « New Outlook via OVH », **copier-coller le bloc ci-dessous en intégralité**. Il référence tous les docs nécessaires et donne le contexte de la session précédente.
 >
@@ -20,7 +20,7 @@ Test rapide :
 Si ton worktree est différent (auto-créé style `claude/happy-XXXX`), exécute en début de session :
   git fetch && git merge master --no-edit
 puis :
-  git log --oneline -5    # doit afficher au minimum `db88cd2 feat: Sujet 1B batch recalibrate + Sujet 5A tests E2E (10/10 PASS)` (30/04 PM autonomie partie 2)
+  git log --oneline -5    # doit afficher au minimum `3fdb2c6 feat(classement): champ #infoClassement cliquable + popup pré-envoi` (top commit 02/05 fin de journée)
 
 ---
 
@@ -31,61 +31,69 @@ CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
 - Toutes les modifs (UX/UI/data) déployées sur OVH dans la foulée — plus de WIP local persistant
 - Yvan utilise BoosterMail au quotidien depuis https://api.boostermail.ai/
 
-ÉTAT DE FIN DE LA DERNIÈRE SESSION (30/04/2026 PM étendu — 5 commits : FD leak + 2 fixes UI Yvan + endpoint + audit)
-- **Session ~3h cumulées** : 1h45 incident FD leak + 1h15 extension fixes UI + Phase A/B autonomie pendant qu'Yvan fiévreux se reposait.
-- **Commits master ce jour PM** :
-  - `b2d2f73` fix(db): GC background pour conn SQLite des threads zombies — incident prod 06:11 UTC saturation `LimitNOFILE` (1024) en ~1h16. Fix double : `LimitNOFILE=65535` systemd + thread BG `db-gc` 60s.
-  - `8c407b8` docs(session): cloture session 30/04 PM — bilan + cascade Pattern #21 + I-DB-06 + ROLLBACK Cas 0/4
-  - `95178cc` fix(dialog): _autocompleteRegistrations declare en TOP — régression S2 du matin. `dialog.js:3272 push undefined` empêchait toute génération de réponse.
-  - `e419741` fix(popup): _backendUrl dynamique (window.location.origin) — toast "Not Found" sur boutons Echeances/Contacts/Profil dû à `localhost:3443` hardcodé en SaaS.
-  - `842dc31` feat(admin): endpoint /api/admin/db_conns_stats + audit autres leaks (rapport `audit/rapports/2026-04-30_PM_audit_autres_leaks_ressources.md`)
-- **2 leaks supplémentaires identifiés** (non bloquants, pré-beta) :
-  - HIGH : `GraphClient` HTTP Session jamais fermée (65 callsites `get_graph()`)
-  - MEDIUM : `ThreadPoolExecutor` `pool.shutdown(wait=False)` ligne 4371
-- **Validation prod live** :
-  - FD leak : 614 → 44 FDs (×14 mieux), GC tourne régulièrement (log `[db-gc] closed N zombie`)
-  - Bug B fix dialog : nouveau cache busting `dialog.js?v=v27-fix-autocomplete-init-30-04-PM` déployé OVH
-  - Bug A fix popup : nouveau cache busting `popup.js?v=v15-fix-backend-url-30-04-PM` déployé OVH
-  - Endpoint live : `tracked_conns=2, live_threads=15, zombie_estimate=0`
-- **Documentation cascade complète** :
-  - **Pattern #21** dans `audit/ANOMALIES_RECURRENTES.md` (leak FD `threading.local()` + remède db-gc)
-  - **I-DB-06** dans `audit/INVARIANTS.md` (conn SQLite bornées par GC zombie)
-  - **Cas 0** + **Cas 4** dans `docs/saas/ROLLBACK_PROCEDURE.md` (diagnostic d'urgence FDs + procédure palliatif/revert)
-  - **Bloc « ✅ FIXÉ 30/04 PM »** dans `docs/PLUS_TARD_VF.md` TL;DR
-  - **Rapport audit autres leaks** : `audit/rapports/2026-04-30_PM_audit_autres_leaks_ressources.md`
-  - **Bilan complet (Partie 1 + Partie 2)** : `docs/sessions/OUTLOOK_BILAN_SESSION_20260430_PM_incident_fd_leak.md`
+ÉTAT DE FIN DE LA DERNIÈRE SESSION (02/05/2026 fin de journée — ~6h cumulées, 3 axes parallèles fusionnés)
 
-🎯 PROCHAINE SESSION (À DÉFINIR PAR YVAN)
-1. **VALIDATION CÔTÉ YVAN AU RÉVEIL** (30 sec) — vérifier que les 2 fixes UI marchent :
-   - Ouvrir un mail dans New Outlook → cliquer BoosterMail → la réponse doit se générer (pas de toast rouge "Cannot read properties of undefined")
-   - Cliquer le bouton Echeances/Contacts/Profil dans l'overlay popup → la page doit se charger (pas de toast "Not Found")
-   - Si purge cache WebView2 nécessaire : cf section C.3 onboarding (rare, le cache busting v27/v15 devrait être pris automatiquement par le `no-store`)
-2. **Endpoint diagnostic live** (1 sec) :
-   `curl -sk https://api.boostermail.ai/api/admin/db_conns_stats` → JSON avec `tracked_conns`, `live_threads_count`, `zombie_estimate`. Au steady state attendu : `zombie_estimate ≈ 0`.
-3. **Si OK → retour roadmap business** (cf bilan 30/04 matin section discussion) :
-   - Tests end-to-end automatisés sur 5 flux critiques (~1 journée)
-   - Phase 4 paiement Stripe + RGPD (~1-2 semaines)
-   - 3-5 beta-testeurs payants dans le réseau direct
-   - Niche métier (comptables ? avocats ?)
-4. **POLISH TECHNIQUE recommandé pré-beta** (1-2h) — fix LEAK #1 + #2 du rapport audit autres leaks 30/04 PM (`audit/rapports/2026-04-30_PM_audit_autres_leaks_ressources.md`) :
-   - LEAK #1 HIGH : `GraphClient` HTTP Session non fermée (65 callsites) → wrapper `with get_graph() as graph:`
-   - LEAK #2 MEDIUM : `ThreadPoolExecutor` `pool.shutdown(wait=False)` ligne 4371 → utiliser `with`
-5. **STAND-BY restants 4/12** (cf bilan 30/04 matin) : S8/S10/S11/S12, à traiter si symptômes observables
+- **Top commit master** : `3fdb2c6` (étape 4'/4' classement champ cliquable + popup pré-envoi)
+- **Bilan complet** : [`docs/sessions/OUTLOOK_BILAN_SESSION_20260502_3axes.md`](../sessions/OUTLOOK_BILAN_SESSION_20260502_3axes.md)
 
-⚠️ ALTERNATIVES si récidive ou stress test :
-- **Monitoring db-gc 24-48h** :
-  ```bash
-  ssh ubuntu@51.178.162.208 "sudo journalctl -u boostermail --since '24 hours ago' --no-pager | grep db-gc | tail -20"
-  curl -sk https://api.boostermail.ai/api/admin/db_conns_stats
-  ```
+**Axe A — Rattrapage Workflow 7** (matin) : bilan rétroactif des 16 commits 01/05 PM → 02/05 AM (Workflow 9 PLAYBOOK + overlay PyQt strict 3 boutons + 4 quick wins UI). Ces commits (01/05) ne sont plus dans la fenêtre des 20 derniers car `git reset --hard` à midi a remplacé.
+
+**Axe B — Refonte specs classement** (matin/midi) : 3 docs `SPEC_CLASSIFICATION_*` (12/04/2026) consolidés en un seul [`SPEC_CLASSEMENT_BOOSTERMAIL.md`](../specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md) (11 sections, ~340 lignes). Pipeline 7 tiers unifié + gardes communes centralisées + matrice proto vs V2 SaaS + décisions archivées. Les 3 anciens docs portent un bandeau OBSOLÈTE.
+
+**Axe C — Récupération session parallèle d'Yvan** (midi) : découverte d'une autre session worktree `claude/amazing-kilby-66bab1` avec ~30 commits non mergés. Reset master vers `d17764a` (HEAD de cette branche) après backup git (cf bilan). Récupération couvre :
+- **Onboarding 5 étapes** (page `onboarding.html` + logo fusée + script `tools/generate_icons.py`)
+- **Chatbot help/FAQ** (page `help.html` + endpoint `/api/assist` Claude Haiku)
+- **Companion sync filesystem** (scan + push OVH via `/api/windows_folders`)
+- **Profil — boutons admin** (« Se reconnecter », « Réinstaller le bouton », « Recalibrer »)
+- **Classement** (commit `2e426c3` arbo Outlook avec chevrons ▼/▶ togglables)
+- **Fixes PJ Graph** (résolution IMID → Entry ID partout, commits `bff9375` `9425d52` `d17764a`)
+- **Divers** : fix DB closed connection après recalibrage, overlay nouveaux boutons Nouveau/Aide
+
+**4 étapes classement « top 3 + popup pré-envoi »** (après-midi) — greffées propre par-dessus le travail d'Yvan, déployées OVH :
+- `99e0c12` étape 1' : backend `api_classification_post_send` expose `suggestions` array (top 3)
+- `97b6a2a` étape 2' : popup post-envoi top 3 (1 principale + 2 boulettes ●)
+- `85f6b0d` étape 3' : arbo scroll auto sur la suggestion (greffé sur l'algo depth-based d'Yvan, sans le modifier)
+- `3fdb2c6` étape 4' : champ `#infoClassement` cliquable + popup pré-envoi avec mode `'pre'`/`'post'`
+
+Cache busting bumpé : `dialog.css v27`, `dialog.js v41`.
+
+**Filets de sécurité en place** (détails dans le bilan complet) :
+- Branche backup git pré-merge (ancien master) — nom dans le bilan
+- 2 backups OVH tar.gz (pré-deploy travail Yvan + pré-deploy 4 étapes)
+- Branche `claude/stoic-bhaskara-9dc6e9` qui archive les 4 commits originaux étapes 1-4 (remplacés par étapes 1'-4' propres sur master)
+
+🎯 PROCHAINE SESSION
+
+1. **Démarrage rapide** :
+   - Vérifier OVH : `curl -sk https://api.boostermail.ai/api/warmup_status` (HTTP 200 attendu)
+   - Vérifier service : `ssh ubuntu@51.178.162.208 "sudo systemctl is-active boostermail"`
+
+2. **Si Yvan signale un bug sur les 4 étapes classement** :
+   - Test attendu côté lui : champ « Classement suggéré » cliquable → popup ouverte avec top 3 + arbo scroll auto + boutons « Annuler »/« Confirmer »
+   - Test post-envoi : popup réapparaît avec choix pré-sélectionné si user a modifié pré-envoi
+   - Diagnostic via `journalctl -u boostermail` + logs OVH
+   - Rollback en 1 commande (chemin tar.gz dans le bilan) : `ssh ubuntu@51.178.162.208 "sudo tar -xzf <chemin tar.gz> -C / && sudo systemctl restart boostermail"`
+
+3. **Sujets ouverts business** (côté Yvan, pas de code Claude) :
+   - Mailbox `dpo@boostermail.ai` à créer/rediriger
+   - Compléter les `[À COMPLÉTER]` dans `legal/` (SIREN, RCS, etc.)
+   - Récupérer DPA Anthropic
+   - Marque INPI BoosterMail (~250 €)
+
+4. **Tech debt différé** (priorité quand Yvan le décide) :
+   - Découpage `app_plugin.py` 11700 lignes en modules (#11 PLUS_TARD_VF, ~1 j)
+   - STAND-BY S8/S12 (gain marginal)
+   - Cleanup branches/backups après quelques jours de stabilité
 
 AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 
-1. **`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** ⭐ — référence vivante de cette session (workflow OVH-first, scope, interdits, procédure déploiement, profil Yvan, tests, procédure purge cache WebView2)
-2. **`docs/PLUS_TARD_VF.md`** ⭐ — référentiel UNIQUE des sujets « plus tard ». **Lis le TL;DR en haut du document** : il liste les 23 items vivants par catégorie (admin, actif, SaaS, audits, tech debt, différé, long terme). Remplace les 3 anciens fichiers PLUS_TARD/TODO/BUGS_PROTO archivés.
-3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260430.md`** ⭐ — bilan complet de la session précédente (~6h, audit ULTRA Pass 2-9 + 30 bugs corrigés + 8 STAND-BY traités sur 12 + déploiement OVH + backup local + procédure rollback + discussion stratégique honnête sur le produit)
-4. **`docs/saas/ONBOARDING_SESSION_SAAS.md`** — référence infra OVH partagée (sections B paths serveur, J commandes, G rollback)
-5. **`audit/INVARIANTS.md`** + **`audit/ANOMALIES_RECURRENTES.md`** — invariants techniques + Patterns identifiés (notamment Pattern #18 cache WebView2 + I-CACHE-01/02/03 + I-SEC-06)
+1. **`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** ⭐ — référence vivante (workflow OVH-first, scope, interdits, profil Yvan, procédure purge cache WebView2)
+2. **`docs/PLUS_TARD_VF.md`** ⭐ — référentiel UNIQUE des sujets « plus tard » avec en-tête mis à jour 02/05 fin de journée
+3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260502_3axes.md`** ⭐ — bilan complet session 02/05 (3 axes : rattrapage Workflow 7 + récup session Yvan + 4 étapes classement)
+4. **`docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md`** — source de vérité unique du classement (mail + PJ + joindre fichier)
+5. **`docs/saas/ONBOARDING_SESSION_SAAS.md`** — référence infra OVH partagée
+6. **`audit/INVARIANTS.md`** + **`audit/ANOMALIES_RECURRENTES.md`** — invariants + Patterns
+7. **`audit/PLAYBOOK.md`** — Workflow 9 (UX/design alignment) à appliquer après chaque décision UX d'Yvan
 
 Puis valide en exécutant ces 2 tests :
 - `ssh -o BatchMode=yes -o ConnectTimeout=5 ubuntu@51.178.162.208 "echo OK_SSH_KEY_WORKS"`

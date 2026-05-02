@@ -1,6 +1,19 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 02/05/2026 (test Yvan sur mail Stéphane Dufau : 3 sujets remontés, 1 fixé → cache bust `dialog.js v35-refine-anti-doublon-02-05`, 2 documentés ci-dessous)
+> **Dernière mise à jour** : 02/05/2026 fin de journée (3 axes session : rattrapage Workflow 7 + récupération session parallèle Yvan + 4 étapes classement « top 3 + popup pré-envoi cliquable » greffées par-dessus l'arbo chevrons d'Yvan, déployées sur OVH ; bilan complet [`OUTLOOK_BILAN_SESSION_20260502_3axes.md`](sessions/OUTLOOK_BILAN_SESSION_20260502_3axes.md))
+>
+> **🆕 Sujets traités session 02/05/2026 PM (4 étapes classement « top 3 + popup pré-envoi »)** :
+> - **✅ Étape 1' Backend top 3** (commit `99e0c12`) — `api_classification_post_send` expose maintenant l'array `suggestions` (top 3 calculé par BG prewarm) en plus de `suggestion` (top 1). Avant : top 3 perdu entre BG et front. Fallback `[#1]` rétro-compat.
+> - **✅ Étape 2' Popup top 3 boulettes** (commit `97b6a2a`) — `_showClassMailPopup` itère sur `suggestion.suggestions` : 1 principale `.em-folder-suggestion.selected` + jusqu'à 2 alternatives `.em-folder-alternative` (boulettes ●). CSS pour les 2 nouvelles classes + `.em-suggestion-reason` (sous-texte gris).
+> - **✅ Étape 3' Arbo scroll auto sur la suggestion** (commit `85f6b0d`) — au load, recherche la row `data-folder-id == _selectedFolderId`, ajoute `.selected` + `scrollIntoView({ block: 'center' })`. Greffé par-dessus l'algo depth-based d'Yvan (commit `2e426c3`) sans le modifier.
+> - **✅ Étape 4' Champ #infoClassement cliquable + popup pré-envoi** (commit `3fdb2c6`) — helpers `_setClassementFieldClickable` / `_openPreSendClassPopup` / `_confirmPreSendChoice` / `_cancelPreSendChoice`. `_showClassMailPopup` accepte un paramètre `mode = 'pre' | 'post'` + adapte boutons (« Annuler »/« Confirmer » vs « Pas maintenant »/« Classer ici »). En mode 'post', le choix pré-envoi (`_preSendFolderId/Path`) pré-sélectionne la suggestion BG.
+>
+> Cache busting bumpé : `dialog.css v26 → v27`, `dialog.js v40 → v41`.
+> **Test côté Yvan attendu** : champ classement cliquable → popup s'ouvre avec top 3 + arbo scroll → modification éventuelle → post-envoi popup avec choix pré-sélectionné (1 clic Confirmer suffit).
+>
+> **🆕 Refonte specs classement** (commit `74e910c` puis appliquée propre sur master en fin de journée) — 3 docs `SPEC_CLASSIFICATION_*` (12/04/2026) consolidés en un seul [`SPEC_CLASSEMENT_BOOSTERMAIL.md`](specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md) (11 sections, ~340 lignes). Pipeline 7 tiers unifié + gardes communes centralisées + matrice proto vs V2 SaaS explicite + décisions archivées. Les 3 anciens docs portent un bandeau OBSOLÈTE.
+>
+> **Dernière mise à jour précédente** : 02/05/2026 (test Yvan sur mail Stéphane Dufau : 3 sujets remontés, 1 fixé → cache bust `dialog.js v35-refine-anti-doublon-02-05`, 2 documentés ci-dessous)
 >
 > **🆕 À FAIRE AVANT BETA UTILISATEURS (02/05/2026 fin de session)** :
 > - **MEDIUM** Popup de lancement qui réapparaît au redémarrage du service même si user déjà onboardé/activé. Comportement actuel : `_should_show_popup_now()` consulte `/api/activation_status` mais retourne `should_show_popup: true` même quand `user_activated: true` et `popup_shown_date == today`. À fixer pour que la popup ne réapparaisse JAMAIS chez un user déjà activé qui rouvre Outlook (ex: après un auto-update du service ou un crash). **Action** : auditer la logique `should_show_popup` dans `app_plugin.py` (route `/api/activation_status`) — la condition de retour True doit exclure les cas `user_activated=true` ET `popup_shown_date==today`. Documenté suite au signal Yvan qui a constaté la popup ressurgir à chacun de mes ~7 redémarrages du service local pendant la session 02/05 (codage Phase A→D). Yvan n'est pas gêné personnellement (il sait pourquoi), mais c'est inacceptable pour un utilisateur final.

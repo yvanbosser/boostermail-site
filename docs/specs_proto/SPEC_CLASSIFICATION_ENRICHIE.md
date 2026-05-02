@@ -1,5 +1,7 @@
 # Spécifications — Classification enrichie (règles DB évolutives)
 
+> ⚠️ **DOCUMENT OBSOLÈTE — REMPLACÉ le 02/05/2026** par [`SPEC_CLASSEMENT_BOOSTERMAIL.md`](SPEC_CLASSEMENT_BOOSTERMAIL.md) (consolidation des 3 docs SPEC_CLASSIFICATION_* en un seul, avec écart proto/SaaS explicité). Conservé pour archive historique. Ne PAS s'y référer pour le code actuel.
+>
 > **Dernière mise à jour** : 12/04/2026 (git)
 
 ## Objectif
