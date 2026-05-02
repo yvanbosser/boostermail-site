@@ -416,7 +416,7 @@
                 </div>
             </div>
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;justify-content:center;">
-                <div style="width:20px;height:20px;border:2px solid #e0e0e0;border-top-color:#0078d4;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;"></div>
+                <div id="style-spinner" style="width:20px;height:20px;border:2px solid #e0e0e0;border-top-color:#0078d4;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;"></div>
                 <span id="style-step" style="color:#0078d4;font-weight:600;font-size:13px;">Démarrage...</span>
             </div>
             <div style="padding:0 20px;">
@@ -785,6 +785,10 @@
                                 sEl.textContent = '✓ Analyse terminée — ' + indexed + ' mails indexés';
                                 sEl.style.color = '#28a745';
                             }
+                            // Stop le spinner (signal Yvan : il continuait de tourner
+                            // même après "Analyse terminée" → confusion UX)
+                            var spEl = document.getElementById('style-spinner');
+                            if (spEl) spEl.style.display = 'none';
                             if (nextBtn) nextBtn.disabled = false;
                             saveSetupStep(3);
                             return;
