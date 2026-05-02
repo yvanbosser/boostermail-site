@@ -12661,6 +12661,104 @@ def page_echeances():
     return render_template('echeances.html')
 
 
+# =============================================================================
+# CHATBOT ASSISTANCE BoosterMail (02/05/2026)
+# Route hybride : 7 FAQ statiques côté frontend + Claude Haiku pour les
+# questions libres. System prompt strict pour éviter les hallucinations.
+# =============================================================================
+
+_ASSIST_SYSTEM_PROMPT = """Tu es l'assistance officielle de BoosterMail, un add-in Outlook qui aide à répondre aux mails 5× plus vite via l'IA Claude (Anthropic).
+
+Tu réponds UNIQUEMENT sur l'usage de BoosterMail. Périmètre :
+- Installation et désinstallation de BoosterMail
+- Connexion Microsoft / Outlook
+- Le bouton 🚀 BoosterMail (ruban Outlook, barre d'actions des mails)
+- L'analyse du style d'écriture (recalibrage)
+- Le classement automatique des pièces jointes
+- La confidentialité des données (chiffrement, RGPD, pas d'entraînement IA)
+- L'onboarding et la configuration
+
+Si la question dépasse ce périmètre (ex: comment utiliser Outlook lui-même, autres outils, vie privée du user), redirige poliment vers support@boostermail.ai.
+
+NE JAMAIS inventer de fonctionnalité non documentée. Si tu n'es pas sûr, dis : « Je ne sais pas répondre précisément à cette question. Écrivez-nous : support@boostermail.ai ».
+
+Sois concis (3-5 phrases max), direct, en français. Utilise des étapes numérotées si la question demande une procédure. Pas de markdown lourd (gras simple, pas de code blocks)."""
+
+
+@app.route('/api/assist', methods=['POST'])
+def api_assist():
+    """Chatbot assistance BoosterMail — questions libres après FAQ.
+
+    Reçoit {messages: [{role, content}]} (max 20 messages d'historique).
+    Retourne {answer: str} ou {error}.
+
+    Modèle : Claude Haiku (rapide + économique : ~$0.001 / question).
+    Coût attendu : ~$1.50/mois sur 10 users × 5 questions/jour.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        messages = data.get('messages') or []
+        if not isinstance(messages, list) or not messages:
+            return jsonify({'error': 'messages requis'}), 400
+        # Garde-fou : pas plus de 20 messages d'historique (évite les abus
+        # de tokens, l'utilisateur n'a normalement pas besoin de plus)
+        if len(messages) > 20:
+            messages = messages[-20:]
+        # Validation des messages
+        clean_messages = []
+        for m in messages:
+            if not isinstance(m, dict):
+                continue
+            role = m.get('role')
+            content = m.get('content', '')
+            if role not in ('user', 'assistant'):
+                continue
+            if not isinstance(content, str) or not content.strip():
+                continue
+            # Tronque chaque message à 2000 chars (anti-spam token)
+            clean_messages.append({'role': role, 'content': content[:2000]})
+        if not clean_messages:
+            return jsonify({'error': 'aucun message valide'}), 400
+
+        ai = get_ai()
+        if not ai or not getattr(ai, 'client', None):
+            return jsonify({'error': 'IA indisponible'}), 503
+
+        # Appel Claude Haiku — modèle rapide + économique pour Q/A
+        try:
+            response = ai.client.messages.create(
+                model='claude-haiku-4-5',
+                max_tokens=500,
+                system=_ASSIST_SYSTEM_PROMPT,
+                messages=clean_messages,
+            )
+        except Exception as e:
+            logger.warning(f"[assist] Claude erreur : {e}")
+            return jsonify({'error': 'IA en erreur, réessayez'}), 502
+
+        if not response.content:
+            return jsonify({'error': 'réponse vide'}), 500
+        answer = response.content[0].text or ''
+
+        # Log anonymisé : on stocke juste la dernière question user (pour
+        # identifier les FAQ manquantes / sujets récurrents). Pas de
+        # contenu mail, pas d'identifiant user.
+        try:
+            last_user = next(
+                (m['content'] for m in reversed(clean_messages) if m['role'] == 'user'),
+                ''
+            )
+            if last_user:
+                logger.info(f"[assist] question : {last_user[:200]}")
+        except Exception:
+            pass
+
+        return jsonify({'answer': answer})
+    except Exception as e:
+        logger.warning(f"[assist] exception : {e}")
+        return jsonify({'error': str(e)[:200]}), 500
+
+
 # --- Stubs des 6 routes API manquantes (porting depuis proto) ----------------
 
 @app.route('/api/style_status')

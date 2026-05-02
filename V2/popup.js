@@ -82,16 +82,14 @@ var _companionAvailable = false;
     _btn('navContactsFixed', function () { _openDashboardWindow('contacts'); });
     _btn('navProfilFixed', function () { _openDashboardWindow('profile'); });
 
-    // Phase 02/05/2026 — placeholders pour 2 boutons à activer plus tard :
-    // - navComposeFixed : raccourci composition d'un nouveau mail
-    // - navHelpFixed    : assistance BoosterMail (chatbot hybride FAQ + Claude)
+    // 02/05/2026 — Bouton ✏️ Nouveau (composition rapide) — placeholder
+    // (sera activé plus tard quand on définira en profondeur le flux)
     _btn('navComposeFixed', function () {
         alert('✏️ Composition rapide d\'un nouveau message — bientôt disponible.');
     });
-    _btn('navHelpFixed', function () {
-        alert('❓ Assistance BoosterMail — bientôt disponible.\n\n' +
-              'En attendant, contactez-nous : support@boostermail.ai');
-    });
+
+    // 02/05/2026 — Bouton ❓ Aide : ouvre le chatbot d'assistance
+    _btn('navHelpFixed', function () { _openAssistChatbot(); });
 
     // Logique ?view=X — démarrer directement sur la vue demandée si param URL.
     // Permet à dialog.html d'ouvrir popup.html?view=profil et de tomber
@@ -1102,6 +1100,204 @@ function _pollOnboarding() {
             dragging = false;
             _nav('drag-end');
         }
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // CHATBOT ASSISTANCE BoosterMail (02/05/2026)
+    // 7 FAQ statiques cliquables + champ libre Claude Haiku.
+    // System prompt strict côté backend pour éviter les hallucinations.
+    // ═══════════════════════════════════════════════════════════════
+
+    // 7 FAQ pré-rédigées (validées avec Yvan, ne pas modifier sans accord).
+    // Réponses HTML simples (gras + listes) pour rendu propre dans la modale.
+    var ASSIST_FAQ = [
+        {
+            id: 'ruban-pas-visible',
+            q: 'Le 🚀 n\'apparaît pas dans le ruban d\'Outlook',
+            a:
+                '📍 <strong>Le ruban</strong> = la grande barre horizontale en haut de la fenêtre Outlook (où se trouvent <em>Nouveau message, Répondre, Transférer</em>…). Toujours visible quand Outlook est ouvert.<br><br>' +
+                'Si le bouton 🚀 n\'apparaît pas dans le ruban :<br>' +
+                '1. <strong>Fermez complètement Outlook</strong> (clic droit dans la barre des tâches → Quitter, pas juste la croix).<br>' +
+                '2. <strong>Rouvrez Outlook.</strong> Le bouton 🚀 doit maintenant apparaître.<br>' +
+                '3. Si toujours invisible : <strong>Profil → 🚀 Bouton Outlook → Réinstaller le bouton</strong>, puis refermez/rouvrez Outlook.<br>' +
+                '4. Si ça persiste : <strong>support@boostermail.ai</strong>',
+        },
+        {
+            id: 'barre-actions-pas-visible',
+            q: 'Le 🚀 n\'apparaît pas dans la barre d\'actions / l\'épingler',
+            a:
+                '📍 <strong>La barre d\'actions du mail</strong> = la ligne de boutons <em>Répondre, Répondre à tous, Transférer</em> (souvent sous forme de flèches) qui apparaît juste au-dessus du contenu d\'un mail quand vous le cliquez.<br><br>' +
+                '<em>(Cette barre existe sur <strong>New Outlook</strong> et <strong>Outlook Web</strong>. Sur <strong>Outlook Classic</strong>, les add-ins se trouvent dans le ruban — voir la question précédente.)</em><br><br>' +
+                'Par défaut, Outlook cache les boutons d\'add-ins (dont 🚀) derrière une <strong>petite icône carrée à 4 sous-carrés (⊞)</strong> à droite de la barre d\'actions. Pour épingler 🚀 BoosterMail :<br>' +
+                '1. Ouvrez n\'importe quel mail<br>' +
+                '2. Repérez l\'<strong>icône carrée à 4 sous-carrés (⊞)</strong> à droite<br>' +
+                '3. Cliquez dessus → vous voyez la liste des add-ins<br>' +
+                '4. <strong>Clic droit</strong> sur 🚀 BoosterMail → <strong>Épingler</strong><br>' +
+                '5. Le bouton est désormais toujours visible',
+        },
+        {
+            id: 'recalibrer-style',
+            q: 'Comment recalibrer mon style d\'écriture',
+            a:
+                'BoosterMail apprend votre style en analysant vos mails envoyés et reçus. Pour relancer l\'analyse :<br><br>' +
+                '<strong>Profil → Style rédactionnel → Recalibrer BoosterMail</strong><br><br>' +
+                'L\'analyse prend quelques minutes. Plus vous envoyez de mails, plus BoosterMail s\'affine.',
+        },
+        {
+            id: 'changer-dossier-pj',
+            q: 'Comment changer mon dossier de classement PJ',
+            a:
+                'Pour modifier le dossier où BoosterMail propose de classer vos pièces jointes :<br><br>' +
+                '<strong>Profil → 📁 Pièces jointes → bouton 📁 Parcourir</strong> → sélectionnez votre nouveau dossier.<br><br>' +
+                'BoosterMail réindexe automatiquement votre arborescence (~quelques secondes).',
+        },
+        {
+            id: 'confidentialite',
+            q: 'Confidentialité : que voit BoosterMail de mes données',
+            a:
+                'Vos mails sont analysés par l\'IA <strong>Claude (Anthropic, USA)</strong> pour générer vos réponses. Nos engagements :<br>' +
+                '• <strong>Chiffrement</strong> en transit (HTTPS) et au repos (serveurs OVH France)<br>' +
+                '• <strong>Pas d\'entraînement IA</strong> sur vos mails (DPA Anthropic signé)<br>' +
+                '• <strong>Logs minimaux</strong> : nous n\'enregistrons pas le contenu de vos mails<br>' +
+                '• <strong>Suppression à la demande</strong> : Profil → exporter ou supprimer toutes vos données<br><br>' +
+                'Politique complète : <a href="https://boostermail.ai/privacy" target="_blank" style="color:#0F6CBD;">boostermail.ai/privacy</a>',
+        },
+        {
+            id: 'tache-de-fond',
+            q: 'Pourquoi BoosterMail tourne en tâche de fond',
+            a:
+                'Pour 3 raisons :<br>' +
+                '1. <strong>Rapidité</strong> : préparer vos réponses à l\'avance → prêtes en 2-3 sec au clic<br>' +
+                '2. <strong>Synchronisation Outlook</strong> : détecter les nouveaux mails et organiser vos PJ<br>' +
+                '3. <strong>Apprentissage continu</strong> : analyser votre style au fil de vos envois<br><br>' +
+                'Consommation très faible : ~30 Mo de RAM, aucun impact CPU notable.',
+        },
+        {
+            id: 'desinstaller',
+            q: 'Comment désinstaller BoosterMail',
+            a:
+                '1. Fermez Outlook<br>' +
+                '2. <strong>Panneau de configuration → Programmes → BoosterMail → Désinstaller</strong><br>' +
+                '3. Le bouton 🚀 disparaît d\'Outlook au prochain démarrage<br><br>' +
+                'Vos données restent <strong>30 jours côté serveur</strong> puis sont supprimées. Pour tout effacer immédiatement : <strong>Profil → Confidentialité → Supprimer mes données</strong>.',
+        },
+    ];
+
+    var _assistHistory = [];  // [{role:'user'|'assistant', content:string}] — pas envoyé au backend pour les FAQ statiques
+    var _assistInited = false;
+
+    function _openAssistChatbot() {
+        var ov = document.getElementById('assistOverlay');
+        if (!ov) return;
+        if (!_assistInited) _assistInitMessages();
+        ov.style.display = 'flex';
+    }
+
+    function _closeAssistChatbot() {
+        var ov = document.getElementById('assistOverlay');
+        if (ov) ov.style.display = 'none';
+    }
+
+    function _assistInitMessages() {
+        _assistInited = true;
+        var box = document.getElementById('assistMessages');
+        if (!box) return;
+        var html = '';
+        // Message d'accueil
+        html += '<div style="margin-bottom:10px;">';
+        html += '<div style="font-weight:600; color:#1a1a2e; margin-bottom:4px;">👋 Bonjour !</div>';
+        html += '<div style="color:#5a6377;">Sur quoi puis-je vous aider ?</div>';
+        html += '</div>';
+        // Boutons FAQ
+        html += '<div style="font-size:11px; color:#5a6377; font-weight:600; margin:12px 0 6px;">📌 Questions fréquentes :</div>';
+        ASSIST_FAQ.forEach(function (f) {
+            html += '<button class="assist-faq-btn" data-faq-id="' + f.id + '" style="display:block; width:100%; text-align:left; background:white; border:1px solid #d6dde7; border-radius:6px; padding:8px 10px; margin-bottom:5px; cursor:pointer; font-size:11px; color:#2d3548; font-family:inherit; line-height:1.4;">' + f.q + '</button>';
+        });
+        box.innerHTML = html;
+        // Hook les boutons FAQ
+        box.querySelectorAll('.assist-faq-btn').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var fid = b.getAttribute('data-faq-id');
+                var faq = ASSIST_FAQ.find(function (f) { return f.id === fid; });
+                if (!faq) return;
+                _assistAddMessage('user', faq.q);
+                _assistAddMessage('assistant', faq.a, true);  // HTML autorisé pour FAQ statiques
+            });
+        });
+    }
+
+    function _assistAddMessage(role, content, isHtml) {
+        var box = document.getElementById('assistMessages');
+        if (!box) return;
+        var bubble = document.createElement('div');
+        if (role === 'user') {
+            bubble.style.cssText = 'margin:8px 0 8px auto; max-width:85%; background:#0F6CBD; color:white; padding:7px 11px; border-radius:10px 10px 2px 10px; font-size:12px; line-height:1.45;';
+        } else {
+            bubble.style.cssText = 'margin:8px auto 8px 0; max-width:90%; background:white; color:#2d3548; padding:8px 11px; border-radius:10px 10px 10px 2px; font-size:12px; line-height:1.55; border:1px solid #e0e7f0;';
+        }
+        if (isHtml) {
+            bubble.innerHTML = content;
+        } else {
+            bubble.textContent = content;
+        }
+        box.appendChild(bubble);
+        box.scrollTop = box.scrollHeight;
+        // Historique pour les questions Claude (skip pour les FAQ statiques —
+        // elles n'ont pas besoin de contexte côté backend)
+        _assistHistory.push({ role: role, content: isHtml ? bubble.innerText : content });
+        if (_assistHistory.length > 20) _assistHistory = _assistHistory.slice(-20);
+    }
+
+    function _assistSendQuestion() {
+        var input = document.getElementById('assistInput');
+        if (!input) return;
+        var q = (input.value || '').trim();
+        if (!q) return;
+        input.value = '';
+        _assistAddMessage('user', q);
+
+        // Affiche un placeholder « écrit… » pendant l'attente Claude
+        var box = document.getElementById('assistMessages');
+        var typing = document.createElement('div');
+        typing.id = 'assistTyping';
+        typing.style.cssText = 'margin:8px auto 8px 0; max-width:90%; padding:8px 11px; font-size:12px; color:#5a6377; font-style:italic;';
+        typing.textContent = '✍️ BoosterMail réfléchit…';
+        box.appendChild(typing);
+        box.scrollTop = box.scrollHeight;
+
+        // POST /api/assist
+        fetch(_backendUrl + '/api/assist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: _assistHistory.slice(-10) }),
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                var typingEl = document.getElementById('assistTyping');
+                if (typingEl) typingEl.remove();
+                if (d && d.answer) {
+                    _assistAddMessage('assistant', d.answer);
+                } else {
+                    _assistAddMessage('assistant', '⚠️ Désolé, je n\'ai pas pu répondre. Écrivez-nous : support@boostermail.ai');
+                }
+            })
+            .catch(function () {
+                var typingEl = document.getElementById('assistTyping');
+                if (typingEl) typingEl.remove();
+                _assistAddMessage('assistant', '⚠️ Service indisponible. Vérifiez votre connexion ou contactez support@boostermail.ai');
+            });
+    }
+
+    // Hook les contrôles de la modale
+    document.addEventListener('DOMContentLoaded', function () {
+        var closeBtn = document.getElementById('assistCloseBtn');
+        var sendBtn = document.getElementById('assistSendBtn');
+        var inp = document.getElementById('assistInput');
+        if (closeBtn) closeBtn.addEventListener('click', _closeAssistChatbot);
+        if (sendBtn) sendBtn.addEventListener('click', _assistSendQuestion);
+        if (inp) inp.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); _assistSendQuestion(); }
+        });
     });
 
     // Audit Pass 8 — cleanup au unmount popup : clearInterval polling +
