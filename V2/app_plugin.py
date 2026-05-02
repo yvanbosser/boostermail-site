@@ -11488,11 +11488,24 @@ def api_pj_classification_post_send(message_id):
                 except Exception:
                     pass
             doc_attachments = [a for a in attachments if not a.get('is_inline', False)]
+            # Étape 1'' (02/05 PM, vision Yvan) — Exposer aussi les folders
+            # Windows (depuis user_windows_folders poussés par Companion) +
+            # array `suggestions` (top 3) pour permettre la popup pré-envoi
+            # cliquable + arbo positionnée sur la suggestion (parallèle mail).
+            try:
+                wf_row = _db.get_user_windows_folders()
+                folders = wf_row.get('folders', []) if wf_row else []
+            except Exception:
+                folders = []
+            _suggestions_top3 = plate_data.get('suggestions') or [plate_data.get('suggestion')]
             return jsonify({
                 "status": "done",
                 "pj_suggestions": {
                     "attachments": doc_attachments,
                     "suggestion": plate_data.get('suggestion'),
+                    "suggestions": _suggestions_top3,
+                    "source": plate_data.get('source', 'rule'),
+                    "folders": folders,
                 },
             })
 
