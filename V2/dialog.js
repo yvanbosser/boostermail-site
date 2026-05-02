@@ -1350,24 +1350,36 @@ function _applyMailPreview(preview) {
         }
     }
 
-    // Classement PJ (Phase 2 - 24/04)
+    // Classement PJ (Phase 2 - 24/04 + étape 4'' 02/05 PM clickable)
     var pjEl = document.getElementById('infoClassementPJContent');
     if (pjEl) {
         if (!preview || !preview.pj_classement) {
             pjEl.textContent = 'Néant';
+            _classementPJCacheData = null;
+            _setClassementPJFieldClickable(false);
         } else {
             var pjStatus = preview.pj_classement.status;
             var pjData = preview.pj_classement.data;
             if (pjStatus === 'running' || pjStatus === 'miss') {
                 pjEl.textContent = 'Analyse en cours…';
+                _setClassementPJFieldClickable(false);
             } else if (pjData && pjData.source === 'no_pj') {
                 pjEl.textContent = 'Néant';  // Fix Néant (25/04) — "Pas de PJ" → "Néant" (demande user)
+                _classementPJCacheData = null;
+                _setClassementPJFieldClickable(false);
             } else if (pjData && pjData.suggestion) {
                 var pjSugg = pjData.suggestion;
                 var pjPath = pjSugg.folder_path || pjSugg.dest_folder || pjSugg.folder_name || 'Dossier suggéré';
                 pjEl.textContent = pjPath;
+                // Étape 4'' (02/05 PM) — Stocker pour popup pré-envoi PJ
+                _classementPJCacheData = pjData;
+                _setClassementPJFieldClickable(true);
             } else {
                 pjEl.textContent = 'Néant';
+                // Étape 4'' (02/05 PM) — Cliquable même sans suggestion BG
+                // (cohérent avec fix mail) pour permettre classement manuel
+                _classementPJCacheData = pjData || { suggestion: null, suggestions: [], source: 'none' };
+                _setClassementPJFieldClickable(true);
             }
         }
     }
@@ -1518,14 +1530,23 @@ function _applySinglePlate(plateName, res) {
         if (!pjEl) return;
         if (res.status === 'running' || res.status === 'miss') {
             pjEl.textContent = 'Analyse en cours…';
+            _setClassementPJFieldClickable(false);
         } else if (res.data && res.data.source === 'no_pj') {
             pjEl.textContent = 'Néant';
+            _classementPJCacheData = null;
+            _setClassementPJFieldClickable(false);
         } else if (res.data && res.data.suggestion) {
             var pjSugg = res.data.suggestion;
             var pjPath = pjSugg.folder_path || pjSugg.dest_folder || pjSugg.folder_name || 'Dossier suggéré';
             pjEl.textContent = pjPath;
+            // Étape 4'' (02/05 PM) — Stocker pour popup pré-envoi PJ
+            _classementPJCacheData = res.data;
+            _setClassementPJFieldClickable(true);
         } else {
             pjEl.textContent = 'Néant';
+            // Étape 4'' (02/05 PM) — Cliquable sans suggestion (cohérent fix mail)
+            _classementPJCacheData = res.data || { suggestion: null, suggestions: [], source: 'none' };
+            _setClassementPJFieldClickable(true);
         }
     }
 }
@@ -3354,6 +3375,81 @@ function _confirmPreSendChoice() {
 function _cancelPreSendChoice() {
     _classMailMode = 'post';
     document.getElementById('popupClassMail').classList.remove('active');
+}
+
+// =============================================================================
+// Étape 4''/4'' (02/05 PM) — Helpers POPUP CLASSEMENT PJ PRÉ-ENVOI
+// Parallèles aux helpers mail. Le champ #infoClassementPJ devient cliquable
+// dès qu'une suggestion ou catégorisation a été calculée par le BG. Au clic →
+// popup classement PJ s'ouvre en mode 'pre'. L'user peut modifier (top 3 +
+// arbo Windows + saisie manuelle), son choix est mémorisé dans
+// _preSendPJFolderPath / _preSendPJIsManual, puis la popup post-envoi le
+// réutilise comme défaut.
+// =============================================================================
+
+function _setClassementPJFieldClickable(clickable) {
+    var card = document.getElementById('infoClassementPJ');
+    if (!card) return;
+    if (clickable) {
+        card.classList.add('clickable');
+        if (!card.dataset.clickHandlerAdded) {
+            card.addEventListener('click', _openPreSendClassPJPopup);
+            card.dataset.clickHandlerAdded = '1';
+        }
+    } else {
+        card.classList.remove('clickable');
+    }
+}
+
+function _openPreSendClassPJPopup() {
+    // Permettre l'ouverture même sans suggestion BG (cas 'none' générique).
+    if (!_classementPJCacheData) {
+        _classementPJCacheData = { suggestion: null, suggestions: [], source: 'none' };
+    }
+    if (!_messageId) return;
+
+    // Fetch via /api/pj_classification/post_send qui retourne en 1 appel :
+    // attachments + suggestion + suggestions (top 3) + source + folders
+    // (étape 1'' backend exposé). Bénéfice : 1 seul round-trip + données
+    // toujours fraîches (pas d'incohérence vs cache RAM front).
+    fetch(_backendUrl + '/api/pj_classification/post_send/' + encodeURIComponent(_messageId))
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(data) {
+            var pjs = (data && data.pj_suggestions) || {};
+            // Si rien à classer (pas de PJ ou no_pj source), avertir l'user
+            if (!pjs.attachments || pjs.attachments.length === 0) {
+                alert('Pas de pièce jointe à classer pour ce mail.');
+                return;
+            }
+            _classMailPJMode = 'pre';
+            // Mettre à jour le cache RAM avec les données fraîches
+            _classementPJCacheData = pjs;
+            _showClassPJPopup(pjs, 'pre');
+        })
+        .catch(function(e) {
+            console.warn('[dialog] _openPreSendClassPJPopup failed:', e);
+        });
+}
+
+function _confirmPreSendPJChoice() {
+    if (_selectedPJFolderManualPath) {
+        _preSendPJFolderPath = _selectedPJFolderManualPath;
+        _preSendPJIsManual = true;
+    } else if (_selectedPJFolderPath) {
+        _preSendPJFolderPath = _selectedPJFolderPath;
+        _preSendPJIsManual = false;
+    }
+    var pjEl = document.getElementById('infoClassementPJContent');
+    if (pjEl && _preSendPJFolderPath) {
+        pjEl.textContent = _preSendPJFolderPath + ' ✓';
+    }
+    _classMailPJMode = 'post';
+    document.getElementById('popupClassPJ').classList.remove('active');
+}
+
+function _cancelPreSendPJChoice() {
+    _classMailPJMode = 'post';
+    document.getElementById('popupClassPJ').classList.remove('active');
 }
 
 function doClassMail() {
