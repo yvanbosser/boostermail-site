@@ -3848,7 +3848,15 @@ function _buildPJFolderTreeHtml(folders, suggestedPath) {
         } else {
             chevron = '<span class="em-folder-chevron-spacer"></span>';
         }
-        html += '<div class="em-folder-item" '
+        // Étape 02/05 PM tardif (signal Yvan) — highlight bleu sur la row
+        // exactement à la suggestion principale (realPath, après normalisation
+        // des préfixes numériques). CSS .em-folder-item.selected applique
+        // background bleu clair + texte bleu BoosterMail + bold.
+        var rowClasses = 'em-folder-item';
+        if (pathFound && f.path === realPath) {
+            rowClasses += ' selected';
+        }
+        html += '<div class="' + rowClasses + '" '
             + 'data-folder-path="' + _escapeAttr(f.path) + '" '
             + 'data-depth="' + depth + '" '
             + 'style="padding-left:' + indent + 'px;' + displayCss + '" '
