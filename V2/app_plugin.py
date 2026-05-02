@@ -7179,12 +7179,30 @@ def api_classify_email_manual():
 
 @app.route('/api/attachments/<path:message_id>')
 def api_attachments(message_id):
-    """Liste les PJ d'un mail (Mode Standard)."""
+    """Liste les PJ d'un mail (Mode Standard).
+
+    Fix 02/05/2026 (signal Yvan « Graph 400 Id is malformed ») : résoudre
+    IMID → Graph Entry ID avant l'appel get_attachments. Sinon Graph
+    rejette avec 400 et le frontend ne reçoit aucune PJ → classement
+    PJ « Néant » dans le Profil.
+    """
     graph = get_graph()
     if not graph:
         return jsonify({"error": "Mode Standard requis"}), 403
     try:
-        attachments = graph.get_attachments(message_id)
+        # Résoudre IMID en Entry ID si nécessaire (cf. classify_email + extract)
+        real_id = message_id
+        if message_id.startswith('<') and '@' in message_id and message_id.endswith('>'):
+            try:
+                em = graph.get_email_by_internet_id(message_id)
+                if em and em.get('id'):
+                    real_id = em['id']
+                else:
+                    return jsonify({"error": "Mail introuvable", "attachments": []}), 404
+            except Exception as _e:
+                logger.warning(f"[attachments] IMID résolution : {_e}")
+                return jsonify({"error": "Erreur Graph", "attachments": []}), 502
+        attachments = graph.get_attachments(real_id)
         return jsonify({"attachments": attachments})
     except GraphAuthError:
         return jsonify({"error": "Token expiré", "auth_required": True}), 401
