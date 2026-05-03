@@ -590,6 +590,34 @@ Les regex utilisées dans des fonctions appelées >10×/seconde (génération r�
 - **Pourquoi** : audit perf 29/04 PM a mesuré 20-40 ms gaspillés par génération sur les regex non précompilées
 - **Action si violé** : précompiler en module-level avec un nom `_RE_XXX_DESCRIPTIF`
 
+## Catégorie 16 — Boucles BG bornées (ajout 03/05/2026 post-audit boucle learning)
+
+### I-LEARN-01 : Cadence d'appels Anthropic API en BG bornée
+
+Sur un compte BoosterMail SaaS sans usage user (jour calme : 0 nouveau mail traité, 0 envoi, 0 redémarrage du service), le nombre d'appels `POST https://api.anthropic.com/v1/messages` dans le journal du service `boostermail` doit rester **< 50/jour**.
+
+- **Test** :
+  ```bash
+  ssh ubuntu@51.178.162.208 "sudo journalctl -u boostermail --since '24 hours ago' --no-pager | grep -c 'POST https://api.anthropic.com'"
+  # Doit retourner < 50 si aucun usage user le jour observé
+  ```
+- **Pourquoi** : protège contre les boucles BG qui consomment l'API Claude indépendamment de l'usage user. Une violation = facture Anthropic qui dérive sans cause user identifiable.
+- **Ne s'applique pas si** : Yvan (ou un autre user) a utilisé BoosterMail le jour observé (chaque ouverture/réponse génère ~5-15 appels normaux), OU si plusieurs redémarrages ont été effectués.
+- **Historique** : Pattern #24 détecté le 03/05/2026 — boucle `[learning]` (33 profils piégés sample_count=0 + 34 profils dans schedule sans mémoire) générait ~4 000 appels/jour en pur gaspillage. Fix dans commit `05b34a3`.
+- **Action si violé** : suivre Workflow 4 PLAYBOOK + chercher signal le plus brut (cadence appels API par heure). Si la cadence est constante 24/24, c'est une boucle BG. Identifier qui appelle Claude via grep label dans les logs métier.
+
+### I-LEARN-02 : Boucles BG corrélées à l'usage user
+
+Pour les BG loops qui dépendent de l'usage user (post_send_learning, recalibrage, etc.), la cadence doit varier selon l'heure de la journée (corrélée aux heures d'activité user). Une cadence parfaitement constante 24/24 = signal d'une boucle indépendante de l'usage = bug probable.
+
+- **Test diagnostic** :
+  ```bash
+  sudo journalctl -u boostermail --since '24h ago' --no-pager | grep '<label_loop>' | awk '{print $3}' | cut -d: -f1 | sort | uniq -c
+  # Si toutes les heures ont des comptes ~identiques → signal de boucle indépendante usage
+  ```
+- **Pourquoi** : un BG loop corrélé à l'usage est sain (suit le rythme user). Un BG loop indépendant est suspect (pourquoi tourner la nuit ?).
+- **Action si violé** : auditer la fonction caller pour vérifier qu'elle a une condition d'arrêt liée à l'usage user, OU une condition d'arrêt time-based (cooldown, schedule), OU un check d'état (`if already_done: return`).
+
 ---
 
 ## Mise à jour

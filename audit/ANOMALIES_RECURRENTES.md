@@ -976,6 +976,47 @@ Application :
 
 ---
 
+## Pattern #24 — Branche de rattrapage sans condition d'arrêt + sans cooldown = boucle API infinie
+
+**Historique** :
+- 03/05/2026 : audit factures Anthropic ~$75/jour découvre boucle BG `[learning]` qui appelle Claude ~4 000 fois/jour sans usage user. 3 root causes combinées dans `_maybe_analyze_contact` (V2/app_plugin.py).
+
+**Symptôme générique** :
+- Cadence appels Anthropic constante 24/24 indépendante de l'heure (signal d'or : même cadence à 3h du matin qu'à midi)
+- Logs métier répétitifs sur les mêmes entités (mêmes contacts/IDs ré-traités à chaque cycle BG)
+- Profil DB qui ne change jamais (sample_count, last_analysis...) malgré dizaines/centaines de tentatives par jour
+- **Test du contrôle null** (jour calme = 0 usage user) → coût API > 0 = bug pur
+
+**Cause racine** :
+Branche conditionnelle de "rattrapage" qui ignore le filtre normal, mais sans :
+1. Skip pre-condition early pour les entrées impossibles à traiter (auto-emails, IDs invalides...)
+2. Cooldown sur les rattrapages échoués (au minimum 1× / 24h)
+3. Mémoire d'état comparant résultat attendu vs état actuel (ex: `sample_count >= mail_count` = déjà fait)
+4. Instrumentation des `return None` silencieux
+
+**Fix canonique** :
+1. **Skip pre-condition early** : éliminer en amont les entrées impossibles avec retour silencieux avant tout work
+2. **Cooldown sur rattrapages** : cache RAM `dict[entity_id, last_attempt_ts]` + check `if time.time() - last_attempt < TTL: return`. Bypass via paramètre `bypass_cooldown=True` pour les routes user explicites (recalibrate, post_send, etc.)
+3. **Mémoire d'état** : comparer le résultat actuel vs ce qu'on tenterait de produire (ex: `existing.sample_count >= mail_count` = déjà couvert)
+4. **Instrumentation S4** : `logger.warning` explicite sur tous les `return None` silencieux pour rendre visibles les échecs muets
+
+**Test de non-régression** :
+- I-LEARN-01 : sur jour calme (0 usage user), `journalctl -u boostermail --since '24h ago' | grep -c 'POST api.anthropic.com'` < 50/jour
+- Test plus large : corréler la cadence d'appels API avec l'usage user (jour vs nuit)
+
+**Signaux d'alerte** :
+- Facture API Claude/OpenAI qui dérive sans cause identifiée
+- `journalctl --since '24h ago' | grep 'POST api.anthropic' | wc -l` > 1 000 sur un jour calme
+- Logs métier qui répètent les mêmes IDs en boucle (`awk '{print $entity}' | sort | uniq -c | sort -rn` montre des tops à 1 000+/jour pour quelques entités)
+- `count_distinct(entity) × cycles_per_day ≈ count(label_logs)` → boucle BG corrélée au polling
+
+**Sources** :
+- Rapport complet : `audit/rapports/2026-05-03_audit_boucle_learning_FIX_DEPLOYE.md`
+- Commit fix : `05b34a3`
+- Pattern lié : Pattern #2 (patch-on-patch sans audit) — branche RC2 ajoutée le 30/04 sans audit env, RC3 jamais auditée quand le BG `_continuous_speculation_loop` a commencé à appeler `_maybe_analyze_contact` à chaque cycle (commit P0.2 du 24/04).
+
+---
+
 ## Patterns "rayés" (résolus définitivement)
 
 Aucun pour l'instant — tous les patterns ci-dessus sont "vivants" au sens où ils peuvent récidiver si on n'est pas vigilant.
