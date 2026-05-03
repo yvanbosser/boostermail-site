@@ -1,6 +1,14 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **Dernière mise à jour** : 02/05/2026 fin de soirée (session continuée après le bilan 3 axes : refonte **Cuisinier+Commis** unifiée + **Tier DB prioritaire** + **top 3 boulettes** + **barre de recherche live** + audit complet 4 anomalies fixées ; bilan complet [`OUTLOOK_BILAN_SESSION_20260502_soiree.md`](sessions/OUTLOOK_BILAN_SESSION_20260502_soiree.md))
+> **Dernière mise à jour** : 03/05/2026 fin d'après-midi (session déclenchée par factures Anthropic ~$75/jour — audit Workflow 4 PLAYBOOK appliqué intégralement, identification d'une **boucle infinie d'appels API Claude** ~4 000/jour indépendamment de l'usage user, **3 root causes** + **4 fixes** déployés, validation live -98%. Économie projetée ~$700-1 200/mois. Bilan complet [`OUTLOOK_BILAN_SESSION_20260503.md`](sessions/OUTLOOK_BILAN_SESSION_20260503.md). Pattern #24 + I-LEARN-01/02 ajoutés au kit audit.)
+>
+> **🆕 Sujets traités session 03/05/2026 (3 commits)** :
+> - **✅ Audit boucle infinie [learning] + fix complet** (commits `05b34a3` `2cddd0a` `680608b`) — découverte par test du contrôle null (jour calme = baseline 0 attendue, ~4 000 appels mesurés). 3 root causes : (RC1) pas de skip noreply dans `_maybe_analyze_contact` → 31 contacts piégés en boucle silencieuse, (RC2) branche `Re-analyse forcee sample_count=0` sans condition d'arrêt → 2 contacts en vraie boucle Claude (yvan@gmail, support@coaxis), (RC3) `_should_analyze_contact()` sans mémoire `déjà analysé` → 34 contacts re-analysés à chaque cycle BG. 4 fixes : (S1) `_AUTO_EMAIL_PATTERNS` skip silencieux, (S2) cooldown 24h via `_force_analysis_attempts` cache RAM + paramètre `bypass_cooldown=True` dans 3 routes user, (S3) `_should_analyze_contact(mail_count, existing_sample_count)` avec mémoire, (S4) instrumentation `logger.warning` dans `analyze_contact_profile` pour révéler les `return None` silencieux. Validation live post-deploy 16:52 UTC : 3 appels API au démarrage puis 0 sur 12 min (vs 13 attendus). Pattern #24 + I-LEARN-01/02 documentés dans le kit audit.
+> - **🟡 À surveiller demain (~17h UTC)** : cadence stabilisée + warnings JSON (S4) révèlent la cause du `return None` silencieux pour yvan@gmail et support@coaxis (B2 à fixer en session suivante).
+>
+> ---
+>
+> **Dernière mise à jour précédente** : 02/05/2026 fin de soirée (session continuée après le bilan 3 axes : refonte **Cuisinier+Commis** unifiée + **Tier DB prioritaire** + **top 3 boulettes** + **barre de recherche live** + audit complet 4 anomalies fixées ; bilan complet [`OUTLOOK_BILAN_SESSION_20260502_soiree.md`](sessions/OUTLOOK_BILAN_SESSION_20260502_soiree.md))
 >
 > **🆕 Sujets traités session 02/05/2026 fin de soirée (~21 commits)** :
 > - **✅ Cuisinier + Commis** (commits `d6043ab` `00971ee`) — 5 appels Haiku (résumé + échéance + folder mail + folder PJ + draft) ramenés à 1 appel Haiku unifié `analyze_one_mail_stream` qui produit P/A/E/F/J en multi-output streaming. Économie ~75% appels Haiku. Fallback automatique sur les 3 sub-prewarms originaux si erreur.

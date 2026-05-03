@@ -1,6 +1,6 @@
 # Prompt de reprise — Session « New Outlook via OVH »
 
-> **Dernière mise à jour** : 02/05/2026 fin de soirée — session continuation après le bilan 3 axes : refonte **Cuisinier+Commis** unifiée (5 appels Haiku → 2) + **Tier DB prioritaire** sur commis (désambiguïsation 100 SCI homonymes) + **top 3 boulettes** alternatives + **barre de recherche live** dans popups classement + audit complet 4 anomalies fixées + ~75 appels Haiku par restart économisés (validation prod) ; tout déployé OVH ([bilan soirée](../sessions/OUTLOOK_BILAN_SESSION_20260502_soiree.md)) ; **prochaine session : retour Yvan sur recherche live + désambiguïsation Tier DB + sujets ouverts business**
+> **Dernière mise à jour** : 03/05/2026 fin d'après-midi — session déclenchée par factures Anthropic ~$75/jour. **Audit Workflow 4 PLAYBOOK** complet : identification d'**une boucle infinie d'appels API Claude** (~4 000 appels/jour indépendamment de l'usage user). **3 root causes** dans `_maybe_analyze_contact` (skip noreply manquant + branche rattrapage sans condition d'arrêt + schedule sans mémoire) + **4 fixes** déployés. Validation live post-fix : -98% appels API. Économie projetée ~$700-1 200/mois. **Pattern #24** + **I-LEARN-01/02** ajoutés au kit audit. Bilan complet [OUTLOOK_BILAN_SESSION_20260503.md](../sessions/OUTLOOK_BILAN_SESSION_20260503.md). **Prochaine session : surveillance demain matin (~17h UTC) post-expiration cooldown 24h pour révéler la cause des `return None` silencieux (B2 yvan@gmail + support@coaxis) + sujets ouverts business**
 >
 > **Mode d'emploi** : à chaque démarrage d'une nouvelle session Claude sur le sujet « New Outlook via OVH », **copier-coller le bloc ci-dessous en intégralité**. Il référence tous les docs nécessaires et donne le contexte de la session précédente.
 >
@@ -31,32 +31,36 @@ CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
 - Toutes les modifs (UX/UI/data) déployées sur OVH dans la foulée — plus de WIP local persistant
 - Yvan utilise BoosterMail au quotidien depuis https://api.boostermail.ai/
 
-ÉTAT DE FIN DE LA DERNIÈRE SESSION (02/05/2026 fin de soirée — continuation du bilan 3 axes)
+ÉTAT DE FIN DE LA DERNIÈRE SESSION (03/05/2026 fin d'après-midi — audit factures Anthropic)
 
-- **Bilan complet** : [`docs/sessions/OUTLOOK_BILAN_SESSION_20260502_soiree.md`](../sessions/OUTLOOK_BILAN_SESSION_20260502_soiree.md)
+- **Bilan complet** : [`docs/sessions/OUTLOOK_BILAN_SESSION_20260503.md`](../sessions/OUTLOOK_BILAN_SESSION_20260503.md)
 - Top commit master : voir `git log --oneline -1` (formulation dynamique pour respecter I-SESS-03)
 
-**Refonte Cuisinier + Commis** : 5 appels Haiku séparés (résumé + échéance + folder mail + folder PJ + draft) ramenés à 1 appel Haiku unifié `analyze_one_mail_stream` qui produit P/A/E/F/J en multi-output streaming. Économie ~75% appels Haiku. Le Cuisinier (Sonnet pour la réponse) reste inchangé.
+**Investigation factures Anthropic** : 5 factures auto-recharge $45 chacune en 3 jours (~$225). Test du contrôle null sur dimanche calme (2 mails Bankin' noreply, 0 envoi, 0 user action) = par design 0 appel API attendu. Mesure : 4 000 appels API → **100% du coût = bug pur, pas le sprint dev**.
 
-**Robustesse IMID** : gardes `_is_canonical_imid()` dans `save_mail_*()` + `get_attachment_content` résout IMID → Entry ID (fix bug Devoteam où le commis recevait `pj_text=0c`).
+**3 root causes identifiées** dans `V2/app_plugin.py:_maybe_analyze_contact` :
+- RC1 : pas de skip noreply (31 contacts piégés en boucle silencieuse, return early sur `if not sent_mails: return`)
+- RC2 : branche « Re-analyse forcee sample_count=0 » sans condition d'arrêt → `yvan@gmail` + `support@coaxis` en vraie boucle Claude (1 080 appels/jour chacun)
+- RC3 : `_should_analyze_contact()` sans mémoire « déjà analysé » → 34 contacts dans le schedule re-analysés à chaque cycle BG (~80 s)
 
-**Arbo classement déroulée** (mail + PJ symétrique) : se déroule UNIQUEMENT sur le chemin de la suggestion principale, frères repliés, branches hors chemin cachées, highlight bleu sur la row. Matching tolérant préfixes numériques (`1. IMMOBILIER` ≡ `IMMOBILIER`) + name fallback (cas commis qui abrège).
+**4 fixes déployés** (commit `05b34a3`) :
+- S1 : tuple `_AUTO_EMAIL_PATTERNS` + skip silencieux early (parité commis Haiku unifié)
+- S2 : cooldown 24h via `_force_analysis_attempts` cache RAM + paramètre `bypass_cooldown=True` ajouté à `_maybe_analyze_contact()` (les 3 routes user `api_analyze_contact` + `api_recalibrate_contacts` + `_post_send_learning` passent True)
+- S3 : `_should_analyze_contact(mail_count, existing_sample_count)` avec mémoire (skip si sample >= mail)
+- S4 : instrumentation `logger.warning` dans `claude_ai.py:analyze_contact_profile` pour révéler les paths `return None` silencieux (3 cas : pas de JSON, JSON invalide head, JSON invalide extrait)
 
-**Désambiguïsation Tier DB** : bug Yvan = 100 SCI avec sous-dossier "Administratif" chacune → le commis pioche au hasard. Solution = restaurer Tier 0/1/1bis/3a/3b avant la sortie commis. Les règles DB tranchent via l'ID Graph cryptique exact.
+**Validation live** post-deploy 16:52 UTC : 3 appels API en 12 min (vs 13 attendus avant), -77% à -100% selon métrique. Économie projetée **~$700-1 200/mois (~$8 800-14 200/an)**.
 
-**Top 3 boulettes** : accumulation jusqu'à 3 suggestions sans doublons (par folder_path) à travers tous les tiers + sortie commis. Frontend `dialog.js` était déjà capable d'afficher les boulettes alternatives, c'était le backend qui ne renvoyait qu'1 suggestion.
+**Artefacts kit audit** :
+- `audit/rapports/2026-05-03_audit_boucle_learning_sample_count.md` (constat-only initial)
+- `audit/rapports/2026-05-03_audit_boucle_learning_FIX_DEPLOYE.md` (rapport final post-fix)
+- **Pattern #24** dans `audit/ANOMALIES_RECURRENTES.md` : Branche de rattrapage sans condition d'arrêt + sans cooldown = boucle API infinie
+- **I-LEARN-01** dans `audit/INVARIANTS.md` : cadence appels Anthropic API < 50/jour sur jour calme
+- **I-LEARN-02** dans `audit/INVARIANTS.md` : corrélation BG vs usage user (distribution horaire)
 
-**Barre de recherche live** : input "Rechercher ou créer un dossier" double rôle : match arbo (case+accent insensitive) → row bleue + scroll auto, pas de match → arbo cachée mode création.
+**Lessons learned méthodologie** (mea culpa documenté dans le rapport) : toujours commencer par le **signal le plus brut** (`POST api.anthropic.com count par heure`) avant interprétation des logs métier. Le **test du contrôle null** suggéré par Yvan (jour calme = baseline 0) est un outil systématique à ajouter au PLAYBOOK Workflow 4.
 
-**Audit complet ciblé** (Workflow 1 PLAYBOOK adapté) : 4 anomalies fixées :
-- A2 HIGH : `_prewarm_unified_for_mail` ne checkait pas DB cache → ~75 appels Haiku gaspillés par restart. Validation prod : 63 mails warmup → 0 appel commis confirmé.
-- A3 HIGH : pas de skip noreply / mailer-daemon (parité comportement avec `_prewarm_classement_for_mail`)
-- A1 LOW : regex normalize chars Unicode bruts → escape `̀-ͯ` explicite (3 occurrences corrigées)
-- A14 LOW : reason lisible par tier DB pour boulettes alternatives (UX)
-
-Cache busting bumpé : `dialog.js v51`. Rapport audit dans `audit/rapports/2026-05-02_audit_classement_mail_pj.md`.
-
-**Pattern récurrent identifié** : A2 et A3 sont une récidive du Pattern #2 (patch-on-patch sans audit de l'existant). La nouvelle pipeline unifiée a omis 2 comportements de la pipeline qu'elle remplaçait.
+**Anomalie résiduelle B2** (à investiguer en session suivante) : `yvan@gmail` et `support@coaxis` plantent silencieusement dans `analyze_contact_profile`. Le cooldown 24h les protège, mais la cause exacte (parsing JSON ? validation enum ? exception non capturée ?) sera révélée par l'instrumentation S4 demain matin (~17h UTC) post-expiration du cooldown.
 
 🎯 PROCHAINE SESSION
 
@@ -87,7 +91,7 @@ AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 
 1. **`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** ⭐ — référence vivante (workflow OVH-first, scope, interdits, profil Yvan, procédure purge cache WebView2)
 2. **`docs/PLUS_TARD_VF.md`** ⭐ — référentiel UNIQUE des sujets « plus tard » avec en-tête mis à jour 02/05 fin de journée
-3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260502_soiree.md`** ⭐ — bilan session 02/05 fin de soirée (Cuisinier+Commis + Tier DB + top 3 + recherche live + audit). Pour le bilan du matin/midi, voir `OUTLOOK_BILAN_SESSION_20260502_3axes.md`.
+3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260503.md`** ⭐ — bilan session 03/05 (audit boucle learning + fix -98% appels API). Bilans précédents : `OUTLOOK_BILAN_SESSION_20260502_soiree.md` (Cuisinier+Commis + audit classement) puis `OUTLOOK_BILAN_SESSION_20260502_3axes.md` (matin/midi).
 4. **`docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md`** — source de vérité unique du classement (mail + PJ + joindre fichier)
 5. **`docs/saas/ONBOARDING_SESSION_SAAS.md`** — référence infra OVH partagée
 6. **`audit/INVARIANTS.md`** + **`audit/ANOMALIES_RECURRENTES.md`** — invariants + Patterns
