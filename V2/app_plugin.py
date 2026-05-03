@@ -12241,7 +12241,9 @@ def api_post_send():
                         existing['sample_count'] = 0
                         _db.save_contact_profile(contact_email, existing)
                     logger.info(f"[learning] TRIGGER greeting/closing → re-analyse {_hash_email_partial(contact_email)}")
-                _maybe_analyze_contact(contact_email)
+                # Audit 03/05 fix RC2 : bypass_cooldown=True car action user
+                # explicite (correction post-envoi détectée).
+                _maybe_analyze_contact(contact_email, bypass_cooldown=True)
             except Exception as e:
                 logger.error(f"[learning] Erreur: {e}")
 
@@ -12517,19 +12519,79 @@ def _get_learning_priorities():
 # AUTO-APPRENTISSAGE : PROFILS CONTACTS
 # =============================================================================
 
-def _should_analyze_contact(mail_count):
-    """Vérifie si le nombre de mails correspond à un point du schedule d'analyse."""
+def _should_analyze_contact(mail_count, existing_sample_count=None):
+    """Vérifie si le nombre de mails correspond à un point du schedule d'analyse.
+
+    Audit 03/05 fix RC3 : compare avec `existing_sample_count` pour éviter
+    de ré-analyser à chaque cycle BG (~80s) tant que mail_count n'a pas
+    augmenté. Sans ce check, les contacts avec mail_count pile sur un point
+    du schedule [1,2,3,4,5,7,9,13,17,25,...] étaient bouclés en permanence
+    (34 contacts identifiés dans l'audit).
+    """
     if mail_count in _CONTACT_ANALYSIS_SCHEDULE:
+        # Si profil existe et son sample_count >= mail_count → déjà analysé
+        # à ce stade ou plus loin, skip. Tolérance de 0 (strict equal ou plus).
+        if existing_sample_count is not None and existing_sample_count >= mail_count:
+            return False
         return True
     if mail_count > 200 and mail_count % 50 == 0:
+        if existing_sample_count is not None and existing_sample_count >= mail_count:
+            return False
         return True
     return False
 
 
-def _maybe_analyze_contact(contact_email):
-    """Vérifie si un profil de contact doit être (re)analysé et le fait si nécessaire."""
+# Audit 03/05 fix RC1 : patterns automate (parité fix A3 du commis Haiku
+# unifié dans `_prewarm_unified_for_mail`). Aucun intérêt à analyser le
+# style relationnel d'une boîte vocale qui n'attend pas de réponse.
+_AUTO_EMAIL_PATTERNS = (
+    'noreply', 'no-reply', 'no_reply',
+    'donotreply', 'do-not-reply', 'do_not_reply',
+    'nepasrepondre', 'ne-pas-repondre', 'ne_pas_repondre',
+    'mailer-daemon', 'postmaster',
+    'notifications@', 'notification@',
+    'newsletter@', 'mailing@',
+    'automate.', 'automate@',
+    'quarantine@',
+    'edi@', 'dse@',
+    'e-statement@', 'estatement@',
+    'mssecurity-noreply', 'microsoftexchange',
+    'invitations@trustpilot',
+)
+
+# Audit 03/05 fix RC2 : cooldown anti-boucle pour la branche "sample_count=0
+# anormal, rattrapage". La branche bypasse le filtre schedule, donc sans
+# garde elle se déclenche à CHAQUE cycle BG (~80s) tant que sample_count
+# reste à 0 (ce qui peut arriver si l'analyse Claude renvoie None ou si
+# save_contact_profile plante). Cas observé : yvan.bosser@gmail.com en
+# boucle 1080 appels Sonnet/jour. Cooldown 24h via cache RAM en mémoire
+# (pas besoin de persistance disque : au pire on retente une fois après
+# restart, ce qui est acceptable).
+_force_analysis_attempts = {}  # email -> last_attempt_ts
+_FORCE_ANALYSIS_COOLDOWN_SEC = 24 * 3600  # 24h
+
+
+def _maybe_analyze_contact(contact_email, bypass_cooldown=False):
+    """Vérifie si un profil de contact doit être (re)analysé et le fait si nécessaire.
+
+    Args:
+        contact_email : email du contact
+        bypass_cooldown : si True, ignore le cooldown 24h (audit 03/05 fix RC2).
+            Utilisé par les routes user explicites (recalibrate, analyze_contact,
+            post_send_learning) pour forcer une analyse immédiate. Le BG
+            `_continuous_speculation_loop` appelle SANS bypass (cooldown actif).
+    """
     if not contact_email:
         return
+
+    # Audit 03/05 fix RC1 : skip auto-emails (noreply, mailer-daemon, etc.)
+    # Aucun intérêt à analyser le style relationnel d'une boîte vocale.
+    # Avant ce fix : 31/33 profils sample_count=0 étaient des auto-emails
+    # qui faisaient le tour complet jusqu'à `if not sent_mails: return`
+    # ligne ~12595, soit ~33 480 logs/jour de bruit pur (CPU + DB load).
+    contact_lower = contact_email.lower()
+    if any(p in contact_lower for p in _AUTO_EMAIL_PATTERNS):
+        return  # silencieux : pas de log, pas d'analyse, pas de save
 
     mail_count = _db.count_mails_with_contact(contact_email)
     if mail_count < _CONTACT_MIN_MAILS:
@@ -12539,33 +12601,41 @@ def _maybe_analyze_contact(contact_email):
     if existing:
         if existing.get('manually_edited'):
             return
-        # Fix 30/04 PM (signal Yvan : signature Yvan BOSSER au lieu de
-        # contact-spécifique pour Julien). Sample_count=0 sur un profil
-        # existant est ANORMAL — soit l'analyse précédente a silencieusement
-        # échoué (try/except qui swallow), soit le profil a été créé par
-        # un autre path (e.g., création auto au 1er mail vu sans declencher
-        # _maybe_analyze_contact). Cas observé : 3/115 profils en prod
-        # (Julien LE VU 86 mails, yvan@gmail, Ronan FOUIN). Sans rattrapage,
-        # ces profils restent dans cet état → user_signature_for_contact
-        # toujours NULL → fallback "Yvan BOSSER (Groupe Bosser)" même avec
-        # contact très familier. Force re-analyse pour rattrapage immédiat.
+        # Fix 30/04 PM (Yvan : signature Yvan BOSSER au lieu de spécifique
+        # pour Julien). sample_count=0 sur un profil existant est anormal —
+        # soit l'analyse précédente a silencieusement échoué, soit le profil
+        # a été créé par un autre path. Force re-analyse pour rattrapage.
+        # Audit 03/05 fix RC2 : cooldown 24h pour éviter la boucle infinie
+        # quand l'analyse forcée plante systématiquement (yvan@gmail observé
+        # 1 080 appels/jour). Si l'analyse échoue, on retente dans 24h, pas
+        # dans 80s. bypass_cooldown=True quand l'utilisateur force lui-même
+        # via api_recalibrate / api_analyze_contact / post_send_learning.
         if existing.get('sample_count', 0) == 0:
+            if not bypass_cooldown:
+                now_ts = time.time()
+                last_attempt = _force_analysis_attempts.get(contact_email, 0)
+                if now_ts - last_attempt < _FORCE_ANALYSIS_COOLDOWN_SEC:
+                    return  # silencieux : cooldown actif
+                _force_analysis_attempts[contact_email] = now_ts
             logger.info(f"[learning] Re-analyse forcee de {_hash_email_partial(contact_email)} (sample_count=0 anormal, rattrapage)")
-        elif not _should_analyze_contact(mail_count):
+        elif not _should_analyze_contact(mail_count, existing.get('sample_count')):
             return
         else:
             logger.info(f"[learning] Re-analyse de {_hash_email_partial(contact_email)} (mail #{mail_count})")
     else:
-        # Fix 24/04 : pour la PREMIÈRE analyse d'un contact SANS profil, ne
-        # pas bloquer sur le schedule strict [1,2,3,4,5,7,9,13,17,25,50,...].
-        # Symptôme (Dufau) : 27 mails en DB mais hors schedule (prochain 50) →
-        # jamais analysé → reste UNKNOWN → BG loop skip TIER 1 → stream à
-        # chaque clic au lieu de cache HIT. Le schedule est pensé pour des
-        # RE-analyses incrémentales, pas pour bloquer la première.
-        # Règle : seuil minimal 3 mails pour lancer la 1ère analyse ; ensuite
-        # les re-analyses suivent le schedule normal (via branche `if existing`).
+        # Fix 24/04 : 1ère analyse d'un contact SANS profil ne bloque pas sur
+        # le schedule strict. Audit 03/05 fix RC2 (extension) : cooldown 24h
+        # pour les contacts sans profil dont l'analyse échoue silencieusement
+        # à chaque cycle (cas support@coaxis.com observé : 12 sent_mails mais
+        # profil jamais créé → 1 326 "Premiere analyse" en 24h).
         if mail_count < 3 and not _should_analyze_contact(mail_count):
             return
+        if not bypass_cooldown:
+            now_ts = time.time()
+            last_attempt = _force_analysis_attempts.get(contact_email, 0)
+            if now_ts - last_attempt < _FORCE_ANALYSIS_COOLDOWN_SEC:
+                return  # silencieux : cooldown actif (Premiere analyse sans profil)
+            _force_analysis_attempts[contact_email] = now_ts
         logger.info(f"[learning] Premiere analyse de {_hash_email_partial(contact_email)} (mail #{mail_count})")
 
     # Fix 30/04 PM (signal Yvan) : limit 25 → 50. Le sub-agent a montré que
@@ -12734,7 +12804,9 @@ def api_analyze_contact():
             if existing:
                 existing['sample_count'] = 0
                 _db.save_contact_profile(contact_email, existing)
-            _maybe_analyze_contact(contact_email)
+            # Audit 03/05 fix RC2 : bypass_cooldown=True car action user
+            # explicite (route /api/analyze_contact appelée à la demande).
+            _maybe_analyze_contact(contact_email, bypass_cooldown=True)
         except Exception as e:
             logger.error(f"analyze_contact: {e}")
 
@@ -12801,7 +12873,9 @@ def api_recalibrate_contacts():
                     if existing:
                         existing['sample_count'] = 0
                         _db.save_contact_profile(email, existing)
-                    _maybe_analyze_contact(email)
+                    # Audit 03/05 fix RC2 : bypass_cooldown=True (recalibrage
+                    # batch lancé volontairement par l'user via la page Profil).
+                    _maybe_analyze_contact(email, bypass_cooldown=True)
                 except Exception as e:
                     logger.error(f"recalibrate_contacts {email}: {e}")
                 _contacts_recalib_progress['done'] = i + 1

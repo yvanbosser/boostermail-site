@@ -1144,15 +1144,27 @@ La signature est ce qui suit le closing (derniere ligne avant fin du mail).
                     text = re.sub(r'\s*```\s*$', '', text, flags=re.MULTILINE)
                     text = text.strip()
                     # Extraire le JSON
+                    # Audit 03/05 fix S4 : log explicite quand on retourne None
+                    # pour identifier les causes silencieuses (jusqu'à présent
+                    # cas yvan@gmail et support@coaxis plantaient ici sans trace).
                     if text.startswith('{'):
-                        profile = json.loads(text)
+                        try:
+                            profile = json.loads(text)
+                        except json.JSONDecodeError as _je:
+                            logger.warning(f"[learning] JSON invalide pour {email_address[:30]}: {_je} — text head: {text[:200]!r}")
+                            return None
                     else:
                         # Chercher le JSON dans le texte
                         start = text.find('{')
                         end = text.rfind('}') + 1
                         if start >= 0 and end > start:
-                            profile = json.loads(text[start:end])
+                            try:
+                                profile = json.loads(text[start:end])
+                            except json.JSONDecodeError as _je:
+                                logger.warning(f"[learning] JSON invalide pour {email_address[:30]} (extrait): {_je} — extrait: {text[start:end][:200]!r}")
+                                return None
                         else:
+                            logger.warning(f"[learning] Pas de JSON dans la reponse Claude pour {email_address[:30]} — text: {text[:200]!r}")
                             return None
 
                     # --- VALIDATION SCHEMA ---
