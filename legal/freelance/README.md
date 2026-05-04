@@ -1,6 +1,6 @@
 # Pack juridique freelance — README
 
-> **Dernière mise à jour** : 04/05/2026 (v3.1 — ajout reverse engineering interdit)
+> **Dernière mise à jour** : 04/05/2026 (v3.3 — bascule droit français → droit mauricien (common law) + intégration modalités paiement Mikadb)
 > **Société émettrice** : Pied dans l'eau Consulting Ltd (PDLConsulting), 26 avenue Surcouf, Quatre Bornes, Mauritius
 > **Usage** : modèles contractuels destinés au recrutement de prestataires indépendants (freelances) intervenant sur le produit BoosterMail
 
@@ -83,26 +83,49 @@ Si une clause s'avère problématique en pratique (ex: un freelance refuse une f
 
 ---
 
-## Choix de loi applicable et de juridiction — Justification
+## Choix de loi applicable et de juridiction — Justification (v3.3)
 
-Le pack retient :
+Le pack retient depuis la v3.3 :
 
-- **Loi applicable** : droit français
-- **Juridiction** : Tribunal de commerce de Paris
+- **Loi applicable** : droit de la République de Maurice (en particulier Companies Act 2001, Copyright Act 1997, Industrial Property Act 2019, Data Protection Act 2017, et Code civil mauricien pour les matières civiles)
+- **Juridiction** : Cour suprême de la République de Maurice (Supreme Court of Mauritius — Commercial Division)
 
-Bien que PDLConsulting soit une société de droit mauricien, ce choix se justifie par :
+### Pourquoi le droit mauricien (et non le droit français)
 
-1. **Lieu d'exécution effectif** : si le prestataire est résident fiscal français, l'essentiel des prestations s'exécute en France ; les relations contractuelles ont leur centre de gravité en France.
+Le système juridique mauricien est **hybride** :
 
-2. **Exécution forcée plus rapide** : un jugement français contre un prestataire français est immédiatement exécutoire sur son patrimoine en France, sans procédure d'exequatur. Un jugement mauricien nécessiterait au contraire une procédure d'exequatur en France (6 à 18 mois en général, en l'absence de convention bilatérale franco-mauricienne en matière civile et commerciale), au cours de laquelle le juge français pourrait refuser l'exequatur sur des motifs d'ordre public.
+- **Droit civil** : héritage du Code civil français (Code Napoléon) — proche du droit français pour les obligations, contrats, responsabilité civile
+- **Droit commercial / droit des sociétés** : héritage **common law (anglo-saxon)** depuis l'indépendance de 1968 (Companies Act 2001 inspiré du modèle anglais, Trade Marks Act 2002, Industrial Property Act 2019, jurisprudence du Privy Council de Londres comme cour d'appel jusqu'en 2003)
 
-3. **Disponibilité des conseils** : marché français des avocats spécialisés en droit du numérique, propriété intellectuelle et droit commercial très fourni ; coûts maîtrisés ; jurisprudence abondante et prévisible.
+Pour un contrat **B2B international** entre PDLConsulting (société mauricienne) et un prestataire étranger, c'est principalement le **droit commercial mauricien (common law)** qui régit la relation, complété par le Code civil pour les questions de droit civil pur.
 
-4. **Mesures conservatoires** : le référé français permet d'obtenir en quelques jours une mesure conservatoire (saisie, interdiction sous astreinte) en cas de fuite avérée. Le système mauricien est plus lent.
+### Justification du choix
 
-**Cas où le choix mauricien serait préférable** : prestataire résident hors UE, ou actifs principaux du prestataire situés à Maurice — situations à étudier au cas par cas avec un avocat.
+1. **Cohérence avec les parties** : aucune des deux parties n'est française. PDLConsulting est mauricienne, le Prestataire (typiquement) est domicilié hors UE (Delaware pour Mikadb LLC). Imposer le droit français serait artificiel et difficilement opposable.
 
-**Cas où une clause d'arbitrage serait pertinente** : litige potentiel à fort enjeu transfrontalier (> 100 k€). À discuter avec un avocat le moment venu.
+2. **Cohérence avec le siège du Client** : PDLConsulting étant la société qui paie et qui détient les actifs IP du produit BoosterMail, c'est sa juridiction de référence qui s'applique.
+
+3. **Cohérence avec un prestataire de common law** : un prestataire opérant sous une LLC américaine, anglaise, australienne, indienne, etc., est plus à l'aise avec un cadre common law qu'avec le droit civil français.
+
+4. **Reconnaissance internationale des jugements mauriciens** : Maurice étant signataire de la Convention de New York 1958 sur l'arbitrage international et adhérant aux standards Commonwealth, les jugements mauriciens sont reconnus dans la plupart des juridictions où un prestataire IT est susceptible d'avoir des actifs.
+
+5. **Place financière mauricienne** : Maurice est un **hub d'affaires international reconnu** (IFC — International Financial Centre), avec des juridictions spécialisées (Commercial Division), un barreau international, et une jurisprudence prévisible inspirée de la jurisprudence Privy Council et UKSC.
+
+6. **Lecture par avocats US/UK** : un avocat américain ou britannique consulté par le Prestataire reconnaîtra immédiatement les références common law (Cavendish v Makdessi, Nordenfelt v Maxim Nordenfelt) et acceptera la rédaction sans avoir besoin de traduire des concepts de droit civil français.
+
+### Cas particuliers couverts
+
+- **Pour le RGPD** : le RGPD s'applique extraterritorialement (article 3) lorsque le traitement vise des personnes situées dans l'UE. Le DPA (Annexe 3) intègre donc à la fois les obligations RGPD et celles du Mauritius Data Protection Act 2017.
+- **Pour les transferts de données vers les États-Unis (Prestataire Mikadb LLC)** : encadrés par les Clauses Contractuelles Types européennes intégrées par référence dans le DPA.
+- **Pour les mesures conservatoires urgentes** : possibilité maintenue, par dérogation à la clause de juridiction, de saisir toute juridiction compétente d'un référé en mesure conservatoire (article 16.9 du Contrat).
+
+### ⚠️ Validation impérative par un avocat mauricien
+
+La conversion du pack vers le droit mauricien a été effectuée avec rigueur, mais elle utilise des références (jurisprudence Cavendish v Makdessi, Nordenfelt, Companies Act 2001, Copyright Act 1997, Data Protection Act 2017) qu'un avocat **inscrit au barreau mauricien** doit vérifier en pratique avant signature. Recommandations :
+
+- Cabinet d'avocat mauricien spécialisé en droit commercial international (cabinets connus à Port-Louis, Ebène, Grand Baie : Conyers, BLC Robert, ENSafrica Mauritius, Appleby, Juristconsult Chambers)
+- Coût indicatif : 8 000 à 15 000 MUR par heure (~150-300 €/h) — budget 1-2h pour valider l'ensemble du pack
+- Délai : généralement 2 à 5 jours ouvrés pour un retour
 
 ---
 
@@ -126,6 +149,59 @@ Bien que PDLConsulting soit une société de droit mauricien, ce choix se justif
 Création initiale du pack (6 documents : README + NDA + Contrat + Annexe Mission + Charte sécurité + DPA).
 
 ---
+
+### v3.3 — 04/05/2026 (bascule droit mauricien + modalités paiement Mikadb)
+
+Bascule fondamentale du pack vers le **droit de la République de Maurice** (common law commercial + Code civil mauricien), suite à la confirmation par Yvan que :
+
+- PDLConsulting est société mauricienne ;
+- Le Prestataire pressenti (Mikadb LLC) est société du Delaware (USA) ;
+- Aucune des deux parties n'est française → le droit français était inapproprié.
+
+**Modifications structurelles** :
+
+- **Loi applicable** (NDA art. 7.5, Contrat art. 16.8, DPA art. 8.1) : droit français → droit mauricien (Companies Act 2001, Copyright Act 1997, Industrial Property Act 2019, Data Protection Act 2017, Code civil mauricien)
+- **Juridiction** (NDA art. 7.6, Contrat art. 16.9, DPA art. 8.2) : Tribunal de commerce de Paris → **Supreme Court of Mauritius (Commercial Division)**
+- **Clauses pénales (NDA art. 6.2, Contrat art. 11.6)** : reformulées en « **liquidated damages** » conformes au common law (référence *Cavendish Square Holding BV v Talal El Makdessi* [2015] UKSC 67), avec démonstration explicite du caractère raisonnable du forfait pour résister au test de la « penalty doctrine »
+- **Mesures conservatoires (NDA art. 6.3)** : reformulées en termes d'« interim and injunctive relief » du common law
+- **Cession IP (Contrat art. 9, NDA art. 4.3)** : référence à l'article L. 131-3 CPI français → Copyright Act 1997 mauricien (commissioned works) et Industrial Property Act 2019
+- **Secrets d'affaires (NDA art. 5.2)** : référence loi française du 30/07/2018 → définition générique conforme à l'article 39 ADPIC + droit mauricien
+- **Actions en concurrence déloyale (NDA art. 6.1)** : référence aux articles L. 152-1 Code de commerce français → « unfair competition », « passing off », « breach of confidence » du common law mauricien
+- **Force majeure (Contrat art. 15)** : référence à l'article 1218 du Code civil français → définition common law de la force majeure / act of God
+- **Non-concurrence (Contrat art. 11.4.4)** : jurisprudence Cass. com. 15 mars 2011 → doctrine *Nordenfelt v Maxim Nordenfelt* [1894] AC 535 (« reasonable restraint of trade »)
+- **TVA (Contrat art. 8.4)** : régime français adapté → constatation que la prestation est entre deux entités hors UE (Maurice ↔ Delaware), donc hors champ TVA française/européenne ; le Prestataire reste responsable des taxes locales US
+- **DPA art. 3.3** : transferts de données encadrés à la fois par le RGPD (extraterritorialité), les CCT européennes 2021/914, et le Mauritius Data Protection Act 2017
+
+**Modifications du Contrat — Article 8 (rémunération)** :
+
+Intégration des modalités de paiement proposées par Mikadb LLC (et acceptées par Yvan) :
+
+- **TJM** : 200 € HT par jour ouvré
+- **Volume prévisionnel** : 20 jours ouvrés
+- **Montant total prévisionnel** : 4 000 € HT
+- **Acompte** : 50 % à la signature, soit 2 000 € HT
+- **Solde** : 7 jours après livraison finale acceptée OU 27 jours après signature du contrat (échéance la plus proche)
+- **Devise** : EUR
+- **TVA** : sans objet (Mauritius ↔ Delaware = hors UE)
+- **Article 8.10 nouveau** : confirmation que le non-paiement n'invalide pas la cession IP (cohérence avec art. 9.2)
+
+**Justification stratégique du choix mauricien** : voir section dédiée du présent README (« Choix de loi applicable et de juridiction »).
+
+**⚠️ Recommandation** : faire valider le pack par un avocat mauricien (~150-300 €/h, 1-2h suffisent). Cabinets recommandés : Conyers, BLC Robert, ENSafrica Mauritius, Appleby, Juristconsult Chambers.
+
+### v3.2 — 04/05/2026 (calibrage non-concurrence pour mission courte)
+
+**Modification du Contrat (`02_CONTRAT_PRESTATION.md` art. 11.4)** :
+
+Réduction du périmètre de la non-concurrence post-contractuelle :
+- **Durée** : 60 mois (5 ans) → **12 mois**
+- **Contrepartie totale** : ~135 000 € → **8 000 € (12 mensualités de 666,67 €)**
+- **Périmètre géographique** : UE+UK+Suisse+US → **UE+UK+Suisse** (suppression USA, peu pertinent pour Mikadb LLC qui est déjà US)
+- Autres caractéristiques préservées : définition produit concurrent, fonctions ciblées, levée par PDLConsulting, clause de réduction par juge, sanctions
+
+**Justification** : pour une mission courte (1 mois, 4 000 € HT), une non-concurrence de 5 ans à ~135 k€ était disproportionnée et juridiquement fragile (jurisprudence Cass. com. 2011 et suivantes). Le compromis 12 mois + 8 k€ reste validable, défendable, et acceptable pour le Prestataire.
+
+**Marge de négociation** : la contrepartie peut être ajustée jusqu'à 10 000 € total si le Prestataire la juge insuffisante.
 
 ### v3.1 — 04/05/2026 (ajout marginal post-revue ChatGPT 4/4)
 

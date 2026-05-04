@@ -163,31 +163,48 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
 
 ## Article 8 — Rémunération et facturation
 
-8.1 **Mode de rémunération.** [À COMPLÉTER selon choix : OPTION A — Taux journalier moyen (TJM) de [montant] € HT par jour travaillé / OPTION B — Forfait par mission, défini dans chaque Annexe Mission / OPTION C — Forfait mensuel de [montant] € HT pour [X] jours par mois]
+8.1 **Mode de rémunération.** Les Prestations sont rémunérées au **Taux Journalier Moyen (TJM)** de **deux cents euros (200 € HT)** par jour ouvré de disponibilité du Prestataire.
 
-8.2 **Devise.** Les paiements sont effectués en **euros (€)**, par virement bancaire sur le compte communiqué par le Prestataire (RIB joint).
+8.2 **Volume prévisionnel et montant total.** Le volume prévisionnel pour la première Annexe Mission est estimé à **vingt (20) jours ouvrés**, soit un montant total prévisionnel de **quatre mille euros (4 000 € HT)**. Tout dépassement de ce volume requiert un avenant écrit signé par les Parties.
 
-8.3 **TVA.** [Si Prestataire assujetti à la TVA française : « Les montants sont exprimés hors taxes ; la TVA française au taux en vigueur est applicable selon le régime de l'autoliquidation pour le preneur étranger établi hors UE, conformément à l'article 283-2 du CGI. Le Prestataire émettra ses factures sans TVA, en mentionnant : ‹ Autoliquidation - Article 283 du CGI ›. »] [Si Prestataire en franchise en base de TVA (auto-entrepreneur) : « Les montants sont exprimés en euros, le Prestataire bénéficiant de la franchise en base de TVA prévue à l'article 293 B du CGI ; mention obligatoire ‹ TVA non applicable, art. 293 B du CGI › sur chaque facture. »]
+8.3 **Devise.** Les paiements sont effectués en **euros (€)**, par virement bancaire international (SWIFT/SEPA) sur le compte communiqué par le Prestataire (RIB joint en annexe au présent Contrat).
 
-8.4 **Modalités de facturation.**
+8.4 **TVA / Taxes.** Les montants sont exprimés **hors taxes**. Le Prestataire étant établi aux États-Unis (Delaware) et le Client étant établi à Maurice, la prestation est réalisée entre deux entités hors Union européenne ; aucune TVA française ou européenne n'est applicable. Le Prestataire reste responsable de l'application des taxes locales éventuellement dues dans sa juridiction de résidence fiscale (notamment au titre du droit fédéral et étatique américain), qui demeurent à sa charge exclusive et sans incidence sur le montant net à recevoir tel que stipulé au Contrat.
 
-  a) Le Prestataire émet ses factures **mensuellement à terme échu**, au plus tard le [À COMPLÉTER : ex. cinquième jour ouvré du mois suivant] ;
+8.5 **Modalités de paiement — première Annexe Mission.**
+
+  a) **Acompte** : un acompte de **cinquante pour cent (50 %)** du montant total prévisionnel, soit **deux mille euros (2 000 € HT)**, est versé par PDLConsulting au Prestataire à la signature du présent Contrat (et au plus tard dans les trois (3) jours ouvrés suivant la signature). L'acompte vaut engagement réciproque des Parties ;
+
+  b) **Solde** : le solde, soit **deux mille euros (2 000 € HT)** (ou tel autre montant correspondant au nombre exact de jours ouvrés effectivement travaillés s'il diffère du prévisionnel), est versé par PDLConsulting au Prestataire dans les conditions suivantes :
+
+  - **Soit dans un délai de sept (7) jours calendaires suivant la livraison finale acceptée** des livrables prévus à l'Annexe Mission, dans les conditions de la procédure de recette définie à l'article 7 ;
+  - **Soit au plus tard vingt-sept (27) jours calendaires après la signature du présent Contrat**,
+
+  selon l'échéance atteinte en premier.
+
+  c) **Cas où la livraison finale n'est pas acceptée à 27 jours** : si à l'expiration du délai de vingt-sept (27) jours, la livraison n'a pas encore été soumise à recette ou n'a pas été acceptée du fait de réserves justifiées (art. 7), les Parties conviennent d'un nouveau délai de paiement aligné sur le calendrier de finalisation, sans que cela libère le Prestataire de son obligation de livrer un livrable conforme.
+
+8.6 **Modalités pour les missions ultérieures.** Pour toute Annexe Mission postérieure à la première, les modalités de paiement seront fixées dans l'Annexe Mission elle-même (acompte/solde, paiement mensuel à terme échu en cas de mission longue, etc.). À défaut de stipulation contraire dans l'Annexe Mission, les factures sont payables par virement bancaire à **trente (30) jours date de facture**.
+
+8.7 **Modalités de facturation.**
+
+  a) Le Prestataire émet une facture pour l'acompte à la signature du Contrat et une facture pour le solde lors de la livraison finale (ou au 27e jour, selon ce qui survient en premier) ;
   b) Les factures sont adressées par voie électronique à : [À COMPLÉTER : ex. invoicing@boostermail.ai] ;
-  c) Chaque facture mentionne, outre les mentions légales obligatoires : la référence du Contrat, la référence de l'Annexe Mission concernée, le détail des prestations facturées (jours, livrables) et le mois de référence ;
-  d) En cas de TJM, un **compte rendu d'activité** (CRA) détaillé est joint à chaque facture, listant les jours travaillés et les missions associées.
+  c) Chaque facture mentionne, outre les mentions légales obligatoires applicables au Prestataire : la référence du Contrat, la référence de l'Annexe Mission concernée, le détail des prestations facturées (jours travaillés, livrables) et la période de référence ;
+  d) Pour les missions au TJM, un **compte rendu d'activité** (CRA) détaillé est joint à la facture, listant les jours travaillés et les missions associées.
 
-8.5 **Délais de paiement.** Les factures sont payables par virement bancaire à **trente (30) jours date de facture**, conformément à l'article L. 441-10 du Code de commerce.
+8.8 **Pénalités de retard.** En cas de retard de paiement par PDLConsulting au-delà du délai stipulé, le Prestataire est en droit, sans formalité préalable, d'appliquer des intérêts de retard au taux légal applicable au Royaume-Uni / à Maurice à la date du retard, majoré de **trois (3) points de pourcentage**, calculés à compter du jour suivant l'expiration du délai de paiement.
 
-8.6 **Pénalités de retard.** En cas de retard de paiement, le Prestataire est en droit, sans formalité préalable, d'appliquer des pénalités de retard au taux d'intérêt de la BCE majoré de **dix (10) points de pourcentage**, ainsi qu'une indemnité forfaitaire pour frais de recouvrement de **40 €**.
+8.9 **Cas de suspension.** Le Prestataire est autorisé à suspendre l'exécution des Prestations en cas de retard de paiement de plus de **trente (30) jours** après mise en demeure écrite restée infructueuse, sans que cette suspension puisse être considérée comme une résiliation du Contrat.
 
-8.7 **Cas de suspension.** Le Prestataire est autorisé à suspendre l'exécution des Prestations en cas de retard de paiement supérieur à **trente (30) jours** après mise en demeure restée infructueuse, sans que cette suspension puisse être considérée comme une résiliation du Contrat.
+8.10 **Imputation du non-paiement sur la cession des droits.** Conformément à l'article 9.2 du présent Contrat, **le non-paiement total ou partiel d'une facture par PDLConsulting ne saurait être invoqué par le Prestataire pour remettre en cause la cession des droits de propriété intellectuelle sur les Œuvres**, laquelle est acquise dès la création des Œuvres. Le Prestataire conserve les voies de droit commun pour recouvrer son dû.
 
 ---
 
 ## Article 9 — Propriété intellectuelle
 
-> **CLAUSE CRITIQUE — À FAIRE VALIDER PAR UN AVOCAT**
-> [NOTE INTERNE : cette clause est rédigée dans le respect des exigences de l'article L. 131-3 du Code de la propriété intellectuelle français qui impose une mention distincte de chaque droit cédé, du domaine d'exploitation, du lieu et de la durée. Une rédaction insuffisante peut entraîner la nullité de la cession.]
+> **CLAUSE CRITIQUE — À FAIRE VALIDER PAR UN AVOCAT MAURICIEN**
+> [NOTE INTERNE : cette clause est rédigée pour être conforme tant au Copyright Act 1997 mauricien (qui exige un transfert exprès et écrit pour les œuvres réalisées sur commande / commissioned works) qu'à la pratique du common law en matière de transfert de droits. La mention détaillée des droits cédés, du domaine d'exploitation, du territoire et de la durée prémunit contre une qualification de cession ambiguë.]
 
 9.1 **Définition.** Sont qualifiées d'« **Œuvres** », au sens du présent article, l'ensemble des créations intellectuelles, originales ou non, réalisées par le Prestataire dans le cadre ou à l'occasion des Prestations, notamment :
 
@@ -262,10 +279,9 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
 
 11.4 **Non-concurrence post-contractuelle.**
 
-> ⚠️ **AVERTISSEMENT CRITIQUE — À FAIRE VALIDER PAR AVOCAT AVANT SIGNATURE**
-> En droit français, une clause de non-concurrence post-contractuelle de **soixante (60) mois** imposée à un prestataire indépendant est considérée par la jurisprudence comme manifestement excessive dans la grande majorité des cas (Cass. com. 4 juin 2002 n° 00-14.092, Cass. com. 15 mars 2011 n° 10-13.824, et lignée jurisprudentielle constante). Le juge peut **annuler la clause dans son intégralité** ou la **réduire** à une durée jugée raisonnable (généralement 12 à 24 mois), sans pour autant nécessairement réduire la contrepartie financière correspondante. **L'activation de cette clause expose PDLConsulting à un coût significatif sans garantie d'efficacité juridique.** Un avocat doit être consulté avant signature pour ajuster la durée, le périmètre et la contrepartie en fonction de la situation réelle (en particulier : rémunération du Prestataire, ancienneté de la collaboration, criticité réelle des informations détenues).
+> [NOTE INTERNE — DÉCISION YVAN du 04/05/2026 (v3.2) : durée 12 mois retenue, contrepartie modeste 8 000 € total (~666 €/mois) — équilibre entre protection effective et coût raisonnable pour mission courte. Conforme à la jurisprudence française qui exige durée limitée + contrepartie non dérisoire. **Validation par avocat recommandée** sur le montant exact de la contrepartie, fonction du TJM réel et des jours travaillés effectifs. Possibilité d'ajustement à la hausse (jusqu'à 10 000 € total) lors de la négociation avec le Prestataire.]
 
-11.4.1 **Engagement de non-concurrence.** Pendant une durée de **soixante (60) mois** (cinq (5) années) suivant la cessation du Contrat, pour quelque cause que ce soit, le Prestataire s'interdit, directement ou indirectement, par personne interposée ou pour le compte d'un tiers, d'exercer ou de participer à une activité de développement, conception, ou édition d'un produit logiciel directement concurrent de BoosterMail.
+11.4.1 **Engagement de non-concurrence.** Pendant une durée de **douze (12) mois** suivant la cessation du Contrat, pour quelque cause que ce soit, le Prestataire s'interdit, directement ou indirectement, par personne interposée ou pour le compte d'un tiers, d'exercer ou de participer à une activité de développement, conception, ou édition d'un produit logiciel directement concurrent de BoosterMail.
 
 11.4.2 **Définition du produit concurrent.** Est considéré comme directement concurrent au sens du présent article tout produit logiciel répondant cumulativement aux caractéristiques suivantes :
 
@@ -276,31 +292,34 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
 
 11.4.3 **Périmètre géographique et matériel.** L'obligation s'applique :
 
-  a) Sur le **territoire** de l'Union européenne, du Royaume-Uni, de la Suisse et des États-Unis d'Amérique ;
+  a) Sur le **territoire** de l'Union européenne, du Royaume-Uni, et de la Suisse ;
   b) Aux **fonctions** de conception produit, architecture technique, direction technique (CTO ou équivalent), lead développement, et direction du produit (PM, CPO ou équivalent) ;
   c) N'est pas concerné le simple usage d'un produit concurrent en qualité de client ou d'utilisateur final.
 
-11.4.4 **Contrepartie financière.** En application des principes posés par la jurisprudence française précitée, la présente obligation de non-concurrence est assortie du versement par PDLConsulting au Prestataire d'une **contrepartie financière mensuelle**, due pendant toute la durée d'application de l'obligation et jusqu'à son terme :
+11.4.4 **Contrepartie financière.** En application des principes du common law applicables à Maurice en matière de « restraint of trade » (notamment la doctrine *Nordenfelt v Maxim Nordenfelt* [1894] AC 535 et la lignée jurisprudentielle subséquente, qui exigent que toute clause restrictive de la liberté commerciale soit assortie d'une contrepartie raisonnable), la présente obligation de non-concurrence est assortie du versement par PDLConsulting au Prestataire d'une contrepartie financière de **huit mille euros (8 000 €) au total**, payable en douze (12) mensualités égales de **six cent soixante-six euros et soixante-sept centimes (666,67 €)** chacune, due pendant toute la durée d'application de l'obligation :
 
-  - **Montant** : [À COMPLÉTER : montant à négocier — repère indicatif : 30 % du revenu mensuel moyen perçu par le Prestataire au titre du Contrat sur les douze (12) mois précédant la cessation du Contrat. Pour fixer les idées, sur la base d'un TJM de 500 € et 15 jours travaillés/mois (revenu mensuel ~7 500 € HT), une contrepartie de 30 % représenterait ~2 250 €/mois × 60 mois = **~135 000 € HT** sur la durée totale]
-  - **Versement** : mensuel, à terme échu, par virement bancaire, dans les quinze (15) premiers jours de chaque mois pendant les soixante (60) mois ;
-  - **Cessation anticipée du versement** : le versement de la contrepartie cesse de plein droit en cas de manquement du Prestataire à l'obligation de non-concurrence, sans préjudice du droit pour PDLConsulting de demander la restitution des sommes déjà versées et la réparation du préjudice subi.
+  a) **Versement** : mensuel, à terme échu, par virement bancaire sur le compte communiqué par le Prestataire, dans les quinze (15) premiers jours de chaque mois pendant les douze (12) mois ;
+  b) **Indexation** : la contrepartie n'est pas indexée et est versée en valeur fixe pendant toute la durée ;
+  c) **Cessation anticipée du versement** : le versement de la contrepartie cesse de plein droit en cas de manquement du Prestataire à l'obligation de non-concurrence, sans préjudice du droit pour PDLConsulting de demander la restitution des sommes déjà versées et la réparation du préjudice subi.
 
-11.4.5 **Levée de l'obligation par PDLConsulting.** PDLConsulting peut, à tout moment, et notamment dans un délai de quinze (15) jours suivant la cessation du Contrat, renoncer **par notification écrite** à tout ou partie de l'obligation de non-concurrence prévue au présent article 11.4, auquel cas la contrepartie financière correspondante cesse d'être due. La levée peut être totale, partielle (réduction de durée, de périmètre, etc.), conditionnelle ou définitive.
+11.4.5 **Levée de l'obligation par PDLConsulting.** PDLConsulting peut, à tout moment, et notamment dans un délai de quinze (15) jours suivant la cessation du Contrat, renoncer **par notification écrite** à tout ou partie de l'obligation de non-concurrence prévue au présent article 11.4, auquel cas la contrepartie financière correspondante cesse d'être due à compter du mois suivant la notification. La levée peut être totale, partielle (réduction de durée, de périmètre, etc.), conditionnelle ou définitive.
 
-11.4.6 **Réduction par le juge — Clause de sauvegarde.** Conformément au principe de proportionnalité, dans l'hypothèse où une juridiction compétente jugerait l'engagement de non-concurrence prévu au présent article 11.4 excessif quant à sa durée, son périmètre géographique, son périmètre matériel, ou la contrepartie financière, les Parties demandent expressément au juge :
+11.4.6 **Réduction par le juge — Clause de sauvegarde.** Dans l'hypothèse où une juridiction compétente jugerait l'engagement de non-concurrence prévu au présent article 11.4 excessif quant à sa durée, son périmètre géographique, son périmètre matériel, ou la contrepartie financière, les Parties demandent expressément au juge :
 
   a) De **ne pas annuler** purement et simplement la clause, mais de la **réduire** à la durée, au périmètre ou à la contrepartie qu'il jugera proportionné aux intérêts légitimes de PDLConsulting ;
-  b) D'ajuster en conséquence la contrepartie financière mensuelle à un montant proportionnel à la durée maintenue ;
+  b) D'ajuster en conséquence la contrepartie financière à un montant proportionnel à la durée maintenue ;
   c) De maintenir les autres stipulations du Contrat dans leur intégralité, conformément à l'article 16.4 du présent Contrat.
 
 11.4.7 **Sanction des manquements.** Toute violation des obligations résultant du présent article 11.4 entraîne, outre la cessation immédiate du versement de la contrepartie financière, l'application de la clause pénale prévue à l'article 11.6 du présent Contrat, ainsi que, le cas échéant, la cessation immédiate de toute relation contractuelle entre les Parties et le droit pour PDLConsulting de demander la réparation intégrale du préjudice subi.
 
-> [NOTE INTERNE — DÉCISION YVAN du 04/05/2026 : durée 5 ans retenue malgré l'avertissement juridique. Risques résiduels : (1) avocat de Michael peut refuser cette durée et exiger renégociation à 12-24 mois ; (2) si Michael signe puis attaque, juge réduira probablement à 12-24 mois mais Yvan aura potentiellement payé la contrepartie complète ; (3) coût estimé sur 5 ans : ~135 k€ pour un freelance à TJM 500 € / 15 j/mois. **À VALIDER par avocat avec ajustement de la contrepartie en conséquence.** Alternative recommandée par Claude : 24 mois + contrepartie ~50 k€, plus défendable.]
-
 11.5 **Liberté d'exercice.** Sous réserve des obligations résultant des articles 11.1 à 11.3, du respect strict des obligations de confidentialité (article 10) et de l'absence de conflit d'intérêts avéré, le Prestataire reste libre d'exercer toute autre activité professionnelle, y compris au profit de clients du secteur informatique.
 
-11.6 **Sanctions des manquements aux articles 11.1 et 11.2.** Toute violation des obligations de non-sollicitation prévues aux articles 11.1 et 11.2 ouvre droit pour PDLConsulting, à titre de clause pénale et sans préjudice de la réparation du préjudice supérieur, à une somme forfaitaire de **trente mille euros (30 000 €)** par manquement caractérisé. Cette clause pénale s'ajoute, le cas échéant, à la clause pénale prévue à l'article 6.2 du NDA.
+11.6 **Sanctions des manquements aux articles 11.1, 11.2 et 11.4 — Indemnisation forfaitaire.** Conformément aux principes du common law en matière de « liquidated damages » (notamment *Cavendish Square Holding BV v Talal El Makdessi* [2015] UKSC 67, suivie par les juridictions mauriciennes en matière commerciale), les Parties conviennent qu'en cas de violation des obligations de non-sollicitation (articles 11.1 et 11.2) ou de non-concurrence post-contractuelle (article 11.4), le Prestataire sera redevable, à titre d'indemnisation forfaitaire représentant une estimation raisonnable et de bonne foi du préjudice minimal subi par PDLConsulting, d'une somme de **trente mille euros (30 000 €)** par manquement caractérisé. Cette indemnisation forfaitaire :
+
+  a) S'ajoute, le cas échéant, à l'indemnisation forfaitaire prévue à l'article 6.2 du NDA ;
+  b) Ne fait pas obstacle à ce que PDLConsulting demande la réparation du préjudice réellement subi lorsque celui-ci excède ce montant.
+
+  Le caractère raisonnable de ce montant est apprécié au regard des intérêts légitimes protégés (relations commerciales, base utilisateurs, équipe interne) et de la difficulté pratique d'établir précisément le préjudice résultant d'une sollicitation déloyale.
 
 ---
 
@@ -368,7 +387,7 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
 
 ## Article 15 — Force majeure
 
-15.1 Aucune des Parties ne pourra être tenue responsable de l'inexécution ou du retard d'exécution de ses obligations en cas de survenance d'un événement de force majeure au sens de l'article 1218 du Code civil français, étant précisé que les difficultés financières ou organisationnelles propres à une Partie ne constituent pas un cas de force majeure.
+15.1 Aucune des Parties ne pourra être tenue responsable de l'inexécution ou du retard d'exécution de ses obligations en cas de survenance d'un événement de force majeure (« force majeure », « act of God ») au sens du droit mauricien et des principes du common law applicables, à savoir tout événement extérieur, imprévisible et irrésistible, échappant au contrôle raisonnable de la Partie qui l'invoque (notamment : catastrophes naturelles, troubles civils, conflits armés, décisions impératives d'autorités gouvernementales rendant l'exécution impossible). Sont expressément exclus de la qualification de force majeure les difficultés financières ou organisationnelles propres à une Partie, ainsi que les défaillances techniques susceptibles d'être prévenues par les diligences raisonnables d'un professionnel.
 
 15.2 La Partie affectée notifie sans délai l'autre Partie de la survenance de l'événement de force majeure et met en œuvre tous moyens raisonnables pour en limiter les effets. Si l'empêchement persiste plus de **trente (30) jours**, chaque Partie peut résilier le Contrat sans indemnité.
 
@@ -398,9 +417,9 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
 - Pour PDLConsulting : [À COMPLÉTER : email + adresse postale]
 - Pour le Prestataire : [À COMPLÉTER]
 
-16.8 **Loi applicable.** Le Contrat est régi et interprété selon le **droit français**.
+16.8 **Loi applicable.** Le présent Contrat est régi et interprété conformément au **droit de la République de Maurice**, en particulier à ses dispositions de droit commercial et des sociétés (Companies Act 2001), au droit de la propriété intellectuelle (Copyright Act 1997, Industrial Property Act 2019), au Data Protection Act 2017, ainsi qu'au Code civil mauricien pour les matières civiles non couvertes par les lois commerciales spéciales. Les Parties confirment expressément avoir choisi le droit mauricien comme droit applicable au sens des règles de droit international privé applicables.
 
-16.9 **Juridiction.** Tout litige relatif à la formation, l'exécution, l'interprétation ou la résiliation du Contrat, qui n'aurait pu être résolu à l'amiable, sera de la compétence exclusive du **Tribunal de commerce de Paris**, nonobstant pluralité de défendeurs ou appel en garantie.
+16.9 **Juridiction.** Tout litige relatif à la formation, l'exécution, l'interprétation ou la résiliation du présent Contrat, qui n'aurait pu être résolu à l'amiable, sera soumis à la compétence exclusive de la **Cour suprême de la République de Maurice (Supreme Court of Mauritius — Commercial Division)**, nonobstant pluralité de défendeurs ou appel en garantie. Les Parties renoncent expressément à se prévaloir de toute autre juridiction étatique, sans préjudice de la possibilité, pour PDLConsulting, de saisir toute juridiction compétente d'une mesure conservatoire ou injonctive en référé.
 
 ---
 

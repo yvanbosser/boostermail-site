@@ -108,7 +108,13 @@ Conformément à l'article 28 du RGPD, le Prestataire s'engage à :
   a) Lieu(x) de traitement déclaré(s) : [À COMPLÉTER : ex. France métropolitaine] ;
   b) Outils cloud utilisés (le cas échéant) et leurs juridictions : [À COMPLÉTER ou « néant »].
 
-3.3 [Cas spécifique mauricien : PDLConsulting étant établie à l'Île Maurice, qui ne bénéficie pas d'une décision d'adéquation de la Commission européenne au titre de l'article 45 du RGPD, les transferts de données personnelles vers PDLConsulting sont encadrés par les Clauses Contractuelles Types adoptées par la Décision d'exécution (UE) 2021/914 de la Commission du 4 juin 2021. PDLConsulting confirme la souscription à ces clauses dans le cadre de sa propre conformité.]
+3.3 **Cas spécifique mauricien et étatsunien.** PDLConsulting étant établie à la République de Maurice et le Prestataire étant établi aux États-Unis, et aucun de ces deux pays ne bénéficiant à ce jour d'une décision générale d'adéquation de la Commission européenne au titre de l'article 45 du RGPD, les flux de données personnelles relevant du RGPD entre PDLConsulting et le Prestataire sont encadrés :
+
+  a) **Côté droit européen** : par les Clauses Contractuelles Types (CCT) adoptées par la Décision d'exécution (UE) 2021/914 de la Commission européenne du 4 juin 2021, lorsque le traitement entre dans le champ d'application territorial du RGPD (article 3) ;
+  b) **Côté droit mauricien** : par les dispositions du **Mauritius Data Protection Act 2017** (DPA 2017), qui transpose en droit mauricien les principes du RGPD et constitue le cadre de référence pour la protection des données personnelles à Maurice ;
+  c) **Côté droit étatsunien** : par les dispositions applicables au Prestataire en sa qualité de société du Delaware, étant précisé que le Prestataire reconnaît être informé de l'extraterritorialité du RGPD pour les traitements visant des personnes situées dans l'UE.
+
+  Le Prestataire confirme avoir pris connaissance des CCT précitées et accepte qu'elles s'appliquent par référence aux flux de données personnelles relevant du RGPD effectués dans le cadre du présent Accord.
 
 ---
 
@@ -153,9 +159,9 @@ Conformément à l'article 28 du RGPD, le Prestataire s'engage à :
 
 ## Article 8 — Dispositions générales
 
-8.1 **Loi applicable.** Le présent Accord est régi par le **droit français**, en cohérence avec le Contrat de Prestation principal.
+8.1 **Loi applicable.** Le présent Accord est régi par le **droit de la République de Maurice**, et notamment par le Mauritius Data Protection Act 2017, en cohérence avec le Contrat de Prestation principal. Le présent Accord intègre par ailleurs, par référence, les obligations résultant du Règlement (UE) 2016/679 (RGPD) lorsque celui-ci s'applique au traitement (notamment lorsque les personnes concernées sont situées dans l'Union européenne, article 3 RGPD).
 
-8.2 **Juridiction.** Tout litige relatif au présent Accord relève de la compétence exclusive du **Tribunal de commerce de Paris**.
+8.2 **Juridiction.** Tout litige relatif au présent Accord relève de la compétence exclusive de la **Cour suprême de la République de Maurice (Supreme Court of Mauritius — Commercial Division)**.
 
 8.3 **Articulation avec le Contrat principal.** En cas de contradiction entre les stipulations du présent Accord et celles du Contrat de Prestation principal, **les stipulations du présent Accord prévalent** pour ce qui concerne le traitement des données personnelles.
 

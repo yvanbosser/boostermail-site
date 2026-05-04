@@ -152,7 +152,7 @@ Il est convenu et arrêté ce qui suit.
 
 4.2 Tout droit de propriété intellectuelle attaché aux Informations Confidentielles, qu'il soit existant ou futur, demeure la propriété pleine et entière de PDLConsulting.
 
-4.3 **Productions intellectuelles antérieures à un contrat de prestation.** Dans l'hypothèse où le Récipiendaire produirait, dans le cadre des échanges préalables à la signature d'un éventuel contrat de prestation et avant celle-ci, toute création intellectuelle (notamment : code source, scripts, schémas, prompts, extraits de texte rédigés à la demande ou sur invitation de PDLConsulting), il en cède d'ores et déjà l'intégralité des droits patrimoniaux à PDLConsulting, à titre exclusif et définitif, dans les conditions de l'article L. 131-3 du Code de la propriété intellectuelle français :
+4.3 **Productions intellectuelles antérieures à un contrat de prestation.** Dans l'hypothèse où le Récipiendaire produirait, dans le cadre des échanges préalables à la signature d'un éventuel contrat de prestation et avant celle-ci, toute création intellectuelle (notamment : code source, scripts, schémas, prompts, extraits de texte rédigés à la demande ou sur invitation de PDLConsulting), il en cède d'ores et déjà l'intégralité des droits patrimoniaux à PDLConsulting, à titre exclusif et définitif, conformément aux dispositions du **Copyright Act 1997 de la République de Maurice** (en particulier ses articles relatifs aux œuvres réalisées sur commande / « commissioned works ») et de l'**Industrial Property Act 2019** :
 
   a) **Droits cédés** : reproduction, représentation, adaptation, modification, traduction, distribution, commercialisation, sous-licence, cession à un tiers ;
   b) **Supports** : tous supports actuels ou futurs ;
@@ -174,7 +174,7 @@ Il est convenu et arrêté ce qui suit.
 
   a) Pendant toute la durée des échanges entre les Parties ;
   b) Pendant une période de **dix (10) ans** à compter de la fin de leurs relations, quelle qu'en soit la cause, pour les Informations Confidentielles ne constituant pas des secrets d'affaires ;
-  c) **Sans limitation de durée**, et tant que les informations conservent leur caractère secret, pour les Informations Confidentielles constituant des **secrets d'affaires** au sens des articles L. 151-1 et suivants du Code de commerce français (issus de la loi n° 2018-670 du 30 juillet 2018 transposant la directive (UE) 2016/943 sur la protection des savoir-faire et des informations commerciales non divulgués).
+  c) **Sans limitation de durée**, et tant que les informations conservent leur caractère secret, pour les Informations Confidentielles constituant des **secrets d'affaires** (« trade secrets ») au sens du droit mauricien et des principes du common law applicables, à savoir toute information : (i) qui n'est pas généralement connue ni aisément accessible aux personnes du secteur traitant habituellement ce type d'informations, (ii) qui revêt une valeur commerciale du fait de son caractère secret, et (iii) qui a fait l'objet de mesures de protection raisonnables par son détenteur — définition conforme tant à l'article 39 de l'Accord ADPIC qu'à la pratique usuelle du droit commercial mauricien.
 
   Sont notamment qualifiés de secrets d'affaires, sans que cette liste soit limitative : le code source du logiciel BoosterMail, les algorithmes propriétaires, les modèles de prompts, les méthodes de scoring redactionnel, les paramétrages d'IA, les bases de connaissances internes, les listes de clients et prospects, les méthodes commerciales et opérationnelles non publiques.
 
@@ -190,9 +190,17 @@ Il est convenu et arrêté ce qui suit.
 
 ## Article 6 — Sanctions
 
-6.1 **Indemnisation.** Tout manquement aux obligations du présent accord ouvre droit pour PDLConsulting à la réparation intégrale du préjudice subi (préjudice direct, indirect, perte de chance, atteinte à l'image), sans préjudice de toute autre voie de droit, et notamment des actions sur le fondement des articles L. 152-1 et suivants du Code de commerce relatifs à la protection des secrets d'affaires.
+6.1 **Indemnisation.** Tout manquement aux obligations du présent accord ouvre droit pour PDLConsulting à la réparation intégrale du préjudice subi (préjudice direct, indirect, perte de chance, atteinte à l'image), sans préjudice de toute autre voie de droit, et notamment des actions au titre de la **concurrence déloyale** (« unfair competition », « passing off »), de la **violation de secrets d'affaires** (« breach of confidence ») et de toute autre cause d'action reconnue par le droit mauricien et par les principes du common law applicables à Maurice.
 
-6.2 **Clause pénale.** En cas de manquement caractérisé du Récipiendaire à l'une quelconque des obligations résultant des articles 2 (confidentialité), 4 (propriété) ou 5.3 (restitution / destruction) du présent accord, ce dernier sera redevable, à titre de clause pénale et **sans préjudice de la réparation du préjudice supérieur**, d'une somme forfaitaire de **cinquante mille euros (50 000 €)** par manquement caractérisé.
+6.2 **Indemnisation forfaitaire (« liquidated damages »).** Les Parties reconnaissent expressément que les obligations du Récipiendaire au titre du présent accord protègent des intérêts légitimes essentiels de PDLConsulting (confidentialité du code source, des données, des méthodes propriétaires), dont la violation cause un préjudice difficilement chiffrable mais substantiel. En conséquence, et conformément aux principes posés par la jurisprudence du common law en matière de « liquidated damages » (notamment l'arrêt *Cavendish Square Holding BV v Talal El Makdessi* [2015] UKSC 67, dont la solution est suivie par les juridictions mauriciennes en matière commerciale), les Parties conviennent d'une **indemnisation forfaitaire d'un montant de cinquante mille euros (50 000 €) par manquement caractérisé** aux obligations résultant des articles 2 (confidentialité, rétro-ingénierie, savoir-faire, données dérivées, training, IA), 4 (propriété) ou 5.3 (restitution / destruction) du présent accord.
+
+  Ce montant a été déterminé par les Parties comme une **estimation raisonnable et de bonne foi** (« genuine pre-estimate ») du préjudice minimal qu'engendrerait chaque manquement caractérisé, compte tenu :
+  a) De la valeur stratégique des informations protégées (code source d'un produit IA propriétaire, base de données utilisateurs, méthodes algorithmiques) ;
+  b) Des coûts directs de remédiation (audit, sécurisation, communication, conseils juridiques) ;
+  c) De la perte de spécificité concurrentielle subie par PDLConsulting du fait de la divulgation ;
+  d) De la difficulté pratique d'établir précisément le préjudice réel par voie d'expertise, dans un délai utile au rétablissement de la situation.
+
+  La présente indemnisation forfaitaire ne fait pas obstacle à ce que PDLConsulting demande la réparation intégrale du préjudice réellement subi lorsque celui-ci excède ce montant forfaitaire, dans les conditions du droit commun mauricien.
 
   Constitue notamment un manquement caractérisé, à titre indicatif et non limitatif :
   a) Toute divulgation, publication ou transmission non autorisée d'Informations Confidentielles à un tiers, quel qu'en soit le canal ;
@@ -203,7 +211,13 @@ Il est convenu et arrêté ce qui suit.
 
   Les Parties conviennent expressément que ce montant correspond à une évaluation forfaitaire raisonnable du préjudice minimal subi par PDLConsulting du fait de chaque manquement caractérisé, compte tenu de la nature stratégique des Informations Confidentielles et des coûts de remédiation. Cette clause pénale ne fait pas obstacle à ce que PDLConsulting demande la réparation intégrale du préjudice réellement subi lorsque celui-ci excède ce montant forfaitaire.
 
-6.3 **Mesures conservatoires.** Le Récipiendaire reconnaît que la nature des Informations Confidentielles est telle que toute violation pourrait causer à PDLConsulting un préjudice irréparable, et qu'en conséquence PDLConsulting est fondée à solliciter de toute juridiction compétente toute mesure conservatoire (notamment référé-interdiction, séquestre, saisie-contrefaçon, saisie sur le fondement des articles L. 152-3 et suivants du Code de commerce relatifs à la protection des secrets d'affaires) en vue de faire cesser ou prévenir toute violation.
+6.3 **Mesures conservatoires (« interim and injunctive relief »).** Le Récipiendaire reconnaît expressément que la nature des Informations Confidentielles est telle que toute violation est susceptible de causer à PDLConsulting un **préjudice irréparable** (« irreparable harm ») non intégralement réparable par dommages-intérêts seuls. En conséquence, PDLConsulting est fondée à solliciter, devant la Cour suprême de la République de Maurice ou toute autre juridiction compétente saisie en référé, toutes mesures conservatoires ou injonctives appropriées, notamment :
+
+  a) Une injonction de cesser toute divulgation, utilisation ou communication non autorisée des Informations Confidentielles (« injunctive relief ») ;
+  b) Le séquestre ou la saisie des supports contenant les Informations Confidentielles ;
+  c) Toute mesure de divulgation forcée d'informations relatives à l'identité des destinataires de la divulgation litigieuse (« disclosure orders »).
+
+  Le Récipiendaire renonce expressément à invoquer toute exception tirée de la disponibilité d'une réparation par dommages-intérêts pour s'opposer à l'octroi de telles mesures conservatoires.
 
 ---
 
@@ -220,9 +234,9 @@ Il est convenu et arrêté ce qui suit.
 - Pour PDLConsulting : [À COMPLÉTER : email officiel, ex. legal@boostermail.ai]
 - Pour le Récipiendaire : [À COMPLÉTER]
 
-7.5 **Loi applicable.** Le présent accord est régi par le **droit français**.
+7.5 **Loi applicable.** Le présent accord est régi et interprété conformément au **droit de la République de Maurice**, en particulier à ses dispositions de droit commercial et des sociétés (Companies Act 2001), de droit de la propriété intellectuelle (Copyright Act 1997, Industrial Property Act 2019), de protection des données (Data Protection Act 2017), et au Code civil mauricien pour les matières civiles non couvertes par les lois commerciales spéciales.
 
-7.6 **Juridiction.** Tout litige relatif à la formation, l'exécution, l'interprétation ou la résiliation du présent accord, qui n'aurait pu être résolu à l'amiable, sera de la compétence exclusive du **Tribunal de commerce de Paris**, nonobstant pluralité de défendeurs ou appel en garantie.
+7.6 **Juridiction.** Tout litige relatif à la formation, l'exécution, l'interprétation ou la résiliation du présent accord, qui n'aurait pu être résolu à l'amiable, sera soumis à la compétence exclusive de la **Cour suprême de la République de Maurice (Supreme Court of Mauritius — Commercial Division)**, nonobstant pluralité de défendeurs ou appel en garantie. Les Parties renoncent expressément à se prévaloir de toute autre juridiction.
 
 ---
 
