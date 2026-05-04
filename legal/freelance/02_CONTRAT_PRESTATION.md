@@ -410,7 +410,47 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
 
 16.5 **Tolérance.** Le fait pour une Partie de tolérer un manquement de l'autre Partie à l'une de ses obligations ne saurait être interprété comme une renonciation à se prévaloir de cette obligation à l'avenir.
 
-16.6 **Cession.** Le Contrat est conclu intuitu personae à l'égard du Prestataire, qui ne peut le céder à un tiers sans l'accord écrit préalable de PDLConsulting. PDLConsulting peut céder librement le Contrat à toute société de son groupe ou à un tiers acquéreur de tout ou partie de son activité.
+16.6 **Cession et changement d'entité émettrice.**
+
+16.6.1 **Cession par le Prestataire.** Le Contrat est conclu *intuitu personae* à l'égard du Prestataire, qui ne peut le céder, en tout ou partie, à un tiers sans l'accord écrit et préalable de PDLConsulting. Toute cession non autorisée est nulle et non avenue.
+
+16.6.2 **Cession par PDLConsulting — Restructuration et changement d'entité émettrice.** Compte tenu du caractère évolutif de la structure juridique du Client (notamment dans la perspective d'opérations de levée de fonds, de restructuration internationale ou de réorganisation du groupe), PDLConsulting **se réserve expressément le droit de céder, transférer ou subroger** tout ou partie du présent Contrat, ainsi que l'intégralité des droits et obligations qui en résultent (y compris la propriété intellectuelle visée à l'article 9, les obligations de confidentialité, et l'ensemble des annexes), à :
+
+  a) Toute **société du même groupe** que PDLConsulting (filiale, société-sœur, société-mère, société holding, joint-venture contrôlée), à toute date et sans condition d'accord du Prestataire ;
+
+  b) Toute **nouvelle entité émettrice** créée par les actionnaires de PDLConsulting ou sous leur contrôle effectif, dans le cadre d'une réorganisation du groupe (par exemple : création d'une société holding au Royaume-Uni, aux États-Unis, en Irlande, à Singapour, ou dans toute autre juridiction jugée appropriée pour les besoins du développement commercial du produit BoosterMail) ;
+
+  c) Tout **tiers acquéreur** de tout ou partie de l'activité de PDLConsulting (cession d'actifs, cession de fonds de commerce, cession de l'intégralité du capital social, fusion, apport partiel d'actif), à toute date et sans condition d'accord du Prestataire.
+
+16.6.3 **Effets de la cession.** À compter de la date d'effet de la cession :
+
+  a) L'**entité cessionnaire** se substitue de plein droit à PDLConsulting dans l'ensemble de ses droits et obligations au titre du présent Contrat, sans qu'il soit besoin d'un autre acte ;
+
+  b) L'**ensemble des droits de propriété intellectuelle** cédés par le Prestataire au titre de l'article 9 sont automatiquement transférés à l'entité cessionnaire, sans rémunération supplémentaire du Prestataire et sans formalité additionnelle ;
+
+  c) Les **obligations de confidentialité** et de non-sollicitation du Prestataire bénéficient à l'entité cessionnaire et à ses ayants droit ;
+
+  d) L'**ensemble des annexes** (NDA, DPA, Charte sécurité, Annexe Mission) sont automatiquement transférés à l'entité cessionnaire dans les mêmes conditions ;
+
+  e) Le Prestataire est **informé par écrit** de la cession dans un délai raisonnable (au plus 30 jours après la date d'effet) avec l'identité, la juridiction de constitution, et les coordonnées de l'entité cessionnaire.
+
+16.6.4 **Adaptation de la loi applicable et de la juridiction en cas de changement d'entité émettrice.** Dans l'hypothèse d'une cession à une entité dont le siège social est situé hors de la République de Maurice (notamment au Royaume-Uni, aux États-Unis, en Irlande, à Singapour ou dans toute autre juridiction de common law ou compatible) :
+
+  a) La cession **n'emporte pas automatiquement modification** de la loi applicable (article 16.8) ni de la juridiction (article 16.9) du présent Contrat. Ces stipulations demeurent en vigueur sauf avenant écrit signé par les Parties (la nouvelle entité cessionnaire et le Prestataire) ;
+
+  b) Toutefois, l'entité cessionnaire peut **proposer au Prestataire**, par notification écrite, l'adaptation de la loi applicable et de la juridiction afin de les aligner sur la juridiction de son nouveau siège social. Le Prestataire s'engage à examiner cette proposition de bonne foi et à y répondre dans un délai de **trente (30) jours**. Le silence du Prestataire à l'expiration de ce délai vaut acceptation tacite de l'avenant proposé, dès lors que :
+    - La nouvelle juridiction proposée est une juridiction de **common law commercial reconnue** (Royaume-Uni, États-Unis, Irlande, Singapour, Hong Kong, Australie, Nouvelle-Zélande, Canada, ou toute autre juridiction du Commonwealth ou équivalente) ; et
+    - Les autres stipulations du Contrat (notamment les protections substantielles du Prestataire et de l'entité cessionnaire) demeurent inchangées ;
+
+  c) Le refus motivé du Prestataire d'accepter l'adaptation proposée à l'article 16.6.4 (b) ne constitue pas un manquement contractuel et n'ouvre pas droit à résiliation pour faute. Dans ce cas, le Contrat continue à être régi par la loi mauricienne et la juridiction prévue à l'article 16.9 ;
+
+  d) **Pour éviter tout doute** : la cession elle-même (au sens de l'article 16.6.2) demeure de plein droit, indépendamment de la question de l'adaptation de la loi applicable et de la juridiction, qui constitue une question distincte et postérieure.
+
+16.6.5 **Garantie de continuité.** L'entité cessionnaire garantit au Prestataire la continuité du Contrat dans les mêmes conditions que celles convenues avec PDLConsulting, sans que la cession puisse :
+
+  a) Modifier unilatéralement la rémunération du Prestataire (article 8) ;
+  b) Réduire les engagements de PDLConsulting au titre des contreparties (notamment l'article 11.4.4 sur la non-concurrence) ;
+  c) Allonger les délais de paiement convenus.
 
 16.7 **Notifications.** Toute notification au titre du Contrat est valablement faite par courrier électronique avec accusé de réception, ou par lettre recommandée avec accusé de réception, aux adresses suivantes :
 

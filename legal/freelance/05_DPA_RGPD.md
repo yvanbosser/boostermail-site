@@ -165,6 +165,16 @@ Conformément à l'article 28 du RGPD, le Prestataire s'engage à :
 
 8.3 **Articulation avec le Contrat principal.** En cas de contradiction entre les stipulations du présent Accord et celles du Contrat de Prestation principal, **les stipulations du présent Accord prévalent** pour ce qui concerne le traitement des données personnelles.
 
+8.4 **Cession et changement d'entité émettrice.** Le présent Accord suit le sort du Contrat de Prestation principal en cas de cession de celui-ci dans les conditions de son article 16.6 (cession à une société du groupe, à une nouvelle entité émettrice ou à un tiers acquéreur). À la date d'effet de la cession :
+
+  a) L'entité cessionnaire devient **Responsable de Traitement** au titre du présent Accord en lieu et place de PDLConsulting, et hérite de l'ensemble des droits et obligations correspondants ;
+
+  b) L'ensemble des données personnelles, des Données Dérivées et des journaux d'activité de traitement sont transférés à l'entité cessionnaire dans les conditions garantissant la continuité de la conformité réglementaire (RGPD, Mauritius DPA 2017, et tout autre cadre applicable) ;
+
+  c) Le Sous-Traitant est informé par écrit de la cession dans un délai raisonnable, avec l'identité de l'entité cessionnaire et la confirmation que les obligations RGPD/DPA continuent de s'appliquer ;
+
+  d) Si l'entité cessionnaire est établie hors de l'Union européenne et de la République de Maurice, les Parties conviennent de signer, le cas échéant, des Clauses Contractuelles Types européennes complémentaires pour encadrer les nouveaux flux internationaux de données personnelles.
+
 ---
 
 ## Signatures

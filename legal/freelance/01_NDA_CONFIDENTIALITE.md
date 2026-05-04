@@ -229,6 +229,16 @@ Il est convenu et arrêté ce qui suit.
 
 7.3 **Modifications.** Toute modification du présent accord requiert un avenant écrit signé par les deux Parties.
 
+7.3 bis **Cession et changement d'entité émettrice.** Les Parties conviennent que :
+
+  a) PDLConsulting peut, sans accord préalable du Récipiendaire, **céder ou transférer le bénéfice du présent accord** à toute société de son groupe, à toute nouvelle entité émettrice créée par ses actionnaires ou sous leur contrôle effectif (notamment dans le cadre d'une restructuration internationale ou d'une levée de fonds), ainsi qu'à tout tiers acquéreur de tout ou partie de son activité ;
+
+  b) À la date d'effet de la cession, l'**entité cessionnaire** se substitue de plein droit à PDLConsulting dans l'intégralité de ses droits au titre du présent accord, y compris la propriété des Informations Confidentielles et le bénéfice des obligations de confidentialité, de non-réutilisation et de protection des secrets d'affaires souscrites par le Récipiendaire ;
+
+  c) Le Récipiendaire est informé par écrit de la cession dans un délai raisonnable et reconnaît dès à présent que ses obligations au titre du présent accord bénéficient automatiquement à l'entité cessionnaire dans les mêmes conditions ;
+
+  d) Les stipulations relatives à la loi applicable et à la juridiction (articles 7.5 et 7.6) demeurent inchangées à la suite de la cession, sauf avenant écrit signé par les Parties (l'entité cessionnaire et le Récipiendaire) postérieurement à la cession.
+
 7.4 **Notifications.** Toute notification au titre du présent accord sera valablement adressée par courrier électronique avec accusé de réception aux adresses suivantes :
 
 - Pour PDLConsulting : [À COMPLÉTER : email officiel, ex. legal@boostermail.ai]

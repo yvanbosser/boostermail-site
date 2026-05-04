@@ -1,6 +1,6 @@
 # Pack juridique freelance — README
 
-> **Dernière mise à jour** : 04/05/2026 (v3.3 — bascule droit français → droit mauricien (common law) + intégration modalités paiement Mikadb)
+> **Dernière mise à jour** : 04/05/2026 (v3.4 — anticipation changement d'entité émettrice (futur UK Ltd, levée de fonds))
 > **Société émettrice** : Pied dans l'eau Consulting Ltd (PDLConsulting), 26 avenue Surcouf, Quatre Bornes, Mauritius
 > **Usage** : modèles contractuels destinés au recrutement de prestataires indépendants (freelances) intervenant sur le produit BoosterMail
 
@@ -149,6 +149,34 @@ La conversion du pack vers le droit mauricien a été effectuée avec rigueur, m
 Création initiale du pack (6 documents : README + NDA + Contrat + Annexe Mission + Charte sécurité + DPA).
 
 ---
+
+### v3.4 — 04/05/2026 (anticipation changement d'entité émettrice)
+
+Anticipation d'une réorganisation future du groupe BoosterMail (par exemple : création d'une société holding au Royaume-Uni pour faciliter une levée de fonds auprès de fonds anglo-saxons, ou de toute autre restructuration internationale).
+
+**Modifications du Contrat (`02_CONTRAT_PRESTATION.md`)** :
+
+- **Article 16.6 entièrement réécrit** (5 sous-articles 16.6.1 à 16.6.5) :
+  - 16.6.1 : cession par le Prestataire impossible sans accord écrit
+  - 16.6.2 : cession **libre** par PDLConsulting à toute société du groupe, toute nouvelle entité émettrice (UK Ltd, US Inc., Irish Ltd, Singapore Pte Ltd…), ou tout tiers acquéreur — **sans accord du Prestataire**
+  - 16.6.3 : effets de la cession (substitution de plein droit, transfert auto des droits IP, continuité confidentialité, transfert auto des annexes)
+  - 16.6.4 : **mécanique d'adaptation de la loi applicable et de la juridiction** : pas automatique, par avenant. Le Prestataire examine de bonne foi sous 30 jours ; silence vaut acceptation tacite si la nouvelle juridiction est de common law (UK, US, Irlande, Singapour, Hong Kong, Australie, Nouvelle-Zélande, Canada). Refus motivé possible — pas de manquement
+  - 16.6.5 : garantie de continuité (rémunération + contreparties non-concurrence + délais de paiement préservés)
+
+**Modifications du NDA (`01_NDA_CONFIDENTIALITE.md`)** :
+
+- **Article 7.3 bis nouveau** : clause miroir sur la cession et le changement d'entité émettrice. Le NDA suit le sort du Contrat principal. Loi applicable et juridiction inchangées sauf avenant.
+
+**Modifications du DPA (`05_DPA_RGPD.md`)** :
+
+- **Article 8.4 nouveau** : clause miroir RGPD/DPA. L'entité cessionnaire devient Responsable de Traitement en lieu et place de PDLConsulting, transfert des données personnelles avec continuité conformité, possibilité de signer de nouvelles CCT européennes si besoin.
+
+**Bénéfices stratégiques** :
+
+- **Liberté totale de réorganisation** : Yvan peut créer une UK Ltd ou un autre véhicule pour une levée de fonds sans devoir renégocier les contrats freelance
+- **Simplicité due diligence pour investisseurs** : un VC qui auditera la chain of title des contrats verra une cession claire, propre, sans accord requis du freelance
+- **Protection du Prestataire préservée** : la cession ne peut pas réduire ses droits acquis (rémunération, contrepartie non-concurrence, délais de paiement)
+- **Cohérence juridique maintenue** : pas de bascule automatique de la loi applicable, ce qui pourrait être préjudiciable à l'une des Parties
 
 ### v3.3 — 04/05/2026 (bascule droit mauricien + modalités paiement Mikadb)
 
