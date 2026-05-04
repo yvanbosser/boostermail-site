@@ -15,7 +15,7 @@ Ci-après dénommée « **PDLConsulting** » ou la « **Société** »,
 
 **Et :**
 
-**Mikadb LLC**, *Limited Liability Company* de droit de l'État du Delaware (États-Unis d'Amérique), dont le siège social est sis 16192 Coastal Highway, Lewes, Delaware 19958, Sussex County, USA, immatriculée auprès du *Delaware Division of Corporations* sous le **Delaware State File Number 10036505** et identifiée auprès de l'*Internal Revenue Service* sous l'**EIN 38-4339760**, représentée par [À COMPLÉTER : Monsieur/Madame NOM Prénom] en qualité de [À COMPLÉTER : Manager / Member / Authorized Representative] dûment habilité(e) aux fins des présentes,
+**Mikadb LLC**, *Limited Liability Company* de droit de l'État du Delaware (États-Unis d'Amérique), dont le siège social est sis 16192 Coastal Highway, Lewes, Delaware 19958, Sussex County, USA, immatriculée auprès du *Delaware Division of Corporations* sous le **Delaware State File Number 10036505** et identifiée auprès de l'*Internal Revenue Service* sous l'**EIN 38-4339760**, représentée par Monsieur **Michael de Brauwer** en qualité de **Manager** dûment habilité aux fins des présentes,
 
 Ci-après dénommée « **Mikadb** » ou le « **Récipiendaire** » ou le « **Prestataire** »,
 
@@ -256,8 +256,8 @@ Fait en deux (2) exemplaires originaux, à Grand Baie (République de Maurice), 
 
 | Pour PDLConsulting | Pour Mikadb LLC |
 |---|---|
-| Yvan BOSSER | [À COMPLÉTER : NOM Prénom] |
-| Directeur | [À COMPLÉTER : Manager / Member] |
+| Yvan BOSSER | Michael de Brauwer |
+| Directeur | Manager |
 | Signature : | Signature : |
 | | |
 | | |

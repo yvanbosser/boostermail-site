@@ -14,7 +14,7 @@ Ci-après dénommée « **PDLConsulting** » ou le « **Client** »,
 
 **Et :**
 
-**Mikadb LLC**, *Limited Liability Company* de droit de l'État du Delaware (États-Unis d'Amérique), dont le siège social est sis 16192 Coastal Highway, Lewes, Delaware 19958, Sussex County, USA, immatriculée auprès du *Delaware Division of Corporations* sous le **Delaware State File Number 10036505** et identifiée auprès de l'*Internal Revenue Service* sous l'**EIN 38-4339760**, représentée par [À COMPLÉTER : Monsieur/Madame NOM Prénom] en qualité de [À COMPLÉTER : Manager / Member / Authorized Representative] dûment habilité(e) aux fins des présentes,
+**Mikadb LLC**, *Limited Liability Company* de droit de l'État du Delaware (États-Unis d'Amérique), dont le siège social est sis 16192 Coastal Highway, Lewes, Delaware 19958, Sussex County, USA, immatriculée auprès du *Delaware Division of Corporations* sous le **Delaware State File Number 10036505** et identifiée auprès de l'*Internal Revenue Service* sous l'**EIN 38-4339760**, représentée par Monsieur **Michael de Brauwer** en qualité de **Manager** dûment habilité aux fins des présentes,
 
 Ci-après dénommée « **Mikadb** » ou le « **Prestataire** »,
 
@@ -100,7 +100,7 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
 
 4.5 **Sous-traitance.** Le Prestataire ne peut sous-traiter tout ou partie de l'exécution des Prestations à un tiers sans l'accord écrit et préalable de PDLConsulting. En cas d'autorisation, le Prestataire demeure pleinement responsable des prestations sous-traitées et garantit que le sous-traitant est tenu à des obligations au moins équivalentes à celles du présent Contrat (notamment en matière de confidentialité et de propriété intellectuelle).
 
-4.6 **Intervenant nommément désigné (clause « key man »).** Lorsque le Prestataire est une société, les Prestations doivent être exécutées personnellement par **[À COMPLÉTER : NOM Prénom de l'intervenant nommément désigné]**, dont les compétences et l'expérience ont déterminé le choix de PDLConsulting. Le Prestataire s'interdit d'affecter à l'exécution des Prestations toute autre personne sans l'accord écrit et préalable de PDLConsulting, qui pourra refuser librement et sans avoir à motiver sa décision. En cas d'indisponibilité prolongée (plus de quinze (15) jours calendaires) de l'intervenant désigné, le Prestataire en informe PDLConsulting sans délai, et les Parties conviennent ensemble des modalités de poursuite ou de suspension des Prestations.
+4.6 **Intervenant nommément désigné (clause « key man »).** Lorsque le Prestataire est une société, les Prestations doivent être exécutées personnellement par **Monsieur Michael de Brauwer**, dont les compétences et l'expérience ont déterminé le choix de PDLConsulting. Le Prestataire s'interdit d'affecter à l'exécution des Prestations toute autre personne sans l'accord écrit et préalable de PDLConsulting, qui pourra refuser librement et sans avoir à motiver sa décision. En cas d'indisponibilité prolongée (plus de quinze (15) jours calendaires) de l'intervenant désigné, le Prestataire en informe PDLConsulting sans délai, et les Parties conviennent ensemble des modalités de poursuite ou de suspension des Prestations.
 
 4.7 **Transparence sur les missions parallèles.** Le Prestataire informe spontanément PDLConsulting de toute mission, en cours ou en projet, qu'il exerce ou envisage d'exercer pour le compte d'un tiers exerçant une activité dans le domaine du logiciel, de l'intelligence artificielle, du traitement automatique de langage ou du courrier électronique, et qui serait susceptible de générer un conflit d'intérêts avec les Prestations objet du présent Contrat. PDLConsulting peut alors, dans un délai raisonnable, soit donner son accord écrit sur la poursuite simultanée des missions, soit demander au Prestataire de choisir entre les deux engagements, soit résilier le Contrat dans les conditions de l'article 13.
 
@@ -469,8 +469,8 @@ Fait en deux (2) exemplaires originaux, à Grand Baie (République de Maurice), 
 
 | Pour PDLConsulting | Pour Mikadb LLC |
 |---|---|
-| Yvan BOSSER | [À COMPLÉTER : NOM Prénom] |
-| Directeur | [À COMPLÉTER : Manager / Member] |
+| Yvan BOSSER | Michael de Brauwer |
+| Directeur | Manager |
 | Signature : | Signature : |
 | | |
 | | |

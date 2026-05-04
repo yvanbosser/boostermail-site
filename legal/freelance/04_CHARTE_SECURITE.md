@@ -157,7 +157,7 @@ Fait à Grand Baie (République de Maurice), le [date].
 
 | Pour PDLConsulting | Pour Mikadb LLC |
 |---|---|
-| Yvan BOSSER | [À COMPLÉTER : NOM Prénom] |
-| Directeur | [À COMPLÉTER : Manager / Member] |
+| Yvan BOSSER | Michael de Brauwer |
+| Directeur | Manager |
 | Signature : | Signature : |
 | Date : | Date : |
