@@ -14,31 +14,6 @@ Tu rejoins le projet en tant que prestataire indépendant. Ce document te donne 
 
 ---
 
-## 0 — Avant de coder une seule ligne (juridique + accès)
-
-### 0.1 Documents à signer
-
-Aucun accès au code, à la documentation interne ou aux systèmes ne peut t'être donné avant la signature des documents suivants (dans l'ordre) :
-
-| # | Document | Rôle |
-|---|---|---|
-| 1 | **NDA (Accord de confidentialité)** | Protection des informations confidentielles avant tout partage |
-| 2 | **Contrat de prestation** | Cadre commercial et juridique de la mission |
-| 3 | **Annexe Mission n° 1** | Périmètre précis de ta première mission |
-| 4 | **Charte de sécurité informatique** | Règles techniques (MFA, no force-push, etc.) |
-| 5 | **DPA RGPD** *(conditionnel)* | Si ta mission t'amène à accéder à des données utilisateurs réelles |
-
-Les modèles te seront transmis depuis `legal/freelance/word/`. Lis le `README.md` du dossier en premier.
-
-### 0.2 Pièces à fournir
-
-- Pièce d'identité en cours de validité
-- Justificatif d'immatriculation à jour (extrait équivalent K-Bis pour Mikadb LLC : *Delaware Certificate of Good Standing* récent ou équivalent)
-- Attestation d'assurance Responsabilité Civile Professionnelle en cours de validité
-- RIB ou IBAN de la structure (compte au nom de Mikadb LLC, pas un compte personnel)
-
----
-
 ## 1 — Contexte produit en 5 minutes
 
 BoosterMail est un assistant email qui :
@@ -345,9 +320,6 @@ Pose tes **questions tôt et fréquemment** — la pire erreur est de coder une 
 
 ## 10 — Premiers jours : checklist
 
-- [ ] Documents juridiques signés (NDA + Contrat + Annexe Mission + Charte sécurité)
-- [ ] Pièces fournies à PDLConsulting (identité, immatriculation, RC pro, RIB)
-- [ ] Acompte 50 % reçu (selon Contrat art. 8.5)
 - [ ] Compte GitHub Collaborator activé sur le repo
 - [ ] Repo cloné en local
 - [ ] `config.json` créé et configuré avec tes clés perso
