@@ -153,10 +153,11 @@ Le Prestataire intervient sur un produit logiciel (BoosterMail) qui traite des d
 
 Le Prestataire reconnaît avoir lu et accepté l'intégralité de la présente Charte de Sécurité Informatique, qu'il s'engage à respecter scrupuleusement.
 
-Fait à [À COMPLÉTER], le [date].
+Fait à Grand Baie (République de Maurice), le [date].
 
-| Pour PDLConsulting | Pour le Prestataire |
+| Pour PDLConsulting | Pour Mikadb LLC |
 |---|---|
-| Yvan BOSSER | [NOM Prénom] |
+| Yvan BOSSER | [À COMPLÉTER : NOM Prénom] |
+| Directeur | [À COMPLÉTER : Manager / Member] |
 | Signature : | Signature : |
 | Date : | Date : |

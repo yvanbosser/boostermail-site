@@ -9,15 +9,15 @@
 
 **Entre :**
 
-**La société Pied dans l'eau Consulting Ltd**, société de droit mauricien (Domestic Company), dont le siège social est sis 26 avenue Surcouf, Quatre Bornes, République de Maurice, immatriculée au Registre des Sociétés de Maurice sous le numéro [À COMPLÉTER], représentée par Monsieur Yvan BOSSER en qualité de Directeur,
+**La société Pied dans l'eau Consulting Ltd** (« PDLConsulting »), société de droit mauricien (Domestic Company), dont le siège social est sis 26 avenue Surcouf, Quatre Bornes, République de Maurice, immatriculée au Registrar of Companies de Maurice sous le numéro **BRN C22188347**, représentée par Monsieur Yvan BOSSER en qualité de Directeur,
 
 Ci-après dénommée « **PDLConsulting** » ou le « **Responsable de Traitement** »,
 
 **Et :**
 
-**[NOM PRÉNOM ou Société Freelance]**, [statut juridique et coordonnées],
+**Mikadb LLC**, *Limited Liability Company* de droit de l'État du Delaware (États-Unis d'Amérique), dont le siège social est sis 16192 Coastal Highway, Lewes, Delaware 19958, Sussex County, USA, immatriculée auprès du *Delaware Division of Corporations* sous le **Delaware State File Number 10036505** et identifiée auprès de l'*Internal Revenue Service* sous l'**EIN 38-4339760**, représentée par [À COMPLÉTER : Monsieur/Madame NOM Prénom] en qualité de [À COMPLÉTER : Manager / Member / Authorized Representative],
 
-Ci-après dénommé(e) le « **Prestataire** » ou le « **Sous-Traitant Ultérieur** »,
+Ci-après dénommée « **Mikadb** » ou le « **Prestataire** » ou le « **Sous-Traitant Ultérieur** »,
 
 Ci-après désignés ensemble les « **Parties** ».
 
@@ -105,8 +105,8 @@ Conformément à l'article 28 du RGPD, le Prestataire s'engage à :
 
 3.2 Le Prestataire informe PDLConsulting du lieu effectif d'hébergement et de traitement des données personnelles. À ce titre, il indique sa résidence professionnelle et l'emplacement de ses équipements de travail :
 
-  a) Lieu(x) de traitement déclaré(s) : [À COMPLÉTER : ex. France métropolitaine] ;
-  b) Outils cloud utilisés (le cas échéant) et leurs juridictions : [À COMPLÉTER ou « néant »].
+  a) Lieu(x) de traitement déclaré(s) : **États-Unis (Delaware)** au siège social de Mikadb LLC, et **République de Maurice** au siège social de PDLConsulting ; tout autre lieu de traitement effectif (notamment toute juridiction de résidence du ou des intervenants nommément désignés au sens de l'article 4.6 du Contrat principal) doit être préalablement déclaré à PDLConsulting ;
+  b) Outils cloud utilisés (le cas échéant) et leurs juridictions : [À COMPLÉTER par le Prestataire avant signature — exemples typiques : GitHub (USA), Vercel (USA), AWS (région à préciser), Cloudflare (USA / global), services Google Cloud (région à préciser). Pour chaque outil, vérifier la conformité RGPD et l'existence d'un DPA fournisseur applicable].
 
 3.3 **Cas spécifique mauricien et étatsunien.** PDLConsulting étant établie à la République de Maurice et le Prestataire étant établi aux États-Unis, et aucun de ces deux pays ne bénéficiant à ce jour d'une décision générale d'adéquation de la Commission européenne au titre de l'article 45 du RGPD, les flux de données personnelles relevant du RGPD entre PDLConsulting et le Prestataire sont encadrés :
 
@@ -179,11 +179,11 @@ Conformément à l'article 28 du RGPD, le Prestataire s'engage à :
 
 ## Signatures
 
-Fait en deux (2) exemplaires originaux, à [À COMPLÉTER], le [date].
+Fait en deux (2) exemplaires originaux, à Grand Baie (République de Maurice), le [date].
 
-| Pour PDLConsulting (Responsable de Traitement) | Pour le Prestataire (Sous-Traitant) |
+| Pour PDLConsulting (Responsable de Traitement) | Pour Mikadb LLC (Sous-Traitant) |
 |---|---|
-| Yvan BOSSER | [NOM Prénom] |
-| Directeur | [Qualité] |
+| Yvan BOSSER | [À COMPLÉTER : NOM Prénom] |
+| Directeur | [À COMPLÉTER : Manager / Member] |
 | Signature : | Signature : |
 | Date : | Date : |

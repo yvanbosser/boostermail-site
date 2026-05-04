@@ -7,7 +7,7 @@
 
 **Entre les soussignés :**
 
-**La société Pied dans l'eau Consulting Ltd**, société de droit mauricien (Domestic Company), au capital social de [À COMPLÉTER] MUR, dont le siège social est sis 26 avenue Surcouf, Quatre Bornes, République de Maurice, immatriculée au Registre des Sociétés de Maurice sous le numéro [À COMPLÉTER], représentée par Monsieur Yvan BOSSER en qualité de Directeur dûment habilité aux fins des présentes,
+**La société Pied dans l'eau Consulting Ltd** (« PDLConsulting »), société de droit mauricien (Domestic Company), dont le siège social est sis 26 avenue Surcouf, Quatre Bornes, République de Maurice, immatriculée au Registrar of Companies de Maurice sous le numéro **BRN C22188347**, représentée par Monsieur Yvan BOSSER en qualité de Directeur dûment habilité aux fins des présentes,
 
 Ci-après dénommée « **PDLConsulting** » ou la « **Société** »,
 
@@ -15,9 +15,9 @@ Ci-après dénommée « **PDLConsulting** » ou la « **Société** »,
 
 **Et :**
 
-**[NOM PRÉNOM Freelance]**, [OPTION 1 : agissant en qualité d'entrepreneur individuel, immatriculé au répertoire SIRENE sous le numéro [SIRET], domicilié au [adresse complète]] [OPTION 2 : la société [Dénomination], [forme sociale] au capital de [montant] €, dont le siège social est sis [adresse], immatriculée au RCS de [ville] sous le numéro [SIREN], représentée par Monsieur/Madame [NOM Prénom] en qualité de [fonction]],
+**Mikadb LLC**, *Limited Liability Company* de droit de l'État du Delaware (États-Unis d'Amérique), dont le siège social est sis 16192 Coastal Highway, Lewes, Delaware 19958, Sussex County, USA, immatriculée auprès du *Delaware Division of Corporations* sous le **Delaware State File Number 10036505** et identifiée auprès de l'*Internal Revenue Service* sous l'**EIN 38-4339760**, représentée par [À COMPLÉTER : Monsieur/Madame NOM Prénom] en qualité de [À COMPLÉTER : Manager / Member / Authorized Representative] dûment habilité(e) aux fins des présentes,
 
-Ci-après dénommé(e) le « **Récipiendaire** » ou le « **Prestataire** »,
+Ci-après dénommée « **Mikadb** » ou le « **Récipiendaire** » ou le « **Prestataire** »,
 
 **D'autre part,**
 
@@ -242,7 +242,7 @@ Il est convenu et arrêté ce qui suit.
 7.4 **Notifications.** Toute notification au titre du présent accord sera valablement adressée par courrier électronique avec accusé de réception aux adresses suivantes :
 
 - Pour PDLConsulting : [À COMPLÉTER : email officiel, ex. legal@boostermail.ai]
-- Pour le Récipiendaire : [À COMPLÉTER]
+- Pour Mikadb LLC : [À COMPLÉTER : email du représentant Mikadb]
 
 7.5 **Loi applicable.** Le présent accord est régi et interprété conformément au **droit de la République de Maurice**, en particulier à ses dispositions de droit commercial et des sociétés (Companies Act 2001), de droit de la propriété intellectuelle (Copyright Act 1997, Industrial Property Act 2019), de protection des données (Data Protection Act 2017), et au Code civil mauricien pour les matières civiles non couvertes par les lois commerciales spéciales.
 
@@ -252,12 +252,12 @@ Il est convenu et arrêté ce qui suit.
 
 ## Signatures
 
-Fait en deux (2) exemplaires originaux, à [À COMPLÉTER : ville], le [date de signature].
+Fait en deux (2) exemplaires originaux, à Grand Baie (République de Maurice), le [date de signature].
 
-| Pour PDLConsulting | Pour le Récipiendaire |
+| Pour PDLConsulting | Pour Mikadb LLC |
 |---|---|
-| Yvan BOSSER | [NOM Prénom] |
-| Directeur | [Qualité] |
+| Yvan BOSSER | [À COMPLÉTER : NOM Prénom] |
+| Directeur | [À COMPLÉTER : Manager / Member] |
 | Signature : | Signature : |
 | | |
 | | |

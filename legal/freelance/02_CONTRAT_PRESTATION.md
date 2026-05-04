@@ -6,7 +6,7 @@
 
 **Entre les soussignés :**
 
-**La société Pied dans l'eau Consulting Ltd**, société de droit mauricien (Domestic Company), au capital social de [À COMPLÉTER] MUR, dont le siège social est sis 26 avenue Surcouf, Quatre Bornes, République de Maurice, immatriculée au Registre des Sociétés de Maurice sous le numéro [À COMPLÉTER], représentée par Monsieur Yvan BOSSER en qualité de Directeur dûment habilité aux fins des présentes,
+**La société Pied dans l'eau Consulting Ltd** (« PDLConsulting »), société de droit mauricien (Domestic Company), dont le siège social est sis 26 avenue Surcouf, Quatre Bornes, République de Maurice, immatriculée au Registrar of Companies de Maurice sous le numéro **BRN C22188347**, représentée par Monsieur Yvan BOSSER en qualité de Directeur dûment habilité aux fins des présentes,
 
 Ci-après dénommée « **PDLConsulting** » ou le « **Client** »,
 
@@ -14,9 +14,9 @@ Ci-après dénommée « **PDLConsulting** » ou le « **Client** »,
 
 **Et :**
 
-**[NOM PRÉNOM Freelance]**, [OPTION 1 : entrepreneur individuel, immatriculé au répertoire SIRENE sous le numéro [SIRET], domicilié au [adresse complète], n° de TVA intracommunautaire [si assujetti] [OPTION 2 : la société [Dénomination], [forme sociale], au capital de [montant] €, dont le siège social est sis [adresse], immatriculée au RCS de [ville] sous le numéro [SIREN], n° de TVA intracommunautaire [À COMPLÉTER], représentée par Monsieur/Madame [NOM Prénom] en qualité de [fonction]],
+**Mikadb LLC**, *Limited Liability Company* de droit de l'État du Delaware (États-Unis d'Amérique), dont le siège social est sis 16192 Coastal Highway, Lewes, Delaware 19958, Sussex County, USA, immatriculée auprès du *Delaware Division of Corporations* sous le **Delaware State File Number 10036505** et identifiée auprès de l'*Internal Revenue Service* sous l'**EIN 38-4339760**, représentée par [À COMPLÉTER : Monsieur/Madame NOM Prénom] en qualité de [À COMPLÉTER : Manager / Member / Authorized Representative] dûment habilité(e) aux fins des présentes,
 
-Ci-après dénommé(e) le « **Prestataire** »,
+Ci-après dénommée « **Mikadb** » ou le « **Prestataire** »,
 
 **D'autre part,**
 
@@ -28,7 +28,7 @@ Ci-après désignés individuellement la « **Partie** » et collectivement les 
 
 PDLConsulting édite et exploite la solution logicielle **BoosterMail**, assistant intelligent intégré à Microsoft Outlook permettant la génération de réponses email adaptées au style de l'utilisateur et au profil de chaque correspondant. Cette solution est commercialisée sous forme de service en ligne (SaaS) à destination de professionnels.
 
-Le Prestataire exerce à titre indépendant une activité de [À COMPLÉTER : ex. développement informatique, conception logicielle, ingénierie web]. Il dispose des compétences techniques requises pour intervenir sur le développement, la maintenance et l'évolution de BoosterMail.
+Mikadb LLC exerce à titre indépendant une activité de **développement informatique, conception logicielle et ingénierie d'applications web et SaaS**. Elle dispose des compétences techniques requises pour intervenir sur le développement, l'optimisation, la maintenance et l'évolution du logiciel BoosterMail, notamment en matière de développement multi-utilisateur (architecture multi-tenant), d'optimisation de performance, de mise en production, d'administration SaaS, et d'intégration de modèles d'intelligence artificielle, y compris les modèles de langage auto-hébergés (« self-hosted LLM »).
 
 Les Parties ont signé préalablement un **Accord de Confidentialité Bilatéral** en date du [date NDA], dont les termes demeurent applicables et complètent le présent contrat.
 
@@ -454,8 +454,8 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
 
 16.7 **Notifications.** Toute notification au titre du Contrat est valablement faite par courrier électronique avec accusé de réception, ou par lettre recommandée avec accusé de réception, aux adresses suivantes :
 
-- Pour PDLConsulting : [À COMPLÉTER : email + adresse postale]
-- Pour le Prestataire : [À COMPLÉTER]
+- Pour PDLConsulting : [À COMPLÉTER : email officiel + 26 avenue Surcouf, Quatre Bornes, Mauritius]
+- Pour Mikadb LLC : [À COMPLÉTER : email du représentant Mikadb] + 16192 Coastal Highway, Lewes, Delaware 19958, Sussex County, USA
 
 16.8 **Loi applicable.** Le présent Contrat est régi et interprété conformément au **droit de la République de Maurice**, en particulier à ses dispositions de droit commercial et des sociétés (Companies Act 2001), au droit de la propriété intellectuelle (Copyright Act 1997, Industrial Property Act 2019), au Data Protection Act 2017, ainsi qu'au Code civil mauricien pour les matières civiles non couvertes par les lois commerciales spéciales. Les Parties confirment expressément avoir choisi le droit mauricien comme droit applicable au sens des règles de droit international privé applicables.
 
@@ -465,12 +465,12 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
 
 ## Signatures
 
-Fait en deux (2) exemplaires originaux, à [À COMPLÉTER : ville], le [date de signature].
+Fait en deux (2) exemplaires originaux, à Grand Baie (République de Maurice), le [date de signature].
 
-| Pour PDLConsulting | Pour le Prestataire |
+| Pour PDLConsulting | Pour Mikadb LLC |
 |---|---|
-| Yvan BOSSER | [NOM Prénom] |
-| Directeur | [Qualité] |
+| Yvan BOSSER | [À COMPLÉTER : NOM Prénom] |
+| Directeur | [À COMPLÉTER : Manager / Member] |
 | Signature : | Signature : |
 | | |
 | | |
