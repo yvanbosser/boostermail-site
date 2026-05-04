@@ -1,9 +1,10 @@
 """Convertit les .md du pack juridique freelance en .docx professionnels.
 
-Usage : python .convert_md_to_docx.py
+Usage : python _tools/convert_md_to_docx.py
+        (ou python convert_md_to_docx.py depuis le dossier _tools/)
 
-Sources : *.md du dossier courant
-Sortie : word/*.docx
+Sources : *.md du dossier parent (legal/freelance/)
+Sortie : word/*.docx (dans le dossier parent)
 """
 import re
 from pathlib import Path
@@ -14,7 +15,8 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
-HERE = Path(__file__).parent
+# Le script est dans legal/freelance/_tools/, les .md sont dans le parent.
+HERE = Path(__file__).resolve().parent.parent
 OUT = HERE / 'word'
 OUT.mkdir(exist_ok=True)
 

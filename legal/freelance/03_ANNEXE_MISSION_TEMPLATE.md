@@ -67,12 +67,35 @@
 
 Le ou les livrables seront considérés comme conformes si l'ensemble des critères ci-dessous sont remplis :
 
+### 4.1 Critères fonctionnels
+
 - [ ] [Critère fonctionnel 1, ex. : « la suggestion IA top 3 s'affiche dans la modale en moins d'1 seconde »]
 - [ ] [Critère fonctionnel 2]
-- [ ] [Critère qualité : code testé sur Outlook Web et New Outlook desktop, sans régression sur le flow existant]
-- [ ] [Critère qualité : code respectant les conventions documentées dans `CLAUDE.md` (commentaires français, vanilla JS, etc.)]
-- [ ] [Critère documentaire : PR descriptive avec captures d'écran avant/après]
-- [ ] [Critère opérationnel : pas de modification de fichiers hors périmètre]
+
+### 4.2 Critères de qualité
+
+- [ ] Code testé sur les environnements cibles spécifiés au § 2 sans régression du flow existant
+- [ ] Code respectant les conventions documentées dans `CLAUDE.md` du dépôt
+- [ ] PR descriptive avec captures d'écran avant/après lorsque la mission concerne l'UI
+
+### 4.3 Critères de performance et de sécurité (à activer selon scope)
+
+[À COMPLÉTER ou supprimer si non pertinent pour la mission]
+
+- [ ] Temps de réponse de la fonctionnalité ajoutée < [X] ms (P95) en conditions de production simulées
+- [ ] Aucune régression sur le `smoke_test` du dépôt (test E2E pytest 10/10 PASS)
+- [ ] Aucune dépendance ajoutée sans validation préalable de PDLConsulting (sécurité supply chain)
+- [ ] Aucun secret committé (vérification automatique au pre-commit ou validation manuelle)
+- [ ] Aucune nouvelle exception non gérée détectée dans les logs après recette
+
+### 4.4 Critères documentaires
+
+- [ ] Documentation de reprise mise à jour : `CLAUDE.md`, ou `docs/<sujet>.md`, ou commentaires de code lorsque la décision est non évidente
+- [ ] Liste à jour des dépendances et de leurs licences (vérification compatibilité commerciale, cf. art. 9.4 du Contrat)
+
+### 4.5 Critère opérationnel
+
+- [ ] Aucune modification de fichiers hors du périmètre défini au § 2
 
 ---
 
@@ -118,7 +141,21 @@ Le ou les livrables seront considérés comme conformes si l'ensemble des critè
 
 ---
 
-## 8. Conditions particulières
+## 8. Pénalités de retard (option)
+
+[À COMPLÉTER ou supprimer si non applicable. À activer en cas de mission à enjeu fort où la date de livraison est critique.]
+
+En cas de retard imputable au Prestataire dans la livraison définitive du livrable, par rapport à la date prévue au § 5, et après mise en demeure restée infructueuse pendant **cinq (5) jours ouvrés**, des pénalités s'appliquent dans les conditions suivantes :
+
+- **Montant** : [À COMPLÉTER : ex. 0,5 % du montant forfaitaire de la mission par jour ouvré de retard / 100 € par jour de retard]
+- **Plafond** : la somme des pénalités est plafonnée à [À COMPLÉTER : ex. 10 % du montant forfaitaire / 2 000 €]
+- **Imputation** : les pénalités sont déduites de la facture finale du Prestataire après émission d'un titre de pénalité par PDLConsulting
+
+Les pénalités ne libèrent pas le Prestataire de l'exécution de la mission ; elles sont distinctes de toute action en réparation du préjudice subi par PDLConsulting au-delà du montant des pénalités.
+
+---
+
+## 9. Conditions particulières
 
 [À COMPLÉTER si applicable, sinon supprimer la section]
 
@@ -127,7 +164,7 @@ Le ou les livrables seront considérés comme conformes si l'ensemble des critè
 
 ---
 
-## 9. Signatures
+## 10. Signatures
 
 Fait en deux (2) exemplaires originaux, le [date].
 

@@ -84,6 +84,42 @@ Il est convenu et arrêté ce qui suit.
   b) D'utiliser les Informations Confidentielles pour développer, directement ou indirectement, un produit ou service concurrent de BoosterMail ;
   c) De divulguer le contenu du présent accord, sauf à ses conseils tenus au secret professionnel et dans la stricte mesure nécessaire à leur mission.
 
+2.3 **Non-réutilisation du savoir-faire et des concepts.** Au-delà de la protection du code et des données, le Récipiendaire s'interdit, pendant la durée du présent accord et pendant la durée de protection prévue à l'article 5.2 :
+
+  a) De réutiliser, en totalité ou en partie, les **concepts produits, l'architecture technique, les workflows fonctionnels, les choix de design d'interface (UX/UI), les modèles d'interaction utilisateur, les approches algorithmiques propres à BoosterMail** (notamment : pipeline de scoring rédactionnel, méthode d'analyse des profils contacts, articulation cuisinier/commis pour la classification des emails, pipeline de classement multi-tiers), pour développer ou contribuer au développement d'un produit ou service tiers ;
+
+  b) De prétendre, dans toute communication ou démarche commerciale future, à la paternité ou à la co-paternité des concepts ou méthodes propres à BoosterMail dont il aurait eu connaissance dans le cadre des échanges avec PDLConsulting.
+
+  Cette obligation est distincte et complémentaire de l'interdiction de divulgation prévue à l'article 2.1.
+
+2.4 **Données dérivées, traces et artefacts intermédiaires.** Toute donnée, trace, fichier, jeu de tests, log, embedding, vecteur, feature, modèle intermédiaire, fine-tuning, dataset constitué ou cache, généré, enrichi, transformé ou dérivé par le Récipiendaire à partir d'Informations Confidentielles dans le cadre de ses échanges avec PDLConsulting (ci-après les « **Données Dérivées** ») :
+
+  a) Sont la propriété exclusive de PDLConsulting au même titre que les Informations Confidentielles dont elles dérivent ;
+  b) Sont soumises aux mêmes obligations de confidentialité, de non-divulgation, de non-réutilisation, de restitution et de destruction que les Informations Confidentielles ;
+  c) Ne peuvent être conservées par le Récipiendaire après la fin des échanges avec PDLConsulting, dans les conditions de l'article 5.3.
+
+2.5 **Interdiction d'usage des Informations Confidentielles pour l'entraînement de modèles d'intelligence artificielle.** Le Récipiendaire s'interdit formellement, pendant et après la fin des relations entre les Parties, et sans limitation de durée :
+
+  a) D'utiliser tout ou partie des Informations Confidentielles ou des Données Dérivées pour entraîner, ajuster (fine-tuning), évaluer ou améliorer **tout modèle d'intelligence artificielle** (modèle de langage, modèle de classification, modèle de plongement vectoriel, modèle multimodal, etc.), que ce soit pour son compte propre, pour celui d'un tiers, ou pour le compte de toute organisation à laquelle il pourrait être lié ;
+
+  b) De soumettre tout ou partie des Informations Confidentielles ou des Données Dérivées à un service d'intelligence artificielle dont les conditions d'utilisation autorisent, par défaut ou de manière implicite, la conservation, l'analyse ou la réutilisation des contenus à des fins d'entraînement ou d'amélioration du modèle ;
+
+  c) De constituer, à partir des Informations Confidentielles ou des Données Dérivées, des jeux de données destinés à être ultérieurement utilisés à des fins d'entraînement de modèles d'IA, à quelque titre que ce soit.
+
+  Toute violation du présent article 2.5 est qualifiée de manquement caractérisé au sens de l'article 6 du présent accord et expose le Récipiendaire à la clause pénale prévue à l'article 6.2, sans préjudice de la réparation du préjudice supérieur, lequel inclura notamment, le cas échéant, l'évaluation économique de la perte de spécificité concurrentielle subie par PDLConsulting.
+
+2.6 **Usage des outils d'intelligence artificielle générative.** Compte tenu de la nature particulièrement sensible des Informations Confidentielles, le Récipiendaire reconnaît expressément que :
+
+  a) La transmission, le copier-coller, la soumission ou tout autre usage des Informations Confidentielles dans un service d'intelligence artificielle générative grand public (notamment, sans s'y limiter : ChatGPT, Claude.ai grand public, Gemini, Copilot Chat dans sa version grand public, Mistral Le Chat grand public, ou tout autre service équivalent) constitue une **divulgation à un tiers** au sens du présent accord, susceptible d'engager sa responsabilité ;
+
+  b) En conséquence, le Récipiendaire s'interdit formellement de soumettre tout ou partie des Informations Confidentielles à de tels services, sauf si l'outil est :
+    - couvert par un contrat professionnel garantissant l'absence de réutilisation des données aux fins d'entraînement ou d'amélioration du modèle (par exemple : Claude API avec opt-out, GitHub Copilot Business avec « data sharing » désactivé, ChatGPT Enterprise / Team, ou équivalent), **et**
+    - expressément autorisé par PDLConsulting **par écrit** ;
+
+  c) Le Récipiendaire s'engage à informer préalablement PDLConsulting de la liste exhaustive des outils d'IA qu'il envisage d'utiliser dans le cadre de ses échanges avec PDLConsulting, et à obtenir une autorisation écrite avant chaque ajout ;
+
+  d) Toute violation des dispositions du présent article 2.6 est qualifiée de manquement caractérisé au sens de l'article 6 du présent accord.
+
 ---
 
 ## Article 3 — Divulgation imposée par la loi
@@ -102,13 +138,31 @@ Il est convenu et arrêté ce qui suit.
 
 4.2 Tout droit de propriété intellectuelle attaché aux Informations Confidentielles, qu'il soit existant ou futur, demeure la propriété pleine et entière de PDLConsulting.
 
+4.3 **Productions intellectuelles antérieures à un contrat de prestation.** Dans l'hypothèse où le Récipiendaire produirait, dans le cadre des échanges préalables à la signature d'un éventuel contrat de prestation et avant celle-ci, toute création intellectuelle (notamment : code source, scripts, schémas, prompts, extraits de texte rédigés à la demande ou sur invitation de PDLConsulting), il en cède d'ores et déjà l'intégralité des droits patrimoniaux à PDLConsulting, à titre exclusif et définitif, dans les conditions de l'article L. 131-3 du Code de la propriété intellectuelle français :
+
+  a) **Droits cédés** : reproduction, représentation, adaptation, modification, traduction, distribution, commercialisation, sous-licence, cession à un tiers ;
+  b) **Supports** : tous supports actuels ou futurs ;
+  c) **Destinations** : toutes destinations à titre gratuit ou onéreux ;
+  d) **Territoire** : monde entier ;
+  e) **Durée** : durée légale de protection des droits considérés.
+
+  La présente cession est consentie sans contrepartie financière particulière, le Récipiendaire reconnaissant qu'aucun travail rémunéré n'est attendu de lui en l'absence d'un contrat de prestation signé. Si une rémunération devait être versée par PDLConsulting au Récipiendaire au titre de productions intellectuelles antérieures au contrat, celle-ci ferait l'objet d'une convention écrite distincte.
+
+  En cas de signature ultérieure d'un contrat de prestation, les stipulations de propriété intellectuelle dudit contrat prévaudront sur la présente clause pour ce qui concerne les productions postérieures à sa signature.
+
 ---
 
 ## Article 5 — Durée et restitution
 
 5.1 **Entrée en vigueur.** Le présent accord entre en vigueur à compter de sa signature par la dernière des Parties.
 
-5.2 **Durée.** Les obligations de confidentialité du Récipiendaire perdurent pendant toute la durée des échanges entre les Parties et pendant une période de **cinq (5) ans** à compter de la fin de leurs relations, quelle qu'en soit la cause.
+5.2 **Durée.** Les obligations de confidentialité du Récipiendaire perdurent :
+
+  a) Pendant toute la durée des échanges entre les Parties ;
+  b) Pendant une période de **dix (10) ans** à compter de la fin de leurs relations, quelle qu'en soit la cause, pour les Informations Confidentielles ne constituant pas des secrets d'affaires ;
+  c) **Sans limitation de durée**, et tant que les informations conservent leur caractère secret, pour les Informations Confidentielles constituant des **secrets d'affaires** au sens des articles L. 151-1 et suivants du Code de commerce français (issus de la loi n° 2018-670 du 30 juillet 2018 transposant la directive (UE) 2016/943 sur la protection des savoir-faire et des informations commerciales non divulgués).
+
+  Sont notamment qualifiés de secrets d'affaires, sans que cette liste soit limitative : le code source du logiciel BoosterMail, les algorithmes propriétaires, les modèles de prompts, les méthodes de scoring redactionnel, les paramétrages d'IA, les bases de connaissances internes, les listes de clients et prospects, les méthodes commerciales et opérationnelles non publiques.
 
 5.3 **Restitution / destruction.** À la première demande de PDLConsulting, et au plus tard dans les **trente (30) jours** suivant la cessation des relations entre les Parties, le Récipiendaire devra :
 
@@ -122,11 +176,20 @@ Il est convenu et arrêté ce qui suit.
 
 ## Article 6 — Sanctions
 
-6.1 **Indemnisation.** Tout manquement aux obligations du présent accord ouvre droit pour PDLConsulting à la réparation intégrale du préjudice subi (préjudice direct, indirect, perte de chance, atteinte à l'image), sans préjudice de toute autre voie de droit.
+6.1 **Indemnisation.** Tout manquement aux obligations du présent accord ouvre droit pour PDLConsulting à la réparation intégrale du préjudice subi (préjudice direct, indirect, perte de chance, atteinte à l'image), sans préjudice de toute autre voie de droit, et notamment des actions sur le fondement des articles L. 152-1 et suivants du Code de commerce relatifs à la protection des secrets d'affaires.
 
-6.2 **Clause pénale.** En cas de divulgation non autorisée d'Informations Confidentielles imputable au Récipiendaire, ce dernier sera redevable, à titre de clause pénale et sans préjudice de la réparation du préjudice supérieur, d'une somme forfaitaire de **dix mille euros (10 000 €)** par manquement constaté.
+6.2 **Clause pénale.** En cas de manquement caractérisé du Récipiendaire à l'une quelconque des obligations résultant des articles 2 (confidentialité), 4 (propriété) ou 5.3 (restitution / destruction) du présent accord, ce dernier sera redevable, à titre de clause pénale et **sans préjudice de la réparation du préjudice supérieur**, d'une somme forfaitaire de **cinquante mille euros (50 000 €)** par manquement caractérisé.
 
-6.3 **Mesures conservatoires.** Le Récipiendaire reconnaît que la nature des Informations Confidentielles est telle que toute violation pourrait causer à PDLConsulting un préjudice irréparable, et qu'en conséquence PDLConsulting est fondée à solliciter de toute juridiction compétente toute mesure conservatoire (notamment référé-interdiction, séquestre, saisie-contrefaçon) en vue de faire cesser ou prévenir toute violation.
+  Constitue notamment un manquement caractérisé, à titre indicatif et non limitatif :
+  a) Toute divulgation, publication ou transmission non autorisée d'Informations Confidentielles à un tiers, quel qu'en soit le canal ;
+  b) Toute soumission d'Informations Confidentielles à un service d'intelligence artificielle générative grand public en violation de l'article 2.3 ;
+  c) Tout dépôt de titre de propriété intellectuelle sur tout ou partie des Informations Confidentielles ;
+  d) Toute utilisation des Informations Confidentielles pour développer un produit ou service concurrent de BoosterMail ;
+  e) Tout défaut de restitution ou de destruction des Informations Confidentielles dans les conditions de l'article 5.3.
+
+  Les Parties conviennent expressément que ce montant correspond à une évaluation forfaitaire raisonnable du préjudice minimal subi par PDLConsulting du fait de chaque manquement caractérisé, compte tenu de la nature stratégique des Informations Confidentielles et des coûts de remédiation. Cette clause pénale ne fait pas obstacle à ce que PDLConsulting demande la réparation intégrale du préjudice réellement subi lorsque celui-ci excède ce montant forfaitaire.
+
+6.3 **Mesures conservatoires.** Le Récipiendaire reconnaît que la nature des Informations Confidentielles est telle que toute violation pourrait causer à PDLConsulting un préjudice irréparable, et qu'en conséquence PDLConsulting est fondée à solliciter de toute juridiction compétente toute mesure conservatoire (notamment référé-interdiction, séquestre, saisie-contrefaçon, saisie sur le fondement des articles L. 152-3 et suivants du Code de commerce relatifs à la protection des secrets d'affaires) en vue de faire cesser ou prévenir toute violation.
 
 ---
 

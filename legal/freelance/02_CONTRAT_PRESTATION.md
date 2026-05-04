@@ -100,6 +100,18 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
 
 4.5 **Sous-traitance.** Le Prestataire ne peut sous-traiter tout ou partie de l'exécution des Prestations à un tiers sans l'accord écrit et préalable de PDLConsulting. En cas d'autorisation, le Prestataire demeure pleinement responsable des prestations sous-traitées et garantit que le sous-traitant est tenu à des obligations au moins équivalentes à celles du présent Contrat (notamment en matière de confidentialité et de propriété intellectuelle).
 
+4.6 **Intervenant nommément désigné (clause « key man »).** Lorsque le Prestataire est une société, les Prestations doivent être exécutées personnellement par **[À COMPLÉTER : NOM Prénom de l'intervenant nommément désigné]**, dont les compétences et l'expérience ont déterminé le choix de PDLConsulting. Le Prestataire s'interdit d'affecter à l'exécution des Prestations toute autre personne sans l'accord écrit et préalable de PDLConsulting, qui pourra refuser librement et sans avoir à motiver sa décision. En cas d'indisponibilité prolongée (plus de quinze (15) jours calendaires) de l'intervenant désigné, le Prestataire en informe PDLConsulting sans délai, et les Parties conviennent ensemble des modalités de poursuite ou de suspension des Prestations.
+
+4.7 **Transparence sur les missions parallèles.** Le Prestataire informe spontanément PDLConsulting de toute mission, en cours ou en projet, qu'il exerce ou envisage d'exercer pour le compte d'un tiers exerçant une activité dans le domaine du logiciel, de l'intelligence artificielle, du traitement automatique de langage ou du courrier électronique, et qui serait susceptible de générer un conflit d'intérêts avec les Prestations objet du présent Contrat. PDLConsulting peut alors, dans un délai raisonnable, soit donner son accord écrit sur la poursuite simultanée des missions, soit demander au Prestataire de choisir entre les deux engagements, soit résilier le Contrat dans les conditions de l'article 13.
+
+4.8 **Communication externe — image et confidentialité de la relation.** Sauf accord écrit et préalable de PDLConsulting, le Prestataire s'interdit, pendant la durée du Contrat et pendant une période de **vingt-quatre (24) mois** suivant sa cessation, de :
+
+  a) Mentionner publiquement la relation contractuelle avec PDLConsulting ou avec le produit BoosterMail (notamment sur des réseaux sociaux professionnels comme LinkedIn, sur GitHub, sur son site personnel, dans des conférences, articles, podcasts ou interviews) ;
+  b) Utiliser le nom, le logo, les éléments graphiques ou la dénomination commerciale de PDLConsulting ou de BoosterMail dans tout document de promotion personnelle, portfolio, CV, ou tout autre support ;
+  c) Faire référence aux travaux exécutés pour le compte de PDLConsulting dans tout devis ou proposition commerciale adressée à un tiers, sauf de manière strictement générique et dans le respect des obligations de confidentialité.
+
+  PDLConsulting s'engage en retour à examiner avec bienveillance toute demande d'autorisation préalable du Prestataire portant sur des mentions strictement génériques (par exemple : mention « éditeur SaaS B2B basé à l'international » sans citation directe de BoosterMail) et à y répondre dans un délai raisonnable.
+
 ---
 
 ## Article 5 — Obligations du Prestataire
@@ -114,7 +126,9 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
   f) Documenter ses développements de manière à permettre leur reprise par un tiers ;
   g) Participer aux revues de code et accepter les retours formulés par PDLConsulting ;
   h) Respecter les règles de la **Charte de sécurité informatique** (Annexe 4) ;
-  i) Respecter les obligations de confidentialité résultant du NDA signé séparément.
+  i) Respecter les obligations de confidentialité résultant du NDA signé séparément ;
+  j) **Documenter systématiquement** ses développements (commentaires de code lorsqu'ils éclairent une décision non évidente, README techniques, schémas d'architecture, diagrammes de séquence, instructions de déploiement, conditions d'usage des composants tiers, listes des dépendances), de manière à permettre la reprise complète et autonome des Prestations par toute personne disposant des compétences requises, dans un délai raisonnable et sans accès au Prestataire ;
+  k) **Coopérer aux opérations d'audit** que PDLConsulting pourrait diligenter, en particulier dans le cadre d'opérations de due diligence préalables à une levée de fonds, à une cession de tout ou partie de l'activité, ou à un audit de conformité (sécurité, RGPD, propriété intellectuelle), en fournissant à première demande tous documents, attestations, accès et informations de nature à établir le respect par le Prestataire de ses obligations contractuelles. Cette obligation perdure pendant **vingt-quatre (24) mois** suivant la cessation du Contrat.
 
 5.2 **Obligation de moyens / résultat.** Sauf stipulation contraire expresse dans une Annexe Mission, le Prestataire est tenu d'une obligation de moyens. Toutefois, lorsqu'une Annexe Mission définit un livrable précis avec des critères d'acceptation objectifs, le Prestataire est tenu d'une obligation de résultat sur ce livrable.
 
@@ -184,7 +198,7 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
   e) Les contenus textuels rédigés pour le compte de PDLConsulting ;
   f) Toute autre création susceptible de protection au titre de la propriété intellectuelle.
 
-9.2 **Cession exclusive et définitive.** Le Prestataire **cède à PDLConsulting**, **à titre exclusif et définitif**, à compter du paiement intégral de chaque facture afférente aux Prestations correspondantes, l'ensemble des droits de propriété intellectuelle attachés aux Œuvres, et ce :
+9.2 **Cession exclusive et définitive — Effet à la création.** Le Prestataire **cède à PDLConsulting**, **à titre exclusif et définitif**, **au fur et à mesure de la création des Œuvres** et de manière automatique, sans formalité supplémentaire, l'ensemble des droits de propriété intellectuelle attachés aux Œuvres, et ce :
 
   a) **Droits cédés** : droit de reproduction, droit de représentation, droit d'adaptation, droit de modification, droit de traduction, droit d'incorporation dans tout autre œuvre, droit de distribution, droit de commercialisation, droit de sous-licencier, droit de céder à un tiers ;
 
@@ -195,6 +209,8 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
   d) **Territoire** : pour le **monde entier** ;
 
   e) **Durée** : pour toute la **durée légale de protection** des droits de propriété intellectuelle, telle qu'elle résulte des législations applicables, en ce compris ses prorogations et renouvellements éventuels.
+
+  Le **paiement des Prestations** par PDLConsulting constitue une **condition financière** de l'exécution du Contrat ; il ne conditionne pas la validité ou la prise d'effet de la cession des droits, laquelle est acquise à PDLConsulting dès la création des Œuvres. En cas de non-paiement total ou partiel d'une facture régulièrement émise, le Prestataire conserve l'intégralité des voies de droit commun pour recouvrer son dû (mise en demeure, action en paiement, suspension de l'exécution dans les conditions de l'article 8.7), à l'exclusion de toute revendication d'un quelconque droit de propriété ou d'usage sur les Œuvres déjà créées.
 
 9.3 **Œuvres préexistantes.** Si le Prestataire intègre dans une Œuvre des éléments préexistants dont il est titulaire des droits (bibliothèques personnelles, code antérieur), il en informe expressément PDLConsulting et lui concède une **licence d'utilisation perpétuelle, mondiale, non exclusive, transférable et entièrement libérée de redevances** sur ces éléments, dans la mesure nécessaire à l'exploitation pleine et entière des Œuvres.
 
@@ -228,21 +244,79 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
 
 ## Article 11 — Non-sollicitation et non-concurrence
 
-11.1 **Non-sollicitation.** Pendant toute la durée du Contrat et pendant une période de **douze (12) mois** suivant sa cessation, pour quelque cause que ce soit, le Prestataire s'interdit de solliciter, débaucher ou employer, directement ou indirectement, tout salarié, mandataire ou prestataire de PDLConsulting, sans accord écrit préalable de cette dernière.
+11.1 **Non-sollicitation des collaborateurs et prestataires.** Pendant toute la durée du Contrat et pendant une période de **vingt-quatre (24) mois** suivant sa cessation, pour quelque cause que ce soit, le Prestataire s'interdit, directement ou indirectement, par personne interposée ou pour le compte d'un tiers, de :
 
-11.2 **Non-concurrence limitée.** Pendant toute la durée du Contrat, le Prestataire s'interdit d'exécuter, directement ou indirectement, toute prestation de développement logiciel pour toute entreprise éditant un produit **directement concurrent** de BoosterMail, à savoir : un assistant de génération automatisée de réponses email s'intégrant à Microsoft Outlook ou similaires, à destination de la clientèle professionnelle francophone.
+  a) Solliciter, débaucher, recruter ou tenter de recruter tout salarié, mandataire, dirigeant ou prestataire de PDLConsulting ;
+  b) Inciter ou tenter d'inciter l'une de ces personnes à mettre fin à sa relation contractuelle ou de service avec PDLConsulting ;
+  c) Conclure une relation contractuelle ou de service avec l'une de ces personnes lorsque ladite relation a son origine, directe ou indirecte, dans la connaissance acquise au sein de PDLConsulting.
 
-11.3 [OPTION : si Yvan veut une non-concurrence post-contrat, NE PAS l'imposer sans avocat — risque de nullité en France si non rémunérée et trop large] Compte tenu de la nature limitée du marché concerné et dans le respect du principe de proportionnalité posé par la jurisprudence française, **aucune obligation de non-concurrence post-contractuelle** n'est imposée au Prestataire au-delà des obligations de confidentialité visées à l'article 10.
+11.2 **Non-sollicitation des clients et prospects.** Pendant toute la durée du Contrat et pendant une période de **vingt-quatre (24) mois** suivant sa cessation, pour quelque cause que ce soit, le Prestataire s'interdit, directement ou indirectement, par personne interposée ou pour le compte d'un tiers, de :
 
-11.4 Le Prestataire reste libre d'exercer toute autre activité professionnelle, y compris au profit de clients du secteur informatique, sous réserve du respect strict des obligations de confidentialité et de l'absence de conflit d'intérêts avéré.
+  a) Solliciter, démarcher ou contacter à des fins commerciales tout client de PDLConsulting (utilisateur du logiciel BoosterMail à titre payant ou gratuit) dont il aurait eu connaissance dans le cadre de l'exécution du Contrat ;
+  b) Solliciter, démarcher ou contacter à des fins commerciales tout prospect de PDLConsulting (personne ou entité avec laquelle PDLConsulting est en relation commerciale active en vue de la conclusion d'un contrat) dont il aurait eu connaissance dans le cadre de l'exécution du Contrat ;
+  c) Détourner, directement ou indirectement, la clientèle ou les prospects de PDLConsulting au profit d'une activité concurrente, qu'elle soit la sienne propre ou celle d'un tiers.
+
+  La présente obligation est limitée aux clients et prospects effectivement connus du Prestataire à l'occasion de l'exécution du Contrat, à l'exclusion de toute personne ou entité dont le Prestataire pourrait justifier d'une relation commerciale antérieure et indépendante.
+
+11.3 **Non-concurrence en cours de Contrat.** Pendant toute la durée du Contrat, le Prestataire s'interdit d'exécuter, directement ou indirectement, toute prestation de développement logiciel pour toute entreprise éditant un produit **directement concurrent** de BoosterMail, à savoir : un assistant de génération automatisée de réponses email s'intégrant à Microsoft Outlook, Microsoft 365, Gmail Workspace ou tout autre client de messagerie professionnelle, à destination de la clientèle professionnelle francophone ou anglophone.
+
+11.4 **Non-concurrence post-contractuelle.**
+
+> ⚠️ **AVERTISSEMENT CRITIQUE — À FAIRE VALIDER PAR AVOCAT AVANT SIGNATURE**
+> En droit français, une clause de non-concurrence post-contractuelle de **soixante (60) mois** imposée à un prestataire indépendant est considérée par la jurisprudence comme manifestement excessive dans la grande majorité des cas (Cass. com. 4 juin 2002 n° 00-14.092, Cass. com. 15 mars 2011 n° 10-13.824, et lignée jurisprudentielle constante). Le juge peut **annuler la clause dans son intégralité** ou la **réduire** à une durée jugée raisonnable (généralement 12 à 24 mois), sans pour autant nécessairement réduire la contrepartie financière correspondante. **L'activation de cette clause expose PDLConsulting à un coût significatif sans garantie d'efficacité juridique.** Un avocat doit être consulté avant signature pour ajuster la durée, le périmètre et la contrepartie en fonction de la situation réelle (en particulier : rémunération du Prestataire, ancienneté de la collaboration, criticité réelle des informations détenues).
+
+11.4.1 **Engagement de non-concurrence.** Pendant une durée de **soixante (60) mois** (cinq (5) années) suivant la cessation du Contrat, pour quelque cause que ce soit, le Prestataire s'interdit, directement ou indirectement, par personne interposée ou pour le compte d'un tiers, d'exercer ou de participer à une activité de développement, conception, ou édition d'un produit logiciel directement concurrent de BoosterMail.
+
+11.4.2 **Définition du produit concurrent.** Est considéré comme directement concurrent au sens du présent article tout produit logiciel répondant cumulativement aux caractéristiques suivantes :
+
+  a) Assistant de génération, suggestion ou rédaction automatisée de réponses email ;
+  b) S'intégrant à un client de messagerie professionnelle (Microsoft Outlook, Microsoft 365, Gmail Workspace, ou tout client équivalent) ;
+  c) Reposant sur des modèles d'intelligence artificielle générative ou des techniques équivalentes ;
+  d) S'adressant à une clientèle professionnelle (TPE/PME, professions libérales, dirigeants, fonctions support) francophone ou anglophone.
+
+11.4.3 **Périmètre géographique et matériel.** L'obligation s'applique :
+
+  a) Sur le **territoire** de l'Union européenne, du Royaume-Uni, de la Suisse et des États-Unis d'Amérique ;
+  b) Aux **fonctions** de conception produit, architecture technique, direction technique (CTO ou équivalent), lead développement, et direction du produit (PM, CPO ou équivalent) ;
+  c) N'est pas concerné le simple usage d'un produit concurrent en qualité de client ou d'utilisateur final.
+
+11.4.4 **Contrepartie financière.** En application des principes posés par la jurisprudence française précitée, la présente obligation de non-concurrence est assortie du versement par PDLConsulting au Prestataire d'une **contrepartie financière mensuelle**, due pendant toute la durée d'application de l'obligation et jusqu'à son terme :
+
+  - **Montant** : [À COMPLÉTER : montant à négocier — repère indicatif : 30 % du revenu mensuel moyen perçu par le Prestataire au titre du Contrat sur les douze (12) mois précédant la cessation du Contrat. Pour fixer les idées, sur la base d'un TJM de 500 € et 15 jours travaillés/mois (revenu mensuel ~7 500 € HT), une contrepartie de 30 % représenterait ~2 250 €/mois × 60 mois = **~135 000 € HT** sur la durée totale]
+  - **Versement** : mensuel, à terme échu, par virement bancaire, dans les quinze (15) premiers jours de chaque mois pendant les soixante (60) mois ;
+  - **Cessation anticipée du versement** : le versement de la contrepartie cesse de plein droit en cas de manquement du Prestataire à l'obligation de non-concurrence, sans préjudice du droit pour PDLConsulting de demander la restitution des sommes déjà versées et la réparation du préjudice subi.
+
+11.4.5 **Levée de l'obligation par PDLConsulting.** PDLConsulting peut, à tout moment, et notamment dans un délai de quinze (15) jours suivant la cessation du Contrat, renoncer **par notification écrite** à tout ou partie de l'obligation de non-concurrence prévue au présent article 11.4, auquel cas la contrepartie financière correspondante cesse d'être due. La levée peut être totale, partielle (réduction de durée, de périmètre, etc.), conditionnelle ou définitive.
+
+11.4.6 **Réduction par le juge — Clause de sauvegarde.** Conformément au principe de proportionnalité, dans l'hypothèse où une juridiction compétente jugerait l'engagement de non-concurrence prévu au présent article 11.4 excessif quant à sa durée, son périmètre géographique, son périmètre matériel, ou la contrepartie financière, les Parties demandent expressément au juge :
+
+  a) De **ne pas annuler** purement et simplement la clause, mais de la **réduire** à la durée, au périmètre ou à la contrepartie qu'il jugera proportionné aux intérêts légitimes de PDLConsulting ;
+  b) D'ajuster en conséquence la contrepartie financière mensuelle à un montant proportionnel à la durée maintenue ;
+  c) De maintenir les autres stipulations du Contrat dans leur intégralité, conformément à l'article 16.4 du présent Contrat.
+
+11.4.7 **Sanction des manquements.** Toute violation des obligations résultant du présent article 11.4 entraîne, outre la cessation immédiate du versement de la contrepartie financière, l'application de la clause pénale prévue à l'article 11.6 du présent Contrat, ainsi que, le cas échéant, la cessation immédiate de toute relation contractuelle entre les Parties et le droit pour PDLConsulting de demander la réparation intégrale du préjudice subi.
+
+> [NOTE INTERNE — DÉCISION YVAN du 04/05/2026 : durée 5 ans retenue malgré l'avertissement juridique. Risques résiduels : (1) avocat de Michael peut refuser cette durée et exiger renégociation à 12-24 mois ; (2) si Michael signe puis attaque, juge réduira probablement à 12-24 mois mais Yvan aura potentiellement payé la contrepartie complète ; (3) coût estimé sur 5 ans : ~135 k€ pour un freelance à TJM 500 € / 15 j/mois. **À VALIDER par avocat avec ajustement de la contrepartie en conséquence.** Alternative recommandée par Claude : 24 mois + contrepartie ~50 k€, plus défendable.]
+
+11.5 **Liberté d'exercice.** Sous réserve des obligations résultant des articles 11.1 à 11.3, du respect strict des obligations de confidentialité (article 10) et de l'absence de conflit d'intérêts avéré, le Prestataire reste libre d'exercer toute autre activité professionnelle, y compris au profit de clients du secteur informatique.
+
+11.6 **Sanctions des manquements aux articles 11.1 et 11.2.** Toute violation des obligations de non-sollicitation prévues aux articles 11.1 et 11.2 ouvre droit pour PDLConsulting, à titre de clause pénale et sans préjudice de la réparation du préjudice supérieur, à une somme forfaitaire de **trente mille euros (30 000 €)** par manquement caractérisé. Cette clause pénale s'ajoute, le cas échéant, à la clause pénale prévue à l'article 6.2 du NDA.
 
 ---
 
 ## Article 12 — Responsabilité — Assurance
 
-12.1 **Limitation de responsabilité.** La responsabilité du Prestataire vis-à-vis de PDLConsulting au titre de l'exécution du présent Contrat est limitée aux dommages directs et prévisibles. Sont expressément exclus de la responsabilité du Prestataire les dommages indirects (notamment perte de chiffre d'affaires, perte de clientèle, atteinte à l'image), à l'exception des cas de faute lourde, dol, ou manquement à ses obligations de confidentialité, de cession de propriété intellectuelle ou de garantie d'éviction (articles 9 et 10).
+12.1 **Limitation de responsabilité.** La responsabilité du Prestataire vis-à-vis de PDLConsulting au titre de l'exécution du présent Contrat est limitée aux dommages directs et prévisibles. Sont expressément exclus de la responsabilité du Prestataire les dommages indirects (notamment perte de chiffre d'affaires, perte de clientèle, atteinte à l'image), à l'exception des cas suivants pour lesquels la responsabilité du Prestataire n'est ni limitée ni plafonnée :
 
-12.2 **Plafond.** En tout état de cause, et hors les cas visés à l'article 12.1 in fine, la responsabilité totale du Prestataire au titre du présent Contrat est plafonnée à un montant équivalent au **total des sommes versées par PDLConsulting au Prestataire au cours des douze (12) mois précédant le fait générateur** du dommage.
+  a) Faute lourde, faute intentionnelle, dol ou fraude ;
+  b) Négligence grave ;
+  c) Manquement aux obligations de **confidentialité** (article 10 et NDA annexé) ;
+  d) Manquement aux obligations de **propriété intellectuelle** (article 9), y compris en matière de garantie d'éviction (article 9.5) ;
+  e) Manquement caractérisé aux règles de la **Charte de sécurité informatique** (Annexe 4), en particulier celles relatives à la protection des secrets, à l'usage des outils d'intelligence artificielle, et à la prévention des incidents de sécurité ;
+  f) Violation des obligations de l'**Accord de Sous-Traitance des Données Personnelles** (DPA, Annexe 3) en matière de sécurité (article 32 RGPD), de notification (article 33 RGPD) ou de transferts (Chapitre V RGPD) ;
+  g) Manquement aux obligations de non-sollicitation (article 11.1 et 11.2) et de non-concurrence (article 11.3) en cours de Contrat.
+
+12.2 **Plafond.** En tout état de cause, et **hors les cas visés à l'article 12.1 (a) à (g)**, la responsabilité totale du Prestataire au titre du présent Contrat est plafonnée à un montant équivalent au **total des sommes versées par PDLConsulting au Prestataire au cours des douze (12) mois précédant le fait générateur** du dommage, avec un minimum de **vingt-cinq mille euros (25 000 €)** lorsque la durée d'exécution du Contrat antérieure au fait générateur est inférieure à douze (12) mois.
 
 12.3 **Assurance.** Le Prestataire déclare avoir souscrit, et s'engage à maintenir pendant toute la durée du Contrat, une police d'assurance Responsabilité Civile Professionnelle couvrant les conséquences pécuniaires de sa responsabilité civile professionnelle. Il fournit à PDLConsulting, à première demande, une attestation d'assurance en cours de validité.
 
@@ -265,7 +339,20 @@ C'est dans ces conditions que les Parties se sont rapprochées et ont convenu ce
 
   a) Le Prestataire est rémunéré au prorata des Prestations effectivement exécutées et acceptées jusqu'à la date de résiliation ;
   b) Le Prestataire restitue à PDLConsulting, dans les **dix (10) jours ouvrés**, l'ensemble des Informations Confidentielles, livrables en cours, accès, documentations et matériels mis à sa disposition, et procède à la destruction des copies dans les conditions prévues à l'article 5.3 du NDA ;
-  c) Les obligations de confidentialité (article 10), de propriété intellectuelle (article 9), de non-sollicitation (article 11.1) et de garantie (articles 9.5 et 12) survivent à la résiliation.
+  c) Les obligations de confidentialité (article 10), de propriété intellectuelle (article 9), de non-sollicitation (articles 11.1 et 11.2), de communication externe (article 4.8), de coopération à un audit (article 5.1.k) et de garantie (articles 9.5 et 12) survivent à la résiliation.
+
+13.5 **Continuité de service et réversibilité.** Indépendamment de la cause de la cessation du Contrat, et afin d'éviter toute rupture opérationnelle pour PDLConsulting, le Prestataire s'engage à assurer une **prestation de transition** dans les conditions suivantes :
+
+  a) **Période de transition** : pendant une durée de **trente (30) jours calendaires** suivant la notification de cessation du Contrat (ou suivant la date d'effet de la résiliation, selon ce qui est le plus tardif), le Prestataire reste joignable et disponible, dans des plages horaires raisonnables, pour répondre aux questions de PDLConsulting ou de tout intervenant désigné par elle (autre prestataire, salarié recruté en interne, etc.) portant sur les Prestations exécutées ;
+
+  b) **Livrables de transition** : dans les dix (10) jours ouvrés suivant la notification de cessation, le Prestataire transmet à PDLConsulting :
+    - L'ensemble des codes sources, configurations, scripts et documents en sa possession concernant les Prestations ;
+    - Une **documentation de reprise** synthétique exposant l'état d'avancement des Prestations en cours, les choix techniques structurants, les pièges connus, les dépendances et les actions restantes ;
+    - La liste exhaustive des accès, comptes, identifiants et abonnements ouverts au nom de PDLConsulting ou en lien avec les Prestations, ainsi que les informations nécessaires à leur révocation ou transfert ;
+
+  c) **Rémunération de la transition** : la prestation de transition est incluse dans la rémunération forfaitaire du Contrat lorsque celui-ci est en mode forfaitaire, et est facturable au TJM applicable (limité à un plafond de **cinq (5) jours**) lorsque le Contrat est en mode TJM, sauf en cas de résiliation pour faute du Prestataire (article 13.2 et 13.3) où la transition est due sans rémunération supplémentaire ;
+
+  d) **Refus de transition** : tout refus injustifié du Prestataire d'exécuter la prestation de transition est qualifié de manquement grave et expose à la clause pénale prévue à l'article 6.2 du NDA.
 
 ---
 
