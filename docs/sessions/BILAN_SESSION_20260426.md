@@ -71,9 +71,9 @@
 
 **Découverte** : pendant la validation du fix bug D, observé `HTTP/1.1 401 Unauthorized — invalid x-api-key` sur tous les appels Claude.
 
-**Diagnostic** : la clé `REDACTED_ANTHROPIC_KEY_1` (présente dans `config.json` et 14 backups) est révoquée par Anthropic. Probablement leak (clé identique partout depuis le 10/03/2026).
+**Diagnostic** : la clé Anthropic alors présente dans `config.json` et 14 backups (préfixe `REDACTED_ANTHROPIC_KEY_1` — désormais révoquée) est rejetée par Anthropic. Probablement leak (clé identique partout depuis le 10/03/2026).
 
-**Fix appliqué** : remplacement par la nouvelle clé `REDACTED_ANTHROPIC_KEY_2` fournie par le user (créée pour BoosterMail SaaS Production, 2,39 USD déjà utilisés).
+**Fix appliqué** : remplacement par une nouvelle clé fournie par le user (créée pour BoosterMail SaaS Production, 2,39 USD déjà utilisés au moment du remplacement). Préfixes / suffixes des clés masqués dans les bilans à des fins de sécurité (clé désormais dans `config.json` non commité).
 
 **Validation** : test direct API → 200 OK + 0 erreur 401 dans les logs après restart V2.
 
@@ -200,7 +200,7 @@ pour traitement futur.**
 
 ### Stratégie API
 - **Anthropic 100% pour le moment** (V2 local actuel)
-- Migration OpenAI non actée (la clé `sk-proj-` reste pour le SaaS futur séparé)
+- Migration OpenAI non actée (la clé OpenAI reste configurée pour le SaaS futur séparé)
 - Pas de chantier multi-provider en parallèle des bugs UI
 
 ### Stratégie warmup vs SaaS

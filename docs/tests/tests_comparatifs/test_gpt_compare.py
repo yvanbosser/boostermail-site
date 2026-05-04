@@ -1,12 +1,22 @@
 """
 Test comparatif : GPT-5.4 mini vs GPT-5.4 nano vs GPT-4.1 mini
 Utilise le prompt exact capture par EasyMail (_test_prompt.txt)
+
+Usage : exporter la clé OpenAI dans l'env avant de lancer le script :
+    export OPENAI_API_KEY="sk-proj-..."
+    python test_gpt_compare.py
 """
 import os
+import sys
 import time
 from openai import OpenAI
 
-client = OpenAI(api_key="REDACTED_OPENAI_KEY")
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    print("ERREUR : variable d'environnement OPENAI_API_KEY non definie.", file=sys.stderr)
+    print("        export OPENAI_API_KEY=\"sk-proj-...\" puis relancez le script.", file=sys.stderr)
+    sys.exit(1)
+client = OpenAI(api_key=api_key)
 
 prompt_path = os.path.join(os.path.dirname(__file__), "_test_prompt.txt")
 if not os.path.exists(prompt_path):
