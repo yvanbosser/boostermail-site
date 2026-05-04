@@ -1,6 +1,6 @@
 # Pack juridique freelance — README
 
-> **Dernière mise à jour** : 04/05/2026 (v3 — protections IA + réversibilité + key man + non-concurrence 5 ans)
+> **Dernière mise à jour** : 04/05/2026 (v3.1 — ajout reverse engineering interdit)
 > **Société émettrice** : Pied dans l'eau Consulting Ltd (PDLConsulting), 26 avenue Surcouf, Quatre Bornes, Mauritius
 > **Usage** : modèles contractuels destinés au recrutement de prestataires indépendants (freelances) intervenant sur le produit BoosterMail
 
@@ -126,6 +126,12 @@ Bien que PDLConsulting soit une société de droit mauricien, ce choix se justif
 Création initiale du pack (6 documents : README + NDA + Contrat + Annexe Mission + Charte sécurité + DPA).
 
 ---
+
+### v3.1 — 04/05/2026 (ajout marginal post-revue ChatGPT 4/4)
+
+**Ajout au NDA (`01_NDA_CONFIDENTIALITE.md`)** :
+- **Article 2.3 nouveau** : interdiction explicite de **rétro-ingénierie** (décompilation, désassemblage, observation comportementale, reproduction de logique fonctionnelle, étude « black-box »). Complète la non-réutilisation du savoir-faire (art. 2.4) en visant les techniques d'extraction par observation extérieure du produit.
+- Renumérotation : ex-2.3 → 2.4, ex-2.4 → 2.5, ex-2.5 → 2.6, ex-2.6 → 2.7.
 
 ### v3 — 04/05/2026 (post-revue ChatGPT 2/2 + décisions Yvan)
 

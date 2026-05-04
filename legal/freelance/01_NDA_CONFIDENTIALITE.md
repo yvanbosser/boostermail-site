@@ -84,21 +84,35 @@ Il est convenu et arrêté ce qui suit.
   b) D'utiliser les Informations Confidentielles pour développer, directement ou indirectement, un produit ou service concurrent de BoosterMail ;
   c) De divulguer le contenu du présent accord, sauf à ses conseils tenus au secret professionnel et dans la stricte mesure nécessaire à leur mission.
 
-2.3 **Non-réutilisation du savoir-faire et des concepts.** Au-delà de la protection du code et des données, le Récipiendaire s'interdit, pendant la durée du présent accord et pendant la durée de protection prévue à l'article 5.2 :
+2.3 **Interdiction de rétro-ingénierie (« reverse engineering »).** Le Récipiendaire s'interdit formellement, pendant la durée du présent accord et pendant la durée de protection prévue à l'article 5.2, d'effectuer ou de faire effectuer, directement ou indirectement, par lui-même ou par un tiers, toute opération de :
+
+  a) Décompilation, désassemblage, ingénierie inverse, observation comportementale, rétro-conception ou analyse statique ou dynamique de tout ou partie du logiciel BoosterMail, dans une finalité autre que celle strictement nécessaire à l'exécution des Prestations confiées par PDLConsulting ;
+
+  b) Reproduction, même partielle, de la **logique fonctionnelle**, des **enchaînements de traitement**, des **interfaces utilisateur**, des **structures de données**, des **prompts d'IA**, des **paramétrages**, ou de tout autre élément constitutif du logiciel BoosterMail, à des fins de création d'un produit similaire, alternatif ou concurrent ;
+
+  c) Étude méthodique du fonctionnement du logiciel BoosterMail (« black-box analysis ») visant à reproduire ses caractéristiques sans accès direct au code source ;
+
+  d) Création, à partir de l'observation du logiciel BoosterMail (en production, en démonstration, ou dans un environnement de test), de toute documentation technique tierce, de spécifications fonctionnelles, ou de schémas d'architecture destinés à un tiers ou à un projet personnel concurrent.
+
+  La présente interdiction est distincte et complémentaire des obligations de non-divulgation (article 2.1), de non-réutilisation du savoir-faire (article 2.4) et de propriété intellectuelle (article 4) ; elle vise expressément les techniques d'extraction d'informations qui ne reposeraient pas sur la divulgation directe du code, mais sur son observation extérieure.
+
+  Toute violation du présent article 2.3 est qualifiée de manquement caractérisé au sens de l'article 6 du présent accord.
+
+2.4 **Non-réutilisation du savoir-faire et des concepts.** Au-delà de la protection du code et des données, le Récipiendaire s'interdit, pendant la durée du présent accord et pendant la durée de protection prévue à l'article 5.2 :
 
   a) De réutiliser, en totalité ou en partie, les **concepts produits, l'architecture technique, les workflows fonctionnels, les choix de design d'interface (UX/UI), les modèles d'interaction utilisateur, les approches algorithmiques propres à BoosterMail** (notamment : pipeline de scoring rédactionnel, méthode d'analyse des profils contacts, articulation cuisinier/commis pour la classification des emails, pipeline de classement multi-tiers), pour développer ou contribuer au développement d'un produit ou service tiers ;
 
   b) De prétendre, dans toute communication ou démarche commerciale future, à la paternité ou à la co-paternité des concepts ou méthodes propres à BoosterMail dont il aurait eu connaissance dans le cadre des échanges avec PDLConsulting.
 
-  Cette obligation est distincte et complémentaire de l'interdiction de divulgation prévue à l'article 2.1.
+  Cette obligation est distincte et complémentaire des interdictions de divulgation (article 2.1) et de rétro-ingénierie (article 2.3).
 
-2.4 **Données dérivées, traces et artefacts intermédiaires.** Toute donnée, trace, fichier, jeu de tests, log, embedding, vecteur, feature, modèle intermédiaire, fine-tuning, dataset constitué ou cache, généré, enrichi, transformé ou dérivé par le Récipiendaire à partir d'Informations Confidentielles dans le cadre de ses échanges avec PDLConsulting (ci-après les « **Données Dérivées** ») :
+2.5 **Données dérivées, traces et artefacts intermédiaires.** Toute donnée, trace, fichier, jeu de tests, log, embedding, vecteur, feature, modèle intermédiaire, fine-tuning, dataset constitué ou cache, généré, enrichi, transformé ou dérivé par le Récipiendaire à partir d'Informations Confidentielles dans le cadre de ses échanges avec PDLConsulting (ci-après les « **Données Dérivées** ») :
 
   a) Sont la propriété exclusive de PDLConsulting au même titre que les Informations Confidentielles dont elles dérivent ;
   b) Sont soumises aux mêmes obligations de confidentialité, de non-divulgation, de non-réutilisation, de restitution et de destruction que les Informations Confidentielles ;
   c) Ne peuvent être conservées par le Récipiendaire après la fin des échanges avec PDLConsulting, dans les conditions de l'article 5.3.
 
-2.5 **Interdiction d'usage des Informations Confidentielles pour l'entraînement de modèles d'intelligence artificielle.** Le Récipiendaire s'interdit formellement, pendant et après la fin des relations entre les Parties, et sans limitation de durée :
+2.6 **Interdiction d'usage des Informations Confidentielles pour l'entraînement de modèles d'intelligence artificielle.** Le Récipiendaire s'interdit formellement, pendant et après la fin des relations entre les Parties, et sans limitation de durée :
 
   a) D'utiliser tout ou partie des Informations Confidentielles ou des Données Dérivées pour entraîner, ajuster (fine-tuning), évaluer ou améliorer **tout modèle d'intelligence artificielle** (modèle de langage, modèle de classification, modèle de plongement vectoriel, modèle multimodal, etc.), que ce soit pour son compte propre, pour celui d'un tiers, ou pour le compte de toute organisation à laquelle il pourrait être lié ;
 
@@ -106,9 +120,9 @@ Il est convenu et arrêté ce qui suit.
 
   c) De constituer, à partir des Informations Confidentielles ou des Données Dérivées, des jeux de données destinés à être ultérieurement utilisés à des fins d'entraînement de modèles d'IA, à quelque titre que ce soit.
 
-  Toute violation du présent article 2.5 est qualifiée de manquement caractérisé au sens de l'article 6 du présent accord et expose le Récipiendaire à la clause pénale prévue à l'article 6.2, sans préjudice de la réparation du préjudice supérieur, lequel inclura notamment, le cas échéant, l'évaluation économique de la perte de spécificité concurrentielle subie par PDLConsulting.
+  Toute violation du présent article 2.6 est qualifiée de manquement caractérisé au sens de l'article 6 du présent accord et expose le Récipiendaire à la clause pénale prévue à l'article 6.2, sans préjudice de la réparation du préjudice supérieur, lequel inclura notamment, le cas échéant, l'évaluation économique de la perte de spécificité concurrentielle subie par PDLConsulting.
 
-2.6 **Usage des outils d'intelligence artificielle générative.** Compte tenu de la nature particulièrement sensible des Informations Confidentielles, le Récipiendaire reconnaît expressément que :
+2.7 **Usage des outils d'intelligence artificielle générative.** Compte tenu de la nature particulièrement sensible des Informations Confidentielles, le Récipiendaire reconnaît expressément que :
 
   a) La transmission, le copier-coller, la soumission ou tout autre usage des Informations Confidentielles dans un service d'intelligence artificielle générative grand public (notamment, sans s'y limiter : ChatGPT, Claude.ai grand public, Gemini, Copilot Chat dans sa version grand public, Mistral Le Chat grand public, ou tout autre service équivalent) constitue une **divulgation à un tiers** au sens du présent accord, susceptible d'engager sa responsabilité ;
 
@@ -118,7 +132,7 @@ Il est convenu et arrêté ce qui suit.
 
   c) Le Récipiendaire s'engage à informer préalablement PDLConsulting de la liste exhaustive des outils d'IA qu'il envisage d'utiliser dans le cadre de ses échanges avec PDLConsulting, et à obtenir une autorisation écrite avant chaque ajout ;
 
-  d) Toute violation des dispositions du présent article 2.6 est qualifiée de manquement caractérisé au sens de l'article 6 du présent accord.
+  d) Toute violation des dispositions du présent article 2.7 est qualifiée de manquement caractérisé au sens de l'article 6 du présent accord.
 
 ---
 
