@@ -30,8 +30,13 @@ __pycache__/
 easymail_backup_*/
 V2_backup/
 
+# Dossiers freelances (pieces d'identite, RIB, attestations URSSAF, RC pro)
+# Contiennent des donnees personnelles et bancaires de tiers - NE JAMAIS COMMITER
+legal/freelance/dossiers/
+
 # Documents / rapports (pas utiles pour les testeurs)
 *.docx
+!legal/freelance/word/*.docx
 RAPPORT_*.md
 SESSION_RECAP_*.md
 TESTS_SCENARIOS*.md
