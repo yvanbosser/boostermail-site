@@ -637,6 +637,79 @@ class Database:
 
         conn.commit()
 
+        # ================================================================
+        # ORGANISATIONS — licensing B2B multi-tenant (05/05/2026)
+        # Une organisation achète N licences et les distribue à ses users.
+        # Règles org : couche au-dessus du per-user, injectées dans prompts.
+        # ================================================================
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS organizations (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                plan TEXT NOT NULL DEFAULT 'trial',
+                max_licenses INTEGER NOT NULL DEFAULT 1,
+                billing_email TEXT,
+                stripe_customer_id TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                trial_ends_at TEXT,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_orgs_stripe ON organizations(stripe_customer_id)")
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS organization_invites (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
+                email TEXT NOT NULL,
+                invited_by_user_id TEXT NOT NULL,
+                token TEXT NOT NULL UNIQUE,
+                org_role TEXT NOT NULL DEFAULT 'member',
+                expires_at TEXT NOT NULL,
+                accepted_at TEXT,
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_invites_org ON organization_invites(organization_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_invites_token ON organization_invites(token)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_invites_email ON organization_invites(email)")
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS organization_rules (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
+                rule_type TEXT NOT NULL,
+                rule_label TEXT NOT NULL,
+                rule_content TEXT NOT NULL DEFAULT '{}',
+                priority INTEGER NOT NULL DEFAULT 0,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_by TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_org_rules_org ON organization_rules(organization_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_org_rules_type ON organization_rules(rule_type)")
+
+        # Migration : ajouter organization_id et org_role sur users
+        for col_def in [
+            "organization_id TEXT",
+            "org_role TEXT NOT NULL DEFAULT 'member'",
+        ]:
+            col_name = col_def.split()[0]
+            try:
+                c.execute(f"ALTER TABLE users ADD COLUMN {col_def}")
+                conn.commit()
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
+
+        c.execute("CREATE INDEX IF NOT EXISTS idx_users_org ON users(organization_id)")
+
+        conn.commit()
+
     # --- MAILS TRAITÉS -----------------------------------------------------
 
     def mark_treated(self, entry_id, action='replied'):
@@ -1178,6 +1251,211 @@ class Database:
         user_id = str(uuid.uuid4())
         self.create_user(user_id, microsoft_oid, email, display_name)
         return user_id
+
+    # --- ORGANISATIONS (multi-tenant B2B) ----------------------------------
+
+    def get_organization(self, org_id):
+        c = self._conn().cursor()
+        c.execute("SELECT * FROM organizations WHERE id = ?", (org_id,))
+        row = c.fetchone()
+        return dict(row) if row else None
+
+    def get_organization_by_stripe(self, stripe_customer_id):
+        c = self._conn().cursor()
+        c.execute("SELECT * FROM organizations WHERE stripe_customer_id = ?", (stripe_customer_id,))
+        row = c.fetchone()
+        return dict(row) if row else None
+
+    def create_organization(self, org_id, name, plan='trial', max_licenses=1, billing_email=None):
+        conn = self._conn()
+        conn.execute("""
+            INSERT OR IGNORE INTO organizations (id, name, plan, max_licenses, billing_email)
+            VALUES (?, ?, ?, ?, ?)
+        """, (org_id, name, plan, max_licenses, billing_email))
+        conn.commit()
+
+    def update_organization(self, org_id, **kwargs):
+        allowed = {'name', 'plan', 'max_licenses', 'billing_email',
+                   'stripe_customer_id', 'is_active', 'trial_ends_at'}
+        fields = {k: v for k, v in kwargs.items() if k in allowed}
+        if not fields:
+            return
+        fields['updated_at'] = datetime.now().isoformat()
+        set_clause = ', '.join(f"{k} = ?" for k in fields)
+        params = list(fields.values()) + [org_id]
+        conn = self._conn()
+        conn.execute(f"UPDATE organizations SET {set_clause} WHERE id = ?", params)
+        conn.commit()
+
+    def list_organizations(self, include_inactive=False):
+        c = self._conn().cursor()
+        if include_inactive:
+            c.execute("SELECT * FROM organizations ORDER BY created_at DESC")
+        else:
+            c.execute("SELECT * FROM organizations WHERE is_active = 1 ORDER BY created_at DESC")
+        return [dict(row) for row in c.fetchall()]
+
+    def get_organization_usage(self, org_id):
+        """Retourne {max_licenses, used_licenses, available} pour une org."""
+        c = self._conn().cursor()
+        c.execute("SELECT max_licenses FROM organizations WHERE id = ?", (org_id,))
+        row = c.fetchone()
+        if not row:
+            return None
+        max_licenses = row[0]
+        c.execute(
+            "SELECT COUNT(*) FROM users WHERE organization_id = ? AND is_active = 1",
+            (org_id,)
+        )
+        used = c.fetchone()[0]
+        return {
+            'max_licenses': max_licenses,
+            'used_licenses': used,
+            'available': max(0, max_licenses - used),
+        }
+
+    def get_organization_members(self, org_id):
+        """Liste des users d'une organisation."""
+        c = self._conn().cursor()
+        c.execute(
+            "SELECT id, email, display_name, org_role, is_active, created_at, last_login_at "
+            "FROM users WHERE organization_id = ? ORDER BY created_at ASC",
+            (org_id,)
+        )
+        return [dict(row) for row in c.fetchall()]
+
+    def can_add_member(self, org_id):
+        """True si l'org a encore des licences disponibles."""
+        usage = self.get_organization_usage(org_id)
+        if not usage:
+            return False
+        return usage['available'] > 0
+
+    # --- INVITATIONS -------------------------------------------------------
+
+    def create_invite(self, org_id, email, invited_by_user_id, org_role='member', expires_days=7):
+        """Crée une invitation et retourne {id, token, expires_at}."""
+        import uuid, secrets
+        from datetime import timedelta
+        invite_id = str(uuid.uuid4())
+        token = secrets.token_urlsafe(32)
+        expires_at = (datetime.now() + timedelta(days=expires_days)).isoformat()
+        conn = self._conn()
+        conn.execute("""
+            INSERT INTO organization_invites
+                (id, organization_id, email, invited_by_user_id, token, org_role, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (invite_id, org_id, email, invited_by_user_id, token, org_role, expires_at))
+        conn.commit()
+        return {'id': invite_id, 'token': token, 'expires_at': expires_at}
+
+    def get_invite_by_token(self, token):
+        c = self._conn().cursor()
+        c.execute("SELECT * FROM organization_invites WHERE token = ?", (token,))
+        row = c.fetchone()
+        return dict(row) if row else None
+
+    def accept_invite(self, token, user_id):
+        """Marque l'invitation acceptée et assigne le user à l'org.
+        Retourne l'invite dict, ou None si invalide/expirée."""
+        invite = self.get_invite_by_token(token)
+        if not invite:
+            return None
+        if invite['accepted_at']:
+            return None  # déjà acceptée
+        if invite['expires_at'] and invite['expires_at'] < datetime.now().isoformat():
+            return None  # expirée
+        conn = self._conn()
+        conn.execute(
+            "UPDATE organization_invites SET accepted_at = ? WHERE token = ?",
+            (datetime.now().isoformat(), token)
+        )
+        conn.execute(
+            "UPDATE users SET organization_id = ?, org_role = ? WHERE id = ?",
+            (invite['organization_id'], invite['org_role'], user_id)
+        )
+        conn.commit()
+        return invite
+
+    def list_pending_invites(self, org_id):
+        """Invitations en attente (non acceptées, non expirées) pour une org."""
+        c = self._conn().cursor()
+        c.execute("""
+            SELECT * FROM organization_invites
+            WHERE organization_id = ? AND accepted_at IS NULL AND expires_at > ?
+            ORDER BY created_at DESC
+        """, (org_id, datetime.now().isoformat()))
+        return [dict(row) for row in c.fetchall()]
+
+    def revoke_invite(self, invite_id, org_id):
+        conn = self._conn()
+        conn.execute(
+            "DELETE FROM organization_invites WHERE id = ? AND organization_id = ?",
+            (invite_id, org_id)
+        )
+        conn.commit()
+
+    # --- RÈGLES ORGANISATION -----------------------------------------------
+
+    def get_org_rules(self, org_id, rule_type=None, active_only=True):
+        """Retourne les règles actives d'une org (triées par priorité desc).
+        Utilisé pour injecter les contraintes dans les prompts Claude."""
+        c = self._conn().cursor()
+        query = "SELECT * FROM organization_rules WHERE organization_id = ?"
+        params = [org_id]
+        if active_only:
+            query += " AND is_active = 1"
+        if rule_type:
+            query += " AND rule_type = ?"
+            params.append(rule_type)
+        query += " ORDER BY priority DESC, created_at ASC"
+        c.execute(query, params)
+        rows = [dict(r) for r in c.fetchall()]
+        for r in rows:
+            try:
+                r['rule_content'] = json.loads(r['rule_content'])
+            except Exception:
+                pass
+        return rows
+
+    def create_org_rule(self, org_id, rule_type, rule_label, rule_content, created_by, priority=0):
+        """Crée une règle d'organisation. Retourne le rule_id."""
+        import uuid
+        rule_id = str(uuid.uuid4())
+        conn = self._conn()
+        conn.execute("""
+            INSERT INTO organization_rules
+                (id, organization_id, rule_type, rule_label, rule_content, priority, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (rule_id, org_id, rule_type, rule_label,
+              json.dumps(rule_content, ensure_ascii=False), priority, created_by))
+        conn.commit()
+        return rule_id
+
+    def update_org_rule(self, rule_id, org_id, **kwargs):
+        allowed = {'rule_label', 'rule_content', 'priority', 'is_active'}
+        fields = {k: v for k, v in kwargs.items() if k in allowed}
+        if not fields:
+            return
+        if 'rule_content' in fields:
+            fields['rule_content'] = json.dumps(fields['rule_content'], ensure_ascii=False)
+        fields['updated_at'] = datetime.now().isoformat()
+        set_clause = ', '.join(f"{k} = ?" for k in fields)
+        params = list(fields.values()) + [rule_id, org_id]
+        conn = self._conn()
+        conn.execute(
+            f"UPDATE organization_rules SET {set_clause} WHERE id = ? AND organization_id = ?",
+            params
+        )
+        conn.commit()
+
+    def delete_org_rule(self, rule_id, org_id):
+        conn = self._conn()
+        conn.execute(
+            "DELETE FROM organization_rules WHERE id = ? AND organization_id = ?",
+            (rule_id, org_id)
+        )
+        conn.commit()
 
     # --- RÉGLAGES ----------------------------------------------------------
 

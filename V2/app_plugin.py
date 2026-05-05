@@ -13931,17 +13931,287 @@ def api_admin_update_user_quota(user_id):
 @app.route('/api/user/me', methods=['GET'])
 def api_user_me():
     """Retourne les infos du user connecté (accessible sans is_admin)."""
-    from user_context import require_user as _require_user_ctx
     user_id = session.get('auth_user_id')
     if not user_id:
         return jsonify({'error': 'Non authentifié', 'auth_required': True}), 401
     user = _db.get_user(user_id)
     if not user:
         return jsonify({'error': 'Utilisateur introuvable'}), 404
-    # Masquer les champs internes
-    safe = {k: v for k, v in user.items()
-            if k not in ('microsoft_oid',)}
+    safe = {k: v for k, v in user.items() if k not in ('microsoft_oid',)}
+    # Ajouter usage licences si l'user appartient à une org
+    if user.get('organization_id'):
+        safe['org_usage'] = _db.get_organization_usage(user['organization_id'])
     return jsonify(safe)
+
+
+# =============================================================================
+# ORGANISATIONS — B2B licensing
+# Routes accessibles par :
+#   - /api/admin/orgs/*       : super-admin (is_admin = 1 en DB)
+#   - /api/org/*              : org-admin (org_role = 'owner' ou 'admin')
+# =============================================================================
+
+def _require_org_admin(f):
+    """Décorateur : vérifie que le user est owner ou admin de son organisation."""
+    import functools
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        user_id = session.get('auth_user_id')
+        if not user_id:
+            return jsonify({'error': 'Non authentifié', 'auth_required': True}), 401
+        user = _db.get_user(user_id)
+        if not user:
+            return jsonify({'error': 'Utilisateur introuvable'}), 404
+        if user.get('org_role') not in ('owner', 'admin'):
+            return jsonify({'error': 'Droits org-admin requis'}), 403
+        if not user.get('organization_id'):
+            return jsonify({'error': "Pas d'organisation associée"}), 403
+        return f(*args, **kwargs)
+    return wrapper
+
+
+# ---- Super-admin : gestion globale des orgs --------------------------------
+
+@app.route('/api/admin/orgs', methods=['GET'])
+@_require_admin
+def api_admin_list_orgs():
+    include_inactive = request.args.get('include_inactive', 'false').lower() == 'true'
+    orgs = _db.list_organizations(include_inactive=include_inactive)
+    for org in orgs:
+        org['usage'] = _db.get_organization_usage(org['id'])
+    return jsonify(orgs)
+
+
+@app.route('/api/admin/orgs', methods=['POST'])
+@_require_admin
+def api_admin_create_org():
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name requis'}), 400
+    import uuid
+    org_id = str(uuid.uuid4())
+    _db.create_organization(
+        org_id,
+        name,
+        plan=data.get('plan', 'trial'),
+        max_licenses=int(data.get('max_licenses', 1)),
+        billing_email=data.get('billing_email'),
+    )
+    return jsonify({'id': org_id, 'name': name}), 201
+
+
+@app.route('/api/admin/orgs/<org_id>', methods=['GET'])
+@_require_admin
+def api_admin_get_org(org_id):
+    org = _db.get_organization(org_id)
+    if not org:
+        return jsonify({'error': 'Organisation introuvable'}), 404
+    org['usage'] = _db.get_organization_usage(org_id)
+    org['members'] = _db.get_organization_members(org_id)
+    return jsonify(org)
+
+
+@app.route('/api/admin/orgs/<org_id>', methods=['PATCH'])
+@_require_admin
+def api_admin_update_org(org_id):
+    data = request.get_json() or {}
+    allowed = {'name', 'plan', 'max_licenses', 'billing_email',
+               'stripe_customer_id', 'is_active', 'trial_ends_at'}
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates:
+        return jsonify({'error': 'Aucun champ valide fourni'}), 400
+    _db.update_organization(org_id, **updates)
+    return jsonify({'status': 'updated'})
+
+
+# ---- Org-admin : gestion de son organisation --------------------------------
+
+@app.route('/api/org/me', methods=['GET'])
+@_require_org_admin
+def api_org_me():
+    """Retourne l'organisation du user connecté avec usage licences."""
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    org = _db.get_organization(user['organization_id'])
+    if not org:
+        return jsonify({'error': 'Organisation introuvable'}), 404
+    org['usage'] = _db.get_organization_usage(org['id'])
+    return jsonify(org)
+
+
+@app.route('/api/org/members', methods=['GET'])
+@_require_org_admin
+def api_org_members():
+    """Liste des membres de l'organisation."""
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    members = _db.get_organization_members(user['organization_id'])
+    return jsonify(members)
+
+
+@app.route('/api/org/members/<member_id>', methods=['PATCH'])
+@_require_org_admin
+def api_org_update_member(member_id):
+    """Modifier le rôle ou l'état d'un membre (org-admin only)."""
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    member = _db.get_user(member_id)
+    if not member or member.get('organization_id') != user['organization_id']:
+        return jsonify({'error': 'Membre introuvable dans cette organisation'}), 404
+    data = request.get_json() or {}
+    allowed = {'org_role', 'is_active'}
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates:
+        return jsonify({'error': 'Aucun champ valide'}), 400
+    # Empêcher de se rétrograder soi-même
+    if member_id == user_id and 'org_role' in updates:
+        return jsonify({'error': 'Impossible de modifier son propre rôle'}), 400
+    _db.update_user(member_id, **updates)
+    return jsonify({'status': 'updated'})
+
+
+@app.route('/api/org/members/<member_id>', methods=['DELETE'])
+@_require_org_admin
+def api_org_remove_member(member_id):
+    """Retire un membre de l'organisation (libère une licence)."""
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    member = _db.get_user(member_id)
+    if not member or member.get('organization_id') != user['organization_id']:
+        return jsonify({'error': 'Membre introuvable dans cette organisation'}), 404
+    if member_id == user_id:
+        return jsonify({'error': 'Impossible de se retirer soi-même'}), 400
+    # Retrait soft : on détache l'org mais on ne supprime pas le user
+    _db.update_user(member_id, is_active=0)
+    conn = _db._conn()
+    conn.execute("UPDATE users SET organization_id = NULL, org_role = 'member' WHERE id = ?", (member_id,))
+    conn.commit()
+    return jsonify({'status': 'removed'})
+
+
+# ---- Invitations ------------------------------------------------------------
+
+@app.route('/api/org/invites', methods=['GET'])
+@_require_org_admin
+def api_org_list_invites():
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    invites = _db.list_pending_invites(user['organization_id'])
+    return jsonify(invites)
+
+
+@app.route('/api/org/invites', methods=['POST'])
+@_require_org_admin
+def api_org_create_invite():
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    org_id = user['organization_id']
+
+    # Vérifier qu'il reste des licences
+    if not _db.can_add_member(org_id):
+        usage = _db.get_organization_usage(org_id)
+        return jsonify({
+            'error': 'Limite de licences atteinte',
+            'max_licenses': usage['max_licenses'],
+            'used_licenses': usage['used_licenses'],
+        }), 402
+
+    data = request.get_json() or {}
+    email = (data.get('email') or '').strip().lower()
+    if not email:
+        return jsonify({'error': 'email requis'}), 400
+    org_role = data.get('org_role', 'member')
+    if org_role not in ('member', 'admin'):
+        return jsonify({'error': "org_role doit être 'member' ou 'admin'"}), 400
+
+    invite = _db.create_invite(org_id, email, user_id, org_role=org_role)
+    return jsonify(invite), 201
+
+
+@app.route('/api/org/invites/<invite_id>', methods=['DELETE'])
+@_require_org_admin
+def api_org_revoke_invite(invite_id):
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    _db.revoke_invite(invite_id, user['organization_id'])
+    return jsonify({'status': 'revoked'})
+
+
+@app.route('/api/org/invite/accept', methods=['POST'])
+def api_org_accept_invite():
+    """Accepte une invitation. Appelé après le login Microsoft."""
+    user_id = session.get('auth_user_id')
+    if not user_id:
+        return jsonify({'error': 'Non authentifié', 'auth_required': True}), 401
+    data = request.get_json() or {}
+    token = (data.get('token') or '').strip()
+    if not token:
+        return jsonify({'error': 'token requis'}), 400
+    result = _db.accept_invite(token, user_id)
+    if not result:
+        return jsonify({'error': "Invitation invalide, expirée ou déjà utilisée"}), 400
+    return jsonify({'status': 'accepted', 'organization_id': result['organization_id']})
+
+
+# ---- Règles organisation ----------------------------------------------------
+
+@app.route('/api/org/rules', methods=['GET'])
+@_require_org_admin
+def api_org_list_rules():
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    rule_type = request.args.get('type')
+    rules = _db.get_org_rules(user['organization_id'], rule_type=rule_type, active_only=False)
+    return jsonify(rules)
+
+
+@app.route('/api/org/rules', methods=['POST'])
+@_require_org_admin
+def api_org_create_rule():
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    data = request.get_json() or {}
+    rule_type = (data.get('rule_type') or '').strip()
+    rule_label = (data.get('rule_label') or '').strip()
+    if not rule_type or not rule_label:
+        return jsonify({'error': 'rule_type et rule_label requis'}), 400
+    valid_types = {'writing_style', 'forbidden_words', 'classification',
+                   'mandatory_signature', 'contact_priority', 'language'}
+    if rule_type not in valid_types:
+        return jsonify({'error': f"rule_type invalide. Valeurs : {sorted(valid_types)}"}), 400
+    rule_id = _db.create_org_rule(
+        org_id=user['organization_id'],
+        rule_type=rule_type,
+        rule_label=rule_label,
+        rule_content=data.get('rule_content', {}),
+        created_by=user_id,
+        priority=int(data.get('priority', 0)),
+    )
+    return jsonify({'id': rule_id}), 201
+
+
+@app.route('/api/org/rules/<rule_id>', methods=['PATCH'])
+@_require_org_admin
+def api_org_update_rule(rule_id):
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    data = request.get_json() or {}
+    allowed = {'rule_label', 'rule_content', 'priority', 'is_active'}
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates:
+        return jsonify({'error': 'Aucun champ valide'}), 400
+    _db.update_org_rule(rule_id, user['organization_id'], **updates)
+    return jsonify({'status': 'updated'})
+
+
+@app.route('/api/org/rules/<rule_id>', methods=['DELETE'])
+@_require_org_admin
+def api_org_delete_rule(rule_id):
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    _db.delete_org_rule(rule_id, user['organization_id'])
+    return jsonify({'status': 'deleted'})
 
 
 # --- Démarrage ---------------------------------------------------------------
