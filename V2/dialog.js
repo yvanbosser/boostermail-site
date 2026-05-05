@@ -453,19 +453,9 @@ function _loadEcheancesUrgentes() {
     //   - btnSend redevient "📤 Relire et envoyer" → onclick=sendReply
     //     (restauré dans _safeSetSendBtn quand label = "Relire/Envoye/Envoyer")
     if (_mode === 'new') {
-        // FORCE dimensions (v12) : retire condition window.opener, ajoute
-        // setTimeout pour exécuter APRÈS rendu initial, force dimensions
-        // ENORMES en dur pour test (si pas de changement → resizeTo bloqué).
-        try { window.moveTo(0, 0); } catch (e) {}
-        try { window.resizeTo(1900, 1100); } catch (e) {}
-        setTimeout(function() {
-            try { window.moveTo(0, 0); } catch (e) {}
-            try { window.resizeTo(1900, 1100); } catch (e) {}
-        }, 200);
-        setTimeout(function() {
-            // 2e tentative après 500ms
-            try { window.resizeTo(1900, 1100); } catch (e) {}
-        }, 500);
+        // Dimensions gérées au niveau Qt natif (popup_pyqt.py
+        // _ChildPopupPage.acceptNavigationRequest) → 90% écran si mode=new.
+        // Plus besoin de window.resizeTo (bloqué par browser hôte).
 
         var editorEl = document.getElementById('editor');
         if (editorEl) editorEl.setAttribute('data-placeholder', 'Donnez vos instructions pour générer un nouveau mail');

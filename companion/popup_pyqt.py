@@ -165,7 +165,23 @@ class _ChildPopupPage(QWebEnginePage):
                 v = QWebEngineView()
                 v.setPage(self)
                 v.setWindowTitle('BoosterMail')
-                v.resize(700, 600)
+
+                # Dimensions selon le type d'URL (gap 05/05/2026 — Yvan compose) :
+                # - mode=new (nouveau mail) : 90% écran (équivalent dialog 80% Office.js)
+                # - autres (Profil/Contacts/Échéances) : 700×600 par défaut
+                url_str = url.toString()
+                if 'mode=new' in url_str:
+                    try:
+                        scr = QApplication.primaryScreen().availableGeometry()
+                        w = int(scr.width() * 0.90)
+                        h = int(scr.height() * 0.90)
+                        v.resize(w, h)
+                        v.move((scr.width() - w) // 2, (scr.height() - h) // 2)
+                    except Exception:
+                        v.resize(1600, 1000)  # fallback safe
+                else:
+                    v.resize(700, 600)
+
                 v.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
                 v.show()
                 v.raise_()
