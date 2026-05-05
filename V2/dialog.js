@@ -466,6 +466,11 @@ function _loadEcheancesUrgentes() {
         var btnGenHide = document.getElementById('btnGenerate');
         if (btnGenHide) btnGenHide.style.display = 'none';
 
+        // PHASE 1 : cacher refineBar (champ "Raccourcir, ton plus ferme...")
+        // Sera réaffiché par _safeSetSendBtn après la 1ère génération.
+        var refineBarHide = document.getElementById('refineBar');
+        if (refineBarHide) refineBarHide.style.display = 'none';
+
         // btnSend → label "Generer" en phase 1
         var btnSendEl = document.getElementById('btnSend');
         if (btnSendEl) {
@@ -473,8 +478,6 @@ function _loadEcheancesUrgentes() {
             btnSendEl.innerHTML = '&#x2728; Generer';
             btnSendEl.disabled = false;
             btnSendEl.onclick = function() {
-                // Copier le contenu de l'éditeur (les instructions) dans fieldBrief
-                // car generateReply lit fieldBrief.value pour construire le prompt IA.
                 var briefSync = document.getElementById('fieldBrief');
                 var ed = document.getElementById('editor');
                 if (briefSync && ed) {
@@ -1198,12 +1201,18 @@ function _bindRecipientContextLoader() {
         _loadRecipientContext(email);
     };
 
-    // Triple trigger pour fiabilité (gap 05/05 v6) : blur + change + Enter
+    // 4 triggers (gap 05/05 v7) : input debouncé est le PRIMAIRE car il
+    // capture aussi le clic sur suggestion d'autocomplete (qui ne déclenche
+    // pas blur). Les autres triggers sont des fallbacks.
+    var _profileDebounce;
+    fieldTo.addEventListener('input', function() {
+        clearTimeout(_profileDebounce);
+        _profileDebounce = setTimeout(handler, 800);  // 800ms après dernière modif
+    });
     fieldTo.addEventListener('blur', handler);
     fieldTo.addEventListener('change', handler);
     fieldTo.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' || e.key === 'Tab') {
-            // Léger délai pour laisser le navigateur finaliser la valeur
             setTimeout(handler, 50);
         }
     });
@@ -5291,11 +5300,15 @@ function _safeSetSendBtn(opts) {
     if (opts && typeof opts.html === 'string') btn.innerHTML = opts.html;
     if (opts && typeof opts.disabled === 'boolean') btn.disabled = opts.disabled;
 
-    // Mode new phase 2 : restaurer onclick = sendReply (l'override generateReply
-    // de la phase 1 doit être annulé une fois le mail généré)
+    // Mode new phase 2 : restaurer onclick = sendReply + réafficher refineBar
     if (_mode === 'new' && opts && typeof opts.html === 'string'
         && (opts.html.indexOf('Relire') >= 0 || opts.html.indexOf('Envoye') >= 0 || opts.html.indexOf('Envoyer') >= 0)) {
         btn.onclick = function() { sendReply(); };
+        // Réafficher le champ modification (caché en phase 1)
+        var refineBarShow = document.getElementById('refineBar');
+        if (refineBarShow && refineBarShow.style.display === 'none') {
+            refineBarShow.style.display = '';
+        }
     }
 }
 

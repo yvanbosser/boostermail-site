@@ -88,10 +88,14 @@ var _companionAvailable = false;
     // string complexe peut bloquer window.open silencieusement).
     _btn('navComposeFixed', function () {
         var url = _backendUrl + '/plugin/dialog.html?mode=new';
-        var w = Math.min(1200, (screen.availWidth || 1200) - 80);
-        var h = Math.min(800, (screen.availHeight || 800) - 80);
-        var x = ((screen.availWidth || 1200) - w) / 2;
-        var y = ((screen.availHeight || 800) - h) / 2;
+        // Dimensions = 80% de l'écran (equivalent dialog 80% Office.js,
+        // cf autorunshared.js _dlgOpts = { width: 80, height: 80 })
+        var aw = screen.availWidth || 1400;
+        var ah = screen.availHeight || 900;
+        var w = Math.round(aw * 0.80);
+        var h = Math.round(ah * 0.80);
+        var x = Math.round((aw - w) / 2);
+        var y = Math.round((ah - h) / 2);
         var feats = 'width=' + w + ',height=' + h + ',left=' + x + ',top=' + y +
                     ',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no';
         try {
