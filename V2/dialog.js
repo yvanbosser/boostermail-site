@@ -3127,6 +3127,14 @@ function _detectMode() {
     // Si on a un cache frais, on l'utilise instantanément + on revalide en BG.
     var _applyStatus = function(data) {
         _isStandardMode = data.authenticated && data.mode === 'standard';
+        // Mode new (gap 05/05 v6) : le label est géré par init mode new
+        // (✨ Generer en phase 1). Ne pas l'écraser tant que generation
+        // pas démarrée. Sinon le bouton bascule prématurément en
+        // "Relire et envoyer" alors qu'on attend la saisie d'instructions.
+        if (_mode === 'new' && !_modeNewGenerationStarted) {
+            _sendStartTime = Date.now();
+            return;
+        }
         var btnSend = document.getElementById('btnSend');
         if (btnSend) {
             btnSend.innerHTML = _isStandardMode
