@@ -441,20 +441,41 @@ function _loadEcheancesUrgentes() {
         }
     }
 
-    // Mode new : adapter UX éditeur + bouton principal (gap 05/05 PM)
-    // - Placeholder éditeur : "Donnez les instructions de votre mail..."
-    // - Bouton btnSend devient "Générer mon mail" + onclick=generateReply()
-    //   (sera restauré en "Relire et envoyer" automatiquement après la 1ère
-    //   génération réussie via _safeSetSendBtn appelé dans le flow existant).
+    // Mode new : adapter UX (gap 05/05 PM v2)
+    // - Éditeur : placeholder "Le mail généré apparaîtra ici..."
+    // - fieldBrief (textarea cachée par défaut) : devient champ instructions VISIBLE
+    // - btnGenerate (bouton caché par défaut) : devient visible avec "Générer mon mail"
+    // - btnSend (Relire et envoyer) : caché jusqu'à génération réussie
+    //   (réaffiché par _safeSetSendBtn après 1ère génération via patch ci-dessous)
     if (_mode === 'new') {
         var editorEl = document.getElementById('editor');
-        if (editorEl) editorEl.setAttribute('data-placeholder', 'Donnez les instructions de votre mail...');
-        var btnSendEl = document.getElementById('btnSend');
-        if (btnSendEl) {
-            btnSendEl.innerHTML = '&#x2728; Generer mon mail';
-            btnSendEl.disabled = false;
-            btnSendEl.onclick = function() { generateReply(); };
+        if (editorEl) editorEl.setAttribute('data-placeholder', 'Le mail généré apparaîtra ici...');
+
+        var briefEl = document.getElementById('fieldBrief');
+        if (briefEl) {
+            briefEl.style.display = 'block';
+            briefEl.style.width = '100%';
+            briefEl.style.minHeight = '70px';
+            briefEl.style.padding = '8px 10px';
+            briefEl.style.border = '1px solid #0F6CBD';
+            briefEl.style.borderRadius = '4px';
+            briefEl.style.marginTop = '8px';
+            briefEl.style.fontFamily = 'inherit';
+            briefEl.style.fontSize = '12px';
+            briefEl.style.outline = 'none';
+            briefEl.style.resize = 'vertical';
+            briefEl.placeholder = 'Donnez les instructions de votre mail (ex: Demander un RDV mardi 14h pour faire le point sur le dossier X)';
+            briefEl.rows = 3;
         }
+
+        var btnGen = document.getElementById('btnGenerate');
+        if (btnGen) {
+            btnGen.style.display = 'inline-block';
+            btnGen.innerHTML = '&#x2728; Generer mon mail';
+        }
+
+        var btnSendEl = document.getElementById('btnSend');
+        if (btnSendEl) btnSendEl.style.display = 'none';
     }
 
     // Auto-détection importance (mots-clés sensibles → H, comme le proto)
@@ -1417,13 +1438,13 @@ function _loadMailBody() {
         if (resumePJ) resumePJ.style.display = 'block';
     }
 
-    if (!_messageId && !_isStandaloneMode) {
-        // Mode new mail (gap "Nouveau message" 05/05/2026) : panneau gauche
-        // affiche d'abord un placeholder, puis le profil + résumé des échanges
-        // dès que l'utilisateur saisit un destinataire (cf _loadRecipientContext).
+    // Mode new mail (gap "Nouveau message" 05/05/2026) : PRIORITÉ ABSOLUE
+    // Doit être traité AVANT la branche standalone (le dialog est ouvert
+    // depuis l'overlay popup PyQt avec mode=new + standalone, donc les deux
+    // flags sont vrais en même temps).
+    if (_mode === 'new') {
         _renderComposePlaceholder();
         var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
-        // Brancher le chargement contexte sur la saisie destinataire
         _bindRecipientContextLoader();
         return;
     }
@@ -5208,6 +5229,17 @@ function _safeSetSendBtn(opts) {
     if (!btn) return;  // Dialog fermé, on no-op
     if (opts && typeof opts.html === 'string') btn.innerHTML = opts.html;
     if (opts && typeof opts.disabled === 'boolean') btn.disabled = opts.disabled;
+
+    // Mode new (gap 05/05 PM v2) : si btnSend est caché (état initial) et
+    // qu'on (ré)active btnSend après génération, basculer l'UI vers la phase
+    // "envoi" : réafficher btnSend, cacher fieldBrief + btnGenerate.
+    if (_mode === 'new' && btn.style.display === 'none') {
+        btn.style.display = '';
+        var briefEl = document.getElementById('fieldBrief');
+        if (briefEl) briefEl.style.display = 'none';
+        var btnGen = document.getElementById('btnGenerate');
+        if (btnGen) btnGen.style.display = 'none';
+    }
 }
 
 /**
