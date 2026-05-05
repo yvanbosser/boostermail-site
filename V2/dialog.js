@@ -429,11 +429,19 @@ function _loadEcheancesUrgentes() {
         briefField.placeholder = 'Instructions (optionnel)';
     }
 
-    // Boutons mode : highlight le bon, masquer en mode new
+    // Boutons mode : highlight le bon, masquer juste les 3 boutons Reply en mode new
+    // (gap v14 : garder modeRow visible pour conserver le bouton PJ 📎 + chips R/S/H)
     var modeRow = document.getElementById('modeRow');
     if (modeRow) {
         if (_mode === 'new') {
-            modeRow.style.display = 'none';
+            // Cacher uniquement les 3 boutons Reply/ReplyAll/Forward (pas la ligne entière)
+            ['modeReply', 'modeReplyAll', 'modeForward'].forEach(function(id) {
+                var b = document.getElementById(id);
+                if (b) b.style.display = 'none';
+            });
+            // Afficher Cc en mode new (caché par défaut, normalement masqué jusqu'à clic 'Ajouter Cc')
+            var rowCcShow = document.getElementById('rowCc');
+            if (rowCcShow) rowCcShow.style.display = '';
         } else {
             document.querySelectorAll('.em-mode-btn').forEach(function(btn) {
                 btn.classList.toggle('active', btn.getAttribute('data-mode') === _mode);

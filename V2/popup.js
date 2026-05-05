@@ -87,24 +87,23 @@ var _companionAvailable = false;
     // (le QWebEngineView popup_pyqt avec nom de window non-_blank + query
     // string complexe peut bloquer window.open silencieusement).
     _btn('navComposeFixed', function () {
+        // Aligné sur _openCompose (dialog.js) — même pattern que le bouton ✏ du
+        // header du dialog 80%. Yvan v14 : depuis dialog ça marche (Qt intercepte
+        // via _ChildPopupPage et applique 90% écran), depuis '_blank' Qt ignorait.
+        // Solution : target name spécifique 'boostermail_compose_new' identique.
         var url = _backendUrl + '/plugin/dialog.html?mode=new';
-        // Dimensions = 85% écran (équivalent dialog 80% Office.js qui s'ouvre
-        // DANS la fenêtre Outlook ~95% écran → 80% × 95% ≈ 76% écran réel).
-        // Yvan v9 : la fenêtre Réponse est presque plein écran, pas petite.
-        // Pas de plafond pour matcher la sensation native dialog 80%.
         var aw = screen.availWidth || 1400;
         var ah = screen.availHeight || 900;
-        var w = Math.round(aw * 0.85);
-        var h = Math.round(ah * 0.85);
-        var x = Math.round((aw - w) / 2);
-        var y = Math.round((ah - h) / 2);
+        var w = Math.min(1200, aw - 80);
+        var h = Math.min(800, ah - 80);
+        var x = (aw - w) / 2;
+        var y = (ah - h) / 2;
         var feats = 'width=' + w + ',height=' + h + ',left=' + x + ',top=' + y +
                     ',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no';
         try {
-            var nw = window.open(url, '_blank', feats);
+            var nw = window.open(url, 'boostermail_compose_new', feats);
             if (nw) { nw.focus(); return; }
         } catch (e) {}
-        // Fallback : navigation in-place (overlay 280x70 → page dégradée).
         window.location.href = url;
     });
 
