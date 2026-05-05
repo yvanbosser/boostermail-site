@@ -1,5 +1,7 @@
 # ONBOARDING — Sessions SaaS BoosterMail
 
+> ⚠️ **Racine de travail = `C:\EasyMail\` UNIQUEMENT.** Le dossier `C:\Users\yvanb\OneDrive\Desktop\EasyMail\` est un **vestige pré-migration 12/04/2026** (contenu périmé + fichiers cloud-only souvent illisibles). NE JAMAIS l'utiliser comme source. Vérifié par I-SESS-05 dans `audit/tests/cloture_check.sh`.
+
 > **Dernière mise à jour** : 27/04/2026 PM (pivot stratégique « OVH = source de vérité unique » + consolidation merge SaaS+Outlook + déploiement code & DB)
 
 > **Rôle de ce doc** : référence vivante pour toute session Claude qui travaille sur l'infrastructure SaaS BoosterMail. À mettre à jour à la fin de chaque session SaaS pour refléter l'état réel.

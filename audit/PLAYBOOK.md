@@ -302,6 +302,11 @@ Yvan copie-colle `docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md` dans la nouvelle s
 
 ### Étapes (à exécuter par Claude au démarrage)
 
+0. **Vérification racine (5 sec, OBLIGATOIRE — ajout 05/05/2026)**
+   - Confirmer que toute exploration projet vise `C:\EasyMail\` — JAMAIS `C:\Users\yvanb\OneDrive\Desktop\EasyMail\` (vestige pré-12/04, contenu périmé + souvent cloud-only illisible).
+   - Si un `pwd` ou un Glob retourne un chemin OneDrive lié au projet → arrêter et alerter Yvan.
+   - Couvert par `I-SESS-05` dans `audit/INVARIANTS.md` (vérification mécanique en fin de session via `cloture_check.sh`).
+
 1. **Vérification worktree (30 sec)**
    - `git -C C:/EasyMail branch --show-current` → doit retourner `master`
    - `git -C C:/EasyMail log --oneline -5` → top doit matcher l'état décrit dans le PROMPT_REPRISE

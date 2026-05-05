@@ -158,6 +158,42 @@ else
 fi
 
 # --------------------------------------------------------------------------
+# I-SESS-05 : aucun chemin OneDrive\Desktop\EasyMail dans docs vivants
+# --------------------------------------------------------------------------
+print_section "I-SESS-05 — aucun chemin OneDrive obsolète dans docs vivants"
+
+DOCS_VIVANTS_RACINE=(
+    "docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md"
+    "docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md"
+    "docs/saas/ONBOARDING_SESSION_SAAS.md"
+    "docs/PLUS_TARD_VF.md"
+    "docs/SOMMAIRE_DETAILLE.md"
+)
+
+ONEDRIVE_REFS=""
+for f in "${DOCS_VIVANTS_RACINE[@]}"; do
+    if [ -f "$f" ]; then
+        # Match OneDrive[\/]Desktop[\/]EasyMail (toute slash, casse insensible)
+        # Exclut les bandeaux d'avertissement qui mentionnent le chemin POUR
+        # avertir (mots-clés "vestige", "JAMAIS l'utiliser", "I-SESS-05" =
+        # le doc explique le piège, pas un chemin de travail actif)
+        REFS=$(grep -inE 'OneDrive[\\/]+Desktop[\\/]+EasyMail' "$f" 2>/dev/null \
+            | grep -viE 'vestige|JAMAIS l.utiliser|I-SESS-05|pré-migration|piège' \
+            || true)
+        if [ -n "$REFS" ]; then
+            ONEDRIVE_REFS="${ONEDRIVE_REFS}${f}:\n${REFS}\n"
+        fi
+    fi
+done
+
+if [ -z "$ONEDRIVE_REFS" ]; then
+    ok "I-SESS-05 : aucune ref OneDrive\\Desktop\\EasyMail dans les docs vivants"
+else
+    ko "I-SESS-05 : refs OneDrive obsolètes détectées dans docs vivants (racine projet = C:\\EasyMail\\ depuis 12/04) :"
+    echo -e "$ONEDRIVE_REFS" | sed 's/^/    /'
+fi
+
+# --------------------------------------------------------------------------
 # Synthèse finale
 # --------------------------------------------------------------------------
 print_section "SYNTHÈSE"

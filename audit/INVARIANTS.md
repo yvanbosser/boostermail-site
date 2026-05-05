@@ -565,6 +565,13 @@ Tous les chiffres « N commits master » mentionnés dans les docs vivants (PROM
 - **Recommandation** : préférer une formulation **relative** (« ~30 commits ») ou un hash (`89e6524+`) plutôt qu'un chiffre figé qui devient faux au commit suivant
 - **Action si violé** : harmoniser tous les docs vivants à la même valeur OU passer en formulation relative
 
+### I-SESS-05 : Aucun chemin OneDrive obsolète dans docs vivants (ajout 05/05/2026)
+Aucun doc vivant (`PROMPT_REPRISE_NEW_OUTLOOK`, `ONBOARDING_NEW_OUTLOOK_VIA_OVH`, `ONBOARDING_SESSION_SAAS`, `PLUS_TARD_VF`, `SOMMAIRE_DETAILLE`) ne mentionne `OneDrive\Desktop\EasyMail` comme chemin de travail actif. La racine du projet est **`C:\EasyMail\`** depuis la migration documentée le 12/04/2026 (cf `docs/SOMMAIRE_DETAILLE.md` ligne 48).
+- **Test** : `grep -inE 'OneDrive[\\/]+Desktop[\\/]+EasyMail' docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md docs/saas/ONBOARDING_SESSION_SAAS.md docs/PLUS_TARD_VF.md docs/SOMMAIRE_DETAILLE.md` → doit retourner 0 ligne
+- **Pourquoi** : la session 05/05 a perdu ~1h à explorer `OneDrive\Desktop\EasyMail` (vestige pré-migration, contenu périmé, fichiers cloud-only illisibles) avant de trouver la racine `C:\EasyMail\` via le SOMMAIRE. Toute mention dans un doc vivant risque de faire retomber une session future dans ce piège.
+- **Action si violé** : remplacer la ref par `C:\EasyMail\...` ou par le chemin relatif équivalent (les chemins relatifs des docs supposent racine = `C:\EasyMail\`)
+- **Vérifié par** : `audit/tests/cloture_check.sh`
+
 ## Catégorie 15 — Conventions code V2 (ajout 29/04/2026 PM tardif post-audit stabilisation)
 
 ### I-CODE-MODELS-01 : Modèles Claude centralisés (pas de hardcode)
