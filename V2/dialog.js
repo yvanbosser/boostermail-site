@@ -5300,15 +5300,26 @@ function _safeSetSendBtn(opts) {
     if (opts && typeof opts.html === 'string') btn.innerHTML = opts.html;
     if (opts && typeof opts.disabled === 'boolean') btn.disabled = opts.disabled;
 
-    // Mode new phase 2 : restaurer onclick = sendReply + réafficher refineBar
+    // Mode new phase 2 (gap 05/05 v10) : trigger sur fin de génération.
+    // _onGenerationDone appelle _safeSetSendBtn({disabled: false}) SANS html,
+    // donc on détecte cette signature (mode new + generation started + disabled
+    // false + refineBar encore caché) pour basculer l'UI vers phase 2.
+    if (_mode === 'new' && _modeNewGenerationStarted
+        && opts && opts.disabled === false) {
+        var refineBarShow = document.getElementById('refineBar');
+        if (refineBarShow && refineBarShow.style.display === 'none') {
+            // Bascule phase 2 : label + onclick + refineBar visible
+            btn.innerHTML = '&#x1f4e4; Relire et envoyer';
+            btn.onclick = function() { sendReply(); };
+            refineBarShow.style.display = '';
+        }
+    }
+    // Trigger redondant (sécurité) : si un autre flow appelle avec html "Relire/Envoye"
     if (_mode === 'new' && opts && typeof opts.html === 'string'
         && (opts.html.indexOf('Relire') >= 0 || opts.html.indexOf('Envoye') >= 0 || opts.html.indexOf('Envoyer') >= 0)) {
         btn.onclick = function() { sendReply(); };
-        // Réafficher le champ modification (caché en phase 1)
-        var refineBarShow = document.getElementById('refineBar');
-        if (refineBarShow && refineBarShow.style.display === 'none') {
-            refineBarShow.style.display = '';
-        }
+        var rb2 = document.getElementById('refineBar');
+        if (rb2 && rb2.style.display === 'none') rb2.style.display = '';
     }
 }
 
