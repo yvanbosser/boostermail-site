@@ -127,11 +127,55 @@ Pour chaque écran :
 
 ## Écran : `V2/templates/echeances.html` (page Échéances)
 
-### Visibles
+> **Spec consolidée** : `docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md` (source de vérité unique fonctionnelle, datée 05/05/2026).
+>
+> **Servi par** : `GET /plugin/echeances` (`app_plugin.py:13312`), chargé dans le `QWebEngineView` du companion PyQt (overlay).
 
-- Liste des échéances détectées par IA, triées par date
-- Filtres : à venir / en retard / fait
-- Actions : marquer comme fait / reporter / annuler
+### Visibles à l'écran (mode défaut)
+
+| Élément | Sélecteur / ID | Notes |
+|---|---|---|
+| Header bleu BoosterMail | `.header` | Gradient `#0F6CBD → #1976D2`, icône `⏰` + titre |
+| Nav onglets vers autres pages overlay | `.nav-link` (Profil, Contacts, Échéances) | `.active` blanc sur fond bleu |
+| 3 onglets de filtre | `#tab-encours`, `#tab-depassees`, `#tab-archivees` | Avec compteurs `.tab-count` |
+| Champ recherche | `#echeance-search` | Filtre live description / correspondant / sujet |
+| Sections temporelles dans "En cours" | `.section-title` | « À relancer aujourd'hui / demain / avant fin de semaine / semaine prochaine et plus » |
+| Cards échéance | `.card` | Avatar + sujet + date relative + badge retard |
+| Boutons par card | `.btn-primary` (Relance), `.btn` (Réponse reçue / Modifier) | Labels dynamiques selon `nb_relances` |
+| Bouton suppression | `<a>` icône poubelle | Mini-confirm inline |
+| Détail échéance (panel sticky droite) | `#detail-col` | Visible quand card sélectionnée |
+| Toast UNDO 4s | `#undo-toast` | Sur action « Réponse reçue » |
+| Popup modif date | `#reporter-popup` | Dropdown -4j à +90j, blocage date passée, skip week-end |
+| Empty states par onglet | `.empty-state` | « Aucune relance en cours — tout est à jour ✓ » |
+
+### Comportement attendu
+
+- **Mémorisation onglet actif** via `sessionStorage.echeances_tab` + URL param `?tab=`
+- **Modif date qui tombe samedi/dimanche** → décalage automatique au lundi (côté JS, avant `PUT`)
+- **Auto-archivage** : > 5j de retard sans réponse → onglet Archivées
+- **Filtre d'affichage** : > 15j de retard ou terminé > 30j → masqué
+
+### Routes JS appelées
+
+| Route | Méthode | Rôle |
+|---|---|---|
+| `/api/echeances` | GET | Charge la liste complète |
+| `/api/echeances/<id>` | PUT | Update statut/date |
+| `/api/echeances/<id>/relance` | GET | ⚠ Stub V2 — gap §10 de la spec |
+| `/api/echeances/<id>/mail` | GET | ⚠ Stub V2 — gap §10 de la spec |
+| `/api/echeances/search_relance_mail` | GET | Récupère corps mail relance pour modale |
+| `/api/echeances/purge_archives` | POST | Vider l'archive |
+
+### Interdits absolus
+
+- Pas de `window.open()` pour ouvrir une autre page overlay (régression connue)
+- Pas d'overlay positionné en taskpane à droite (cf `feedback_taskpane_interdit.md`)
+- Pas d'affichage du contenu intégral des mails en clair (PII — extrait ≤ 100 chars OK)
+- Pas de DELETE physique sur échéance (utiliser `PUT statut='annulee'` — audit trail)
+
+### Test associé
+
+`audit/tests/e2e/test_ui_specs.py::test_echeances_overlay_3_tabs_and_sections` (à créer — vérifie présence 3 onglets + 4 sections temporelles + boutons standards par card)
 
 ---
 

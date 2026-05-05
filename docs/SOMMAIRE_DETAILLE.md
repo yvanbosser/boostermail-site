@@ -176,7 +176,8 @@ docs/
 | `SPEC_CONTACTS_ADAPTATIF.md` | Profils contacts auto-apprentissage, re-analyse tous les 3 mails | `contacts`, `profils`, `adaptatif` |
 | `SPEC_D2_FUSION_RECALIBRAGE.md` | Fusion D2 pour le recalibrage | `D2`, `recalibrage`, `fusion` |
 | `SPEC_DOUBLON_CLASSEMENT.md` | Gestion doublons classement | `doublons`, `classement` |
-| `SPEC_ECHEANCES_OPTIMISATION.md` | Détection IA échéances, popup proactive, relance, Bloc F | `échéances`, `relance`, `blocF` |
+| **`SPEC_ECHEANCES_BOOSTERMAIL.md`** ⭐ | **Source de vérité unique des échéances** (consolidée 05/05). Pipeline détection (pré-filtre regex + scan IA Sonnet 4.6 + dédup), schéma DB, UI overlay 3 onglets, 12 routes API V2, auto-annulation heuristique, gaps restants (2 stubs + scheduler J-1 ouvré). Remplace `SPEC_ECHEANCES_OPTIMISATION.md`. | `échéances`, `relance`, `deadline`, `rappel`, `blocF` |
+| ~~`SPEC_ECHEANCES_OPTIMISATION.md`~~ | ⚠️ **Archivé 05/05** — remplacé par `SPEC_ECHEANCES_BOOSTERMAIL.md` | `archive` |
 | `SPEC_IMAGES_INLINE.md` | Content-ID inline vs PJ, PropertyAccessor PR_ATTACH_DATA_BIN | `images`, `inline`, `CID` |
 | `SPEC_OCR_LIMITE.md` | Limite OCR (PDF, Word, Excel) | `OCR`, `extraction`, `PJ` |
 | `SPEC_PREINJECTION.md` | Pré-injection contexte, prefetch | `préinjection`, `prefetch` |

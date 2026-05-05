@@ -1,5 +1,11 @@
 # Spécifications — Échéances : pré-filtre heuristique + suivi de correspondance
 
+> ⚠️ **DOCUMENT ARCHIVÉ — 05/05/2026**
+>
+> Cette spec proto est **remplacée** par la spec consolidée **`docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md`** (source de vérité unique fonctionnelle V2 SaaS).
+>
+> Conservée pour l'historique du raisonnement initial (06/04 → 18/04). Ne pas s'y référer pour le code actuel sans valider avec la nouvelle spec.
+
 > **Dernière mise à jour** : 18/04/2026 (git)
 
 ## A. Pré-filtre heuristique (réduire les appels IA)
