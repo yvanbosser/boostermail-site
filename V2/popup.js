@@ -88,15 +88,14 @@ var _companionAvailable = false;
     // string complexe peut bloquer window.open silencieusement).
     _btn('navComposeFixed', function () {
         var url = _backendUrl + '/plugin/dialog.html?mode=new';
-        // Dimensions fixes 1200x800 — taille standard d'un dialog compose.
-        // NB : impossible de reproduire EXACTEMENT le dialog 80% Office.js
-        // qui utilise displayInIframe:true (s'ouvre DANS la fenêtre Outlook,
-        // pas en plein écran). window.open ne sait ouvrir que dans une vraie
-        // fenêtre browser. 1200x800 = compromis raisonnable.
+        // Dimensions = 85% écran (équivalent dialog 80% Office.js qui s'ouvre
+        // DANS la fenêtre Outlook ~95% écran → 80% × 95% ≈ 76% écran réel).
+        // Yvan v9 : la fenêtre Réponse est presque plein écran, pas petite.
+        // Pas de plafond pour matcher la sensation native dialog 80%.
         var aw = screen.availWidth || 1400;
         var ah = screen.availHeight || 900;
-        var w = Math.min(1200, aw - 100);
-        var h = Math.min(800, ah - 100);
+        var w = Math.round(aw * 0.85);
+        var h = Math.round(ah * 0.85);
         var x = Math.round((aw - w) / 2);
         var y = Math.round((ah - h) / 2);
         var feats = 'width=' + w + ',height=' + h + ',left=' + x + ',top=' + y +
