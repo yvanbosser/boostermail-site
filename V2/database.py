@@ -560,6 +560,72 @@ class Database:
             if "duplicate column" not in str(e).lower():
                 raise
 
+        # ================================================================
+        # MULTI-USER — table users + colonne user_id (05/05/2026)
+        # Chaque ligne de données est isolée par user_id.
+        # Données existantes de Yvan conservées avec user_id = 'default'.
+        # ================================================================
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                microsoft_oid TEXT UNIQUE,
+                email TEXT NOT NULL UNIQUE,
+                display_name TEXT,
+                plan TEXT NOT NULL DEFAULT 'trial',
+                is_admin INTEGER NOT NULL DEFAULT 0,
+                quota_claude_daily INTEGER DEFAULT 500,
+                quota_openai_daily INTEGER DEFAULT 200,
+                trial_ends_at TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                last_login_at TEXT
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_users_oid ON users(microsoft_oid)")
+
+        _tables_needing_user_id = [
+            'threads', 'style_corrections', 'metrics', 'contact_profiles',
+            'echeances', 'treated_emails', 'mail_summaries',
+            'mail_classement_cache', 'mail_echeance_cache',
+            'mail_pj_classement_cache', 'folder_classifications',
+            'pj_classifications', 'email_cache', 'folder_cache',
+            'score_history', 'learned_templates',
+        ]
+        for table in _tables_needing_user_id:
+            try:
+                c.execute(
+                    f"ALTER TABLE {table} ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'"
+                )
+                conn.commit()
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
+
+        _user_id_indexes = [
+            ("idx_threads_uid",          "threads",                  "user_id"),
+            ("idx_corrections_uid",      "style_corrections",        "user_id"),
+            ("idx_metrics_uid",          "metrics",                  "user_id"),
+            ("idx_contacts_uid",         "contact_profiles",         "user_id"),
+            ("idx_echeances_uid",        "echeances",                "user_id"),
+            ("idx_treated_uid",          "treated_emails",           "user_id"),
+            ("idx_summaries_uid",        "mail_summaries",           "user_id"),
+            ("idx_classement_uid",       "mail_classement_cache",    "user_id"),
+            ("idx_ech_cache_uid",        "mail_echeance_cache",      "user_id"),
+            ("idx_pj_cache_uid",         "mail_pj_classement_cache", "user_id"),
+            ("idx_folder_class_uid",     "folder_classifications",   "user_id"),
+            ("idx_pj_class_uid",         "pj_classifications",       "user_id"),
+            ("idx_email_cache_uid",      "email_cache",              "user_id"),
+            ("idx_folder_cache_uid",     "folder_cache",             "user_id"),
+            ("idx_score_uid",            "score_history",            "user_id"),
+            ("idx_templates_uid",        "learned_templates",        "user_id"),
+        ]
+        for idx_name, table, col in _user_id_indexes:
+            c.execute(
+                f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table}({col})"
+            )
+
         conn.commit()
 
     # --- MAILS TRAITÉS -----------------------------------------------------
@@ -1006,6 +1072,76 @@ class Database:
             if rows:
                 return [{'dest_folder': r[0], 'contact': r[1], 'original': r[2], 'renamed': r[3], 'date': r[4]} for r in rows]
         return []
+
+    # --- UTILISATEURS (multi-user SaaS) ------------------------------------
+
+    def get_user(self, user_id):
+        c = self._conn().cursor()
+        c.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = c.fetchone()
+        return dict(row) if row else None
+
+    def get_user_by_microsoft_oid(self, microsoft_oid):
+        c = self._conn().cursor()
+        c.execute("SELECT * FROM users WHERE microsoft_oid = ?", (microsoft_oid,))
+        row = c.fetchone()
+        return dict(row) if row else None
+
+    def get_user_by_email(self, email):
+        c = self._conn().cursor()
+        c.execute("SELECT * FROM users WHERE email = ?", (email,))
+        row = c.fetchone()
+        return dict(row) if row else None
+
+    def create_user(self, user_id, microsoft_oid, email, display_name=None,
+                    plan='trial', is_admin=0):
+        conn = self._conn()
+        conn.execute("""
+            INSERT OR IGNORE INTO users
+                (id, microsoft_oid, email, display_name, plan, is_admin)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (user_id, microsoft_oid, email, display_name, plan, is_admin))
+        conn.commit()
+
+    def update_user(self, user_id, **kwargs):
+        allowed = {
+            'plan', 'is_active', 'is_admin', 'display_name',
+            'quota_claude_daily', 'quota_openai_daily', 'trial_ends_at',
+            'last_login_at',
+        }
+        fields = {k: v for k, v in kwargs.items() if k in allowed}
+        if not fields:
+            return
+        set_clause = ', '.join(f"{k} = ?" for k in fields)
+        params = list(fields.values()) + [user_id]
+        conn = self._conn()
+        conn.execute(f"UPDATE users SET {set_clause} WHERE id = ?", params)
+        conn.commit()
+
+    def delete_user(self, user_id):
+        conn = self._conn()
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+
+    def list_users(self, include_inactive=False):
+        c = self._conn().cursor()
+        if include_inactive:
+            c.execute("SELECT * FROM users ORDER BY created_at DESC")
+        else:
+            c.execute("SELECT * FROM users WHERE is_active = 1 ORDER BY created_at DESC")
+        return [dict(row) for row in c.fetchall()]
+
+    def upsert_user_on_login(self, microsoft_oid, email, display_name=None):
+        """Crée ou met à jour un user au login Microsoft OAuth.
+        Retourne le user_id (existant ou nouvellement créé)."""
+        import uuid
+        existing = self.get_user_by_microsoft_oid(microsoft_oid)
+        if existing:
+            self.update_user(existing['id'], last_login_at=datetime.now().isoformat())
+            return existing['id']
+        user_id = str(uuid.uuid4())
+        self.create_user(user_id, microsoft_oid, email, display_name)
+        return user_id
 
     # --- RÉGLAGES ----------------------------------------------------------
 

@@ -13815,6 +13815,135 @@ def api_echeance_mail(echeance_id):
         return jsonify({'status': 'error', 'reason': str(e)[:200]}), 500
 
 
+# --- Admin — Gestion utilisateurs (multi-user SaaS) -------------------------
+
+def _require_admin(f):
+    """Décorateur : exige une session authentifiée ET is_admin = 1."""
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        user_id = session.get('auth_user_id')
+        if not user_id:
+            return jsonify({'error': 'Authentification requise', 'auth_required': True}), 401
+        user = _db.get_user(user_id)
+        if not user or not user.get('is_active', 0):
+            return jsonify({'error': 'Compte inactif ou introuvable'}), 403
+        if not user.get('is_admin', 0):
+            return jsonify({'error': 'Accès admin requis'}), 403
+        request.auth_user_id = user_id
+        request.admin_user = user
+        return f(*args, **kwargs)
+    return wrapper
+
+
+@app.route('/api/admin/users', methods=['GET'])
+@_require_admin
+def api_admin_list_users():
+    """Liste tous les utilisateurs (actifs par défaut)."""
+    include_inactive = request.args.get('include_inactive', '0') == '1'
+    users = _db.list_users(include_inactive=include_inactive)
+    return jsonify({'users': users, 'total': len(users)})
+
+
+@app.route('/api/admin/users', methods=['POST'])
+@_require_admin
+def api_admin_create_user():
+    """Crée un utilisateur manuellement (invitation)."""
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    if not email:
+        return jsonify({'error': 'email requis'}), 400
+    if _db.get_user_by_email(email):
+        return jsonify({'error': 'Utilisateur déjà existant'}), 409
+    import uuid
+    user_id = str(uuid.uuid4())
+    _db.create_user(
+        user_id=user_id,
+        microsoft_oid=data.get('microsoft_oid', ''),
+        email=email,
+        display_name=data.get('display_name', ''),
+        plan=data.get('plan', 'trial'),
+        is_admin=int(data.get('is_admin', 0)),
+    )
+    return jsonify({'status': 'created', 'user_id': user_id}), 201
+
+
+@app.route('/api/admin/users/<user_id>', methods=['GET'])
+@_require_admin
+def api_admin_get_user(user_id):
+    """Retourne les détails d'un utilisateur."""
+    user = _db.get_user(user_id)
+    if not user:
+        return jsonify({'error': 'Utilisateur introuvable'}), 404
+    return jsonify(user)
+
+
+@app.route('/api/admin/users/<user_id>', methods=['PATCH'])
+@_require_admin
+def api_admin_update_user(user_id):
+    """Met à jour les champs autorisés d'un utilisateur."""
+    if not _db.get_user(user_id):
+        return jsonify({'error': 'Utilisateur introuvable'}), 404
+    data = request.get_json(silent=True) or {}
+    allowed = {
+        'plan', 'is_active', 'is_admin', 'display_name',
+        'quota_claude_daily', 'quota_openai_daily', 'trial_ends_at',
+    }
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates:
+        return jsonify({'error': 'Aucun champ valide à mettre à jour'}), 400
+    _db.update_user(user_id, **updates)
+    return jsonify({'status': 'updated', 'updated_fields': list(updates.keys())})
+
+
+@app.route('/api/admin/users/<user_id>', methods=['DELETE'])
+@_require_admin
+def api_admin_delete_user(user_id):
+    """Supprime (désactive) un utilisateur."""
+    if not _db.get_user(user_id):
+        return jsonify({'error': 'Utilisateur introuvable'}), 404
+    # Désactivation douce par défaut (préserve les données)
+    hard = request.args.get('hard', '0') == '1'
+    if hard:
+        _db.delete_user(user_id)
+        return jsonify({'status': 'deleted'})
+    _db.update_user(user_id, is_active=0)
+    return jsonify({'status': 'deactivated'})
+
+
+@app.route('/api/admin/users/<user_id>/quota', methods=['PATCH'])
+@_require_admin
+def api_admin_update_user_quota(user_id):
+    """Met à jour les quotas API d'un utilisateur."""
+    if not _db.get_user(user_id):
+        return jsonify({'error': 'Utilisateur introuvable'}), 404
+    data = request.get_json(silent=True) or {}
+    updates = {}
+    if 'claude_daily' in data:
+        updates['quota_claude_daily'] = int(data['claude_daily'])
+    if 'openai_daily' in data:
+        updates['quota_openai_daily'] = int(data['openai_daily'])
+    if not updates:
+        return jsonify({'error': 'claude_daily ou openai_daily requis'}), 400
+    _db.update_user(user_id, **updates)
+    return jsonify({'status': 'updated', 'quotas': updates})
+
+
+@app.route('/api/user/me', methods=['GET'])
+def api_user_me():
+    """Retourne les infos du user connecté (accessible sans is_admin)."""
+    from user_context import require_user as _require_user_ctx
+    user_id = session.get('auth_user_id')
+    if not user_id:
+        return jsonify({'error': 'Non authentifié', 'auth_required': True}), 401
+    user = _db.get_user(user_id)
+    if not user:
+        return jsonify({'error': 'Utilisateur introuvable'}), 404
+    # Masquer les champs internes
+    safe = {k: v for k, v in user.items()
+            if k not in ('microsoft_oid',)}
+    return jsonify(safe)
+
+
 # --- Démarrage ---------------------------------------------------------------
 
 if __name__ == '__main__':

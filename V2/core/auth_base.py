@@ -285,8 +285,20 @@ def create_auth_blueprint(auth_provider_factory) -> Blueprint:
             return_url = session.pop('auth_return_url', '/plugin/dialog.html')
             return redirect(f'{return_url}?auth_error=exchange_failed&auth_error_desc={str(e)}')
 
+        # Upsert user dans la table users (multi-user SaaS)
+        microsoft_oid = user_info.get('user_id', '')
+        email = user_info.get('email', '')
+        display_name = user_info.get('name', '')
+        try:
+            db_user_id = provider._store._db.upsert_user_on_login(
+                microsoft_oid, email, display_name
+            )
+        except Exception:
+            db_user_id = microsoft_oid  # fallback : OID direct si DB échoue
+
         # Stocker l'identifiant en session Flask (cookie signé)
-        session['auth_user_id'] = user_info.get('user_id', '')
+        session['auth_user_id'] = db_user_id
+        session['auth_microsoft_oid'] = microsoft_oid
         session['auth_provider'] = provider.PROVIDER_NAME
         session.permanent = True  # Durée = app.permanent_session_lifetime
 
