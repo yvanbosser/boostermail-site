@@ -441,41 +441,44 @@ function _loadEcheancesUrgentes() {
         }
     }
 
-    // Mode new : adapter UX (gap 05/05 PM v2)
-    // - Éditeur : placeholder "Le mail généré apparaîtra ici..."
-    // - fieldBrief (textarea cachée par défaut) : devient champ instructions VISIBLE
-    // - btnGenerate (bouton caché par défaut) : devient visible avec "Générer mon mail"
-    // - btnSend (Relire et envoyer) : caché jusqu'à génération réussie
-    //   (réaffiché par _safeSetSendBtn après 1ère génération via patch ci-dessous)
+    // Mode new : adapter UX (gap 05/05 PM v3 — retour Yvan)
+    // - Éditeur : placeholder "Donnez vos instructions pour générer un nouveau mail"
+    //   (l'éditeur SERT de champ d'instructions, le mail généré le remplace après)
+    // - Barre des onglets (mail-tabs) : cachée → fusion en un seul "onglet" visible
+    // - fieldBrief + btnGenerate : cachés (on utilise btnSend modifié)
+    // - btnSend : visible avec label "Générer" en mode new, onclick=generateReply
+    //   après copie editor.innerText → fieldBrief.value
     if (_mode === 'new') {
         var editorEl = document.getElementById('editor');
-        if (editorEl) editorEl.setAttribute('data-placeholder', 'Le mail généré apparaîtra ici...');
+        if (editorEl) editorEl.setAttribute('data-placeholder', 'Donnez vos instructions pour générer un nouveau mail');
 
-        var briefEl = document.getElementById('fieldBrief');
-        if (briefEl) {
-            briefEl.style.display = 'block';
-            briefEl.style.width = '100%';
-            briefEl.style.minHeight = '70px';
-            briefEl.style.padding = '8px 10px';
-            briefEl.style.border = '1px solid #0F6CBD';
-            briefEl.style.borderRadius = '4px';
-            briefEl.style.marginTop = '8px';
-            briefEl.style.fontFamily = 'inherit';
-            briefEl.style.fontSize = '12px';
-            briefEl.style.outline = 'none';
-            briefEl.style.resize = 'vertical';
-            briefEl.placeholder = 'Donnez les instructions de votre mail (ex: Demander un RDV mardi 14h pour faire le point sur le dossier X)';
-            briefEl.rows = 3;
-        }
+        // Fusion onglets : cacher la barre, seul tab-resume reste visible
+        var mailTabs = document.querySelector('.mail-tabs');
+        if (mailTabs) mailTabs.style.display = 'none';
 
-        var btnGen = document.getElementById('btnGenerate');
-        if (btnGen) {
-            btnGen.style.display = 'inline-block';
-            btnGen.innerHTML = '&#x2728; Generer mon mail';
-        }
+        // Cacher fieldBrief et btnGenerate (on bascule sur btnSend modifié)
+        var briefHide = document.getElementById('fieldBrief');
+        if (briefHide) briefHide.style.display = 'none';
+        var btnGenHide = document.getElementById('btnGenerate');
+        if (btnGenHide) btnGenHide.style.display = 'none';
 
+        // btnSend (re)positionné comme bouton "Générer" en mode new
         var btnSendEl = document.getElementById('btnSend');
-        if (btnSendEl) btnSendEl.style.display = 'none';
+        if (btnSendEl) {
+            btnSendEl.style.display = '';
+            btnSendEl.innerHTML = '&#x2728; Generer';
+            btnSendEl.disabled = false;
+            btnSendEl.onclick = function() {
+                // Copier le contenu de l'éditeur (les instructions) dans fieldBrief
+                // car generateReply lit fieldBrief.value pour construire le prompt IA.
+                var briefSync = document.getElementById('fieldBrief');
+                var ed = document.getElementById('editor');
+                if (briefSync && ed) {
+                    briefSync.value = (ed.innerText || ed.textContent || '').trim();
+                }
+                generateReply();
+            };
+        }
     }
 
     // Auto-détection importance (mots-clés sensibles → H, comme le proto)
@@ -1321,18 +1324,48 @@ function _renderRecipientContext(email, profile) {
         resumePoints.innerHTML = html;
     }
 
-    // Section "Style rédactionnel" (résumé court)
+    // Section unique "Détails du profil" (fusion onglets, retour Yvan v3)
+    // Combine ce qui était dans tab-resume (Style résumé) + tab-full (4 blocs)
     var resumeActions = document.getElementById('resumeActions');
     if (resumeActions) {
-        var html2 = '<div class="resume-section-title">Style rédactionnel</div>';
-        if (profileText) {
-            html2 += '<div style="font-size:12px;color:#555;padding:4px 0;font-style:italic;line-height:1.5;">📝 ' + _escapeHtml(profileText) + '</div>';
-        } else if (sampleCount > 0) {
-            html2 += '<div style="font-size:12px;color:#888;padding:4px 0;">BoosterMail s\'appuiera sur les ' + sampleCount + ' échanges précédents pour adapter le ton.</div>';
+        var d2 = '';
+        if (sampleCount === 0) {
+            d2 += '<div class="resume-section-title">Style rédactionnel</div>';
+            d2 += '<div style="font-size:12px;color:#888;padding:4px 0;font-style:italic;">Aucun historique — ton neutre par défaut.</div>';
         } else {
-            html2 += '<div style="font-size:12px;color:#888;padding:4px 0;font-style:italic;">Aucun historique — ton neutre par défaut.</div>';
+            // Bloc Style rédactionnel
+            if (register || tone || typicalLength || language || powerDynamic) {
+                d2 += '<div class="resume-section-title">Style rédactionnel</div>';
+                d2 += '<div style="font-size:12px;color:#555;padding:4px 0;line-height:1.7;">';
+                if (register) d2 += '💬 Registre : <strong>' + _escapeHtml(_registerLabel(register)) + '</strong><br>';
+                if (tone) d2 += '🎨 Ton : <strong>' + _escapeHtml(tone) + '</strong><br>';
+                if (typicalLength) d2 += '✏️ Longueur typique : <strong>' + _escapeHtml(typicalLength) + '</strong><br>';
+                if (language) d2 += '🌐 Langue : <strong>' + _escapeHtml(_languageLabel(language)) + '</strong><br>';
+                if (powerDynamic) d2 += '🎯 ' + _escapeHtml(_powerDynamicLabel(powerDynamic));
+                d2 += '</div>';
+            }
+
+            // Bloc Formules habituelles
+            if (greeting || closing) {
+                d2 += '<div class="resume-section-title" style="margin-top:12px;">Formules habituelles</div>';
+                d2 += '<div style="font-size:12px;color:#555;padding:4px 0;line-height:1.7;">';
+                if (greeting) d2 += '👋 Salutation : <em>"' + _escapeHtml(greeting) + '"</em><br>';
+                if (closing) d2 += '🙋 Clôture : <em>"' + _escapeHtml(closing) + '"</em>';
+                d2 += '</div>';
+            }
+
+            // Bloc Résumé textuel (highlight)
+            if (profileText) {
+                d2 += '<div class="resume-section-title" style="margin-top:12px;">Résumé du profil</div>';
+                d2 += '<div style="font-size:12px;color:#555;padding:6px 8px;font-style:italic;line-height:1.5;background:#fffde7;border-left:3px solid #fbc02d;border-radius:3px;">📝 ' + _escapeHtml(profileText) + '</div>';
+            }
+
+            // Lien modifier
+            d2 += '<div style="margin-top:12px;text-align:center;">'
+               + '<a href="#" onclick="event.preventDefault();_openDashboard(\'contacts\');return false;" style="font-size:11px;color:#0F6CBD;text-decoration:underline;">✏️ Modifier ce profil dans la page Contacts</a>'
+               + '</div>';
         }
-        resumeActions.innerHTML = html2;
+        resumeActions.innerHTML = d2;
     }
 
     // ============ Onglet "Profil" (vue détaillée) ============
