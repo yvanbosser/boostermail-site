@@ -1110,12 +1110,26 @@ function includeSelectedFwdAttachments() {
 // =============================================================================
 
 function smartPaperclip() {
-    if (!_fromEmail) {
+    // Mode new (gap 05/05 v15) : utiliser le destinataire saisi (fieldTo)
+    // au lieu de _fromEmail (qui est vide en mode new).
+    var emailToUse = _fromEmail;
+    var subjectToUse = _subject;
+    if (_mode === 'new') {
+        var fieldTo = document.getElementById('fieldTo');
+        emailToUse = (fieldTo && fieldTo.value || '').trim();
+        if (!emailToUse || emailToUse.indexOf('@') < 0) {
+            alert('Veuillez d\'abord saisir un destinataire dans le champ "À".');
+            return;
+        }
+        var subjectField = document.getElementById('fieldSubject');
+        subjectToUse = (subjectField && subjectField.value || '').trim();
+    }
+    if (!emailToUse) {
         alert('Aucun correspondant detecte.');
         return;
     }
-    fetch(_backendUrl + '/api/smart_paperclip?email=' + encodeURIComponent(_fromEmail) +
-          '&subject=' + encodeURIComponent(_subject))
+    fetch(_backendUrl + '/api/smart_paperclip?email=' + encodeURIComponent(emailToUse) +
+          '&subject=' + encodeURIComponent(subjectToUse || ''))
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.folder) {
