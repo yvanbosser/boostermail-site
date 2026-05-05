@@ -718,6 +718,32 @@ def api_detected_platform():
     return jsonify({"platform": platform})
 
 
+# =============================================================================
+# Helper BG threads — isolation multi-user
+# Capture le user_id courant AVANT le spawn pour que _uid() retourne la bonne
+# valeur dans le thread BG (sans contexte Flask).
+# Usage : _spawn_bg(_ma_fonction, args=(arg1,)) au lieu de
+#         threading.Thread(target=_ma_fonction, args=(arg1,), daemon=True).start()
+# =============================================================================
+
+def _spawn_bg(target, args=(), kwargs=None, *, name=None, daemon=True):
+    """Lance un thread BG avec le user_id du contexte courant capturé."""
+    captured_uid = (_get_current_user_id() or 'default') if _get_current_user_id else 'default'
+
+    def _wrapped(*a, **kw):
+        try:
+            from user_context import set_thread_user_id
+            set_thread_user_id(captured_uid)
+        except Exception:
+            pass
+        return target(*a, **kw)
+
+    t = threading.Thread(target=_wrapped, args=args, kwargs=kwargs or {},
+                         daemon=daemon, name=name)
+    t.start()
+    return t
+
+
 # --- Warmup inbox (pre-chargement 10 mails au demarrage) ---
 
 # Étape 7 multi-tenant (29/04/2026) — _warmup_cache passe en UserScopedDict.
@@ -896,7 +922,7 @@ def _execute_warmup(graph):
             logger.info(f"Warmup FAST PATH : cache chaud ({len(_warmup_cache)} mails + "
                         f"prefetch < 48h) → skip Graph fetch")
             # Relancer la spéculation TIER 1 en arrière-plan (cache peut avoir des gaps)
-            threading.Thread(target=_background_preload_loop, daemon=True).start()
+            _spawn_bg(_background_preload_loop)
 
             # Fix audit 22/04 (Phase 1.A.1) : bulk résumés MEME en fast path.
             # Avant : le bulk summaries était APRÈS ce return → jamais exécuté
@@ -914,8 +940,7 @@ def _execute_warmup(graph):
                                     f"{skipped} déjà en DB")
                 except Exception as e:
                     logger.warning(f"[warmup FAST PATH] résumés IA erreur : {e}")
-            threading.Thread(target=_fastpath_bulk_summaries, daemon=True,
-                             name='summaries-fastpath').start()
+            _spawn_bg(_fastpath_bulk_summaries, name='summaries-fastpath')
             return
 
         # Plan 2 Phase 3.1 — Parallélisation : lancer immédiatement le prefetch
@@ -943,8 +968,7 @@ def _execute_warmup(graph):
                 'cc': msg.get('cc', ''),
                 'date': msg.get('date', ''),
             }
-            t = threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True)
-            t.start()
+            t = _spawn_bg(_run_prefetch, args=(mail_data,), name='prefetch-early')
             parallel_threads.append(t)
         if parallel_threads:
             logger.info(f"[warmup 3.1] {len(parallel_threads)} prefetch(es) en //  "
@@ -1019,8 +1043,7 @@ def _execute_warmup(graph):
                 'date': msg.get('date', ''),
             }
             if mail_data['from_email']:
-                t = threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True)
-                t.start()
+                t = _spawn_bg(_run_prefetch, args=(mail_data,), name='prefetch-warmup')
                 prefetch_threads.append(t)
         logger.info(f"Warmup prefetch lancé ({len(prefetch_threads)} threads)")
 
@@ -1032,17 +1055,16 @@ def _execute_warmup(graph):
         logger.info("Warmup terminé — spéculation TIER 1 en cours")
 
         # Lancer la spéculation préemptive TIER 1 (contacts connus dans les 20 premiers mails)
-        threading.Thread(target=_run_preemptive_bg, args=(mails,), daemon=True).start()
+        _spawn_bg(_run_preemptive_bg, args=(mails,), name='preemptive-bg')
 
         # Phase 1.5 : Préchargement BG des contextes A/B/C pour tous les mails non traités
         # (au-delà des 5 premiers déjà prefetchés). Tourne en fond, throttle 2s.
-        threading.Thread(target=_background_preload_loop, daemon=True).start()
+        _spawn_bg(_background_preload_loop, name='bg-preload')
 
         # Pré-chargement Windows folders (classement auto PJ) — faible priorité,
         # BG pour ne pas bloquer l'interaction user. Évite un scan synchrone
         # au premier clic "classer PJ".
-        threading.Thread(target=_get_windows_folders_cached, daemon=True,
-                         name='wf-prewarm').start()
+        _spawn_bg(_get_windows_folders_cached, name='wf-prewarm')
 
         # === Audit 20/04 : enrichissement warmup — utiliser les 8 s au max ===
 
@@ -1075,8 +1097,7 @@ def _execute_warmup(graph):
                 logger.info(f"[warmup] {len(senders)} contacts préchargés (bulk)")
             except Exception as e:
                 logger.debug(f"[warmup] bulk contacts erreur : {e}")
-        threading.Thread(target=_bulk_preload_contacts, daemon=True,
-                         name='contacts-prewarm').start()
+        _spawn_bg(_bulk_preload_contacts, name='contacts-prewarm')
 
         # 3. OBSOLÈTE (supprimé P4.1 — 24/04) : _bulk_prescan_echeances ne
         # faisait que du log regex sans écrire en cache. Remplacé par la
@@ -1108,8 +1129,7 @@ def _execute_warmup(graph):
                 _prewarm_mail_previews_batch(_with_draft)
             except Exception as e:
                 logger.debug(f"[warmup] mail_preview prewarm : {e}")
-        threading.Thread(target=_bulk_prewarm_mail_previews, daemon=True,
-                         name='mail-preview-warmup').start()
+        _spawn_bg(_bulk_prewarm_mail_previews, name='mail-preview-warmup')
 
         # 3bis. Résumés IA (21/04) — Claude Haiku batch, pattern calqué sur
         #    échéances. Génère 3-5 points + actions attendues par mail, stocke
@@ -1124,8 +1144,7 @@ def _execute_warmup(graph):
                                 f"{skipped} déjà en DB")
             except Exception as e:
                 logger.warning(f"[warmup] résumés IA erreur : {e}")
-        threading.Thread(target=_bulk_summaries_warmup, daemon=True,
-                         name='summaries-warmup').start()
+        _spawn_bg(_bulk_summaries_warmup, name='summaries-warmup')
 
         # 4. Pré-charger learned_templates (évite un DB hit au 1er /api/instant_reply)
         def _preload_learned_tpl():
@@ -1134,8 +1153,7 @@ def _execute_warmup(graph):
                 logger.info(f"[warmup] {n} learned_templates chargés")
             except Exception:
                 pass
-        threading.Thread(target=_preload_learned_tpl, daemon=True,
-                         name='lt-prewarm').start()
+        _spawn_bg(_preload_learned_tpl, name='lt-prewarm')
     except Exception as e:
         with _warmup_lock:
             _warmup_progress["status"] = "error"
@@ -1294,7 +1312,7 @@ def _preload_neighbors(message_id):
                 'conversation_id': target.get('conversation_id', ''),
             }
             if mail_data['from_email']:
-                threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True).start()
+                _spawn_bg(_run_prefetch, args=(mail_data,))
     except Exception as e:
         logger.debug(f"[preload-neighbor] Erreur : {e}")
 
@@ -1511,8 +1529,7 @@ def _continuous_speculation_loop():
                         except Exception as _e:
                             logger.debug(f"[cont-spec] analyse contact {em[:30]} : {_e}")
                         time.sleep(0.5)  # throttle léger (évite flood API)
-                threading.Thread(target=_analyze_batch, args=(unique_senders,),
-                                 daemon=True, name='cont-spec-contacts').start()
+                _spawn_bg(_analyze_batch, args=(unique_senders,), name='cont-spec-contacts')
             except Exception as e:
                 logger.debug(f"[cont-spec] analyse contacts : {e}")
 
@@ -1714,7 +1731,7 @@ def api_warmup_inbox():
             _warmup_progress["status"] = "idle"
         return jsonify({"status": "no_graph"})
 
-    threading.Thread(target=_execute_warmup, args=(graph,), daemon=True).start()
+    _spawn_bg(_execute_warmup, args=(graph,), name='warmup')
     return jsonify({"status": "started"})
 
 @app.route('/api/warmup_inbox/progress', methods=['GET'])
@@ -3141,21 +3158,15 @@ def _prewarm_unified_for_mail(mid, mail_data):
         logger.warning(f"[unified] FAILED {mid[:30]}: {e} — fallback sub-prewarms")
         # Étape 4 — Fallback : lancer les 3 sub-prewarms originaux comme avant
         try:
-            threading.Thread(target=_prewarm_echeance_for_mail,
-                             args=(mid, mail_data), daemon=True,
-                             name='prewarm-ech-fb').start()
+            _spawn_bg(_prewarm_echeance_for_mail, args=(mid, mail_data), name='prewarm-ech-fb')
         except Exception:
             pass
         try:
-            threading.Thread(target=_prewarm_classement_for_mail,
-                             args=(mid, mail_data), daemon=True,
-                             name='prewarm-cls-fb').start()
+            _spawn_bg(_prewarm_classement_for_mail, args=(mid, mail_data), name='prewarm-cls-fb')
         except Exception:
             pass
         try:
-            threading.Thread(target=_prewarm_pj_classement_for_mail,
-                             args=(mid, mail_data), daemon=True,
-                             name='prewarm-pj-fb').start()
+            _spawn_bg(_prewarm_pj_classement_for_mail, args=(mid, mail_data), name='prewarm-pj-fb')
         except Exception:
             pass
 
@@ -3239,9 +3250,7 @@ def _prewarm_mail_preview(mail_data):
     # _prewarm_unified_for_mail.
     # Lancé si au moins 1 plat n'est pas déjà en cache running/done.
     if not (skip_ech and skip_cls and skip_pj):
-        threading.Thread(target=_prewarm_unified_for_mail,
-                         args=(mid, mail_data), daemon=True,
-                         name='prewarm-unified').start()
+        _spawn_bg(_prewarm_unified_for_mail, args=(mid, mail_data), name='prewarm-unified')
 
 
 def _prewarm_mail_previews_batch(mails):
@@ -3370,7 +3379,7 @@ def api_reply_cache_purge():
         _prefetch_cache.pop(mid, None)
     # Si c'était une entrée user_modified, re-persister le disque (suppression effective)
     if was_user:
-        threading.Thread(target=_persist_reply_cache, daemon=True).start()
+        _spawn_bg(_persist_reply_cache)
     logger.info(f"[reply_cache purge] {mid[:20]} ({reason})")
     return jsonify({"ok": True, "user_draft_deleted": was_user})
 
@@ -3908,7 +3917,7 @@ def _poll_companion_loop():
                     _increment_open_counter(new_data.get('message_id', ''))
                     # Lancer le prefetch
                     if from_email:
-                        threading.Thread(target=_run_prefetch, args=(_current_mail_data,), daemon=True).start()
+                        _spawn_bg(_run_prefetch, args=(_current_mail_data,))
                     # Précharger les mails voisins N+1 / N-1 (Phase 1.6 — le code
                     # `_preload_neighbors` existait mais n'était jamais appelé)
                     _mid = new_data.get('message_id', '')
@@ -4214,7 +4223,7 @@ def api_event_message_read():
 
     # (O8) Auto-prefetch — skip si dédup (déjà lancé il y a <3s)
     if new_data.get('from_email') and not _skip_prefetch:
-        threading.Thread(target=_run_prefetch, args=(new_data,), daemon=True).start()
+        _spawn_bg(_run_prefetch, args=(new_data,))
     elif _skip_prefetch:
         logger.debug(f"[message_read] DEDUP (2ème POST <3s) msg={new_data.get('message_id','')[:30]}")
 
@@ -4266,8 +4275,7 @@ def api_event_message_read():
                 }], chunk_size=1)
             except Exception as e:
                 logger.debug(f"[message_read prescan summary] erreur : {e}")
-        threading.Thread(target=_prescan_summary, daemon=True,
-                         name='summary-prescan').start()
+        _spawn_bg(_prescan_summary, name='summary-prescan')
 
     return jsonify({"status": "ok"})
 
@@ -4659,7 +4667,7 @@ def api_trigger_prefetch():
     if not mail_data.get('from_email'):
         return jsonify({"status": "error", "reason": "no_mail_data"})
 
-    threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True).start()
+    _spawn_bg(_run_prefetch, args=(mail_data,))
     return jsonify({"status": "started"})
 
 
@@ -4853,8 +4861,7 @@ def _run_prefetch(mail_data):
                         _start_speculative(md)
                     finally:
                         _ai_speculative_semaphore.release()
-                threading.Thread(target=_speculate_ws_done, args=(mail_data,),
-                                 daemon=True).start()
+                _spawn_bg(_speculate_ws_done, args=(mail_data,))
             else:
                 logger.debug(f"[spec-done] Skip ({skip_reason}) {message_id[:20]}")
                 # Fix C (25/04) — Marquer 'filtered' pour éviter resoumission ∞.
@@ -5859,8 +5866,7 @@ def _start_speculative(mail_data):
                 logger.debug(f"Template '{template_name}' preemptif pour {message_id[:20]}")
                 _broadcast_sse('speculative_ready', {'message_id': message_id, 'source': 'template'})
                 # Draft prêt → déclencher preview (échéance + classement + PJ) immédiatement (25/04)
-                threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                                 daemon=True, name='preview-post-draft').start()
+                _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-post-draft')
                 return  # Pas d'appel IA nécessaire
         except Exception as e:
             logger.warning(f"Erreur detect_template speculative: {e}")
@@ -6041,15 +6047,13 @@ def _start_speculative(mail_data):
         logger.info(f"Spéculation prête pour {message_id[:20]}... ({len(chunks)} chunks)")
         _broadcast_sse('speculative_ready', {'message_id': message_id})
         # Draft prêt → déclencher preview (échéance + classement + PJ) immédiatement (25/04)
-        threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                         daemon=True, name='preview-post-draft').start()
+        _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-post-draft')
 
         # Fix 23/04 (T2) : persister dès qu'une nouvelle bg_speculation est prête.
         # Sans ça, si V2 crash/restart avant l'atexit, la pré-réponse Claude
         # (coût ~0.03 $) est perdue → gâchis API + cache vide au redémarrage.
         # Persistance asynchrone pour ne pas bloquer le thread spéculatif.
-        threading.Thread(target=_persist_reply_cache, daemon=True,
-                         name='persist-bg-spec').start()
+        _spawn_bg(_persist_reply_cache, name='persist-bg-spec')
 
     except Exception as e:
         logger.warning(f"Spéculation échouée pour {message_id[:20]}: {e}")
@@ -6115,11 +6119,11 @@ def _run_preemptive_bg(inbox_mails):
                 'cc': mail.get('cc', ''),
                 'date': mail.get('date', ''),
             }
-            threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True).start()
+            _spawn_bg(_run_prefetch, args=(mail_data,))
             if _i < len(candidates) - 1:
                 _t.sleep(0.5)  # throttle : 500ms entre lancements
 
-    threading.Thread(target=_run_preemptive_staggered, daemon=True).start()
+    _spawn_bg(_run_preemptive_staggered)
 
 
 # --- Résumé du mail (21/04) --------------------------------------------------
@@ -6585,8 +6589,7 @@ def api_dialog_init():
                                 'has_attachments': cached_email.get('has_attachments', False),
                                 'attachments': cached_email.get('attachments') or [],
                             }
-                            threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                                             daemon=True, name='preview-partial').start()
+                            _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-partial')
                     except Exception:
                         pass
                 return {
@@ -6607,8 +6610,7 @@ def api_dialog_init():
                         'body': cached_email.get('body') or cached_email.get('html_body', ''),
                         'body_preview': cached_email.get('body_preview', ''),
                     }
-                    threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                                     daemon=True, name='preview-ondemand').start()
+                    _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-ondemand')
             except Exception:
                 pass
             return {
@@ -7316,7 +7318,7 @@ def _event_purge_mail(message_id, action, reason):
     # si user_edit → les bg_speculation purgées restaient sur disque jusqu'au
     # prochain _persist_reply_cache déclenché ailleurs → zombies au restart.
     if existed:
-        threading.Thread(target=_persist_reply_cache, daemon=True).start()
+        _spawn_bg(_persist_reply_cache)
     _reply_metric_inc('purges_event')
     logger.info(f"[event-purge] {action} {message_id[:20]} ({reason})")
 
@@ -8209,8 +8211,7 @@ def api_mail_preview(message_id):
                             'has_attachments': cached.get('has_attachments', False),
                             'attachments': cached.get('attachments') or [],
                         }
-                        threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                                         daemon=True, name='preview-ondemand').start()
+                        _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-ondemand')
                 except Exception:
                     pass
             return jsonify({
@@ -8234,8 +8235,7 @@ def api_mail_preview(message_id):
                     'has_attachments': cached.get('has_attachments', False),
                     'attachments': cached.get('attachments') or [],
                 }
-                threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                                 daemon=True, name='preview-ondemand').start()
+                _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-ondemand')
         except Exception as e:
             logger.debug(f"[mail_preview] on-demand trigger échec : {e}")
         return jsonify({
@@ -8369,8 +8369,7 @@ def _fetch_single_preview_plate(message_id, plate):
                 'to': cached.get('to', ''),
                 'cc': cached.get('cc', ''),
             }
-            threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                             daemon=True, name=f'preview-{plate}-ondemand').start()
+            _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name=f'preview-{plate}-ondemand')
     except Exception as e:
         logger.debug(f"[preview-{plate}] on-demand trigger : {e}")
     return {'status': 'miss', 'data': None}
@@ -9409,7 +9408,7 @@ def api_save_draft():
         }
 
     # Écrire sur disque en arrière-plan (non bloquant pour la réponse HTTP)
-    threading.Thread(target=_persist_reply_cache, daemon=True).start()
+    _spawn_bg(_persist_reply_cache)
     return jsonify({"ok": True})
 
 
@@ -11823,7 +11822,7 @@ def api_echeances_post_send(message_id):
                 with _post_send_lock:
                     _post_send_cache.pop(running_key, None)
 
-        threading.Thread(target=_scan_echeances, daemon=True).start()
+        _spawn_bg(_scan_echeances)
 
     return jsonify({"status": "scanning"})
 
@@ -11949,7 +11948,7 @@ def api_classification_post_send(message_id):
                 with _post_send_lock:
                     _post_send_cache.pop(running_key, None)
 
-        threading.Thread(target=_suggest_classification, daemon=True).start()
+        _spawn_bg(_suggest_classification)
 
     return jsonify({"status": "scanning"})
 
@@ -12057,7 +12056,7 @@ def api_pj_classification_post_send(message_id):
                 with _post_send_lock:
                     _post_send_cache.pop(running_key, None)
 
-        threading.Thread(target=_suggest_pj_classification, daemon=True).start()
+        _spawn_bg(_suggest_pj_classification)
 
     return jsonify({"status": "scanning"})
 
@@ -12479,7 +12478,7 @@ def api_post_send():
             except Exception as e:
                 logger.error(f"[learning] Erreur auto_cancel_echeances: {e}")
 
-    threading.Thread(target=_post_send_learning, daemon=True).start()
+    _spawn_bg(_post_send_learning)
 
     return jsonify({
         "status": "ok",
@@ -13034,7 +13033,7 @@ def api_analyze_contact():
         except Exception as e:
             logger.error(f"analyze_contact: {e}")
 
-    threading.Thread(target=_run, daemon=True).start()
+    _spawn_bg(_run)
     return jsonify({"status": "started"})
 
 
@@ -13108,7 +13107,7 @@ def api_recalibrate_contacts():
             _contacts_recalib_progress['recalibrating'] = False
             _contacts_recalib_progress['step'] = ''
 
-    threading.Thread(target=_run, daemon=True, name='recalib-contacts').start()
+    _spawn_bg(_run, name='recalib-contacts')
     return jsonify({"status": "started"})
 
 
@@ -13401,7 +13400,7 @@ def api_setup_onboarding():
             logger.error(f"Erreur onboarding: {e}")
             _db.save_setting('onboarding_status', f'error: {str(e)[:100]}')
 
-    threading.Thread(target=_run_onboarding, daemon=True).start()
+    _spawn_bg(_run_onboarding)
     return jsonify({"status": "started"})
 
 
