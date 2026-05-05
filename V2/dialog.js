@@ -441,13 +441,18 @@ function _loadEcheancesUrgentes() {
         }
     }
 
-    // Mode new : adapter UX (gap 05/05 PM v3 — retour Yvan)
-    // - Éditeur : placeholder "Donnez vos instructions pour générer un nouveau mail"
-    //   (l'éditeur SERT de champ d'instructions, le mail généré le remplace après)
-    // - Barre des onglets (mail-tabs) : cachée → fusion en un seul "onglet" visible
-    // - fieldBrief + btnGenerate : cachés (on utilise btnSend modifié)
-    // - btnSend : visible avec label "Générer" en mode new, onclick=generateReply
-    //   après copie editor.innerText → fieldBrief.value
+    // Mode new : adapter UX en 2 PHASES (gap 05/05 PM v4 — retour Yvan)
+    //
+    // PHASE 1 (initiale, avant génération) :
+    //   - Éditeur sert de champ d'instructions
+    //   - btnSend visible avec label "Générer" → onclick=generateReply
+    //   - Cachés : refineBar, liens action, cards infoRow, fieldBrief, btnGenerate
+    //
+    // PHASE 2 (après 1ère génération réussie) :
+    //   - Le mail généré remplace les instructions dans l'éditeur
+    //   - btnSend redevient "Relire et envoyer" → onclick=sendReply (restauré
+    //     dans _safeSetSendBtn quand le label contient "Relire/Envoye/Envoyer")
+    //   - Réaffichés : refineBar, liens action, cards infoRow
     if (_mode === 'new') {
         var editorEl = document.getElementById('editor');
         if (editorEl) editorEl.setAttribute('data-placeholder', 'Donnez vos instructions pour générer un nouveau mail');
@@ -462,7 +467,19 @@ function _loadEcheancesUrgentes() {
         var btnGenHide = document.getElementById('btnGenerate');
         if (btnGenHide) btnGenHide.style.display = 'none';
 
-        // btnSend (re)positionné comme bouton "Générer" en mode new
+        // PHASE 1 : cacher refineBar + liens action + cards infoRow
+        var refineBarHide = document.getElementById('refineBar');
+        if (refineBarHide) refineBarHide.style.display = 'none';
+        var actionLabelHide = document.getElementById('actionLabel');
+        if (actionLabelHide) actionLabelHide.style.display = 'none';
+        ['btnShorter', 'btnDeeper', 'btnRegen'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+        var infoRowHide = document.getElementById('infoRow');
+        if (infoRowHide) infoRowHide.style.display = 'none';
+
+        // btnSend → bouton "Générer" en phase 1
         var btnSendEl = document.getElementById('btnSend');
         if (btnSendEl) {
             btnSendEl.style.display = '';
@@ -5263,15 +5280,26 @@ function _safeSetSendBtn(opts) {
     if (opts && typeof opts.html === 'string') btn.innerHTML = opts.html;
     if (opts && typeof opts.disabled === 'boolean') btn.disabled = opts.disabled;
 
-    // Mode new (gap 05/05 PM v2) : si btnSend est caché (état initial) et
-    // qu'on (ré)active btnSend après génération, basculer l'UI vers la phase
-    // "envoi" : réafficher btnSend, cacher fieldBrief + btnGenerate.
-    if (_mode === 'new' && btn.style.display === 'none') {
-        btn.style.display = '';
-        var briefEl = document.getElementById('fieldBrief');
-        if (briefEl) briefEl.style.display = 'none';
-        var btnGen = document.getElementById('btnGenerate');
-        if (btnGen) btnGen.style.display = 'none';
+    // Mode new (gap 05/05 PM v4) : transition phase 1 → phase 2
+    // Trigger précis : html contient "Relire/Envoye/Envoyer" = post-génération
+    // (évite faux trigger sur _safeSetSendBtn({disabled:false}) avant génération)
+    if (_mode === 'new' && opts && typeof opts.html === 'string'
+        && (opts.html.indexOf('Relire') >= 0 || opts.html.indexOf('Envoye') >= 0 || opts.html.indexOf('Envoyer') >= 0)) {
+        var refineBarShow = document.getElementById('refineBar');
+        if (refineBarShow && refineBarShow.style.display === 'none') {
+            // Bascule UI vers phase 2 : réafficher refineBar + liens + cards
+            refineBarShow.style.display = '';
+            var actionLabelShow = document.getElementById('actionLabel');
+            if (actionLabelShow) actionLabelShow.style.display = '';
+            ['btnShorter', 'btnDeeper', 'btnRegen'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) el.style.display = '';
+            });
+            var infoRowShow = document.getElementById('infoRow');
+            if (infoRowShow) infoRowShow.style.display = '';
+            // Restaurer onclick original sendReply (j'avais override en generateReply en phase 1)
+            btn.onclick = function() { sendReply(); };
+        }
     }
 }
 
