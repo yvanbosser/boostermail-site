@@ -223,19 +223,15 @@ Rappel proposé = **1 jour ouvré avant l'échéance**.
 
 ## 10. Gaps restants — plan d'action
 
-### Gap 1 : Routes stubs `/relance` et `/mail` (priorité haute, ~30 min)
+### ~~Gap 1 : Routes stubs `/relance` et `/mail`~~ ✅ CLOSE 05/05/2026
 
-**État** : `app_plugin.py:13497` et `13520` retournent juste `{status, echeance, subject_prefilled}` ou `{status, message_id, subject}`. Le frontend les appelle mais ne reçoit pas de quoi générer un brouillon ou ouvrir le mail dans Outlook.
+**Implémenté** : `app_plugin.py:13497` (`/relance`) retourne maintenant `{to, to_name, subject, brief, type, nb_relances, days_late, echeance}` avec brief texte plain neutre (court le 1er coup, plus appuyé pour les relances suivantes). `app_plugin.py:13520` (`/mail`) retourne `{message_id, subject, correspondant, correspondant_nom, extrait_mail, created_at, date_echeance}` pour alimenter une modale d'aperçu locale.
 
-**À faire** :
-- `/api/echeances/<id>/relance` doit retourner un **brouillon de relance complet** (objet + corps pré-rempli pré-écrit avec contexte) que le client peut injecter dans un compose Outlook
-- `/api/echeances/<id>/mail` doit retourner soit le **`itemId` Graph** du mail source pour `Office.context.mailbox.displayMessageForm()`, soit un **redirect vers le thread** dans Outlook
+### ~~Gap 2 : Redirection `/new_mail?...` héritée du proto~~ ✅ CLOSE 05/05/2026
 
-### Gap 2 : Redirection `/new_mail?...` héritée du proto (priorité haute, ~1h)
+**Implémenté** : décision Yvan 05/05 = option **mailto:** pour MVP. Frontend `relancer(id)` (`echeances.html`) construit `mailto:to?subject=&body=` avec encodeURIComponent + tracker la relance via `PUT /api/echeances/<id>` (incrément `nb_relances` + ajout date à `relances_dates` JSON) avant ouverture. Limite : plain text uniquement, pas de HTML — option 2 (companion COM riche HTML) à envisager si besoin user remonté.
 
-**État** : `templates/echeances.html` ligne 593 fait `window.location.href = '/new_mail?to=...&subject=...&relance=1'`. Endpoint inexistant en V2 (héritage Flask proto).
-
-**À faire** : remplacer par un appel `Office.context.mailbox.displayNewMessageForm({toRecipients, subject, htmlBody})` côté add-in. Nécessite que la page overlay puisse appeler Office.js (à vérifier — le QWebEngineView n'a peut-être pas le contexte Office).
+**Bonus implémenté** : frontend `voirMail(id)` ne navigue plus vers JSON brut — réutilise la modale `relance-mail-modal` existante en l'adaptant pour afficher l'aperçu (correspondant, sujet, dates, extrait_mail). Évolution future : intégration **Microsoft Graph webLink** pour ouvrir le mail directement dans Outlook Web/Desktop.
 
 ### Gap 3 : Scheduler des rappels J-1 ouvré (priorité moyenne, ~1 jour)
 

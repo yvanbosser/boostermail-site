@@ -587,11 +587,40 @@
         }
 
         function relancer(id) {
+            // Décision 05/05 : ouvre Outlook via mailto: (MVP plain text, brief court neutre).
+            // Tracker la relance côté serveur (nb_relances + relances_dates) avant l'ouverture.
             fetch('/api/echeances/' + id + '/relance').then(function(r) { return r.json(); }).then(function(data) {
-                if (data.error) { alert(data.error); return; }
-                var params = new URLSearchParams({ to: data.to || '', subject: data.subject || '', brief: data.brief || '', relance: '1', echeance_id: id });
-                window.location.href = '/new_mail?' + params.toString();
-            }).catch(function(err) { alert('Erreur de connexion'); });
+                if (data.status === 'error' || data.error) {
+                    alert(data.reason || data.error || 'Erreur');
+                    return;
+                }
+                var to = encodeURIComponent(data.to || '');
+                var subject = encodeURIComponent(data.subject || 'Relance');
+                var body = encodeURIComponent(data.brief || '');
+                var mailto = 'mailto:' + to + '?subject=' + subject + '&body=' + body;
+
+                // Tracker : incrément nb_relances + ajout date à relances_dates (JSON)
+                var newRelances = (data.nb_relances || 0) + 1;
+                var existingDates = [];
+                try { existingDates = JSON.parse((data.echeance && data.echeance.relances_dates) || '[]'); } catch(e) {}
+                var today = new Date().toISOString().slice(0, 10);
+                existingDates.push({date: today, subject: data.subject || ''});
+
+                fetch('/api/echeances/' + id, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        nb_relances: newRelances,
+                        relances_dates: JSON.stringify(existingDates)
+                    })
+                }).then(function() {
+                    window.location.href = mailto;
+                    setTimeout(loadEcheances, 500);
+                }).catch(function() {
+                    // Tracker en échec : ouvrir mailto: quand même pour ne pas bloquer l'utilisateur
+                    window.location.href = mailto;
+                });
+            }).catch(function() { alert('Erreur de connexion'); });
         }
 
         var _undoTimer = null;
@@ -766,7 +795,43 @@
             .then(function() { closeReporter(); loadEcheances(); }).catch(function() { closeReporter(); alert('Erreur de connexion'); });
         }
 
-        function voirMail(id) { window.location.href = '/api/echeances/' + id + '/mail'; }
+        function voirMail(id) {
+            // Décision 05/05 : modale d'aperçu locale (pas d'ouverture Outlook —
+            // intégration Graph webLink à venir, gap §10 spec). Réutilise la modale
+            // 'relance-mail-modal' existante en adaptant le titre.
+            var modal = document.getElementById('relance-mail-modal');
+            var content = document.getElementById('relance-mail-content');
+            var titleEl = modal.querySelector('div[style*="font-size:15px"]');
+            if (titleEl) titleEl.textContent = 'Mail original';
+            content.innerHTML = '<div style="text-align:center;padding:32px;color:#888;">Chargement...</div>';
+            modal.style.display = 'flex';
+
+            fetch('/api/echeances/' + id + '/mail')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.status === 'error') {
+                        content.innerHTML = '<div style="text-align:center;padding:32px;color:#888;">' + escHtml(data.reason || 'Mail introuvable') + '</div>';
+                        return;
+                    }
+                    var html = '<div style="font-size:12px;color:#888;margin-bottom:8px;">';
+                    html += '<strong>Correspondant :</strong> ' + escHtml(data.correspondant_nom || data.correspondant || '') + '<br>';
+                    html += '<strong>Objet :</strong> ' + escHtml(data.subject || '(sans objet)') + '<br>';
+                    if (data.created_at) html += '<strong>Échéance créée le :</strong> ' + escHtml(data.created_at) + '<br>';
+                    if (data.date_echeance) html += '<strong>Date échéance :</strong> ' + escHtml(formatDate(data.date_echeance));
+                    html += '</div>';
+                    var extrait = data.extrait_mail || '';
+                    if (extrait) {
+                        html += '<div style="font-size:13px;color:#333;line-height:1.6;white-space:pre-wrap;border-top:1px solid #eee;padding-top:12px;margin-top:12px;font-style:italic;">' + escHtml(extrait) + '</div>';
+                    } else {
+                        html += '<div style="font-size:13px;color:#aaa;border-top:1px solid #eee;padding-top:12px;margin-top:12px;font-style:italic;">(extrait du mail non disponible)</div>';
+                    }
+                    html += '<div style="font-size:11px;color:#aaa;margin-top:16px;text-align:center;">Pour ouvrir le mail complet dans Outlook, utilisez la recherche avec l\'objet ci-dessus</div>';
+                    content.innerHTML = html;
+                })
+                .catch(function() {
+                    content.innerHTML = '<div style="text-align:center;padding:32px;color:#888;">Erreur de connexion</div>';
+                });
+        }
 
         // Popup modale pour afficher un mail de relance
         function voirRelanceMail(subject, correspondant) {

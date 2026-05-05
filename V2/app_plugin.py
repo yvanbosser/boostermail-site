@@ -13496,21 +13496,65 @@ def api_add_contact_keyword():
 
 @app.route('/api/echeances/<int:echeance_id>/relance')
 def api_echeance_relance(echeance_id):
-    """Stub V2 — port du proto app.py:3599. Génère un mail de relance
-    pour une échéance. En V2 SaaS : retourne juste les infos minimales,
-    le frontend dialog.js gère la composition."""
+    """Retourne les infos pré-remplies pour un mail de relance via mailto:.
+
+    Le frontend ouvre Outlook avec to/subject/body via window.location.href = 'mailto:...'.
+    Décision 05/05 : option mailto: pour MVP (limité au plain text, brief court neutre).
+    Spec : docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md §10 gap 1+2 (close).
+    """
     try:
         ech = _db.get_echeance_by_id(echeance_id) if hasattr(_db, 'get_echeance_by_id') else None
         if not ech:
-            # Fallback : chercher dans la liste complète
             allech = _db.get_echeances() or []
             ech = next((e for e in allech if e.get('id') == echeance_id), None)
         if not ech:
-            return jsonify({'status': 'error', 'reason': 'echeance introuvable'}), 404
+            return jsonify({'status': 'error', 'reason': 'Échéance introuvable'}), 404
+
+        # Calcul du retard
+        days_late = 0
+        try:
+            from datetime import datetime as _dt
+            _ech_date = _dt.strptime(ech['date_echeance'], '%Y-%m-%d')
+            days_late = (_dt.now() - _ech_date).days
+        except Exception:
+            pass
+
+        # Sujet : strip Re:/Fw: et préfixe avec Re:
+        original = (ech.get('original_subject') or ech.get('description') or '').strip()
+        subject_clean = re.sub(r'^(Re|Fw|Fwd|Tr)\s*:\s*', '', original, flags=re.IGNORECASE).strip()
+        subject = ('Re: ' + subject_clean) if subject_clean else 'Relance'
+
+        # Body texte plain (compatible mailto:)
+        nom = (ech.get('correspondant_nom') or '').strip()
+        salutation = f"Bonjour {nom}," if nom else "Bonjour,"
+        nb_rel = ech.get('nb_relances', 0) or 0
+
+        if nb_rel == 0:
+            corps = (
+                f"Pour faire suite à mon mail \"{subject_clean}\", je me permets de revenir vers vous.\n\n"
+                "Pourriez-vous m'indiquer où en est ce sujet ?\n\n"
+                "Bien cordialement,"
+            )
+        else:
+            corps = (
+                f"Pour faire suite à mes précédents échanges concernant \"{subject_clean}\", "
+                "et n'ayant pas reçu votre retour à ce jour, je me permets de relancer ma demande.\n\n"
+                "Pouvez-vous m'indiquer où en est ce sujet ?\n\n"
+                "Bien cordialement,"
+            )
+
+        body = f"{salutation}\n\n{corps}"
+
         return jsonify({
             'status': 'ok',
-            'echeance': ech,
-            'subject_prefilled': f"Relance — {ech.get('description', '')[:50]}",
+            'to': ech.get('correspondant', ''),
+            'to_name': ech.get('correspondant_nom', ''),
+            'subject': subject,
+            'brief': body,  # Le JS l'utilisera comme body du mailto:
+            'type': ech.get('type', ''),
+            'nb_relances': nb_rel,
+            'days_late': days_late,
+            'echeance': ech,  # Pour permettre au JS d'incrémenter relances_dates
         })
     except Exception as e:
         logger.warning(f"[echeance_relance/{echeance_id}] {e}")
@@ -13519,17 +13563,28 @@ def api_echeance_relance(echeance_id):
 
 @app.route('/api/echeances/<int:echeance_id>/mail')
 def api_echeance_mail(echeance_id):
-    """Stub V2 — port du proto app.py:3688. Redirige vers le mail original
-    associé à l'échéance (ouvre dans Outlook)."""
+    """Retourne les infos d'aperçu du mail original associé à une échéance.
+
+    Pas de redirection vers Outlook (pas de route /email/<id> en SaaS) — l'overlay
+    affiche une modale d'aperçu. Gap §10 spec : intégration Graph webLink à venir
+    pour permettre l'ouverture directe du mail dans Outlook Web/Desktop.
+    """
     try:
-        allech = _db.get_echeances() or []
-        ech = next((e for e in allech if e.get('id') == echeance_id), None)
+        ech = _db.get_echeance_by_id(echeance_id) if hasattr(_db, 'get_echeance_by_id') else None
         if not ech:
-            return jsonify({'status': 'error', 'reason': 'echeance introuvable'}), 404
+            allech = _db.get_echeances() or []
+            ech = next((e for e in allech if e.get('id') == echeance_id), None)
+        if not ech:
+            return jsonify({'status': 'error', 'reason': 'Échéance introuvable'}), 404
         return jsonify({
             'status': 'ok',
-            'message_id': ech.get('source_message_id', ''),
-            'subject': ech.get('source_subject', ''),
+            'message_id': ech.get('email_entry_id', ''),
+            'subject': ech.get('original_subject', ''),
+            'correspondant': ech.get('correspondant', ''),
+            'correspondant_nom': ech.get('correspondant_nom', ''),
+            'extrait_mail': ech.get('extrait_mail', ''),
+            'created_at': ech.get('created_at', ''),
+            'date_echeance': ech.get('date_echeance', ''),
         })
     except Exception as e:
         logger.warning(f"[echeance_mail/{echeance_id}] {e}")
