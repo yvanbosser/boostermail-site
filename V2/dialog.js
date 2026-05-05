@@ -441,6 +441,22 @@ function _loadEcheancesUrgentes() {
         }
     }
 
+    // Mode new : adapter UX éditeur + bouton principal (gap 05/05 PM)
+    // - Placeholder éditeur : "Donnez les instructions de votre mail..."
+    // - Bouton btnSend devient "Générer mon mail" + onclick=generateReply()
+    //   (sera restauré en "Relire et envoyer" automatiquement après la 1ère
+    //   génération réussie via _safeSetSendBtn appelé dans le flow existant).
+    if (_mode === 'new') {
+        var editorEl = document.getElementById('editor');
+        if (editorEl) editorEl.setAttribute('data-placeholder', 'Donnez les instructions de votre mail...');
+        var btnSendEl = document.getElementById('btnSend');
+        if (btnSendEl) {
+            btnSendEl.innerHTML = '&#x2728; Generer mon mail';
+            btnSendEl.disabled = false;
+            btnSendEl.onclick = function() { generateReply(); };
+        }
+    }
+
     // Auto-détection importance (mots-clés sensibles → H, comme le proto)
     _autoDetectImportance();
 
