@@ -8088,8 +8088,18 @@ def api_echeances():
 
 @app.route('/api/echeances/urgent')
 def api_echeances_urgent():
-    """Échéances urgentes (≤ 3 jours + dépassées)."""
+    """Échéances urgentes (≤ 3 jours + dépassées) + en attente de confirmation.
+
+    Étendue 05/05 (gap §10.4) : inclut aussi les `pending_confirmation` pour
+    que le badge cross-écran (popup + dialog) compte tout ce qui demande
+    l'attention de l'utilisateur, peu importe la cause.
+    """
     urgentes = _db.get_echeances_urgentes()
+    pending = _db.get_echeances(statut='pending_confirmation') or []
+    seen_ids = {e.get('id') for e in urgentes}
+    for p in pending:
+        if p.get('id') not in seen_ids:
+            urgentes.append(p)
     return jsonify({"echeances": urgentes})
 
 
@@ -8983,8 +8993,11 @@ def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids
         common = subject_words & desc_words
         if len(common) >= 3:
             try:
-                _db.update_echeance(ech['id'], {'statut': 'terminee'})
-                logger.debug(f"[echeances] Auto-terminee: '{(ech.get('description') or '')[:50]}' "
+                # Décision 05/05 (gap §10.4) : statut intermédiaire 'pending_confirmation'
+                # au lieu d'annulation silencieuse. L'utilisateur confirme/conserve via
+                # la section "À confirmer" de la page Échéances.
+                _db.update_echeance(ech['id'], {'statut': 'pending_confirmation'})
+                logger.debug(f"[echeances] Pending confirmation: '{(ech.get('description') or '')[:50]}' "
                       f"(correspondant a repondu, mots communs: {common})")
             except Exception:
                 pass

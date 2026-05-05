@@ -361,10 +361,15 @@
         }
 
         function render() {
-            var enCours = [], depassees = [], archivees = [], terminees = [];
+            var enCours = [], depassees = [], archivees = [], terminees = [], pending = [];
             var now = new Date(); now.setHours(0,0,0,0);
 
             allEcheances.forEach(function(e) {
+                // Gap §10.4 : pending_confirmation = correspondant a répondu, attend décision user
+                if (e.statut === 'pending_confirmation') {
+                    pending.push(e);
+                    return;
+                }
                 if (e.statut === 'terminee' || e.statut === 'annulee') {
                     terminees.push(e);
                     return;
@@ -411,8 +416,8 @@
                 archivees = archivees.filter(_matchSearch);
             }
 
-            // Update tab counts
-            document.getElementById('count-encours').textContent = enCours.length;
+            // Update tab counts (pending compté dans "en cours" — section dédiée affichée en tête)
+            document.getElementById('count-encours').textContent = enCours.length + pending.length;
             document.getElementById('count-depassees').textContent = depassees.length;
             document.getElementById('count-archivees').textContent = archivees.length;
 
@@ -422,6 +427,13 @@
             if (currentTab === 'encours') {
                 enCours.sort(function(a, b) { return (a.date_echeance || '9999').localeCompare(b.date_echeance || '9999'); });
                 if (!selectedId && enCours.length > 0) selectedId = enCours[0].id;
+
+                // Section "À confirmer" en TÊTE — pending_confirmation (gap §10.4)
+                if (pending.length > 0) {
+                    html += '<div class="section-title" style="color:#e65100;">⚠ À confirmer <span class="section-count">(' + pending.length + ')</span></div>';
+                    html += '<div style="font-size:12px;color:#888;margin:-8px 0 12px 0;">Le correspondant a répondu — confirmer la suppression ou conserver l\'échéance</div>';
+                    pending.forEach(function(e) { html += renderPendingCard(e); });
+                }
 
                 var sections = {
                     aujourdhui: { label: "À relancer aujourd'hui", items: [] },
@@ -442,7 +454,7 @@
                     sec.items.forEach(function(e) { html += renderCard(e); });
                 });
 
-                if (enCours.length === 0) html = '<div class="empty-state">Aucune relance en cours — tout est à jour ✓</div>';
+                if (enCours.length === 0 && pending.length === 0) html = '<div class="empty-state">Aucune relance en cours — tout est à jour ✓</div>';
 
             } else if (currentTab === 'depassees') {
                 depassees.sort(function(a, b) { return (a.date_echeance || '').localeCompare(b.date_echeance || ''); });
@@ -584,6 +596,45 @@
                     voirRelanceMail(el.dataset.subject, el.dataset.correspondant);
                 });
             });
+        }
+
+        // Cards pending_confirmation (gap §10.4) — affichées en tête de l'onglet "En cours"
+        function renderPendingCard(e) {
+            var displayName = e.correspondant_nom || e.correspondant || 'Inconnu';
+            var html = '<div class="card" style="border-left:3px solid #f57c00;">';
+            html += '<div class="card-head" style="background:#fff8e1;">';
+            html += '<div class="card-avatar" style="background:#ffe0b2;color:#e65100;">' + getInitial(displayName) + '</div>';
+            html += '<div class="card-head-info">';
+            html += '<div class="card-head-name">' + escHtml(displayName) + ' a répondu</div>';
+            html += '<div class="card-head-subject">' + escHtml(e.original_subject || e.description || '') + '</div>';
+            html += '</div></div>';
+            html += '<div class="card-body">';
+            html += '<div style="font-size:13px;color:#555;margin-bottom:12px;">Une réponse du correspondant a été détectée. Si elle traite votre demande, supprimez l\'échéance. Sinon, conservez-la.</div>';
+            html += '<div class="card-buttons">';
+            html += '<button class="btn" style="background:#43a047;border-color:#43a047;color:#fff;" onclick="event.stopPropagation();confirmCancelPending(' + e.id + ')">✓ Confirmer la suppression</button>';
+            html += '<button class="btn" onclick="event.stopPropagation();keepPending(' + e.id + ')">Conserver l\'échéance</button>';
+            html += '</div></div></div>';
+            return html;
+        }
+
+        function confirmCancelPending(id) {
+            // L'utilisateur confirme : la réponse traite bien la demande → terminée
+            fetch('/api/echeances/' + id, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({statut: 'terminee'})
+            }).then(function() { loadEcheances(); })
+              .catch(function() { alert('Erreur de connexion'); });
+        }
+
+        function keepPending(id) {
+            // L'utilisateur conserve : la réponse ne traite pas la demande → remettre active
+            fetch('/api/echeances/' + id, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({statut: 'active'})
+            }).then(function() { loadEcheances(); })
+              .catch(function() { alert('Erreur de connexion'); });
         }
 
         function relancer(id) {

@@ -245,17 +245,24 @@ Rappel proposé = **1 jour ouvré avant l'échéance**.
 
 **Limite assumée** : si l'utilisateur n'ouvre pas Outlook de la journée, il ne voit rien. OK car le companion PyQt est lancé automatiquement au démarrage Outlook (tâche planifiée Windows). Si besoin d'alerte mail asynchrone plus tard, ajouter option (b) endpoint cron `/api/echeances/send_reminders`.
 
-### Gap 4 : Popup d'auto-annulation (priorité basse, ~2h)
+### ~~Gap 4 : Popup d'auto-annulation~~ ✅ CLOSE 05/05/2026
 
-**État** : `_auto_cancel_echeances_on_reply` annule en silence (passe à `terminee` sans demander). L'utilisateur peut rater une échéance qui aurait dû être maintenue (ex : réponse du correspondant qui ne traite pas le sujet).
+**Implémenté** : `_auto_cancel_echeances_on_reply` (`app_plugin.py:8986`) met maintenant `statut='pending_confirmation'` au lieu de `terminee` direct. Frontend `echeances.html` filtre les `pending_confirmation` dans un nouveau bucket `pending`, affiché en **section dédiée « ⚠ À confirmer (X) »** en tête de l'onglet "En cours" (style orange/ambre pour distinction visuelle). Cards spéciales avec 2 boutons :
+- **« ✓ Confirmer la suppression »** → `PUT statut='terminee'` (la réponse traite la demande)
+- **« Conserver l'échéance »** → `PUT statut='active'` (la réponse ne traite pas la demande, on continue le suivi)
 
-**À faire** : au lieu de `UPDATE statut='terminee'` direct, créer un état intermédiaire `pending_confirmation` + popup overlay « X a répondu à votre demande du [date]. Supprimer l'échéance ? [Supprimer] [Conserver] » au prochain ouverture overlay.
+Route `/api/echeances/urgent` étendue pour inclure les pending dans le compteur badge cross-écran (popup + dialog).
 
-### Gap 5 : Indexes DB (priorité basse, ~10 min)
+**Limite assumée V1** : pas de mécanisme anti-boucle si l'utilisateur clique « Conserver » et que le correspondant répond à nouveau (ré-pendingisation). Acceptable car cas rare. À ajouter en V2 si remonté utilisateur (champ `auto_cancel_disabled` boolean).
 
-**État** : pas d'index sur `(statut, date_echeance)` ou `(correspondant)`. OK tant que < 10 k lignes par utilisateur.
+### ~~Gap 5 : Indexes DB~~ ✅ CLOSE 05/05/2026 (déjà implémenté)
 
-**À faire** : `CREATE INDEX idx_echeances_statut_date ON echeances(statut, date_echeance);` + `CREATE INDEX idx_echeances_correspondant ON echeances(correspondant);` quand on passera multi-tenant.
+**Constat audit 05/05** : les 3 indexes étaient déjà en place dans `database.py:418-420` (audit antérieur les avait manqués) :
+- `idx_echeances_statut` ON `echeances(statut)`
+- `idx_echeances_date` ON `echeances(date_echeance)`
+- `idx_echeances_correspondant` ON `echeances(correspondant)`
+
+Pas d'index composite `(statut, date_echeance)` mais les 2 indexes simples couvrent les requêtes principales (filtrage statut, recherche par date, lookup correspondant). Suffisant pour les volumes actuels.
 
 ---
 
