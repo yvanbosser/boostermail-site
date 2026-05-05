@@ -493,6 +493,9 @@ function _loadEcheancesUrgentes() {
                 if (briefSync && ed) {
                     briefSync.value = (ed.innerText || ed.textContent || '').trim();
                 }
+                // Flag : génération démarrée → _safeSetSendBtn peut maintenant
+                // changer le label (sortie de phase 1)
+                _modeNewGenerationStarted = true;
                 generateReply();
             };
         }
@@ -1329,12 +1332,8 @@ function _renderRecipientContext(email, profile) {
             if (tone) partsTone.push(_escapeHtml(tone));
             html += '<div style="font-size:12px;color:#555;padding:3px 0;">💬 ' + partsTone.join(' · ') + '</div>';
         }
-        if (typicalLength || language) {
-            var partsFmt = [];
-            if (typicalLength) partsFmt.push('mails ' + _escapeHtml(typicalLength));
-            if (language) partsFmt.push(_languageLabel(language));
-            html += '<div style="font-size:12px;color:#555;padding:3px 0;">✏️ ' + partsFmt.join(' · ') + '</div>';
-        }
+        // Ligne typicalLength + language retirée à la demande Yvan v5
+        // (info redondante avec le bloc Style rédactionnel détaillé en dessous)
         if (lastAnalysis) {
             html += '<div style="font-size:12px;color:#888;padding:3px 0;">📅 Dernière interaction : ' + _formatRelativeDate(lastAnalysis) + '</div>';
         }
@@ -5277,12 +5276,20 @@ function _getEmptyPointsMessage() {
 function _safeSetSendBtn(opts) {
     var btn = document.getElementById('btnSend');
     if (!btn) return;  // Dialog fermé, on no-op
+
+    // Mode new phase 1 (gap 05/05 PM v5) : un autre flow JS (draft restore,
+    // _tryInstantReply, etc.) écrasait prématurément le label "Generer" en
+    // "Relire et envoyer". Protection : tant que generation pas démarrée,
+    // ignorer les changements de label (mais permettre disabled).
+    if (_mode === 'new' && !_modeNewGenerationStarted) {
+        if (opts && typeof opts.disabled === 'boolean') btn.disabled = opts.disabled;
+        return;  // skip changement html
+    }
+
     if (opts && typeof opts.html === 'string') btn.innerHTML = opts.html;
     if (opts && typeof opts.disabled === 'boolean') btn.disabled = opts.disabled;
 
-    // Mode new (gap 05/05 PM v4) : transition phase 1 → phase 2
-    // Trigger précis : html contient "Relire/Envoye/Envoyer" = post-génération
-    // (évite faux trigger sur _safeSetSendBtn({disabled:false}) avant génération)
+    // Mode new : transition phase 1 → phase 2 quand label "Relire/Envoye/Envoyer"
     if (_mode === 'new' && opts && typeof opts.html === 'string'
         && (opts.html.indexOf('Relire') >= 0 || opts.html.indexOf('Envoye') >= 0 || opts.html.indexOf('Envoyer') >= 0)) {
         var refineBarShow = document.getElementById('refineBar');
@@ -5302,6 +5309,9 @@ function _safeSetSendBtn(opts) {
         }
     }
 }
+
+// Flag global mode new (gap 05/05 v5) : protection label phase 1
+var _modeNewGenerationStarted = false;
 
 /**
  * fetch avec timeout explicite (21/04 audit cycle 2 #A).
