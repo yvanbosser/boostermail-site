@@ -453,6 +453,22 @@ function _loadEcheancesUrgentes() {
     //   - btnSend redevient "📤 Relire et envoyer" → onclick=sendReply
     //     (restauré dans _safeSetSendBtn quand label = "Relire/Envoye/Envoyer")
     if (_mode === 'new') {
+        // FORCE dimensions de la fenêtre (gap 05/05 v11) — depuis le dialog
+        // lui-même, après que window.open() l'a créée. Plus fiable que de
+        // passer width/height à window.open() depuis le QWebEngineView popup
+        // qui peut ignorer les hints. Utilise window.screen (physique) pour
+        // un calcul correct, pas screen depuis le contexte appelant.
+        if (window.opener) {
+            try {
+                var sw = window.screen.availWidth || 1600;
+                var sh = window.screen.availHeight || 1000;
+                var tw = Math.round(sw * 0.90);
+                var th = Math.round(sh * 0.90);
+                window.resizeTo(tw, th);
+                window.moveTo(Math.round((sw - tw) / 2), Math.round((sh - th) / 2));
+            } catch (e) { /* silent : window resize peut être bloqué selon browser */ }
+        }
+
         var editorEl = document.getElementById('editor');
         if (editorEl) editorEl.setAttribute('data-placeholder', 'Donnez vos instructions pour générer un nouveau mail');
 
