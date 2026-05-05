@@ -82,13 +82,24 @@ var _companionAvailable = false;
     _btn('navContactsFixed', function () { _openDashboardWindow('contacts'); });
     _btn('navProfilFixed', function () { _openDashboardWindow('profile'); });
 
-    // 05/05/2026 — Bouton ✏️ Nouveau : ouvre dialog.html en mode 'new'
-    // dans une nouvelle fenêtre. Le dialog gère déjà ce mode (validation
-    // brief + à obligatoires, mode reply/reply_all/forward masqué, etc.).
-    // Ajout 05/05 : sur saisie destinataire (onblur), chargement du profil
-    // contact dans le panneau gauche (cf dialog.js _loadRecipientContext).
+    // 05/05/2026 — Bouton ✏️ Nouveau : ouvre dialog.html en mode 'new'.
+    // Fix 05/05 PM : utilise '_blank' au lieu d'un nom de target spécifique
+    // (le QWebEngineView popup_pyqt avec nom de window non-_blank + query
+    // string complexe peut bloquer window.open silencieusement).
     _btn('navComposeFixed', function () {
-        _openDashboardWindow('dialog.html?mode=new');
+        var url = _backendUrl + '/plugin/dialog.html?mode=new';
+        var w = Math.min(1200, (screen.availWidth || 1200) - 80);
+        var h = Math.min(800, (screen.availHeight || 800) - 80);
+        var x = ((screen.availWidth || 1200) - w) / 2;
+        var y = ((screen.availHeight || 800) - h) / 2;
+        var feats = 'width=' + w + ',height=' + h + ',left=' + x + ',top=' + y +
+                    ',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no';
+        try {
+            var nw = window.open(url, '_blank', feats);
+            if (nw) { nw.focus(); return; }
+        } catch (e) {}
+        // Fallback : navigation in-place (overlay 280x70 → page dégradée).
+        window.location.href = url;
     });
 
     // 02/05/2026 — Bouton ❓ Aide : ouvre le chatbot dans une fenêtre
