@@ -1193,84 +1193,193 @@ function _loadRecipientContext(email) {
         });
 }
 
-function _renderRecipientContext(email, profile) {
-    var displayName = (profile && (profile.display_name || profile.name)) || email;
-    var orga = (profile && (profile.organization || profile.org)) || '';
-    var sampleCount = (profile && profile.sample_count) || 0;
-    var register = (profile && (profile.register || profile.tone)) || '';
-    var styleSummary = (profile && (profile.style_summary || profile.summary)) || '';
-    var lastSeen = (profile && (profile.last_seen || profile.last_interaction)) || '';
+// Helpers de formatage pour _renderRecipientContext (gap 05/05 PM)
+function _formatRelativeDate(isoStr) {
+    if (!isoStr) return '';
+    var d = new Date(isoStr);
+    if (isNaN(d.getTime())) return isoStr;
+    var diffMs = Date.now() - d.getTime();
+    var days = Math.floor(diffMs / 86400000);
+    if (days < 0) return d.toLocaleDateString('fr-FR');
+    if (days === 0) return "aujourd'hui";
+    if (days === 1) return 'hier';
+    if (days < 7) return 'il y a ' + days + ' jours';
+    if (days < 30) return 'il y a ' + Math.floor(days / 7) + ' semaine' + (Math.floor(days / 7) > 1 ? 's' : '');
+    if (days < 365) return 'il y a ' + Math.floor(days / 30) + ' mois';
+    return 'il y a ' + Math.floor(days / 365) + ' an' + (Math.floor(days / 365) > 1 ? 's' : '');
+}
 
-    // resumeFrom
+function _confidenceLabel(conf) {
+    if (!conf || conf <= 0) return '';
+    var c = parseFloat(conf);
+    if (isNaN(c)) return String(conf);
+    if (c <= 1) c = c * 100;  // normaliser 0-1 → 0-100
+    if (c < 40) return 'faible';
+    if (c < 70) return 'moyenne';
+    return 'haute';
+}
+
+function _registerLabel(register) {
+    if (!register) return '';
+    var r = String(register).toLowerCase();
+    if (r === 'tu' || r === 'tutoiement') return 'Tutoiement';
+    if (r === 'vous' || r === 'vouvoiement') return 'Vouvoiement';
+    return register;
+}
+
+function _powerDynamicLabel(pd) {
+    if (!pd) return '';
+    var p = String(pd).toLowerCase();
+    if (p === 'sup' || p.indexOf('superieur') >= 0 || p.indexOf('supérieur') >= 0) return 'Vous êtes en position supérieure';
+    if (p === 'sub' || p.indexOf('subordonne') >= 0 || p.indexOf('subordonné') >= 0) return 'Vous êtes en position subordonnée';
+    if (p === 'peer' || p.indexOf('egal') >= 0 || p.indexOf('égal') >= 0) return 'Position égale';
+    return pd;
+}
+
+function _languageLabel(lang) {
+    if (!lang) return '';
+    var l = String(lang).toLowerCase();
+    var map = {fr: 'Français', en: 'Anglais', es: 'Espagnol', de: 'Allemand', it: 'Italien', pt: 'Portugais', nl: 'Néerlandais'};
+    return map[l] || lang;
+}
+
+function _renderRecipientContext(email, profile) {
+    var displayName = (profile && profile.display_name) || email;
+    var orga = (profile && profile.organization) || '';
+    var category = (profile && profile.category) || '';
+    var domain = (profile && profile.domain) || '';
+    var sampleCount = (profile && profile.sample_count) || 0;
+    var confidence = (profile && profile.confidence) || 0;
+    var lastAnalysis = (profile && profile.last_analysis) || (profile && profile.updated_at) || '';
+    var register = (profile && profile.register) || '';
+    var tone = (profile && profile.tone) || '';
+    var typicalLength = (profile && profile.typical_length) || '';
+    var powerDynamic = (profile && profile.power_dynamic) || '';
+    var language = (profile && profile.language) || '';
+    var greeting = (profile && profile.greeting) || '';
+    var closing = (profile && profile.closing) || '';
+    var profileText = (profile && profile.profile_text) || '';
+
+    // ============ Onglet "Résumé" (compact, vue rapide) ============
     var resumeFrom = document.getElementById('resumeFrom');
     if (resumeFrom) {
-        resumeFrom.innerHTML = _escapeHtml(displayName)
-            + (orga ? ' <span style="color:#888;font-size:11px;">— ' + _escapeHtml(orga) + '</span>' : '');
+        var rfHtml = _escapeHtml(displayName);
+        if (orga) rfHtml += ' <span style="color:#888;font-size:11px;">— ' + _escapeHtml(orga) + '</span>';
+        if (category) rfHtml += ' <span style="background:#e3f2fd;color:#0F6CBD;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px;">' + _escapeHtml(category) + '</span>';
+        resumeFrom.innerHTML = rfHtml;
     }
     var resumeSubject = document.getElementById('resumeSubject');
     if (resumeSubject) resumeSubject.textContent = email;
 
-    // Section "Profil correspondant"
     var resumePoints = document.getElementById('resumePoints');
     if (resumePoints) {
         var html = '<div class="resume-section-title">Profil correspondant</div>';
         if (sampleCount > 0) {
-            html += '<div style="font-size:12px;color:#555;padding:4px 0;"><strong>' + sampleCount + ' mail' + (sampleCount > 1 ? 's' : '') + '</strong> échangé' + (sampleCount > 1 ? 's' : '') + ' avec ce contact</div>';
+            var confLabel = _confidenceLabel(confidence);
+            html += '<div style="font-size:12px;color:#555;padding:3px 0;">📊 <strong>' + sampleCount + ' mail' + (sampleCount > 1 ? 's' : '') + '</strong> échangé' + (sampleCount > 1 ? 's' : '');
+            if (confLabel) html += ' <span style="color:#888;">(confiance ' + confLabel + ')</span>';
+            html += '</div>';
         } else {
-            html += '<div style="font-size:12px;color:#888;padding:4px 0;font-style:italic;">Premier contact — aucun historique</div>';
+            html += '<div style="font-size:12px;color:#888;padding:3px 0;font-style:italic;">📊 Premier contact — aucun historique</div>';
         }
-        if (register) {
-            var regLabel = register === 'tu' ? 'Tutoiement' : (register === 'vous' ? 'Vouvoiement' : register);
-            html += '<div style="font-size:12px;color:#555;padding:4px 0;">Registre : <strong>' + _escapeHtml(regLabel) + '</strong></div>';
+        if (register || tone) {
+            var partsTone = [];
+            if (register) partsTone.push(_registerLabel(register));
+            if (tone) partsTone.push(_escapeHtml(tone));
+            html += '<div style="font-size:12px;color:#555;padding:3px 0;">💬 ' + partsTone.join(' · ') + '</div>';
         }
-        if (styleSummary) {
-            html += '<div style="font-size:12px;color:#555;padding:4px 0;">Style : ' + _escapeHtml(styleSummary) + '</div>';
+        if (typicalLength || language) {
+            var partsFmt = [];
+            if (typicalLength) partsFmt.push('mails ' + _escapeHtml(typicalLength));
+            if (language) partsFmt.push(_languageLabel(language));
+            html += '<div style="font-size:12px;color:#555;padding:3px 0;">✏️ ' + partsFmt.join(' · ') + '</div>';
+        }
+        if (lastAnalysis) {
+            html += '<div style="font-size:12px;color:#888;padding:3px 0;">📅 Dernière interaction : ' + _formatRelativeDate(lastAnalysis) + '</div>';
         }
         resumePoints.innerHTML = html;
     }
 
-    // Section "Derniers échanges"
+    // Section "Style rédactionnel" (résumé court)
     var resumeActions = document.getElementById('resumeActions');
     if (resumeActions) {
-        var html2 = '<div class="resume-section-title">Derniers échanges</div>';
-        if (sampleCount > 0) {
-            html2 += '<div style="font-size:12px;color:#555;padding:4px 0;">';
-            if (lastSeen) html2 += 'Dernier échange : <strong>' + _escapeHtml(lastSeen) + '</strong><br>';
-            html2 += 'BoosterMail s\'appuiera sur ces échanges pour adapter le ton et le contenu de votre mail.';
-            html2 += '</div>';
+        var html2 = '<div class="resume-section-title">Style rédactionnel</div>';
+        if (profileText) {
+            html2 += '<div style="font-size:12px;color:#555;padding:4px 0;font-style:italic;line-height:1.5;">📝 ' + _escapeHtml(profileText) + '</div>';
+        } else if (sampleCount > 0) {
+            html2 += '<div style="font-size:12px;color:#888;padding:4px 0;">BoosterMail s\'appuiera sur les ' + sampleCount + ' échanges précédents pour adapter le ton.</div>';
         } else {
-            html2 += '<div style="font-size:12px;color:#888;padding:4px 0;font-style:italic;">Aucun historique disponible — BoosterMail générera avec un ton neutre.</div>';
+            html2 += '<div style="font-size:12px;color:#888;padding:4px 0;font-style:italic;">Aucun historique — ton neutre par défaut.</div>';
         }
         resumeActions.innerHTML = html2;
     }
 
-    // Onglet "Profil" (renommé depuis "Mail recu")
+    // ============ Onglet "Profil" (vue détaillée) ============
+    var fullTab = document.querySelector('.mail-tab[data-tab="full"]');
+    if (fullTab) fullTab.innerHTML = '&#x1f464; Profil';
+
     var mailFrom = document.getElementById('mailFrom');
     if (mailFrom) mailFrom.innerHTML = _escapeHtml(displayName) + (orga ? ' <span style="color:#888;font-size:11px;">— ' + _escapeHtml(orga) + '</span>' : '');
     var mailMeta = document.getElementById('mailMeta');
-    if (mailMeta) mailMeta.textContent = email;
+    if (mailMeta) mailMeta.textContent = email + (domain ? ' · ' + domain : '');
     var mailSubject = document.getElementById('mailSubject');
-    if (mailSubject) mailSubject.textContent = '';
+    if (mailSubject) {
+        mailSubject.innerHTML = category
+            ? '<span style="background:#e3f2fd;color:#0F6CBD;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">' + _escapeHtml(category) + '</span>'
+            : '';
+    }
     var mailBody = document.getElementById('mailBody');
     if (mailBody) {
-        var detailHtml = '<div style="font-size:12px;color:#333;line-height:1.6;">';
-        if (sampleCount > 0) {
-            detailHtml += '<p><strong>' + sampleCount + ' mail' + (sampleCount > 1 ? 's' : '') + ' échangé' + (sampleCount > 1 ? 's' : '') + '</strong></p>';
-            if (register) {
-                var regLabel2 = register === 'tu' ? 'Tutoiement' : (register === 'vous' ? 'Vouvoiement' : register);
-                detailHtml += '<p>Registre habituel : <strong>' + _escapeHtml(regLabel2) + '</strong></p>';
-            }
-            if (styleSummary) {
-                detailHtml += '<p style="margin-top:12px;">' + _escapeHtml(styleSummary) + '</p>';
-            }
-            if (lastSeen) {
-                detailHtml += '<p style="margin-top:12px;color:#888;">Dernier échange : ' + _escapeHtml(lastSeen) + '</p>';
-            }
+        var d = '<div style="font-size:12px;color:#333;line-height:1.7;">';
+        if (sampleCount === 0) {
+            d += '<p style="color:#888;font-style:italic;">Aucun historique avec ce contact. BoosterMail générera votre mail avec un ton neutre par défaut.</p>';
         } else {
-            detailHtml += '<p style="color:#888;font-style:italic;">Aucun historique avec ce contact. BoosterMail générera votre mail avec un ton neutre par défaut.</p>';
+            // Bloc Statistiques
+            d += '<div style="background:#f5f7fa;padding:10px 12px;border-radius:6px;margin-bottom:10px;">';
+            d += '<div style="font-size:10px;color:#888;text-transform:uppercase;font-weight:600;margin-bottom:6px;letter-spacing:0.5px;">Statistiques</div>';
+            d += '<div>📊 <strong>' + sampleCount + ' mail' + (sampleCount > 1 ? 's' : '') + '</strong> analysé' + (sampleCount > 1 ? 's' : '');
+            var cl = _confidenceLabel(confidence);
+            if (cl) d += ' · confiance ' + cl;
+            d += '</div>';
+            if (lastAnalysis) d += '<div>📅 Dernière analyse : ' + _formatRelativeDate(lastAnalysis) + '</div>';
+            d += '</div>';
+
+            // Bloc Style
+            if (register || tone || typicalLength || language || powerDynamic) {
+                d += '<div style="background:#f5f7fa;padding:10px 12px;border-radius:6px;margin-bottom:10px;">';
+                d += '<div style="font-size:10px;color:#888;text-transform:uppercase;font-weight:600;margin-bottom:6px;letter-spacing:0.5px;">Style rédactionnel</div>';
+                if (register) d += '<div>💬 Registre : <strong>' + _escapeHtml(_registerLabel(register)) + '</strong></div>';
+                if (tone) d += '<div>🎨 Ton : <strong>' + _escapeHtml(tone) + '</strong></div>';
+                if (typicalLength) d += '<div>✏️ Longueur typique : <strong>' + _escapeHtml(typicalLength) + '</strong></div>';
+                if (language) d += '<div>🌐 Langue : <strong>' + _escapeHtml(_languageLabel(language)) + '</strong></div>';
+                if (powerDynamic) d += '<div>🎯 ' + _escapeHtml(_powerDynamicLabel(powerDynamic)) + '</div>';
+                d += '</div>';
+            }
+
+            // Bloc Formules habituelles
+            if (greeting || closing) {
+                d += '<div style="background:#f5f7fa;padding:10px 12px;border-radius:6px;margin-bottom:10px;">';
+                d += '<div style="font-size:10px;color:#888;text-transform:uppercase;font-weight:600;margin-bottom:6px;letter-spacing:0.5px;">Formules habituelles</div>';
+                if (greeting) d += '<div>👋 Salutation : <em>"' + _escapeHtml(greeting) + '"</em></div>';
+                if (closing) d += '<div>🙋 Clôture : <em>"' + _escapeHtml(closing) + '"</em></div>';
+                d += '</div>';
+            }
+
+            // Bloc Résumé textuel
+            if (profileText) {
+                d += '<div style="background:#fffde7;padding:10px 12px;border-radius:6px;border-left:3px solid #fbc02d;margin-bottom:10px;">';
+                d += '<div style="font-size:10px;color:#888;text-transform:uppercase;font-weight:600;margin-bottom:6px;letter-spacing:0.5px;">Résumé du profil</div>';
+                d += '<div style="font-style:italic;">' + _escapeHtml(profileText) + '</div>';
+                d += '</div>';
+            }
+
+            // Lien modifier ce profil
+            d += '<div style="margin-top:14px;text-align:center;">'
+              + '<a href="#" onclick="event.preventDefault();_openDashboard(\'contacts\');return false;" style="font-size:11px;color:#0F6CBD;text-decoration:underline;">✏️ Modifier ce profil dans la page Contacts</a>'
+              + '</div>';
         }
-        detailHtml += '</div>';
-        mailBody.innerHTML = detailHtml;
+        d += '</div>';
+        mailBody.innerHTML = d;
     }
 }
 
