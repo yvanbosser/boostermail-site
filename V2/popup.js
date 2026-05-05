@@ -87,21 +87,14 @@ var _companionAvailable = false;
     // (le QWebEngineView popup_pyqt avec nom de window non-_blank + query
     // string complexe peut bloquer window.open silencieusement).
     _btn('navComposeFixed', function () {
-        // Aligné sur _openCompose (dialog.js) — même pattern que le bouton ✏ du
-        // header du dialog 80%. Yvan v14 : depuis dialog ça marche (Qt intercepte
-        // via _ChildPopupPage et applique 90% écran), depuis '_blank' Qt ignorait.
-        // Solution : target name spécifique 'boostermail_compose_new' identique.
+        // Rollback v15 : v14 avait casse le bouton (target name 'boostermail_compose_new'
+        // refuse par Qt depuis l'overlay). Retour a '_blank' avec features simples.
+        // La dimension est fixee au niveau Qt par popup_pyqt._ChildPopupPage si
+        // mode=new (90% ecran natif).
         var url = _backendUrl + '/plugin/dialog.html?mode=new';
-        var aw = screen.availWidth || 1400;
-        var ah = screen.availHeight || 900;
-        var w = Math.min(1200, aw - 80);
-        var h = Math.min(800, ah - 80);
-        var x = (aw - w) / 2;
-        var y = (ah - h) / 2;
-        var feats = 'width=' + w + ',height=' + h + ',left=' + x + ',top=' + y +
-                    ',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no';
+        var feats = 'width=1200,height=800,resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no';
         try {
-            var nw = window.open(url, 'boostermail_compose_new', feats);
+            var nw = window.open(url, '_blank', feats);
             if (nw) { nw.focus(); return; }
         } catch (e) {}
         window.location.href = url;
