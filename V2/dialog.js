@@ -441,45 +441,32 @@ function _loadEcheancesUrgentes() {
         }
     }
 
-    // Mode new : adapter UX en 2 PHASES (gap 05/05 PM v4 — retour Yvan)
+    // Mode new : seul le LABEL DU BOUTON change (Yvan v6, gap 05/05)
     //
     // PHASE 1 (initiale, avant génération) :
-    //   - Éditeur sert de champ d'instructions
-    //   - btnSend visible avec label "Générer" → onclick=generateReply
-    //   - Cachés : refineBar, liens action, cards infoRow, fieldBrief, btnGenerate
+    //   - Éditeur = champ d'instructions (placeholder explicite)
+    //   - btnSend label "✨ Generer" → onclick=generateReply
+    //   - Bas visible inchangé (refineBar + liens + cards) — UX cohérente
     //
-    // PHASE 2 (après 1ère génération réussie) :
-    //   - Le mail généré remplace les instructions dans l'éditeur
-    //   - btnSend redevient "Relire et envoyer" → onclick=sendReply (restauré
-    //     dans _safeSetSendBtn quand le label contient "Relire/Envoye/Envoyer")
-    //   - Réaffichés : refineBar, liens action, cards infoRow
+    // PHASE 2 (après génération) :
+    //   - Mail généré dans l'éditeur (flow generateReply existant)
+    //   - btnSend redevient "📤 Relire et envoyer" → onclick=sendReply
+    //     (restauré dans _safeSetSendBtn quand label = "Relire/Envoye/Envoyer")
     if (_mode === 'new') {
         var editorEl = document.getElementById('editor');
         if (editorEl) editorEl.setAttribute('data-placeholder', 'Donnez vos instructions pour générer un nouveau mail');
 
-        // Fusion onglets : cacher la barre, seul tab-resume reste visible
+        // Fusion onglets panneau gauche : cacher la barre tabs (seul tab-resume utile)
         var mailTabs = document.querySelector('.mail-tabs');
         if (mailTabs) mailTabs.style.display = 'none';
 
-        // Cacher fieldBrief et btnGenerate (on bascule sur btnSend modifié)
+        // Cacher fieldBrief + btnGenerate (on utilise btnSend modifié)
         var briefHide = document.getElementById('fieldBrief');
         if (briefHide) briefHide.style.display = 'none';
         var btnGenHide = document.getElementById('btnGenerate');
         if (btnGenHide) btnGenHide.style.display = 'none';
 
-        // PHASE 1 : cacher refineBar + liens action + cards infoRow
-        var refineBarHide = document.getElementById('refineBar');
-        if (refineBarHide) refineBarHide.style.display = 'none';
-        var actionLabelHide = document.getElementById('actionLabel');
-        if (actionLabelHide) actionLabelHide.style.display = 'none';
-        ['btnShorter', 'btnDeeper', 'btnRegen'].forEach(function(id) {
-            var el = document.getElementById(id);
-            if (el) el.style.display = 'none';
-        });
-        var infoRowHide = document.getElementById('infoRow');
-        if (infoRowHide) infoRowHide.style.display = 'none';
-
-        // btnSend → bouton "Générer" en phase 1
+        // btnSend → label "Generer" en phase 1
         var btnSendEl = document.getElementById('btnSend');
         if (btnSendEl) {
             btnSendEl.style.display = '';
@@ -493,8 +480,6 @@ function _loadEcheancesUrgentes() {
                 if (briefSync && ed) {
                     briefSync.value = (ed.innerText || ed.textContent || '').trim();
                 }
-                // Flag : génération démarrée → _safeSetSendBtn peut maintenant
-                // changer le label (sortie de phase 1)
                 _modeNewGenerationStarted = true;
                 generateReply();
             };
@@ -1204,14 +1189,23 @@ var _lastLoadedRecipient = '';
 function _bindRecipientContextLoader() {
     var fieldTo = document.getElementById('fieldTo');
     if (!fieldTo) return;
-    // onblur = quand l'utilisateur quitte le champ après avoir saisi
-    fieldTo.addEventListener('blur', function() {
+
+    var handler = function() {
         var email = (fieldTo.value || '').trim().toLowerCase();
-        // Validation simple : doit contenir un @ et un .
         if (!email || email.indexOf('@') < 0 || email.indexOf('.') < 0) return;
         if (email === _lastLoadedRecipient) return;  // déjà chargé
         _lastLoadedRecipient = email;
         _loadRecipientContext(email);
+    };
+
+    // Triple trigger pour fiabilité (gap 05/05 v6) : blur + change + Enter
+    fieldTo.addEventListener('blur', handler);
+    fieldTo.addEventListener('change', handler);
+    fieldTo.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === 'Tab') {
+            // Léger délai pour laisser le navigateur finaliser la valeur
+            setTimeout(handler, 50);
+        }
     });
 }
 
@@ -5297,24 +5291,11 @@ function _safeSetSendBtn(opts) {
     if (opts && typeof opts.html === 'string') btn.innerHTML = opts.html;
     if (opts && typeof opts.disabled === 'boolean') btn.disabled = opts.disabled;
 
-    // Mode new : transition phase 1 → phase 2 quand label "Relire/Envoye/Envoyer"
+    // Mode new phase 2 : restaurer onclick = sendReply (l'override generateReply
+    // de la phase 1 doit être annulé une fois le mail généré)
     if (_mode === 'new' && opts && typeof opts.html === 'string'
         && (opts.html.indexOf('Relire') >= 0 || opts.html.indexOf('Envoye') >= 0 || opts.html.indexOf('Envoyer') >= 0)) {
-        var refineBarShow = document.getElementById('refineBar');
-        if (refineBarShow && refineBarShow.style.display === 'none') {
-            // Bascule UI vers phase 2 : réafficher refineBar + liens + cards
-            refineBarShow.style.display = '';
-            var actionLabelShow = document.getElementById('actionLabel');
-            if (actionLabelShow) actionLabelShow.style.display = '';
-            ['btnShorter', 'btnDeeper', 'btnRegen'].forEach(function(id) {
-                var el = document.getElementById(id);
-                if (el) el.style.display = '';
-            });
-            var infoRowShow = document.getElementById('infoRow');
-            if (infoRowShow) infoRowShow.style.display = '';
-            // Restaurer onclick original sendReply (j'avais override en generateReply en phase 1)
-            btn.onclick = function() { sendReply(); };
-        }
+        btn.onclick = function() { sendReply(); };
     }
 }
 
