@@ -58,6 +58,15 @@ class Database:
         # Tracker keyed par thread_id pour cleanup runtime des conn
         # zombies. Cf commentaire class-level ci-dessus + bilan 30/04 PM.
 
+    def _uid(self) -> str:
+        """Retourne le user_id courant depuis le contexte Flask (ou 'default').
+        Utilisé par toutes les méthodes DB pour l'isolation multi-user."""
+        try:
+            from user_context import get_current_user_id
+            return get_current_user_id() or 'default'
+        except Exception:
+            return 'default'
+
     def _conn(self):
         """Connection persistante par thread (evite open/close a chaque requete).
 
@@ -632,21 +641,30 @@ class Database:
 
     def mark_treated(self, entry_id, action='replied'):
         """Marque un mail comme traité dans EasyMail."""
+        uid = self._uid()
         conn = self._conn()
         c = conn.cursor()
-        c.execute("INSERT OR REPLACE INTO treated_emails (entry_id, action) VALUES (?, ?)", (entry_id, action))
+        c.execute(
+            "INSERT OR REPLACE INTO treated_emails (entry_id, action, user_id) VALUES (?, ?, ?)",
+            (entry_id, action, uid)
+        )
         conn.commit()
 
     def get_treated_ids(self):
-        """Retourne l'ensemble des entry_ids traités."""
+        """Retourne l'ensemble des entry_ids traités pour le user courant."""
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT entry_id FROM treated_emails")
+        c.execute("SELECT entry_id FROM treated_emails WHERE user_id = ?", (uid,))
         return set(row[0] for row in c.fetchall())
 
     def is_treated(self, entry_id):
-        """Vérifie si un mail est déjà traité."""
+        """Vérifie si un mail est déjà traité par le user courant."""
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT 1 FROM treated_emails WHERE entry_id = ? LIMIT 1", (entry_id,))
+        c.execute(
+            "SELECT 1 FROM treated_emails WHERE entry_id = ? AND user_id = ? LIMIT 1",
+            (entry_id, uid)
+        )
         return c.fetchone() is not None
 
     # --- CLASSEMENT MAILS (DOSSIERS OUTLOOK) --------------------------------
@@ -656,15 +674,16 @@ class Database:
         Ne retourne une règle auto que si TOUS les classements du contact vont dans le même dossier
         ET que les sujets classés sont cohérents avec le sujet actuel.
         Sinon → laisse l'IA décider avec l'historique complet."""
+        uid = self._uid()
         c = self._conn().cursor()
         if contact_email:
             c.execute("""
                 SELECT folder_path, folder_id, COUNT(*) as cnt
                 FROM folder_classifications
-                WHERE contact_email = ?
+                WHERE contact_email = ? AND user_id = ?
                 GROUP BY folder_path
                 ORDER BY cnt DESC
-            """, (contact_email,))
+            """, (contact_email, uid))
             rows = c.fetchall()
             if len(rows) == 1 and rows[0][2] >= 3:
                 # Un seul dossier, 3+ classements — vérifier que les sujets sont cohérents
@@ -672,8 +691,8 @@ class Database:
                 if subject_keywords:
                     c.execute("""
                         SELECT DISTINCT subject_keywords FROM folder_classifications
-                        WHERE contact_email = ? AND subject_keywords IS NOT NULL AND subject_keywords != ''
-                    """, (contact_email,))
+                        WHERE contact_email = ? AND user_id = ? AND subject_keywords IS NOT NULL AND subject_keywords != ''
+                    """, (contact_email, uid))
                     past_kw = set()
                     for r in c.fetchall():
                         for w in (r[0] or '').split():
@@ -691,10 +710,10 @@ class Database:
             c.execute("""
                 SELECT folder_path, folder_id, COUNT(*) as cnt
                 FROM folder_classifications
-                WHERE domain = ?
+                WHERE domain = ? AND user_id = ?
                 GROUP BY folder_path
                 ORDER BY cnt DESC
-            """, (domain,))
+            """, (domain, uid))
             domain_rows = c.fetchall()
             if len(domain_rows) == 1 and domain_rows[0][2] >= 3:
                 return {'folder_path': domain_rows[0][0], 'folder_id': domain_rows[0][1], 'count': domain_rows[0][2]}
@@ -707,11 +726,12 @@ class Database:
         Retourne {'folder_path', 'folder_id', 'count', 'score'} ou None."""
         if not contact_email or not current_keywords:
             return None
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute("""
             SELECT folder_path, folder_id, subject_keywords
-            FROM folder_classifications WHERE contact_email = ?
-        """, (contact_email,))
+            FROM folder_classifications WHERE contact_email = ? AND user_id = ?
+        """, (contact_email, uid))
         rows = c.fetchall()
         if not rows:
             return None
@@ -760,12 +780,13 @@ class Database:
                            if len(w) >= 3 and not _is_date_token(w))
         if not current_words:
             return None
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute("""
             SELECT folder_path, folder_id, subject_keywords
-            FROM folder_classifications WHERE contact_email = ?
+            FROM folder_classifications WHERE contact_email = ? AND user_id = ?
             ORDER BY created_at DESC LIMIT 20
-        """, (contact_email,))
+        """, (contact_email, uid))
         for row in c.fetchall():
             stored_kw = row[2] or ''
             stored_words = set(w for w in stored_kw.lower().split()
@@ -789,6 +810,7 @@ class Database:
             return None
         # #9 audit : borner le nombre de mots-cles pour eviter une requete SQL geante
         current_words = current_words[:15]
+        uid = self._uid()
         c = self._conn().cursor()
         # Chercher les classements qui contiennent AU MOINS 1 mot-cle significatif
         conditions = ' OR '.join(['subject_keywords LIKE ?' for _ in current_words])
@@ -796,12 +818,12 @@ class Database:
         c.execute(f"""
             SELECT folder_path, folder_id, COUNT(DISTINCT contact_email) as contact_count
             FROM folder_classifications
-            WHERE ({conditions})
+            WHERE ({conditions}) AND user_id = ?
             GROUP BY folder_path
             HAVING COUNT(DISTINCT contact_email) >= 3
             ORDER BY contact_count DESC
             LIMIT 1
-        """, params)
+        """, params + [uid])
         row = c.fetchone()
         if row:
             return {'folder_path': row[0], 'folder_id': row[1] or '', 'contact_count': row[2]}
@@ -812,16 +834,17 @@ class Database:
         Retourne {'folder_path', 'folder_id', 'contact_count'} ou None."""
         if not domain:
             return None
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute("""
             SELECT folder_path, folder_id, COUNT(DISTINCT contact_email) as contact_count
             FROM folder_classifications
-            WHERE domain = ?
+            WHERE domain = ? AND user_id = ?
             GROUP BY folder_path
             HAVING COUNT(DISTINCT contact_email) >= 3
             ORDER BY contact_count DESC
             LIMIT 1
-        """, (domain,))
+        """, (domain, uid))
         row = c.fetchone()
         if row:
             return {'folder_path': row[0], 'folder_id': row[1] or '', 'contact_count': row[2]}
@@ -832,11 +855,12 @@ class Database:
         pour un contact multi-dossiers. Retourne {'dest_folder', 'count', 'score'} ou None."""
         if not contact_email or not current_keywords:
             return None
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute("""
             SELECT dest_folder, subject_keywords
-            FROM pj_classifications WHERE contact_email = ?
-        """, (contact_email,))
+            FROM pj_classifications WHERE contact_email = ? AND user_id = ?
+        """, (contact_email, uid))
         rows = c.fetchall()
         if not rows:
             return None
@@ -871,51 +895,55 @@ class Database:
 
     def save_classification(self, entry_id, folder_path, folder_id, contact_email, domain, was_ai=False, was_corrected=False, subject='', subject_keywords=''):
         """Enregistre un classement pour l'apprentissage."""
+        uid = self._uid()
         conn = self._conn()
         conn.execute("""
-            INSERT INTO folder_classifications (entry_id, folder_path, folder_id, contact_email, domain, subject, subject_keywords, was_ai_suggestion, was_corrected)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (entry_id, folder_path, folder_id, contact_email, domain, subject, subject_keywords, int(was_ai), int(was_corrected)))
+            INSERT INTO folder_classifications (entry_id, folder_path, folder_id, contact_email, domain, subject, subject_keywords, was_ai_suggestion, was_corrected, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (entry_id, folder_path, folder_id, contact_email, domain, subject, subject_keywords, int(was_ai), int(was_corrected), uid))
         conn.commit()
 
     def get_contact_classification_history(self, contact_email, limit=30):
         """Retourne l'historique complet des classements d'un contact, groupé par dossier + mots-clés."""
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute("""
             SELECT folder_path, subject, subject_keywords, COUNT(*) as cnt, MAX(created_at) as last_date
             FROM folder_classifications
-            WHERE contact_email = ?
+            WHERE contact_email = ? AND user_id = ?
             GROUP BY folder_path, subject_keywords
             ORDER BY cnt DESC, last_date DESC
             LIMIT ?
-        """, (contact_email, limit))
+        """, (contact_email, uid, limit))
         rows = c.fetchall()
         return [{'folder_path': r[0], 'subject': r[1] or '', 'keywords': r[2] or '', 'count': r[3], 'last_date': r[4]} for r in rows]
 
     def get_contact_folder_stats(self, contact_email):
         """Retourne les stats par dossier pour un contact (pour la règle automatique)."""
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute("""
             SELECT folder_path, folder_id, COUNT(*) as cnt
             FROM folder_classifications
-            WHERE contact_email = ?
+            WHERE contact_email = ? AND user_id = ?
             GROUP BY folder_path
             ORDER BY cnt DESC
-        """, (contact_email,))
+        """, (contact_email, uid))
         rows = c.fetchall()
         return [{'folder_path': r[0], 'folder_id': r[1], 'count': r[2]} for r in rows]
 
     def get_recent_classifications(self, contact_email=None, domain=None, limit=10):
         """Retourne les N derniers classements pour un contact ou domaine (pour few-shot prompt)."""
+        uid = self._uid()
         c = self._conn().cursor()
         if contact_email:
             c.execute("""
                 SELECT folder_path, contact_email, subject, subject_keywords, created_at
                 FROM folder_classifications
-                WHERE contact_email = ?
+                WHERE contact_email = ? AND user_id = ?
                 ORDER BY created_at DESC
                 LIMIT ?
-            """, (contact_email, limit))
+            """, (contact_email, uid, limit))
             rows = c.fetchall()
             if rows:
                 return [{'folder_path': r[0], 'contact': r[1], 'subject': r[2] or '', 'keywords': r[3] or '', 'date': r[4]} for r in rows]
@@ -923,10 +951,10 @@ class Database:
             c.execute("""
                 SELECT folder_path, contact_email, subject, subject_keywords, created_at
                 FROM folder_classifications
-                WHERE domain = ?
+                WHERE domain = ? AND user_id = ?
                 ORDER BY created_at DESC
                 LIMIT ?
-            """, (domain, limit))
+            """, (domain, uid, limit))
             rows = c.fetchall()
             if rows:
                 return [{'folder_path': r[0], 'contact': r[1], 'subject': r[2] or '', 'keywords': r[3] or '', 'date': r[4]} for r in rows]
@@ -934,9 +962,10 @@ class Database:
         c.execute("""
             SELECT folder_path, contact_email, subject, subject_keywords, created_at
             FROM folder_classifications
+            WHERE user_id = ?
             ORDER BY created_at DESC
             LIMIT ?
-        """, (limit,))
+        """, (uid, limit))
         rows = c.fetchall()
         return [{'folder_path': r[0], 'contact': r[1], 'subject': r[2] or '', 'keywords': r[3] or '', 'date': r[4]} for r in rows]
 
@@ -946,9 +975,10 @@ class Database:
         quand Claude renvoie source='none'."""
         if not contact_email:
             return 0
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT COUNT(*) FROM folder_classifications WHERE contact_email = ?",
-                  (contact_email.strip().lower(),))
+        c.execute("SELECT COUNT(*) FROM folder_classifications WHERE contact_email = ? AND user_id = ?",
+                  (contact_email.strip().lower(), uid))
         return c.fetchone()[0] or 0
 
     def count_classifications_for_domain(self, domain):
@@ -956,19 +986,21 @@ class Database:
         Sert à détecter "domaine inconnu" (count == 0) pour wording transparent."""
         if not domain:
             return 0
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT COUNT(*) FROM folder_classifications WHERE domain = ?",
-                  (domain.strip().lower(),))
+        c.execute("SELECT COUNT(*) FROM folder_classifications WHERE domain = ? AND user_id = ?",
+                  (domain.strip().lower(), uid))
         return c.fetchone()[0] or 0
 
     def get_classification_stats(self):
         """Stats de classement pour la page Profil."""
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT COUNT(*) FROM folder_classifications")
+        c.execute("SELECT COUNT(*) FROM folder_classifications WHERE user_id = ?", (uid,))
         total = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM folder_classifications WHERE was_ai_suggestion = 1")
+        c.execute("SELECT COUNT(*) FROM folder_classifications WHERE was_ai_suggestion = 1 AND user_id = ?", (uid,))
         ai_count = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM folder_classifications WHERE was_corrected = 1")
+        c.execute("SELECT COUNT(*) FROM folder_classifications WHERE was_corrected = 1 AND user_id = ?", (uid,))
         corrected = c.fetchone()[0]
         return {
             'total': total,
@@ -982,32 +1014,34 @@ class Database:
 
     def save_pj_classification(self, original_filename, renamed_filename, dest_folder, contact_email, domain, subject='', subject_keywords='', was_ai=False, was_corrected=False):
         """Enregistre un classement PJ pour l'apprentissage."""
+        uid = self._uid()
         conn = self._conn()
         conn.execute("""
-            INSERT INTO pj_classifications (original_filename, renamed_filename, dest_folder, contact_email, domain, subject, subject_keywords, was_ai_suggestion, was_corrected)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (original_filename, renamed_filename, dest_folder, contact_email, domain, subject, subject_keywords, int(was_ai), int(was_corrected)))
+            INSERT INTO pj_classifications (original_filename, renamed_filename, dest_folder, contact_email, domain, subject, subject_keywords, was_ai_suggestion, was_corrected, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (original_filename, renamed_filename, dest_folder, contact_email, domain, subject, subject_keywords, int(was_ai), int(was_corrected), uid))
         conn.commit()
 
     def get_pj_folder_suggestion(self, contact_email, domain, subject_keywords=''):
         """Renvoie le dossier Windows le plus fréquent pour les PJ d'un contact (3+ identiques).
         Vérifie la cohérence du sujet : si les mots-clés actuels ne recoupent aucun sujet passé,
         laisse l'IA décider (même logique que get_folder_suggestion)."""
+        uid = self._uid()
         c = self._conn().cursor()
         if contact_email:
             c.execute("""
                 SELECT dest_folder, COUNT(*) as cnt
-                FROM pj_classifications WHERE contact_email = ?
+                FROM pj_classifications WHERE contact_email = ? AND user_id = ?
                 GROUP BY dest_folder ORDER BY cnt DESC LIMIT 1
-            """, (contact_email,))
+            """, (contact_email, uid))
             row = c.fetchone()
             if row and row[1] >= 3:
                 # Vérifier cohérence sujet avant de proposer la règle
                 if subject_keywords:
                     c.execute("""
                         SELECT DISTINCT subject_keywords FROM pj_classifications
-                        WHERE contact_email = ? AND subject_keywords IS NOT NULL AND subject_keywords != ''
-                    """, (contact_email,))
+                        WHERE contact_email = ? AND user_id = ? AND subject_keywords IS NOT NULL AND subject_keywords != ''
+                    """, (contact_email, uid))
                     past_kw = set()
                     for r in c.fetchall():
                         for w in (r[0] or '').split():
@@ -1019,16 +1053,16 @@ class Database:
         if domain:
             c.execute("""
                 SELECT dest_folder, COUNT(*) as cnt
-                FROM pj_classifications WHERE domain = ?
+                FROM pj_classifications WHERE domain = ? AND user_id = ?
                 GROUP BY dest_folder ORDER BY cnt DESC LIMIT 1
-            """, (domain,))
+            """, (domain, uid))
             row = c.fetchone()
             if row and row[1] >= 3:
                 if subject_keywords:
                     c.execute("""
                         SELECT DISTINCT subject_keywords FROM pj_classifications
-                        WHERE domain = ? AND subject_keywords IS NOT NULL AND subject_keywords != ''
-                    """, (domain,))
+                        WHERE domain = ? AND user_id = ? AND subject_keywords IS NOT NULL AND subject_keywords != ''
+                    """, (domain, uid))
                     past_kw = set()
                     for r in c.fetchall():
                         for w in (r[0] or '').split():
@@ -1041,33 +1075,35 @@ class Database:
 
     def get_pj_classification_history(self, contact_email, limit=20):
         """Historique des classements PJ d'un contact, groupé par dossier."""
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute("""
             SELECT dest_folder, subject_keywords, COUNT(*) as cnt, MAX(created_at) as last_date
-            FROM pj_classifications WHERE contact_email = ?
+            FROM pj_classifications WHERE contact_email = ? AND user_id = ?
             GROUP BY dest_folder, subject_keywords
             ORDER BY cnt DESC, last_date DESC LIMIT ?
-        """, (contact_email, limit))
+        """, (contact_email, uid, limit))
         return [{'dest_folder': r[0], 'keywords': r[1] or '', 'count': r[2], 'last_date': r[3]} for r in c.fetchall()]
 
     def get_recent_pj_classifications(self, contact_email=None, domain=None, limit=10):
         """Derniers classements PJ pour few-shot prompt."""
+        uid = self._uid()
         c = self._conn().cursor()
         if contact_email:
             c.execute("""
                 SELECT dest_folder, contact_email, original_filename, renamed_filename, created_at
-                FROM pj_classifications WHERE contact_email = ?
+                FROM pj_classifications WHERE contact_email = ? AND user_id = ?
                 ORDER BY created_at DESC LIMIT ?
-            """, (contact_email, limit))
+            """, (contact_email, uid, limit))
             rows = c.fetchall()
             if rows:
                 return [{'dest_folder': r[0], 'contact': r[1], 'original': r[2], 'renamed': r[3], 'date': r[4]} for r in rows]
         if domain:
             c.execute("""
                 SELECT dest_folder, contact_email, original_filename, renamed_filename, created_at
-                FROM pj_classifications WHERE domain = ?
+                FROM pj_classifications WHERE domain = ? AND user_id = ?
                 ORDER BY created_at DESC LIMIT ?
-            """, (domain, limit))
+            """, (domain, uid, limit))
             rows = c.fetchall()
             if rows:
                 return [{'dest_folder': r[0], 'contact': r[1], 'original': r[2], 'renamed': r[3], 'date': r[4]} for r in rows]
@@ -1208,19 +1244,21 @@ class Database:
 
     def get_learned_templates(self, status=None):
         """Retourne la liste des templates appris (tous ou filtrés par status)."""
+        uid = self._uid()
         c = self._conn().cursor()
         if status:
             c.execute(
                 "SELECT id, pattern_keywords, template_text, register, usage_count,"
                 " success_count, reject_count, status, last_used FROM learned_templates"
-                " WHERE status = ? ORDER BY success_count DESC",
-                (status,),
+                " WHERE status = ? AND user_id = ? ORDER BY success_count DESC",
+                (status, uid),
             )
         else:
             c.execute(
                 "SELECT id, pattern_keywords, template_text, register, usage_count,"
                 " success_count, reject_count, status, last_used FROM learned_templates"
-                " ORDER BY success_count DESC"
+                " WHERE user_id = ? ORDER BY success_count DESC",
+                (uid,)
             )
         cols = ['id', 'pattern_keywords', 'template_text', 'register',
                 'usage_count', 'success_count', 'reject_count', 'status', 'last_used']
@@ -1229,11 +1267,12 @@ class Database:
     def add_learned_template(self, pattern_keywords, template_text, register='vouvoiement'):
         """Crée un nouveau template candidat (status='candidate')."""
         import time as _t
+        uid = self._uid()
         conn = self._conn()
         c = conn.execute(
             "INSERT INTO learned_templates (pattern_keywords, template_text, register,"
-            " created_at) VALUES (?, ?, ?, ?)",
-            (pattern_keywords, template_text, register, int(_t.time())),
+            " created_at, user_id) VALUES (?, ?, ?, ?, ?)",
+            (pattern_keywords, template_text, register, int(_t.time()), uid),
         )
         conn.commit()
         return c.lastrowid
@@ -1297,21 +1336,23 @@ class Database:
             raise
 
     def save_to_thread(self, project, direction, subject, body, correspondent):
+        uid = self._uid()
         conn = self._conn()
         conn.execute("""
-            INSERT INTO threads (project, direction, subject, body, correspondent, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (project, direction, subject, body, correspondent, datetime.now().isoformat()))
+            INSERT INTO threads (project, direction, subject, body, correspondent, created_at, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (project, direction, subject, body, correspondent, datetime.now().isoformat(), uid))
         conn.commit()
 
     def get_threads_for_correspondent(self, email, limit=20):
         """Retourne les derniers threads (envoyés + reçus) pour un correspondant."""
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute("""
             SELECT id, direction, subject, body, correspondent, created_at
-            FROM threads WHERE correspondent = ?
+            FROM threads WHERE correspondent = ? AND user_id = ?
             ORDER BY created_at DESC LIMIT ?
-        """, (email, limit))
+        """, (email, uid, limit))
         return [{'id': r[0], 'direction': r[1], 'subject': r[2], 'body': r[3],
                  'correspondent': r[4], 'created_at': r[5]} for r in c.fetchall()]
 
@@ -1319,10 +1360,11 @@ class Database:
 
     def save_correction(self, proposed, sent, correspondent="", project="", categories=""):
         """Sauvegarde une correction et retourne l'ID inseré."""
+        uid = self._uid()
         conn = self._conn()
         cursor = conn.execute(
-            "INSERT INTO style_corrections (proposed, sent, correspondent, project, correction_categories, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (proposed, sent, correspondent, project, categories, datetime.now().isoformat())
+            "INSERT INTO style_corrections (proposed, sent, correspondent, project, correction_categories, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (proposed, sent, correspondent, project, categories, datetime.now().isoformat(), uid)
         )
         conn.commit()
         return cursor.lastrowid
@@ -1341,8 +1383,9 @@ class Database:
 
     def count_quality_impacts(self, limit=10):
         """Compte les impacts qualite des N dernieres corrections. Retourne dict."""
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT quality_impact FROM style_corrections ORDER BY created_at DESC LIMIT ?", (limit,))
+        c.execute("SELECT quality_impact FROM style_corrections WHERE user_id = ? ORDER BY created_at DESC LIMIT ?", (uid, limit))
         counts = {'AMELIORATION': 0, 'STYLE': 0, 'DEGRADATION': 0}
         for row in c.fetchall():
             impact = (row[0] or 'STYLE').upper()
@@ -1354,64 +1397,72 @@ class Database:
 
     def get_recent_sent_mails(self, limit=10):
         """Retourne les N derniers mails envoyes (depuis threads)."""
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute(
-            "SELECT subject, body, correspondent FROM threads WHERE direction='sent' ORDER BY created_at DESC LIMIT ?",
-            (limit,)
+            "SELECT subject, body, correspondent FROM threads WHERE direction='sent' AND user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (uid, limit)
         )
         return [{'subject': r[0] or '', 'body': r[1] or '', 'correspondent': r[2] or ''} for r in c.fetchall()]
 
     def save_score_history(self, score, level, delta):
         """Sauvegarde un point dans l'historique des scores."""
+        uid = self._uid()
         conn = self._conn()
-        conn.execute("INSERT INTO score_history (score, level, delta) VALUES (?, ?, ?)", (score, level, delta))
+        conn.execute("INSERT INTO score_history (score, level, delta, user_id) VALUES (?, ?, ?, ?)", (score, level, delta, uid))
         conn.commit()
 
     def get_score_history(self, limit=5):
         """Retourne les N derniers cycles de scoring."""
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT score, level, delta, created_at FROM score_history ORDER BY created_at DESC LIMIT ?", (limit,))
+        c.execute("SELECT score, level, delta, created_at FROM score_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ?", (uid, limit))
         return [{'score': r[0], 'level': r[1], 'delta': r[2], 'created_at': r[3]} for r in c.fetchall()]
 
     def count_corrections(self):
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT COUNT(*) FROM style_corrections")
+        c.execute("SELECT COUNT(*) FROM style_corrections WHERE user_id = ?", (uid,))
         return c.fetchone()[0]
 
     def get_recent_corrections(self, limit=50):
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute(
-            "SELECT proposed, sent, correspondent, project FROM style_corrections ORDER BY created_at DESC LIMIT ?",
-            (limit,)
+            "SELECT proposed, sent, correspondent, project FROM style_corrections WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (uid, limit)
         )
         return [{'proposed': r[0], 'sent': r[1], 'correspondent': r[2], 'project': r[3]} for r in c.fetchall()]
 
     def get_recent_corrections_with_id(self, limit=50):
         """Retourne les corrections recentes avec leur ID (pour la classification D2 fusionnee)."""
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute(
-            "SELECT id, proposed, sent, correspondent, project FROM style_corrections ORDER BY created_at DESC LIMIT ?",
-            (limit,)
+            "SELECT id, proposed, sent, correspondent, project FROM style_corrections WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (uid, limit)
         )
         return [{'id': r[0], 'proposed': r[1], 'sent': r[2], 'correspondent': r[3], 'project': r[4]} for r in c.fetchall()]
 
     def get_corrections_for_contact(self, email, limit=10):
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute(
-            "SELECT proposed, sent, project FROM style_corrections WHERE correspondent = ? ORDER BY created_at DESC LIMIT ?",
-            (email, limit)
+            "SELECT proposed, sent, project FROM style_corrections WHERE correspondent = ? AND user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (email, uid, limit)
         )
         return [{'proposed': r[0], 'sent': r[1], 'project': r[2]} for r in c.fetchall()]
 
     def get_corrections_for_prompt(self, correspondent="", limit=5):
         results = []
         seen_ids = set()
+        uid = self._uid()
         c = self._conn().cursor()
 
         if correspondent:
             c.execute(
-                "SELECT id, proposed, sent, correspondent, correction_categories, analysis FROM style_corrections WHERE correspondent = ? ORDER BY created_at DESC LIMIT ?",
-                (correspondent, limit)
+                "SELECT id, proposed, sent, correspondent, correction_categories, analysis FROM style_corrections WHERE correspondent = ? AND user_id = ? ORDER BY created_at DESC LIMIT ?",
+                (correspondent, uid, limit)
             )
             for r in c.fetchall():
                 # Garde anti-TypeError : si proposed/sent NULL en DB (migration ancienne),
@@ -1422,8 +1473,8 @@ class Database:
         remaining = limit - len(results)
         if remaining > 0:
             c.execute(
-                "SELECT id, proposed, sent, correspondent, correction_categories, analysis FROM style_corrections ORDER BY created_at DESC LIMIT ?",
-                (limit + len(seen_ids),)
+                "SELECT id, proposed, sent, correspondent, correction_categories, analysis FROM style_corrections WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                (uid, limit + len(seen_ids))
             )
             for r in c.fetchall():
                 if r[0] not in seen_ids and len(results) < limit:
@@ -1434,12 +1485,13 @@ class Database:
     # --- PROFILS DE CORRESPONDANTS ----------------------------------------
 
     def get_contact_profile(self, email):
+        uid = self._uid()
         c = self._conn().cursor()
         # LOWER() : Graph retourne parfois Prénom.Nom@domain (casse mixte)
         # alors que les profils sont stockés en minuscules. Comparaison
         # insensible à la casse pour éviter les miss silencieux.
-        c.execute("SELECT * FROM contact_profiles WHERE LOWER(email) = LOWER(?)",
-                  (email.strip(),))
+        c.execute("SELECT * FROM contact_profiles WHERE LOWER(email) = LOWER(?) AND user_id = ?",
+                  (email.strip(), uid))
         row = c.fetchone()
         return dict(row) if row else None
 
@@ -1465,7 +1517,8 @@ class Database:
         try:
             # Recuperer les IDs existants pour fusion
             c = conn.cursor()
-            c.execute("SELECT entry_ids FROM contact_profiles WHERE email = ?", (email,))
+            _uid_pre = self._uid()
+            c.execute("SELECT entry_ids FROM contact_profiles WHERE email = ? AND user_id = ?", (email, _uid_pre))
             row = c.fetchone()
             if row and row[0]:
                 try:
@@ -1480,14 +1533,15 @@ class Database:
             raise
 
         try:
+            uid = self._uid()
             conn.execute("""
             INSERT INTO contact_profiles (
                 email, display_name, organization, category, domain,
                 register, tone, greeting, closing, typical_length,
                 power_dynamic, language, profile_text, profile_json,
                 sample_count, confidence, last_analysis, entry_ids, manually_edited,
-                user_signature_for_contact, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                user_signature_for_contact, created_at, updated_at, user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(email) DO UPDATE SET
                 display_name=excluded.display_name,
                 organization=excluded.organization,
@@ -1530,7 +1584,7 @@ class Database:
             json.dumps(entry_ids, ensure_ascii=False),
             profile_data.get('manually_edited', 0),
             profile_data.get('user_signature_for_contact'),
-            now, now
+            now, now, uid
         ))
             conn.commit()
         except Exception:
@@ -1538,25 +1592,29 @@ class Database:
             raise
 
     def get_all_contact_profiles(self):
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT * FROM contact_profiles ORDER BY sample_count DESC, display_name ASC")
+        c.execute("SELECT * FROM contact_profiles WHERE user_id = ? ORDER BY sample_count DESC, display_name ASC", (uid,))
         return [dict(r) for r in c.fetchall()]
 
     def count_threads(self):
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT COUNT(*) FROM threads")
+        c.execute("SELECT COUNT(*) FROM threads WHERE user_id = ?", (uid,))
         return c.fetchone()[0]
 
     def count_mails_with_contact(self, email):
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT COUNT(*) FROM threads WHERE correspondent = ?", (email,))
+        c.execute("SELECT COUNT(*) FROM threads WHERE correspondent = ? AND user_id = ?", (email, uid))
         return c.fetchone()[0]
 
     def get_threads_with_contact(self, email, limit=20):
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute(
-            "SELECT direction, subject, body, created_at FROM threads WHERE correspondent = ? ORDER BY created_at DESC LIMIT ?",
-            (email, limit)
+            "SELECT direction, subject, body, created_at FROM threads WHERE correspondent = ? AND user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (email, uid, limit)
         )
         return [{'direction': r[0], 'subject': r[1], 'body': r[2], 'date': r[3]} for r in c.fetchall()]
 
@@ -1633,16 +1691,17 @@ class Database:
         l'index secondaire `internet_message_id` en fallback. Retourne dict
         ou None.
         """
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT email_json FROM email_cache WHERE entry_id = ?", (entry_id,))
+        c.execute("SELECT email_json FROM email_cache WHERE entry_id = ? AND user_id = ?", (entry_id, uid))
         row = c.fetchone()
         if row:
             return json.loads(row[0])
         # Fallback : lookup par internet_message_id (cas où l'appelant passe
         # un internet_id alors que la ligne est encore stockée par Graph ID)
         c.execute(
-            "SELECT email_json FROM email_cache WHERE internet_message_id = ? "
-            "LIMIT 1", (entry_id,)
+            "SELECT email_json FROM email_cache WHERE internet_message_id = ? AND user_id = ? "
+            "LIMIT 1", (entry_id, uid)
         )
         row = c.fetchone()
         if row:
@@ -1658,10 +1717,11 @@ class Database:
         """
         if not internet_message_id:
             return None
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute(
-            "SELECT email_json FROM email_cache WHERE internet_message_id = ? "
-            "LIMIT 1", (internet_message_id,)
+            "SELECT email_json FROM email_cache WHERE internet_message_id = ? AND user_id = ? "
+            "LIMIT 1", (internet_message_id, uid)
         )
         row = c.fetchone()
         if row:
@@ -1669,8 +1729,8 @@ class Database:
         # Fallback PK : certaines lignes (depuis le fix 23/04) sont déjà
         # indexées par internet_id côté entry_id.
         c.execute(
-            "SELECT email_json FROM email_cache WHERE entry_id = ?",
-            (internet_message_id,)
+            "SELECT email_json FROM email_cache WHERE entry_id = ? AND user_id = ?",
+            (internet_message_id, uid)
         )
         row = c.fetchone()
         if row:
@@ -1679,10 +1739,11 @@ class Database:
 
     def get_recent_email_cache(self, limit=10):
         """Retourne les N emails les plus récents du cache DB (pour pré-charger _warmup_cache au démarrage)."""
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute(
-            "SELECT entry_id, email_json FROM email_cache ORDER BY cached_at DESC LIMIT ?",
-            (limit,)
+            "SELECT entry_id, email_json FROM email_cache WHERE user_id = ? ORDER BY cached_at DESC LIMIT ?",
+            (uid, limit)
         )
         results = []
         for row in c.fetchall():
@@ -1709,32 +1770,35 @@ class Database:
             imid = email_data.get('internet_message_id') or None
         if not imid and isinstance(entry_id, str) and entry_id.startswith('<') and '@' in entry_id:
             imid = entry_id
+        uid = self._uid()
         conn.execute("""
-            INSERT OR REPLACE INTO email_cache (entry_id, email_json, internet_message_id, cached_at)
-            VALUES (?, ?, ?, datetime('now', 'localtime'))
-        """, (entry_id, json.dumps(email_data, ensure_ascii=False, default=str), imid))
+            INSERT OR REPLACE INTO email_cache (entry_id, email_json, internet_message_id, cached_at, user_id)
+            VALUES (?, ?, ?, datetime('now', 'localtime'), ?)
+        """, (entry_id, json.dumps(email_data, ensure_ascii=False, default=str), imid, uid))
         conn.commit()
 
     # --- CACHE DOSSIERS OUTLOOK ------------------------------------------------
 
     def get_cached_folders(self):
         """Retourne les dossiers Outlook depuis le cache DB. Retourne liste ou None si vide."""
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT folder_id, folder_path, folder_name, folder_depth FROM folder_cache ORDER BY folder_path")
+        c.execute("SELECT folder_id, folder_path, folder_name, folder_depth FROM folder_cache WHERE user_id = ? ORDER BY folder_path", (uid,))
         rows = c.fetchall()
         if not rows:
             return None
         return [{'id': r[0], 'path': r[1], 'name': r[2], 'depth': r[3]} for r in rows]
 
     def save_folders_cache(self, folders):
-        """Sauvegarde les dossiers Outlook dans le cache DB (remplace tout)."""
+        """Sauvegarde les dossiers Outlook dans le cache DB (remplace tout pour ce user)."""
+        uid = self._uid()
         conn = self._conn()
-        conn.execute("DELETE FROM folder_cache")
+        conn.execute("DELETE FROM folder_cache WHERE user_id = ?", (uid,))
         for f in folders:
             conn.execute("""
-                INSERT INTO folder_cache (folder_id, folder_path, folder_name, folder_depth, cached_at)
-                VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
-            """, (f.get('id', ''), f.get('path', ''), f.get('name', ''), f.get('depth', 0)))
+                INSERT INTO folder_cache (folder_id, folder_path, folder_name, folder_depth, cached_at, user_id)
+                VALUES (?, ?, ?, ?, datetime('now', 'localtime'), ?)
+            """, (f.get('id', ''), f.get('path', ''), f.get('name', ''), f.get('depth', 0), uid))
         conn.commit()
         print(f"[db] Cache dossiers: {len(folders)} dossiers sauvegardes", flush=True)
 
@@ -1744,40 +1808,44 @@ class Database:
         I-DATA-11 : purge sur les DEUX colonnes (entry_id PK + index
         internet_message_id) pour absorber la mixité Graph ID / Internet ID.
         """
+        uid = self._uid()
         conn = self._conn()
         conn.execute(
             "DELETE FROM email_cache "
-            "WHERE entry_id = ? OR internet_message_id = ?",
-            (entry_id, entry_id)
+            "WHERE (entry_id = ? OR internet_message_id = ?) AND user_id = ?",
+            (entry_id, entry_id, uid)
         )
         conn.commit()
 
     def purge_learning_data(self):
-        """Purge toutes les données d'apprentissage (threads, corrections, profils contacts)."""
+        """Purge toutes les données d'apprentissage du user courant (threads, corrections, profils contacts)."""
+        uid = self._uid()
         conn = self._conn()
-        conn.execute("DELETE FROM threads")
-        conn.execute("DELETE FROM style_corrections")
-        conn.execute("DELETE FROM contact_profiles")
+        conn.execute("DELETE FROM threads WHERE user_id = ?", (uid,))
+        conn.execute("DELETE FROM style_corrections WHERE user_id = ?", (uid,))
+        conn.execute("DELETE FROM contact_profiles WHERE user_id = ?", (uid,))
         conn.commit()
-        print(f"[db] Purge learning: threads, corrections, contacts supprimés", flush=True)
+        print(f"[db] Purge learning [{uid}]: threads, corrections, contacts supprimés", flush=True)
 
     # --- MÉTRIQUES ---------------------------------------------------------
 
     def save_metric(self, email_id, action, importance=2, duration_ms=0,
                     direct_send=1, correspondent="", project=""):
+        uid = self._uid()
         conn = self._conn()
         conn.execute("""
             INSERT INTO metrics (email_id, action, importance, duration_ms,
-                                 direct_send, correspondent, project, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                 direct_send, correspondent, project, created_at, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (email_id, action, importance, duration_ms, direct_send,
-              correspondent, project, datetime.now().isoformat()))
+              correspondent, project, datetime.now().isoformat(), uid))
         conn.commit()
 
     # --- ÉCHÉANCES ----------------------------------------------------------
 
     def save_echeance(self, data):
         """Sauvegarde une echeance. Retourne l'id cree."""
+        uid = self._uid()
         date_echeance = data.get('date_echeance', '')
         if date_echeance and not re.match(r'^\d{4}-\d{2}-\d{2}', date_echeance):
             print(f"[db] Invalid date format: {date_echeance}, forcé à vide", flush=True)
@@ -1788,8 +1856,8 @@ class Database:
         c.execute("""
             INSERT INTO echeances (email_entry_id, correspondant, correspondant_nom,
                 date_echeance, description, type, priorite, extrait_mail, direction,
-                statut, rappel_jours, original_subject, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                statut, rappel_jours, original_subject, created_at, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
         """, (
             data.get('email_entry_id', ''),
             data.get('correspondant', ''),
@@ -1802,24 +1870,27 @@ class Database:
             data.get('direction', 'received'),
             data.get('rappel_jours', 3),
             data.get('original_subject', ''),
-            datetime.now().isoformat()
+            datetime.now().isoformat(),
+            uid,
         ))
         conn.commit()
         return c.lastrowid
 
     def get_echeance_by_id(self, echeance_id):
         """Retourne une echeance par son ID, ou None."""
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT * FROM echeances WHERE id = ?", (echeance_id,))
+        c.execute("SELECT * FROM echeances WHERE id = ? AND user_id = ?", (echeance_id, uid))
         row = c.fetchone()
         return dict(row) if row else None
 
     def get_echeances(self, statut=None, correspondant=None):
-        """Retourne les echeances filtrees."""
+        """Retourne les echeances filtrees pour le user courant."""
+        uid = self._uid()
         conn = self._conn()
         c = conn.cursor()
-        query = "SELECT * FROM echeances WHERE 1=1"
-        params = []
+        query = "SELECT * FROM echeances WHERE user_id = ?"
+        params = [uid]
         if statut:
             if statut == 'en_retard':
                 query += " AND statut = 'active' AND date_echeance != '' AND date_echeance IS NOT NULL AND date_echeance < date('now', 'localtime')"
@@ -1837,27 +1908,30 @@ class Database:
 
     def get_echeances_urgentes(self):
         """Retourne les echeances actives depassees ou dans les 3 prochains jours."""
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute("""
             SELECT * FROM echeances
-            WHERE statut = 'active'
+            WHERE user_id = ? AND statut = 'active'
             AND date_echeance != '' AND date_echeance IS NOT NULL
             AND date_echeance <= date('now', '+3 days')
             ORDER BY date_echeance ASC
-        """)
+        """, (uid,))
         return [dict(r) for r in c.fetchall()]
 
     def purge_archived_echeances(self):
-        """Supprime les echeances terminees et annulees. Retourne le nombre supprime."""
+        """Supprime les echeances terminees et annulees du user courant."""
+        uid = self._uid()
         conn = self._conn()
         c = conn.cursor()
-        c.execute("DELETE FROM echeances WHERE statut IN ('terminee', 'annulee')")
+        c.execute("DELETE FROM echeances WHERE statut IN ('terminee', 'annulee') AND user_id = ?", (uid,))
         deleted = c.rowcount
         conn.commit()
         return deleted
 
     def update_echeance(self, echeance_id, updates):
         """Met a jour une echeance."""
+        uid = self._uid()
         conn = self._conn()
         sets = []
         params = []
@@ -1870,22 +1944,22 @@ class Database:
             params.append(datetime.now().isoformat())
         if not sets:
             return
-        params.append(echeance_id)
-        conn.execute(f"UPDATE echeances SET {', '.join(sets)} WHERE id = ?", params)
+        params.extend([echeance_id, uid])
+        conn.execute(f"UPDATE echeances SET {', '.join(sets)} WHERE id = ? AND user_id = ?", params)
         conn.commit()
 
     def echeance_exists(self, correspondant, description_keywords):
         """Verifie si une echeance similaire existe deja (deduplication)."""
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute("""
             SELECT description FROM echeances
-            WHERE correspondant = ? AND statut = 'active'
-        """, (correspondant,))
+            WHERE correspondant = ? AND statut = 'active' AND user_id = ?
+        """, (correspondant, uid))
         existing = [(r[0] or '').lower() for r in c.fetchall()]
         kw_lower = description_keywords.lower()
         _STOP_WORDS = {'le', 'la', 'les', 'de', 'du', 'des', 'un', 'une', 'et', 'ou', 'en', 'au', 'aux', 'à', 'a', 'pour', 'par', 'sur', 'dans', 'avec', 'que', 'qui', 'est', 'son', 'sa', 'ses', 'ce', 'cette', 'il', 'elle', 'nous', 'vous', 'ils', 'doit', 'devez', 'vers'}
         for desc in existing:
-            # Deduplication par overlap de mots
             words_new = set(kw_lower.split()) - _STOP_WORDS
             if not words_new:
                 if kw_lower.strip() in desc:
@@ -1898,12 +1972,13 @@ class Database:
 
     def get_echeances_for_contact(self, correspondant):
         """Retourne les echeances actives pour un correspondant (pour le Bloc F)."""
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute("""
             SELECT * FROM echeances
-            WHERE correspondant = ? AND statut = 'active'
+            WHERE correspondant = ? AND statut = 'active' AND user_id = ?
             ORDER BY date_echeance ASC
-        """, (correspondant,))
+        """, (correspondant, uid))
         return [dict(r) for r in c.fetchall()]
 
     # --- RÉSUMÉS DE MAILS (21/04) ------------------------------------------
@@ -1924,12 +1999,13 @@ class Database:
         if not _is_canonical_imid(message_id):
             logger.warning(f"[save_mail_summary] clé non-canonique refusée : {message_id!r}")
             return False
+        uid = self._uid()
         conn = self._conn()
         c = conn.cursor()
         c.execute("""
             INSERT OR REPLACE INTO mail_summaries
-                (message_id, subject, from_email, points, actions, model, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (message_id, subject, from_email, points, actions, model, created_at, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             message_id,
             data.get('subject', '') or '',
@@ -1938,6 +2014,7 @@ class Database:
             _json.dumps(data.get('actions', []) or [], ensure_ascii=False),
             data.get('model', '') or '',
             datetime.now().isoformat(),
+            uid,
         ))
         conn.commit()
         return True
@@ -1949,8 +2026,12 @@ class Database:
         import json as _json
         if not message_id:
             return None
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT * FROM mail_summaries WHERE message_id = ?", (message_id,))
+        c.execute(
+            "SELECT * FROM mail_summaries WHERE message_id = ? AND user_id = ?",
+            (message_id, uid)
+        )
         row = c.fetchone()
         if not row:
             return None
@@ -1969,9 +2050,12 @@ class Database:
         """True si un résumé existe déjà pour ce mail (guard bulk idempotent)."""
         if not message_id:
             return False
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT 1 FROM mail_summaries WHERE message_id = ? LIMIT 1",
-                  (message_id,))
+        c.execute(
+            "SELECT 1 FROM mail_summaries WHERE message_id = ? AND user_id = ? LIMIT 1",
+            (message_id, uid)
+        )
         return c.fetchone() is not None
 
     # --- CACHE CLASSEMENT PAR MAIL (Phase 1 corrigée 24/04) ----------------
@@ -1988,16 +2072,18 @@ class Database:
         if not _is_canonical_imid(message_id):
             logger.warning(f"[save_mail_classement] clé non-canonique refusée : {message_id!r}")
             return False
+        uid = self._uid()
         conn = self._conn()
         c = conn.cursor()
         c.execute("""
             INSERT OR REPLACE INTO mail_classement_cache
-                (message_id, suggestion_json, source, updated_at)
-            VALUES (?, ?, ?, datetime('now', 'localtime'))
+                (message_id, suggestion_json, source, updated_at, user_id)
+            VALUES (?, ?, ?, datetime('now', 'localtime'), ?)
         """, (
             message_id,
             _json.dumps(suggestion, ensure_ascii=False) if suggestion else None,
             source,
+            uid,
         ))
         conn.commit()
         return True
@@ -2007,10 +2093,11 @@ class Database:
         import json as _json
         if not message_id:
             return None
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute("""SELECT suggestion_json, source, updated_at
-                     FROM mail_classement_cache WHERE message_id = ?""",
-                  (message_id,))
+                     FROM mail_classement_cache WHERE message_id = ? AND user_id = ?""",
+                  (message_id, uid))
         r = c.fetchone()
         if not r:
             return None
@@ -2024,9 +2111,12 @@ class Database:
         """True si classement déjà calculé pour ce mail (guard idempotent)."""
         if not message_id:
             return False
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT 1 FROM mail_classement_cache WHERE message_id = ? LIMIT 1",
-                  (message_id,))
+        c.execute(
+            "SELECT 1 FROM mail_classement_cache WHERE message_id = ? AND user_id = ? LIMIT 1",
+            (message_id, uid)
+        )
         return c.fetchone() is not None
 
     # --- CACHE ÉCHÉANCES PAR MAIL (Phase 1 corrigée 24/04) -----------------
@@ -2041,15 +2131,17 @@ class Database:
         if not _is_canonical_imid(message_id):
             logger.warning(f"[save_mail_echeance] clé non-canonique refusée : {message_id!r}")
             return False
+        uid = self._uid()
         conn = self._conn()
         c = conn.cursor()
         c.execute("""
             INSERT OR REPLACE INTO mail_echeance_cache
-                (message_id, echeances_json, scanned_at)
-            VALUES (?, ?, datetime('now', 'localtime'))
+                (message_id, echeances_json, scanned_at, user_id)
+            VALUES (?, ?, datetime('now', 'localtime'), ?)
         """, (
             message_id,
             _json.dumps(echeances or [], ensure_ascii=False),
+            uid,
         ))
         conn.commit()
         return True
@@ -2059,10 +2151,11 @@ class Database:
         import json as _json
         if not message_id:
             return None
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute("""SELECT echeances_json, scanned_at
-                     FROM mail_echeance_cache WHERE message_id = ?""",
-                  (message_id,))
+                     FROM mail_echeance_cache WHERE message_id = ? AND user_id = ?""",
+                  (message_id, uid))
         r = c.fetchone()
         if not r:
             return None
@@ -2076,9 +2169,12 @@ class Database:
         """True si échéance scannée pour ce mail (guard idempotent)."""
         if not message_id:
             return False
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT 1 FROM mail_echeance_cache WHERE message_id = ? LIMIT 1",
-                  (message_id,))
+        c.execute(
+            "SELECT 1 FROM mail_echeance_cache WHERE message_id = ? AND user_id = ? LIMIT 1",
+            (message_id, uid)
+        )
         return c.fetchone() is not None
 
     # --- CACHE CLASSEMENT PJ PAR MAIL (Phase 2 - 24/04) --------------------
@@ -2095,16 +2191,18 @@ class Database:
         if not _is_canonical_imid(message_id):
             logger.warning(f"[save_mail_pj_classement] clé non-canonique refusée : {message_id!r}")
             return False
+        uid = self._uid()
         conn = self._conn()
         c = conn.cursor()
         c.execute("""
             INSERT OR REPLACE INTO mail_pj_classement_cache
-                (message_id, suggestion_json, source, updated_at)
-            VALUES (?, ?, ?, datetime('now', 'localtime'))
+                (message_id, suggestion_json, source, updated_at, user_id)
+            VALUES (?, ?, ?, datetime('now', 'localtime'), ?)
         """, (
             message_id,
             _json.dumps(suggestion, ensure_ascii=False) if suggestion else None,
             source,
+            uid,
         ))
         conn.commit()
         return True
@@ -2114,10 +2212,11 @@ class Database:
         import json as _json
         if not message_id:
             return None
+        uid = self._uid()
         c = self._conn().cursor()
         c.execute("""SELECT suggestion_json, source, updated_at
-                     FROM mail_pj_classement_cache WHERE message_id = ?""",
-                  (message_id,))
+                     FROM mail_pj_classement_cache WHERE message_id = ? AND user_id = ?""",
+                  (message_id, uid))
         r = c.fetchone()
         if not r:
             return None
@@ -2131,16 +2230,19 @@ class Database:
         """True si classement PJ déjà calculé (guard idempotent)."""
         if not message_id:
             return False
+        uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT 1 FROM mail_pj_classement_cache WHERE message_id = ? LIMIT 1",
-                  (message_id,))
+        c.execute(
+            "SELECT 1 FROM mail_pj_classement_cache WHERE message_id = ? AND user_id = ? LIMIT 1",
+            (message_id, uid)
+        )
         return c.fetchone() is not None
 
     # --- MÉTRIQUES ---------------------------------------------------------
 
     def get_metrics_summary(self):
+        uid = self._uid()
         c = self._conn().cursor()
-        # Single query for send metrics
         c.execute("""
             SELECT
                 COUNT(*) as total,
@@ -2151,14 +2253,14 @@ class Database:
                 SUM(CASE WHEN importance=3 THEN 1 ELSE 0 END) as imp3,
                 SUM(CASE WHEN date(created_at) = date('now', 'localtime') THEN 1 ELSE 0 END) as today,
                 SUM(CASE WHEN created_at >= datetime('now', '-7 days') THEN 1 ELSE 0 END) as week
-            FROM metrics WHERE action='send'
-        """)
+            FROM metrics WHERE action='send' AND user_id = ?
+        """, (uid,))
         row = c.fetchone()
         total = row[0] or 0
         direct = row[1] or 0
         avg_ms = row[2] or 0
 
-        c.execute("SELECT COUNT(*) FROM style_corrections")
+        c.execute("SELECT COUNT(*) FROM style_corrections WHERE user_id = ?", (uid,))
         corrections = c.fetchone()[0]
 
         return {
