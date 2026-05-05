@@ -1085,6 +1085,181 @@ function closeSmartPaperclip() {
 
 
 // =============================================================================
+// MODE "NOUVEAU MAIL" — bouton header + chargement contexte destinataire
+// =============================================================================
+// Gap "Nouveau message" 05/05/2026 :
+// - Bouton ✏ dans le header ouvre dialog.html?mode=new dans une nouvelle fenêtre
+// - En mode new, panneau gauche repurposé pour afficher Profil + résumé échanges
+//   APRÈS saisie du destinataire (event onblur sur fieldTo)
+
+function _openCompose() {
+    var url = _backendUrl + '/plugin/dialog.html?mode=new';
+    var w = Math.min(1200, (screen.availWidth || 1200) - 80);
+    var h = Math.min(800, (screen.availHeight || 800) - 80);
+    var x = ((screen.availWidth || 1200) - w) / 2;
+    var y = ((screen.availHeight || 800) - h) / 2;
+    var feats = 'width=' + w + ',height=' + h + ',left=' + x + ',top=' + y +
+                ',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no';
+    try {
+        var nw = window.open(url, 'boostermail_compose_new', feats);
+        if (nw) { nw.focus(); return; }
+    } catch (e) {}
+    // Fallback navigation in-place si window.open bloqué
+    window.location.href = url;
+}
+
+function _renderComposePlaceholder() {
+    // Affiche dans le panneau gauche (em-mail-side) un placeholder qui invite
+    // l'utilisateur à saisir un destinataire pour voir son profil.
+    var resumeFrom = document.getElementById('resumeFrom');
+    if (resumeFrom) resumeFrom.innerHTML = '<span style="color:#999;font-style:italic;">Aucun destinataire</span>';
+    var resumeSubject = document.getElementById('resumeSubject');
+    if (resumeSubject) resumeSubject.textContent = '';
+
+    var resumePoints = document.getElementById('resumePoints');
+    if (resumePoints) {
+        resumePoints.innerHTML = '<div class="resume-section-title">Profil correspondant</div>'
+            + '<div style="font-size:12px;color:#999;padding:8px 0;">'
+            + '👤 Saisissez un destinataire pour voir son profil et l\'historique.'
+            + '</div>';
+    }
+    var resumeActions = document.getElementById('resumeActions');
+    if (resumeActions) {
+        resumeActions.innerHTML = '<div class="resume-section-title">Derniers échanges</div>'
+            + '<div style="font-size:12px;color:#999;padding:8px 0;">—</div>';
+    }
+    // Onglet "Mail recu" → renommer en "Profil"
+    var fullTab = document.querySelector('.mail-tab[data-tab="full"]');
+    if (fullTab) fullTab.innerHTML = '&#x1f464; Profil';
+    var mailFrom = document.getElementById('mailFrom');
+    if (mailFrom) mailFrom.innerHTML = '<span style="color:#999;font-style:italic;">Saisissez un destinataire</span>';
+    var mailMeta = document.getElementById('mailMeta'); if (mailMeta) mailMeta.textContent = '';
+    var mailSubject = document.getElementById('mailSubject'); if (mailSubject) mailSubject.textContent = '';
+    var mailBody = document.getElementById('mailBody');
+    if (mailBody) mailBody.innerHTML = '<p style="color:#999;font-size:12px;font-style:italic;">Le profil détaillé du correspondant s\'affichera ici dès que vous saisirez un destinataire.</p>';
+}
+
+var _lastLoadedRecipient = '';
+
+function _bindRecipientContextLoader() {
+    var fieldTo = document.getElementById('fieldTo');
+    if (!fieldTo) return;
+    // onblur = quand l'utilisateur quitte le champ après avoir saisi
+    fieldTo.addEventListener('blur', function() {
+        var email = (fieldTo.value || '').trim().toLowerCase();
+        // Validation simple : doit contenir un @ et un .
+        if (!email || email.indexOf('@') < 0 || email.indexOf('.') < 0) return;
+        if (email === _lastLoadedRecipient) return;  // déjà chargé
+        _lastLoadedRecipient = email;
+        _loadRecipientContext(email);
+    });
+}
+
+function _loadRecipientContext(email) {
+    // Spinner d'attente
+    var resumePoints = document.getElementById('resumePoints');
+    if (resumePoints) {
+        resumePoints.innerHTML = '<div class="resume-section-title">Profil correspondant</div>'
+            + '<div style="font-size:12px;color:#999;padding:8px 0;">⏳ Chargement du profil...</div>';
+    }
+
+    fetch(_backendUrl + '/api/contact_profile/' + encodeURIComponent(email))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var profile = (data && data.profile) || null;
+            _renderRecipientContext(email, profile);
+        })
+        .catch(function() {
+            if (resumePoints) {
+                resumePoints.innerHTML = '<div class="resume-section-title">Profil correspondant</div>'
+                    + '<div style="font-size:12px;color:#c62828;padding:8px 0;">Erreur de chargement</div>';
+            }
+        });
+}
+
+function _renderRecipientContext(email, profile) {
+    var displayName = (profile && (profile.display_name || profile.name)) || email;
+    var orga = (profile && (profile.organization || profile.org)) || '';
+    var sampleCount = (profile && profile.sample_count) || 0;
+    var register = (profile && (profile.register || profile.tone)) || '';
+    var styleSummary = (profile && (profile.style_summary || profile.summary)) || '';
+    var lastSeen = (profile && (profile.last_seen || profile.last_interaction)) || '';
+
+    // resumeFrom
+    var resumeFrom = document.getElementById('resumeFrom');
+    if (resumeFrom) {
+        resumeFrom.innerHTML = _escapeHtml(displayName)
+            + (orga ? ' <span style="color:#888;font-size:11px;">— ' + _escapeHtml(orga) + '</span>' : '');
+    }
+    var resumeSubject = document.getElementById('resumeSubject');
+    if (resumeSubject) resumeSubject.textContent = email;
+
+    // Section "Profil correspondant"
+    var resumePoints = document.getElementById('resumePoints');
+    if (resumePoints) {
+        var html = '<div class="resume-section-title">Profil correspondant</div>';
+        if (sampleCount > 0) {
+            html += '<div style="font-size:12px;color:#555;padding:4px 0;"><strong>' + sampleCount + ' mail' + (sampleCount > 1 ? 's' : '') + '</strong> échangé' + (sampleCount > 1 ? 's' : '') + ' avec ce contact</div>';
+        } else {
+            html += '<div style="font-size:12px;color:#888;padding:4px 0;font-style:italic;">Premier contact — aucun historique</div>';
+        }
+        if (register) {
+            var regLabel = register === 'tu' ? 'Tutoiement' : (register === 'vous' ? 'Vouvoiement' : register);
+            html += '<div style="font-size:12px;color:#555;padding:4px 0;">Registre : <strong>' + _escapeHtml(regLabel) + '</strong></div>';
+        }
+        if (styleSummary) {
+            html += '<div style="font-size:12px;color:#555;padding:4px 0;">Style : ' + _escapeHtml(styleSummary) + '</div>';
+        }
+        resumePoints.innerHTML = html;
+    }
+
+    // Section "Derniers échanges"
+    var resumeActions = document.getElementById('resumeActions');
+    if (resumeActions) {
+        var html2 = '<div class="resume-section-title">Derniers échanges</div>';
+        if (sampleCount > 0) {
+            html2 += '<div style="font-size:12px;color:#555;padding:4px 0;">';
+            if (lastSeen) html2 += 'Dernier échange : <strong>' + _escapeHtml(lastSeen) + '</strong><br>';
+            html2 += 'BoosterMail s\'appuiera sur ces échanges pour adapter le ton et le contenu de votre mail.';
+            html2 += '</div>';
+        } else {
+            html2 += '<div style="font-size:12px;color:#888;padding:4px 0;font-style:italic;">Aucun historique disponible — BoosterMail générera avec un ton neutre.</div>';
+        }
+        resumeActions.innerHTML = html2;
+    }
+
+    // Onglet "Profil" (renommé depuis "Mail recu")
+    var mailFrom = document.getElementById('mailFrom');
+    if (mailFrom) mailFrom.innerHTML = _escapeHtml(displayName) + (orga ? ' <span style="color:#888;font-size:11px;">— ' + _escapeHtml(orga) + '</span>' : '');
+    var mailMeta = document.getElementById('mailMeta');
+    if (mailMeta) mailMeta.textContent = email;
+    var mailSubject = document.getElementById('mailSubject');
+    if (mailSubject) mailSubject.textContent = '';
+    var mailBody = document.getElementById('mailBody');
+    if (mailBody) {
+        var detailHtml = '<div style="font-size:12px;color:#333;line-height:1.6;">';
+        if (sampleCount > 0) {
+            detailHtml += '<p><strong>' + sampleCount + ' mail' + (sampleCount > 1 ? 's' : '') + ' échangé' + (sampleCount > 1 ? 's' : '') + '</strong></p>';
+            if (register) {
+                var regLabel2 = register === 'tu' ? 'Tutoiement' : (register === 'vous' ? 'Vouvoiement' : register);
+                detailHtml += '<p>Registre habituel : <strong>' + _escapeHtml(regLabel2) + '</strong></p>';
+            }
+            if (styleSummary) {
+                detailHtml += '<p style="margin-top:12px;">' + _escapeHtml(styleSummary) + '</p>';
+            }
+            if (lastSeen) {
+                detailHtml += '<p style="margin-top:12px;color:#888;">Dernier échange : ' + _escapeHtml(lastSeen) + '</p>';
+            }
+        } else {
+            detailHtml += '<p style="color:#888;font-style:italic;">Aucun historique avec ce contact. BoosterMail générera votre mail avec un ton neutre par défaut.</p>';
+        }
+        detailHtml += '</div>';
+        mailBody.innerHTML = detailHtml;
+    }
+}
+
+
+// =============================================================================
 // CHARGEMENT BODY MAIL (panneau gauche)
 // =============================================================================
 
@@ -1118,10 +1293,13 @@ function _loadMailBody() {
     }
 
     if (!_messageId && !_isStandaloneMode) {
-        // Mode new mail : pas de mail reçu
-        document.getElementById('mailBody').innerHTML =
-            '<p style="color:#999; font-size:11px;">Nouveau mail — pas de mail source.</p>';
+        // Mode new mail (gap "Nouveau message" 05/05/2026) : panneau gauche
+        // affiche d'abord un placeholder, puis le profil + résumé des échanges
+        // dès que l'utilisateur saisit un destinataire (cf _loadRecipientContext).
+        _renderComposePlaceholder();
         var _bs = document.getElementById('bodySpinner'); if (_bs) _bs.classList.remove('active');
+        // Brancher le chargement contexte sur la saisie destinataire
+        _bindRecipientContextLoader();
         return;
     }
 

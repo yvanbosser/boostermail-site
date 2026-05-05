@@ -82,10 +82,13 @@ var _companionAvailable = false;
     _btn('navContactsFixed', function () { _openDashboardWindow('contacts'); });
     _btn('navProfilFixed', function () { _openDashboardWindow('profile'); });
 
-    // 02/05/2026 — Bouton ✏️ Nouveau (composition rapide) — placeholder
-    // (sera activé plus tard quand on définira en profondeur le flux)
+    // 05/05/2026 — Bouton ✏️ Nouveau : ouvre dialog.html en mode 'new'
+    // dans une nouvelle fenêtre. Le dialog gère déjà ce mode (validation
+    // brief + à obligatoires, mode reply/reply_all/forward masqué, etc.).
+    // Ajout 05/05 : sur saisie destinataire (onblur), chargement du profil
+    // contact dans le panneau gauche (cf dialog.js _loadRecipientContext).
     _btn('navComposeFixed', function () {
-        alert('✏️ Composition rapide d\'un nouveau message — bientôt disponible.');
+        _openDashboardWindow('dialog.html?mode=new');
     });
 
     // 02/05/2026 — Bouton ❓ Aide : ouvre le chatbot dans une fenêtre
