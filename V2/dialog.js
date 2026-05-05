@@ -344,12 +344,73 @@ window.addEventListener('beforeunload', _runDomCleanups);
 
 
 // =============================================================================
+// ÉCHÉANCES URGENTES — badge + bannière (ajout 05/05/2026, gap §10.3 close)
+// =============================================================================
+// Spec : docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md §10.3
+// Solution = polling client à l'ouverture (pas de scheduler serveur).
+// Met à jour le badge sur btnNavEcheances ET la bannière sous le header.
+function _loadEcheancesUrgentes() {
+    var backendUrl = (window.location && window.location.origin) || '';
+    fetch(backendUrl + '/api/echeances/urgent')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var allUrgent = (data && data.echeances) || [];
+            var today = new Date(); today.setHours(0, 0, 0, 0);
+            var relancesToday = [];
+            var depassees = [];
+            allUrgent.forEach(function(e) {
+                if (!e.date_echeance) return;
+                var p = e.date_echeance.split('-');
+                var d = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+                var days = Math.round((d - today) / 86400000);
+                if (days < 0) depassees.push(e);
+                else if (days <= 1) relancesToday.push(e);
+            });
+            var totalBadge = relancesToday.length + depassees.length;
+
+            // Badge sur btnNavEcheances
+            var badge = document.getElementById('echeanceBadgeDialog');
+            if (badge) {
+                if (totalBadge > 0) {
+                    badge.textContent = totalBadge;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+            }
+
+            // Bannière sous le header
+            var banner = document.getElementById('echeanceBanner');
+            if (!banner) return;
+            if (totalBadge > 0) {
+                var parts = [];
+                if (relancesToday.length > 0) {
+                    parts.push(relancesToday.length + ' relance' + (relancesToday.length > 1 ? 's' : '') + ' à effectuer aujourd\'hui');
+                }
+                if (depassees.length > 0) {
+                    parts.push(depassees.length + ' échéance' + (depassees.length > 1 ? 's' : '') + ' dépassée' + (depassees.length > 1 ? 's' : ''));
+                }
+                banner.innerHTML = '🔴 ' + parts.join(' et ') + ' — <a href="#" onclick="event.preventDefault();_openDashboard(\'echeances\');return false;">Voir</a>';
+                banner.classList.remove('hidden');
+            } else {
+                banner.classList.add('hidden');
+            }
+        })
+        .catch(function() { /* silencieux : pas critique */ });
+}
+
+
+// =============================================================================
 // INITIALISATION
 // =============================================================================
 
 (function init() {
     // Header
     _updateHeader();
+
+    // Échéances urgentes — badge + bannière (ajout 05/05/2026, gap §10.3)
+    _loadEcheancesUrgentes();
+    setTimeout(_loadEcheancesUrgentes, 3000);
 
     // Champs destinataires pré-remplis
     _prefillFields();

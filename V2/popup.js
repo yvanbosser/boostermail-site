@@ -1344,4 +1344,38 @@ function _pollOnboarding() {
             }
         } catch(e) {}
     });
+
+    // ========================================================================
+    // ÉCHÉANCES URGENTES — badge sur le bouton "Echeances" (ajout 05/05/2026)
+    // ========================================================================
+    // Spec : docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md §10.3 (close).
+    // Solution = polling client à l'ouverture (pas de scheduler serveur).
+    function _loadEcheancesUrgentes() {
+        fetch(_backendUrl + '/api/echeances/urgent')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var allUrgent = (data && data.echeances) || [];
+                var today = new Date(); today.setHours(0, 0, 0, 0);
+                var totalBadge = 0;
+                allUrgent.forEach(function(e) {
+                    if (!e.date_echeance) return;
+                    var p = e.date_echeance.split('-');
+                    var d = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+                    var days = Math.round((d - today) / 86400000);
+                    if (days < 0 || days <= 1) totalBadge++;
+                });
+                var badge = document.getElementById('echeanceBadgeFixed');
+                if (!badge) return;
+                if (totalBadge > 0) {
+                    badge.textContent = totalBadge;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+            })
+            .catch(function() { /* silencieux : pas critique */ });
+    }
+    // Appel au chargement + re-check 3s après (attrape les scans post-envoi)
+    _loadEcheancesUrgentes();
+    setTimeout(_loadEcheancesUrgentes, 3000);
 })();

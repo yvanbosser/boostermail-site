@@ -93,6 +93,27 @@ body {
 }
 .em-hdr-btn:hover { background: rgba(255,255,255,0.3); }
 
+/* Badge échéances sur btnNavEcheances (ajout 05/05/2026 — gap §10.3 close) */
+.em-nav-badge {
+    position: absolute; top: 2px; right: 2px;
+    background: #e81123; color: #fff; font-size: 9px; font-weight: 700;
+    min-width: 14px; height: 14px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 3px; line-height: 1;
+}
+.em-nav-badge.hidden { display: none; }
+
+/* Bannière échéances urgentes — sous le header (ajout 05/05/2026 — gap §10.3 close) */
+.em-echeance-banner {
+    background: linear-gradient(90deg, #d32f2f 0%, #e53935 100%);
+    color: #fff; padding: 8px 16px; font-size: 13px; font-weight: 500;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+}
+.em-echeance-banner.hidden { display: none; }
+.em-echeance-banner a { color: #fff; text-decoration: underline; font-weight: 600; }
+.em-echeance-banner a:hover { text-decoration: none; }
+
 /* Fix UX 22/04 : bouton "Retour Outlook" rouge (remplace la croix + minimize) */
 .em-hdr-return {
     margin-left: 12px;

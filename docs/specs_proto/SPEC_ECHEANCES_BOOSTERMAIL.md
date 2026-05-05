@@ -233,16 +233,17 @@ Rappel proposé = **1 jour ouvré avant l'échéance**.
 
 **Bonus implémenté** : frontend `voirMail(id)` ne navigue plus vers JSON brut — réutilise la modale `relance-mail-modal` existante en l'adaptant pour afficher l'aperçu (correspondant, sujet, dates, extrait_mail). Évolution future : intégration **Microsoft Graph webLink** pour ouvrir le mail directement dans Outlook Web/Desktop.
 
-### Gap 3 : Scheduler des rappels J-1 ouvré (priorité moyenne, ~1 jour)
+### ~~Gap 3 : Scheduler des rappels J-1 ouvré~~ ✅ CLOSE 05/05/2026
 
-**État** : aucun mécanisme serveur pour pousser un rappel à J-1. La colonne `rappel_jours` (défaut 3) est stockée mais inerte.
+**Implémenté** : option (c) **polling client** finalement retenue après rappel d'Yvan que le proto avait déjà un système badge + bannière dans `templates/inbox.html`. Pas besoin de scheduler serveur — l'endpoint `/api/echeances/urgent` existe déjà et le client calcule J-1/J-0/retard à chaque ouverture de l'overlay PyQt et du dialog.
 
-**Options** :
-- **a)** Worker externe (APScheduler) lancé au démarrage du service systemd → lit `echeances` toutes les heures, envoie notifications (mail, push, popup overlay) pour celles dont la date == aujourd'hui + `rappel_jours` ouvrés
-- **b)** Endpoint `/api/echeances/send_reminders` appelé par cron Linux toutes les heures (logique métier dans Python, scheduling externe)
-- **c)** Polling client (overlay vérifie au démarrage les échéances `urgent` et alerte) — plus léger mais nécessite que l'utilisateur ouvre l'overlay
+**Modifications** :
+- `V2/popup.html` : badge `echeanceBadgeFixed` déjà présent dans le DOM, JS `_loadEcheancesUrgentes()` ajouté dans `popup.js` (appel au chargement + re-check 3s pour attraper les scans post-envoi)
+- `V2/dialog.html` : badge `echeanceBadgeDialog` ajouté sur `btnNavEcheances` (cohérence cross-écran) + **bannière `echeanceBanner` rouge** (cachée par défaut, apparaît si urgent > 0) sous le header
+- `V2/dialog.css` : styles `.em-nav-badge` + `.em-echeance-banner`
+- `V2/dialog.js` : fonction `_loadEcheancesUrgentes()` qui met à jour badge ET bannière
 
-**Recommandation** : option (b) pour V1 (simple, débuggable, déterministe). Migration vers (a) si besoin de notifications push temps réel.
+**Limite assumée** : si l'utilisateur n'ouvre pas Outlook de la journée, il ne voit rien. OK car le companion PyQt est lancé automatiquement au démarrage Outlook (tâche planifiée Windows). Si besoin d'alerte mail asynchrone plus tard, ajouter option (b) endpoint cron `/api/echeances/send_reminders`.
 
 ### Gap 4 : Popup d'auto-annulation (priorité basse, ~2h)
 

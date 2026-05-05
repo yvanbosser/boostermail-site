@@ -71,12 +71,15 @@
             <div class="em-header-actions">
                 <button class="em-hdr-btn" id="btnNavProfil" onclick="_openDashboard('profile')" title="Profil">&#x1f464;</button>
                 <button class="em-hdr-btn" id="btnNavContacts" onclick="_openDashboard('contacts')" title="Contacts">&#x1f4d1;</button>
-                <button class="em-hdr-btn" id="btnNavEcheances" onclick="_openDashboard('echeances')" title="Echeances">&#x23f0;</button>
+                <button class="em-hdr-btn" id="btnNavEcheances" onclick="_openDashboard('echeances')" title="Echeances" style="position:relative;">&#x23f0;<span class="em-nav-badge hidden" id="echeanceBadgeDialog"></span></button>
                 <!-- Fix UX 22/04 : bouton "Retour Outlook" rouge remplace la croix + minimize supprime -->
                 <button class="em-hdr-btn em-hdr-return" id="btnClose" title="Retour Outlook">Retour Outlook</button>
             </div>
         </div>
     </div>
+
+    <!-- Bannière échéances urgentes (cachée par défaut, ajout 05/05/2026) -->
+    <div class="em-echeance-banner hidden" id="echeanceBanner"></div>
 
     <!-- ============================================================ -->
     <!-- ZONE SPLIT : MAIL REÇU (30%) | ÉDITEUR (70%)                 -->
