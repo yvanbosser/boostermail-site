@@ -299,6 +299,7 @@ def create_auth_blueprint(auth_provider_factory) -> Blueprint:
         # Stocker l'identifiant en session Flask (cookie signé)
         session['auth_user_id'] = db_user_id
         session['auth_microsoft_oid'] = microsoft_oid
+        session['ms_home_account_id'] = user_info.get('ms_home_account_id', '')
         session['auth_provider'] = provider.PROVIDER_NAME
         session.permanent = True  # Durée = app.permanent_session_lifetime
 

@@ -206,57 +206,67 @@ class MicrosoftAuthProvider(AuthProvider):
         # Récupérer les infos utilisateur via Graph API
         access_token = result.get('access_token', '')
         user_info = self._fetch_user_info(access_token)
+        email = user_info.get('mail', '') or user_info.get('userPrincipalName', '')
 
         # Stocker en DB
         self._store.save_user_info(
             user_id=user_info.get('id', ''),
-            email=user_info.get('mail', '') or user_info.get('userPrincipalName', ''),
+            email=email,
             name=user_info.get('displayName', ''),
             provider=self.PROVIDER_NAME,
         )
 
-        logger.info(f"Auth Microsoft réussie : {user_info.get('displayName', '?')}")
+        # Récupérer le home_account_id MSAL (fiable pour matching multi-user,
+        # car l'OID Graph ≠ MSAL local_account_id pour les comptes perso outlook.com)
+        ms_home_account_id = ''
+        for acc in self._msal_app.get_accounts():
+            if acc.get('username', '').lower() == email.lower():
+                ms_home_account_id = acc.get('home_account_id', '')
+                break
+
+        logger.info(f"Auth Microsoft réussie : {user_info.get('displayName', '?')} (haid={ms_home_account_id[:8]}...)")
 
         return {
             'user_id': user_info.get('id', ''),
-            'email': user_info.get('mail', '') or user_info.get('userPrincipalName', ''),
+            'email': email,
             'name': user_info.get('displayName', ''),
+            'ms_home_account_id': ms_home_account_id,
         }
 
     def _resolve_current_account(self, accounts: list) -> dict:
         """Résout le compte MSAL pour l'utilisateur courant (multi-user safe).
 
         Priorité :
-        1. Session Flask → auth_microsoft_oid (contexte route HTTP)
-        2. Thread-local user_id → DB → microsoft_oid (contexte BG thread)
+        1. Session Flask → ms_home_account_id (match direct, fiable tous types de comptes)
+        2. Thread-local user_id → DB → email → match MSAL username (contexte BG thread)
         3. Fallback accounts[0] (mono-user ou cas dégradé)
         """
         if len(accounts) == 1:
             return accounts[0]
 
-        # 1. Session Flask
+        # 1. Session Flask — home_account_id stocké au login (le plus fiable)
         try:
             from flask import session as _flask_session, has_request_context
             if has_request_context():
-                oid = _flask_session.get('auth_microsoft_oid', '')
-                if oid:
+                haid = _flask_session.get('ms_home_account_id', '')
+                if haid:
                     for acc in accounts:
-                        if acc.get('home_account_id', '').lower().startswith(oid.lower()):
+                        if acc.get('home_account_id') == haid:
                             return acc
         except Exception:
             pass
 
-        # 2. Thread-local user_id → DB
+        # 2. Thread-local user_id → DB → email → match MSAL username (BG threads)
         try:
             from user_context import get_current_user_id
             user_id = get_current_user_id()
             if user_id and user_id != 'default':
                 user_row = self._store._db.get_user(user_id)
                 if user_row:
-                    oid = user_row.get('microsoft_oid', '')
-                    if oid:
+                    email = user_row.get('email', '').lower()
+                    if email:
                         for acc in accounts:
-                            if acc.get('home_account_id', '').lower().startswith(oid.lower()):
+                            if acc.get('username', '').lower() == email:
                                 return acc
         except Exception:
             pass
