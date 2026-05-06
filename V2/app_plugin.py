@@ -16,6 +16,7 @@ import hashlib
 import subprocess
 import shutil
 import traceback
+import functools
 from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
 
@@ -718,6 +719,32 @@ def api_detected_platform():
     return jsonify({"platform": platform})
 
 
+# =============================================================================
+# Helper BG threads — isolation multi-user
+# Capture le user_id courant AVANT le spawn pour que _uid() retourne la bonne
+# valeur dans le thread BG (sans contexte Flask).
+# Usage : _spawn_bg(_ma_fonction, args=(arg1,)) au lieu de
+#         threading.Thread(target=_ma_fonction, args=(arg1,), daemon=True).start()
+# =============================================================================
+
+def _spawn_bg(target, args=(), kwargs=None, *, name=None, daemon=True):
+    """Lance un thread BG avec le user_id du contexte courant capturé."""
+    captured_uid = (_get_current_user_id() or 'default') if _get_current_user_id else 'default'
+
+    def _wrapped(*a, **kw):
+        try:
+            from user_context import set_thread_user_id
+            set_thread_user_id(captured_uid)
+        except Exception:
+            pass
+        return target(*a, **kw)
+
+    t = threading.Thread(target=_wrapped, args=args, kwargs=kwargs or {},
+                         daemon=daemon, name=name)
+    t.start()
+    return t
+
+
 # --- Warmup inbox (pre-chargement 10 mails au demarrage) ---
 
 # Étape 7 multi-tenant (29/04/2026) — _warmup_cache passe en UserScopedDict.
@@ -896,7 +923,7 @@ def _execute_warmup(graph):
             logger.info(f"Warmup FAST PATH : cache chaud ({len(_warmup_cache)} mails + "
                         f"prefetch < 48h) → skip Graph fetch")
             # Relancer la spéculation TIER 1 en arrière-plan (cache peut avoir des gaps)
-            threading.Thread(target=_background_preload_loop, daemon=True).start()
+            _spawn_bg(_background_preload_loop)
 
             # Fix audit 22/04 (Phase 1.A.1) : bulk résumés MEME en fast path.
             # Avant : le bulk summaries était APRÈS ce return → jamais exécuté
@@ -914,8 +941,7 @@ def _execute_warmup(graph):
                                     f"{skipped} déjà en DB")
                 except Exception as e:
                     logger.warning(f"[warmup FAST PATH] résumés IA erreur : {e}")
-            threading.Thread(target=_fastpath_bulk_summaries, daemon=True,
-                             name='summaries-fastpath').start()
+            _spawn_bg(_fastpath_bulk_summaries, name='summaries-fastpath')
             return
 
         # Plan 2 Phase 3.1 — Parallélisation : lancer immédiatement le prefetch
@@ -943,8 +969,7 @@ def _execute_warmup(graph):
                 'cc': msg.get('cc', ''),
                 'date': msg.get('date', ''),
             }
-            t = threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True)
-            t.start()
+            t = _spawn_bg(_run_prefetch, args=(mail_data,), name='prefetch-early')
             parallel_threads.append(t)
         if parallel_threads:
             logger.info(f"[warmup 3.1] {len(parallel_threads)} prefetch(es) en //  "
@@ -1019,8 +1044,7 @@ def _execute_warmup(graph):
                 'date': msg.get('date', ''),
             }
             if mail_data['from_email']:
-                t = threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True)
-                t.start()
+                t = _spawn_bg(_run_prefetch, args=(mail_data,), name='prefetch-warmup')
                 prefetch_threads.append(t)
         logger.info(f"Warmup prefetch lancé ({len(prefetch_threads)} threads)")
 
@@ -1032,17 +1056,16 @@ def _execute_warmup(graph):
         logger.info("Warmup terminé — spéculation TIER 1 en cours")
 
         # Lancer la spéculation préemptive TIER 1 (contacts connus dans les 20 premiers mails)
-        threading.Thread(target=_run_preemptive_bg, args=(mails,), daemon=True).start()
+        _spawn_bg(_run_preemptive_bg, args=(mails,), name='preemptive-bg')
 
         # Phase 1.5 : Préchargement BG des contextes A/B/C pour tous les mails non traités
         # (au-delà des 5 premiers déjà prefetchés). Tourne en fond, throttle 2s.
-        threading.Thread(target=_background_preload_loop, daemon=True).start()
+        _spawn_bg(_background_preload_loop, name='bg-preload')
 
         # Pré-chargement Windows folders (classement auto PJ) — faible priorité,
         # BG pour ne pas bloquer l'interaction user. Évite un scan synchrone
         # au premier clic "classer PJ".
-        threading.Thread(target=_get_windows_folders_cached, daemon=True,
-                         name='wf-prewarm').start()
+        _spawn_bg(_get_windows_folders_cached, name='wf-prewarm')
 
         # === Audit 20/04 : enrichissement warmup — utiliser les 8 s au max ===
 
@@ -1075,8 +1098,7 @@ def _execute_warmup(graph):
                 logger.info(f"[warmup] {len(senders)} contacts préchargés (bulk)")
             except Exception as e:
                 logger.debug(f"[warmup] bulk contacts erreur : {e}")
-        threading.Thread(target=_bulk_preload_contacts, daemon=True,
-                         name='contacts-prewarm').start()
+        _spawn_bg(_bulk_preload_contacts, name='contacts-prewarm')
 
         # 3. OBSOLÈTE (supprimé P4.1 — 24/04) : _bulk_prescan_echeances ne
         # faisait que du log regex sans écrire en cache. Remplacé par la
@@ -1108,8 +1130,7 @@ def _execute_warmup(graph):
                 _prewarm_mail_previews_batch(_with_draft)
             except Exception as e:
                 logger.debug(f"[warmup] mail_preview prewarm : {e}")
-        threading.Thread(target=_bulk_prewarm_mail_previews, daemon=True,
-                         name='mail-preview-warmup').start()
+        _spawn_bg(_bulk_prewarm_mail_previews, name='mail-preview-warmup')
 
         # 3bis. Résumés IA (21/04) — Claude Haiku batch, pattern calqué sur
         #    échéances. Génère 3-5 points + actions attendues par mail, stocke
@@ -1124,8 +1145,7 @@ def _execute_warmup(graph):
                                 f"{skipped} déjà en DB")
             except Exception as e:
                 logger.warning(f"[warmup] résumés IA erreur : {e}")
-        threading.Thread(target=_bulk_summaries_warmup, daemon=True,
-                         name='summaries-warmup').start()
+        _spawn_bg(_bulk_summaries_warmup, name='summaries-warmup')
 
         # 4. Pré-charger learned_templates (évite un DB hit au 1er /api/instant_reply)
         def _preload_learned_tpl():
@@ -1134,8 +1154,7 @@ def _execute_warmup(graph):
                 logger.info(f"[warmup] {n} learned_templates chargés")
             except Exception:
                 pass
-        threading.Thread(target=_preload_learned_tpl, daemon=True,
-                         name='lt-prewarm').start()
+        _spawn_bg(_preload_learned_tpl, name='lt-prewarm')
     except Exception as e:
         with _warmup_lock:
             _warmup_progress["status"] = "error"
@@ -1294,7 +1313,7 @@ def _preload_neighbors(message_id):
                 'conversation_id': target.get('conversation_id', ''),
             }
             if mail_data['from_email']:
-                threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True).start()
+                _spawn_bg(_run_prefetch, args=(mail_data,))
     except Exception as e:
         logger.debug(f"[preload-neighbor] Erreur : {e}")
 
@@ -1511,8 +1530,7 @@ def _continuous_speculation_loop():
                         except Exception as _e:
                             logger.debug(f"[cont-spec] analyse contact {em[:30]} : {_e}")
                         time.sleep(0.5)  # throttle léger (évite flood API)
-                threading.Thread(target=_analyze_batch, args=(unique_senders,),
-                                 daemon=True, name='cont-spec-contacts').start()
+                _spawn_bg(_analyze_batch, args=(unique_senders,), name='cont-spec-contacts')
             except Exception as e:
                 logger.debug(f"[cont-spec] analyse contacts : {e}")
 
@@ -1714,7 +1732,7 @@ def api_warmup_inbox():
             _warmup_progress["status"] = "idle"
         return jsonify({"status": "no_graph"})
 
-    threading.Thread(target=_execute_warmup, args=(graph,), daemon=True).start()
+    _spawn_bg(_execute_warmup, args=(graph,), name='warmup')
     return jsonify({"status": "started"})
 
 @app.route('/api/warmup_inbox/progress', methods=['GET'])
@@ -3141,21 +3159,15 @@ def _prewarm_unified_for_mail(mid, mail_data):
         logger.warning(f"[unified] FAILED {mid[:30]}: {e} — fallback sub-prewarms")
         # Étape 4 — Fallback : lancer les 3 sub-prewarms originaux comme avant
         try:
-            threading.Thread(target=_prewarm_echeance_for_mail,
-                             args=(mid, mail_data), daemon=True,
-                             name='prewarm-ech-fb').start()
+            _spawn_bg(_prewarm_echeance_for_mail, args=(mid, mail_data), name='prewarm-ech-fb')
         except Exception:
             pass
         try:
-            threading.Thread(target=_prewarm_classement_for_mail,
-                             args=(mid, mail_data), daemon=True,
-                             name='prewarm-cls-fb').start()
+            _spawn_bg(_prewarm_classement_for_mail, args=(mid, mail_data), name='prewarm-cls-fb')
         except Exception:
             pass
         try:
-            threading.Thread(target=_prewarm_pj_classement_for_mail,
-                             args=(mid, mail_data), daemon=True,
-                             name='prewarm-pj-fb').start()
+            _spawn_bg(_prewarm_pj_classement_for_mail, args=(mid, mail_data), name='prewarm-pj-fb')
         except Exception:
             pass
 
@@ -3239,9 +3251,7 @@ def _prewarm_mail_preview(mail_data):
     # _prewarm_unified_for_mail.
     # Lancé si au moins 1 plat n'est pas déjà en cache running/done.
     if not (skip_ech and skip_cls and skip_pj):
-        threading.Thread(target=_prewarm_unified_for_mail,
-                         args=(mid, mail_data), daemon=True,
-                         name='prewarm-unified').start()
+        _spawn_bg(_prewarm_unified_for_mail, args=(mid, mail_data), name='prewarm-unified')
 
 
 def _prewarm_mail_previews_batch(mails):
@@ -3370,7 +3380,7 @@ def api_reply_cache_purge():
         _prefetch_cache.pop(mid, None)
     # Si c'était une entrée user_modified, re-persister le disque (suppression effective)
     if was_user:
-        threading.Thread(target=_persist_reply_cache, daemon=True).start()
+        _spawn_bg(_persist_reply_cache)
     logger.info(f"[reply_cache purge] {mid[:20]} ({reason})")
     return jsonify({"ok": True, "user_draft_deleted": was_user})
 
@@ -3908,7 +3918,7 @@ def _poll_companion_loop():
                     _increment_open_counter(new_data.get('message_id', ''))
                     # Lancer le prefetch
                     if from_email:
-                        threading.Thread(target=_run_prefetch, args=(_current_mail_data,), daemon=True).start()
+                        _spawn_bg(_run_prefetch, args=(_current_mail_data,))
                     # Précharger les mails voisins N+1 / N-1 (Phase 1.6 — le code
                     # `_preload_neighbors` existait mais n'était jamais appelé)
                     _mid = new_data.get('message_id', '')
@@ -4214,7 +4224,7 @@ def api_event_message_read():
 
     # (O8) Auto-prefetch — skip si dédup (déjà lancé il y a <3s)
     if new_data.get('from_email') and not _skip_prefetch:
-        threading.Thread(target=_run_prefetch, args=(new_data,), daemon=True).start()
+        _spawn_bg(_run_prefetch, args=(new_data,))
     elif _skip_prefetch:
         logger.debug(f"[message_read] DEDUP (2ème POST <3s) msg={new_data.get('message_id','')[:30]}")
 
@@ -4266,8 +4276,7 @@ def api_event_message_read():
                 }], chunk_size=1)
             except Exception as e:
                 logger.debug(f"[message_read prescan summary] erreur : {e}")
-        threading.Thread(target=_prescan_summary, daemon=True,
-                         name='summary-prescan').start()
+        _spawn_bg(_prescan_summary, name='summary-prescan')
 
     return jsonify({"status": "ok"})
 
@@ -4659,7 +4668,7 @@ def api_trigger_prefetch():
     if not mail_data.get('from_email'):
         return jsonify({"status": "error", "reason": "no_mail_data"})
 
-    threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True).start()
+    _spawn_bg(_run_prefetch, args=(mail_data,))
     return jsonify({"status": "started"})
 
 
@@ -4853,8 +4862,7 @@ def _run_prefetch(mail_data):
                         _start_speculative(md)
                     finally:
                         _ai_speculative_semaphore.release()
-                threading.Thread(target=_speculate_ws_done, args=(mail_data,),
-                                 daemon=True).start()
+                _spawn_bg(_speculate_ws_done, args=(mail_data,))
             else:
                 logger.debug(f"[spec-done] Skip ({skip_reason}) {message_id[:20]}")
                 # Fix C (25/04) — Marquer 'filtered' pour éviter resoumission ∞.
@@ -5859,8 +5867,7 @@ def _start_speculative(mail_data):
                 logger.debug(f"Template '{template_name}' preemptif pour {message_id[:20]}")
                 _broadcast_sse('speculative_ready', {'message_id': message_id, 'source': 'template'})
                 # Draft prêt → déclencher preview (échéance + classement + PJ) immédiatement (25/04)
-                threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                                 daemon=True, name='preview-post-draft').start()
+                _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-post-draft')
                 return  # Pas d'appel IA nécessaire
         except Exception as e:
             logger.warning(f"Erreur detect_template speculative: {e}")
@@ -6041,15 +6048,13 @@ def _start_speculative(mail_data):
         logger.info(f"Spéculation prête pour {message_id[:20]}... ({len(chunks)} chunks)")
         _broadcast_sse('speculative_ready', {'message_id': message_id})
         # Draft prêt → déclencher preview (échéance + classement + PJ) immédiatement (25/04)
-        threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                         daemon=True, name='preview-post-draft').start()
+        _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-post-draft')
 
         # Fix 23/04 (T2) : persister dès qu'une nouvelle bg_speculation est prête.
         # Sans ça, si V2 crash/restart avant l'atexit, la pré-réponse Claude
         # (coût ~0.03 $) est perdue → gâchis API + cache vide au redémarrage.
         # Persistance asynchrone pour ne pas bloquer le thread spéculatif.
-        threading.Thread(target=_persist_reply_cache, daemon=True,
-                         name='persist-bg-spec').start()
+        _spawn_bg(_persist_reply_cache, name='persist-bg-spec')
 
     except Exception as e:
         logger.warning(f"Spéculation échouée pour {message_id[:20]}: {e}")
@@ -6115,11 +6120,11 @@ def _run_preemptive_bg(inbox_mails):
                 'cc': mail.get('cc', ''),
                 'date': mail.get('date', ''),
             }
-            threading.Thread(target=_run_prefetch, args=(mail_data,), daemon=True).start()
+            _spawn_bg(_run_prefetch, args=(mail_data,))
             if _i < len(candidates) - 1:
                 _t.sleep(0.5)  # throttle : 500ms entre lancements
 
-    threading.Thread(target=_run_preemptive_staggered, daemon=True).start()
+    _spawn_bg(_run_preemptive_staggered)
 
 
 # --- Résumé du mail (21/04) --------------------------------------------------
@@ -6585,8 +6590,7 @@ def api_dialog_init():
                                 'has_attachments': cached_email.get('has_attachments', False),
                                 'attachments': cached_email.get('attachments') or [],
                             }
-                            threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                                             daemon=True, name='preview-partial').start()
+                            _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-partial')
                     except Exception:
                         pass
                 return {
@@ -6607,8 +6611,7 @@ def api_dialog_init():
                         'body': cached_email.get('body') or cached_email.get('html_body', ''),
                         'body_preview': cached_email.get('body_preview', ''),
                     }
-                    threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                                     daemon=True, name='preview-ondemand').start()
+                    _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-ondemand')
             except Exception:
                 pass
             return {
@@ -7316,7 +7319,7 @@ def _event_purge_mail(message_id, action, reason):
     # si user_edit → les bg_speculation purgées restaient sur disque jusqu'au
     # prochain _persist_reply_cache déclenché ailleurs → zombies au restart.
     if existed:
-        threading.Thread(target=_persist_reply_cache, daemon=True).start()
+        _spawn_bg(_persist_reply_cache)
     _reply_metric_inc('purges_event')
     logger.info(f"[event-purge] {action} {message_id[:20]} ({reason})")
 
@@ -8209,8 +8212,7 @@ def api_mail_preview(message_id):
                             'has_attachments': cached.get('has_attachments', False),
                             'attachments': cached.get('attachments') or [],
                         }
-                        threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                                         daemon=True, name='preview-ondemand').start()
+                        _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-ondemand')
                 except Exception:
                     pass
             return jsonify({
@@ -8234,8 +8236,7 @@ def api_mail_preview(message_id):
                     'has_attachments': cached.get('has_attachments', False),
                     'attachments': cached.get('attachments') or [],
                 }
-                threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                                 daemon=True, name='preview-ondemand').start()
+                _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-ondemand')
         except Exception as e:
             logger.debug(f"[mail_preview] on-demand trigger échec : {e}")
         return jsonify({
@@ -8369,8 +8370,7 @@ def _fetch_single_preview_plate(message_id, plate):
                 'to': cached.get('to', ''),
                 'cc': cached.get('cc', ''),
             }
-            threading.Thread(target=_prewarm_mail_preview, args=(mail_data,),
-                             daemon=True, name=f'preview-{plate}-ondemand').start()
+            _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name=f'preview-{plate}-ondemand')
     except Exception as e:
         logger.debug(f"[preview-{plate}] on-demand trigger : {e}")
     return {'status': 'miss', 'data': None}
@@ -9409,7 +9409,7 @@ def api_save_draft():
         }
 
     # Écrire sur disque en arrière-plan (non bloquant pour la réponse HTTP)
-    threading.Thread(target=_persist_reply_cache, daemon=True).start()
+    _spawn_bg(_persist_reply_cache)
     return jsonify({"ok": True})
 
 
@@ -11823,7 +11823,7 @@ def api_echeances_post_send(message_id):
                 with _post_send_lock:
                     _post_send_cache.pop(running_key, None)
 
-        threading.Thread(target=_scan_echeances, daemon=True).start()
+        _spawn_bg(_scan_echeances)
 
     return jsonify({"status": "scanning"})
 
@@ -11949,7 +11949,7 @@ def api_classification_post_send(message_id):
                 with _post_send_lock:
                     _post_send_cache.pop(running_key, None)
 
-        threading.Thread(target=_suggest_classification, daemon=True).start()
+        _spawn_bg(_suggest_classification)
 
     return jsonify({"status": "scanning"})
 
@@ -12057,7 +12057,7 @@ def api_pj_classification_post_send(message_id):
                 with _post_send_lock:
                     _post_send_cache.pop(running_key, None)
 
-        threading.Thread(target=_suggest_pj_classification, daemon=True).start()
+        _spawn_bg(_suggest_pj_classification)
 
     return jsonify({"status": "scanning"})
 
@@ -12479,7 +12479,7 @@ def api_post_send():
             except Exception as e:
                 logger.error(f"[learning] Erreur auto_cancel_echeances: {e}")
 
-    threading.Thread(target=_post_send_learning, daemon=True).start()
+    _spawn_bg(_post_send_learning)
 
     return jsonify({
         "status": "ok",
@@ -13034,7 +13034,7 @@ def api_analyze_contact():
         except Exception as e:
             logger.error(f"analyze_contact: {e}")
 
-    threading.Thread(target=_run, daemon=True).start()
+    _spawn_bg(_run)
     return jsonify({"status": "started"})
 
 
@@ -13108,7 +13108,7 @@ def api_recalibrate_contacts():
             _contacts_recalib_progress['recalibrating'] = False
             _contacts_recalib_progress['step'] = ''
 
-    threading.Thread(target=_run, daemon=True, name='recalib-contacts').start()
+    _spawn_bg(_run, name='recalib-contacts')
     return jsonify({"status": "started"})
 
 
@@ -13401,7 +13401,7 @@ def api_setup_onboarding():
             logger.error(f"Erreur onboarding: {e}")
             _db.save_setting('onboarding_status', f'error: {str(e)[:100]}')
 
-    threading.Thread(target=_run_onboarding, daemon=True).start()
+    _spawn_bg(_run_onboarding)
     return jsonify({"status": "started"})
 
 
@@ -13813,6 +13813,405 @@ def api_echeance_mail(echeance_id):
     except Exception as e:
         logger.warning(f"[echeance_mail/{echeance_id}] {e}")
         return jsonify({'status': 'error', 'reason': str(e)[:200]}), 500
+
+
+# --- Admin — Gestion utilisateurs (multi-user SaaS) -------------------------
+
+def _require_admin(f):
+    """Décorateur : exige une session authentifiée ET is_admin = 1."""
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        user_id = session.get('auth_user_id')
+        if not user_id:
+            return jsonify({'error': 'Authentification requise', 'auth_required': True}), 401
+        user = _db.get_user(user_id)
+        if not user or not user.get('is_active', 0):
+            return jsonify({'error': 'Compte inactif ou introuvable'}), 403
+        if not user.get('is_admin', 0):
+            return jsonify({'error': 'Accès admin requis'}), 403
+        request.auth_user_id = user_id
+        request.admin_user = user
+        return f(*args, **kwargs)
+    return wrapper
+
+
+@app.route('/api/admin/users', methods=['GET'])
+@_require_admin
+def api_admin_list_users():
+    """Liste tous les utilisateurs (actifs par défaut)."""
+    include_inactive = request.args.get('include_inactive', '0') == '1'
+    users = _db.list_users(include_inactive=include_inactive)
+    return jsonify({'users': users, 'total': len(users)})
+
+
+@app.route('/api/admin/users', methods=['POST'])
+@_require_admin
+def api_admin_create_user():
+    """Crée un utilisateur manuellement (invitation)."""
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    if not email:
+        return jsonify({'error': 'email requis'}), 400
+    if _db.get_user_by_email(email):
+        return jsonify({'error': 'Utilisateur déjà existant'}), 409
+    import uuid
+    user_id = str(uuid.uuid4())
+    _db.create_user(
+        user_id=user_id,
+        microsoft_oid=data.get('microsoft_oid', ''),
+        email=email,
+        display_name=data.get('display_name', ''),
+        plan=data.get('plan', 'trial'),
+        is_admin=int(data.get('is_admin', 0)),
+    )
+    return jsonify({'status': 'created', 'user_id': user_id}), 201
+
+
+@app.route('/api/admin/users/<user_id>', methods=['GET'])
+@_require_admin
+def api_admin_get_user(user_id):
+    """Retourne les détails d'un utilisateur."""
+    user = _db.get_user(user_id)
+    if not user:
+        return jsonify({'error': 'Utilisateur introuvable'}), 404
+    return jsonify(user)
+
+
+@app.route('/api/admin/users/<user_id>', methods=['PATCH'])
+@_require_admin
+def api_admin_update_user(user_id):
+    """Met à jour les champs autorisés d'un utilisateur."""
+    if not _db.get_user(user_id):
+        return jsonify({'error': 'Utilisateur introuvable'}), 404
+    data = request.get_json(silent=True) or {}
+    allowed = {
+        'plan', 'is_active', 'is_admin', 'display_name',
+        'quota_claude_daily', 'quota_openai_daily', 'trial_ends_at',
+    }
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates:
+        return jsonify({'error': 'Aucun champ valide à mettre à jour'}), 400
+    _db.update_user(user_id, **updates)
+    return jsonify({'status': 'updated', 'updated_fields': list(updates.keys())})
+
+
+@app.route('/api/admin/users/<user_id>', methods=['DELETE'])
+@_require_admin
+def api_admin_delete_user(user_id):
+    """Supprime (désactive) un utilisateur."""
+    if not _db.get_user(user_id):
+        return jsonify({'error': 'Utilisateur introuvable'}), 404
+    # Désactivation douce par défaut (préserve les données)
+    hard = request.args.get('hard', '0') == '1'
+    if hard:
+        _db.delete_user(user_id)
+        return jsonify({'status': 'deleted'})
+    _db.update_user(user_id, is_active=0)
+    return jsonify({'status': 'deactivated'})
+
+
+@app.route('/api/admin/users/<user_id>/quota', methods=['PATCH'])
+@_require_admin
+def api_admin_update_user_quota(user_id):
+    """Met à jour les quotas API d'un utilisateur."""
+    if not _db.get_user(user_id):
+        return jsonify({'error': 'Utilisateur introuvable'}), 404
+    data = request.get_json(silent=True) or {}
+    updates = {}
+    if 'claude_daily' in data:
+        updates['quota_claude_daily'] = int(data['claude_daily'])
+    if 'openai_daily' in data:
+        updates['quota_openai_daily'] = int(data['openai_daily'])
+    if not updates:
+        return jsonify({'error': 'claude_daily ou openai_daily requis'}), 400
+    _db.update_user(user_id, **updates)
+    return jsonify({'status': 'updated', 'quotas': updates})
+
+
+@app.route('/api/user/me', methods=['GET'])
+def api_user_me():
+    """Retourne les infos du user connecté (accessible sans is_admin)."""
+    user_id = session.get('auth_user_id')
+    if not user_id:
+        return jsonify({'error': 'Non authentifié', 'auth_required': True}), 401
+    user = _db.get_user(user_id)
+    if not user:
+        return jsonify({'error': 'Utilisateur introuvable'}), 404
+    safe = {k: v for k, v in user.items() if k not in ('microsoft_oid',)}
+    # Ajouter usage licences si l'user appartient à une org
+    if user.get('organization_id'):
+        safe['org_usage'] = _db.get_organization_usage(user['organization_id'])
+    return jsonify(safe)
+
+
+# =============================================================================
+# ORGANISATIONS — B2B licensing
+# Routes accessibles par :
+#   - /api/admin/orgs/*       : super-admin (is_admin = 1 en DB)
+#   - /api/org/*              : org-admin (org_role = 'owner' ou 'admin')
+# =============================================================================
+
+def _require_org_admin(f):
+    """Décorateur : vérifie que le user est owner ou admin de son organisation."""
+    import functools
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        user_id = session.get('auth_user_id')
+        if not user_id:
+            return jsonify({'error': 'Non authentifié', 'auth_required': True}), 401
+        user = _db.get_user(user_id)
+        if not user:
+            return jsonify({'error': 'Utilisateur introuvable'}), 404
+        if user.get('org_role') not in ('owner', 'admin'):
+            return jsonify({'error': 'Droits org-admin requis'}), 403
+        if not user.get('organization_id'):
+            return jsonify({'error': "Pas d'organisation associée"}), 403
+        return f(*args, **kwargs)
+    return wrapper
+
+
+# ---- Super-admin : gestion globale des orgs --------------------------------
+
+@app.route('/api/admin/orgs', methods=['GET'])
+@_require_admin
+def api_admin_list_orgs():
+    include_inactive = request.args.get('include_inactive', 'false').lower() == 'true'
+    orgs = _db.list_organizations(include_inactive=include_inactive)
+    for org in orgs:
+        org['usage'] = _db.get_organization_usage(org['id'])
+    return jsonify(orgs)
+
+
+@app.route('/api/admin/orgs', methods=['POST'])
+@_require_admin
+def api_admin_create_org():
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name requis'}), 400
+    import uuid
+    org_id = str(uuid.uuid4())
+    _db.create_organization(
+        org_id,
+        name,
+        plan=data.get('plan', 'trial'),
+        max_licenses=int(data.get('max_licenses', 1)),
+        billing_email=data.get('billing_email'),
+    )
+    return jsonify({'id': org_id, 'name': name}), 201
+
+
+@app.route('/api/admin/orgs/<org_id>', methods=['GET'])
+@_require_admin
+def api_admin_get_org(org_id):
+    org = _db.get_organization(org_id)
+    if not org:
+        return jsonify({'error': 'Organisation introuvable'}), 404
+    org['usage'] = _db.get_organization_usage(org_id)
+    org['members'] = _db.get_organization_members(org_id)
+    return jsonify(org)
+
+
+@app.route('/api/admin/orgs/<org_id>', methods=['PATCH'])
+@_require_admin
+def api_admin_update_org(org_id):
+    data = request.get_json() or {}
+    allowed = {'name', 'plan', 'max_licenses', 'billing_email',
+               'stripe_customer_id', 'is_active', 'trial_ends_at'}
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates:
+        return jsonify({'error': 'Aucun champ valide fourni'}), 400
+    _db.update_organization(org_id, **updates)
+    return jsonify({'status': 'updated'})
+
+
+# ---- Org-admin : gestion de son organisation --------------------------------
+
+@app.route('/api/org/me', methods=['GET'])
+@_require_org_admin
+def api_org_me():
+    """Retourne l'organisation du user connecté avec usage licences."""
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    org = _db.get_organization(user['organization_id'])
+    if not org:
+        return jsonify({'error': 'Organisation introuvable'}), 404
+    org['usage'] = _db.get_organization_usage(org['id'])
+    return jsonify(org)
+
+
+@app.route('/api/org/members', methods=['GET'])
+@_require_org_admin
+def api_org_members():
+    """Liste des membres de l'organisation."""
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    members = _db.get_organization_members(user['organization_id'])
+    return jsonify(members)
+
+
+@app.route('/api/org/members/<member_id>', methods=['PATCH'])
+@_require_org_admin
+def api_org_update_member(member_id):
+    """Modifier le rôle ou l'état d'un membre (org-admin only)."""
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    member = _db.get_user(member_id)
+    if not member or member.get('organization_id') != user['organization_id']:
+        return jsonify({'error': 'Membre introuvable dans cette organisation'}), 404
+    data = request.get_json() or {}
+    allowed = {'org_role', 'is_active'}
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates:
+        return jsonify({'error': 'Aucun champ valide'}), 400
+    # Empêcher de se rétrograder soi-même
+    if member_id == user_id and 'org_role' in updates:
+        return jsonify({'error': 'Impossible de modifier son propre rôle'}), 400
+    _db.update_user(member_id, **updates)
+    return jsonify({'status': 'updated'})
+
+
+@app.route('/api/org/members/<member_id>', methods=['DELETE'])
+@_require_org_admin
+def api_org_remove_member(member_id):
+    """Retire un membre de l'organisation (libère une licence)."""
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    member = _db.get_user(member_id)
+    if not member or member.get('organization_id') != user['organization_id']:
+        return jsonify({'error': 'Membre introuvable dans cette organisation'}), 404
+    if member_id == user_id:
+        return jsonify({'error': 'Impossible de se retirer soi-même'}), 400
+    # Retrait soft : on détache l'org mais on ne supprime pas le user
+    _db.update_user(member_id, is_active=0)
+    conn = _db._conn()
+    conn.execute("UPDATE users SET organization_id = NULL, org_role = 'member' WHERE id = ?", (member_id,))
+    conn.commit()
+    return jsonify({'status': 'removed'})
+
+
+# ---- Invitations ------------------------------------------------------------
+
+@app.route('/api/org/invites', methods=['GET'])
+@_require_org_admin
+def api_org_list_invites():
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    invites = _db.list_pending_invites(user['organization_id'])
+    return jsonify(invites)
+
+
+@app.route('/api/org/invites', methods=['POST'])
+@_require_org_admin
+def api_org_create_invite():
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    org_id = user['organization_id']
+
+    # Vérifier qu'il reste des licences
+    if not _db.can_add_member(org_id):
+        usage = _db.get_organization_usage(org_id)
+        return jsonify({
+            'error': 'Limite de licences atteinte',
+            'max_licenses': usage['max_licenses'],
+            'used_licenses': usage['used_licenses'],
+        }), 402
+
+    data = request.get_json() or {}
+    email = (data.get('email') or '').strip().lower()
+    if not email:
+        return jsonify({'error': 'email requis'}), 400
+    org_role = data.get('org_role', 'member')
+    if org_role not in ('member', 'admin'):
+        return jsonify({'error': "org_role doit être 'member' ou 'admin'"}), 400
+
+    invite = _db.create_invite(org_id, email, user_id, org_role=org_role)
+    return jsonify(invite), 201
+
+
+@app.route('/api/org/invites/<invite_id>', methods=['DELETE'])
+@_require_org_admin
+def api_org_revoke_invite(invite_id):
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    _db.revoke_invite(invite_id, user['organization_id'])
+    return jsonify({'status': 'revoked'})
+
+
+@app.route('/api/org/invite/accept', methods=['POST'])
+def api_org_accept_invite():
+    """Accepte une invitation. Appelé après le login Microsoft."""
+    user_id = session.get('auth_user_id')
+    if not user_id:
+        return jsonify({'error': 'Non authentifié', 'auth_required': True}), 401
+    data = request.get_json() or {}
+    token = (data.get('token') or '').strip()
+    if not token:
+        return jsonify({'error': 'token requis'}), 400
+    result = _db.accept_invite(token, user_id)
+    if not result:
+        return jsonify({'error': "Invitation invalide, expirée ou déjà utilisée"}), 400
+    return jsonify({'status': 'accepted', 'organization_id': result['organization_id']})
+
+
+# ---- Règles organisation ----------------------------------------------------
+
+@app.route('/api/org/rules', methods=['GET'])
+@_require_org_admin
+def api_org_list_rules():
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    rule_type = request.args.get('type')
+    rules = _db.get_org_rules(user['organization_id'], rule_type=rule_type, active_only=False)
+    return jsonify(rules)
+
+
+@app.route('/api/org/rules', methods=['POST'])
+@_require_org_admin
+def api_org_create_rule():
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    data = request.get_json() or {}
+    rule_type = (data.get('rule_type') or '').strip()
+    rule_label = (data.get('rule_label') or '').strip()
+    if not rule_type or not rule_label:
+        return jsonify({'error': 'rule_type et rule_label requis'}), 400
+    valid_types = {'writing_style', 'forbidden_words', 'classification',
+                   'mandatory_signature', 'contact_priority', 'language'}
+    if rule_type not in valid_types:
+        return jsonify({'error': f"rule_type invalide. Valeurs : {sorted(valid_types)}"}), 400
+    rule_id = _db.create_org_rule(
+        org_id=user['organization_id'],
+        rule_type=rule_type,
+        rule_label=rule_label,
+        rule_content=data.get('rule_content', {}),
+        created_by=user_id,
+        priority=int(data.get('priority', 0)),
+    )
+    return jsonify({'id': rule_id}), 201
+
+
+@app.route('/api/org/rules/<rule_id>', methods=['PATCH'])
+@_require_org_admin
+def api_org_update_rule(rule_id):
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    data = request.get_json() or {}
+    allowed = {'rule_label', 'rule_content', 'priority', 'is_active'}
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates:
+        return jsonify({'error': 'Aucun champ valide'}), 400
+    _db.update_org_rule(rule_id, user['organization_id'], **updates)
+    return jsonify({'status': 'updated'})
+
+
+@app.route('/api/org/rules/<rule_id>', methods=['DELETE'])
+@_require_org_admin
+def api_org_delete_rule(rule_id):
+    user_id = session.get('auth_user_id')
+    user = _db.get_user(user_id)
+    _db.delete_org_rule(rule_id, user['organization_id'])
+    return jsonify({'status': 'deleted'})
 
 
 # --- Démarrage ---------------------------------------------------------------

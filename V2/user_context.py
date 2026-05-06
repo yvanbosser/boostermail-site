@@ -51,8 +51,29 @@ la liste des 22 caches mono-user à migrer + plan détaillé.
 
 import functools
 import os
+import threading
 import time
 from typing import Callable, Any
+
+
+# Thread-local : permet aux BG threads de recevoir un user_id explicite
+# sans contexte Flask. Posé par set_thread_user_id() avant le spawn.
+_thread_local = threading.local()
+
+
+def set_thread_user_id(user_id: str) -> None:
+    """Pose le user_id dans le contexte thread-local du thread courant.
+
+    Appelé au tout début d'un BG thread pour que get_current_user_id()
+    retourne la bonne valeur sans dépendre du bridge DB mono-user.
+
+    Usage type (via _spawn_bg dans app_plugin.py) :
+        captured_uid = get_current_user_id() or 'default'
+        def _bg():
+            set_thread_user_id(captured_uid)
+            ...
+    """
+    _thread_local.user_id = user_id
 
 
 # Cache 60 sec du user_id DB pour éviter SQLite hits massifs en BG threads.
@@ -147,6 +168,11 @@ def get_current_user_id() -> str:
     L'appelant peut faire ``user_id = get_current_user_id() or 'default'``
     pour avoir un fallback ultime si la DB elle-même n'est pas accessible.
     """
+    # Priorité 0 : thread-local (BG thread avec user_id capturé au spawn)
+    thread_uid = getattr(_thread_local, 'user_id', None)
+    if thread_uid:
+        return thread_uid
+
     # Priorité 1+2 : Flask context
     try:
         from flask import has_request_context, request, session
