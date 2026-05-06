@@ -1126,7 +1126,6 @@ function _toast(msg, kind) {
 }
 
 function smartPaperclip() {
-    console.log('[paperclip] smartPaperclip() appelé, _mode=' + _mode);
     // Mode new (gap 05/05 v15) : utiliser le destinataire saisi (fieldTo)
     // au lieu de _fromEmail (qui est vide en mode new).
     var emailToUse = _fromEmail;
@@ -1150,14 +1149,20 @@ function smartPaperclip() {
         .then(function(r) { return r.json(); })
         .then(function(data) {
             // Fix v16 : API retourne folder_path (mismatch silencieux)
+            // Fix v69 : afficher TOUJOURS la popup. Si pas de suggestion,
+            // proposer d'ouvrir le dossier racine de classement (fallback).
             var folderPath = data.folder_path || data.folder;
+            var fldEl = document.getElementById('smartPaperclipFolder');
             if (folderPath) {
                 _smartPaperclipFolder = folderPath;
-                document.getElementById('smartPaperclipFolder').textContent = '\uD83D\uDCC1 ' + folderPath;
-                document.getElementById('popupSmartPaperclip').classList.add('active');
+                if (fldEl) fldEl.textContent = '\uD83D\uDCC1 ' + folderPath;
             } else {
-                _toast('Aucune suggestion de dossier pour ce correspondant.', 'error');
+                // Aucune suggestion : laisser _smartPaperclipFolder vide
+                // \u2192 openSuggestedFolder() ouvrira le dossier racine
+                _smartPaperclipFolder = '';
+                if (fldEl) fldEl.innerHTML = '<span style="color:#888;font-style:italic;">Aucune suggestion automatique</span><br><span style="font-size:11px;color:#1565c0;">Cliquer pour ouvrir votre dossier racine de classement</span>';
             }
+            document.getElementById('popupSmartPaperclip').classList.add('active');
         })
         .catch(function() {
             _toast('Erreur de connexion au backend.', 'error');
