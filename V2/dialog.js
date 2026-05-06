@@ -499,6 +499,9 @@ function _loadEcheancesUrgentes() {
                 generateReply();
             };
         }
+
+        // Activer drag-and-drop pour PJ (gap 06/05 v20)
+        _setupDragDropAttachments();
     }
 
     // Auto-détection importance (mots-clés sensibles → H, comme le proto)
@@ -1151,23 +1154,25 @@ function smartPaperclip() {
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var rootPath = (data && data.value) || '';
-            if (!rootPath) {
-                _toast('Dossier racine PJ non configur\u00E9 dans le profil.', 'error');
-                return null;
-            }
-            return fetch('http://127.0.0.1:5052/open_folder', {
+            return fetch('http://127.0.0.1:5052/pick_file', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({path: rootPath})
+                body: JSON.stringify({initial_dir: rootPath})
             }).then(function(r) { return r.json(); });
         })
         .then(function(data) {
             if (!data) return;
-            if (data.ok) {
-                _toast('\uD83D\uDCC1 Dossier racine ouvert dans l\'Explorateur', 'info');
-            } else {
+            if (!data.ok) {
                 _toast('Erreur : ' + (data.error || 'inconnu'), 'error');
+                return;
             }
+            var paths = data.paths || [];
+            if (paths.length === 0) return;  // user a annul\u00E9
+            paths.forEach(function(p) {
+                var name = p.split(/[\\/]/).pop();
+                _addAttachmentItem(name, 'pick', p);
+            });
+            _toast('\u2713 ' + paths.length + ' fichier(s) attach\u00E9(s)', 'info');
         })
         .catch(function() {
             _toast('Companion local non joignable. V\u00E9rifiez que BoosterMail est actif.', 'error');

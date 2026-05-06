@@ -1186,36 +1186,41 @@ class EasyMailPopup(QMainWindow):
             logger.warning(f"hide_all_windows erreur: {e}")
 
     def pick_folder_via_ipc(self, request_id, initial_dir):
-        """Phase Bouton Parcourir 02/05/2026 — slot Qt thread.
+        """Slot Qt thread — distingue pick-folder vs pick-file via le préfixe.
 
-        Ouvre QFileDialog.getExistingDirectory() (fenêtre native Windows)
-        pour que l'user choisisse son dossier principal de classement.
-        Le résultat est stocké dans _pick_folder_results et l'Event
-        correspondant est set pour libérer le HTTP thread qui attend.
-
-        Le path est renvoyé tel quel (avec backslash Windows) — le frontend
-        et le backend OVH le normalisent si besoin.
+        - request_id préfixé 'FILE_' → QFileDialog.getOpenFileNames (fichiers,
+          multi-sélection autorisée). Paths joints par '|' dans le résultat.
+        - sinon → QFileDialog.getExistingDirectory (dossier).
         """
+        is_file_pick = request_id.startswith('FILE_')
+        real_id = request_id[5:] if is_file_pick else request_id
         try:
-            logger.info(f"[pick-folder] requête {request_id[:8]} initial={initial_dir!r}")
-            # initial_dir vide → laisser Qt choisir un dossier par défaut
-            # (typiquement Documents). Sinon utiliser le path actuel comme
-            # point de départ.
-            path = QFileDialog.getExistingDirectory(
-                self,
-                "Choisissez le dossier principal de classement",
-                initial_dir or '',
-                QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontResolveSymlinks,
-            )
-            # path == '' si l'user a cliqué Annuler
-            logger.info(f"[pick-folder] {request_id[:8]} → {path!r}")
+            if is_file_pick:
+                logger.info(f"[pick-file] requête {real_id[:8]} initial={initial_dir!r}")
+                paths_tuple = QFileDialog.getOpenFileNames(
+                    self,
+                    "Choisissez un ou plusieurs fichiers à joindre",
+                    initial_dir or '',
+                )
+                paths_list = paths_tuple[0] if paths_tuple else []
+                path = '|'.join(paths_list)  # multi-paths joints par '|'
+                logger.info(f"[pick-file] {real_id[:8]} → {len(paths_list)} fichier(s)")
+            else:
+                logger.info(f"[pick-folder] requête {real_id[:8]} initial={initial_dir!r}")
+                path = QFileDialog.getExistingDirectory(
+                    self,
+                    "Choisissez le dossier principal de classement",
+                    initial_dir or '',
+                    QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontResolveSymlinks,
+                )
+                logger.info(f"[pick-folder] {real_id[:8]} → {path!r}")
         except Exception as e:
-            logger.warning(f"[pick-folder] {request_id[:8]} erreur : {e}")
+            logger.warning(f"[pick-{('file' if is_file_pick else 'folder')}] {real_id[:8]} erreur : {e}")
             path = ''
         finally:
             with _pick_folder_lock:
-                _pick_folder_results[request_id] = path
-                ev = _pick_folder_events.get(request_id)
+                _pick_folder_results[real_id] = path
+                ev = _pick_folder_events.get(real_id)
             if ev is not None:
                 ev.set()
 
@@ -1988,9 +1993,10 @@ class _IPCHandler(BaseHTTPRequestHandler):
                 self._json_response({'ok': False, 'error': str(e)[:200]}, 500)
             return
         if self.path == '/open_folder':
-            # Gap 06/05/2026 — Bouton trombone PJ mode new : ouvre un dossier
-            # Windows existant dans l'Explorateur. Pas de QFileDialog (pas
-            # interactif), juste os.startfile sur le path fourni.
+            # Gap 06/05/2026 — Ouvre un dossier Windows dans l'Explorateur.
+            # Garde pour rétro-compat éventuel mais le bouton 📎 n'utilise
+            # plus cet endpoint depuis v71 (utilise /pick_file qui est UX
+            # bien meilleure : retour direct du fichier sélectionné).
             try:
                 length = int(self.headers.get('Content-Length', 0))
                 body = self.rfile.read(length) if length > 0 else b'{}'
@@ -1999,18 +2005,48 @@ class _IPCHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json_response({'ok': False, 'error': 'bad_request: ' + str(e)[:100]}, 400)
                 return
-            if not path:
-                self._json_response({'ok': False, 'error': 'path requis'}, 400)
-                return
-            if not os.path.isdir(path):
-                self._json_response({'ok': False, 'error': 'Dossier introuvable: ' + path[:120]}, 404)
+            if not path or not os.path.isdir(path):
+                self._json_response({'ok': False, 'error': 'Dossier invalide'}, 404)
                 return
             try:
                 os.startfile(path)
-                logger.info(f"[open-folder] {path}")
                 self._json_response({'ok': True, 'path': path})
             except Exception as e:
-                logger.warning(f"[open-folder] exception : {e}")
+                self._json_response({'ok': False, 'error': str(e)[:200]}, 500)
+            return
+        if self.path == '/pick_file':
+            # Gap 06/05/2026 — QFileDialog natif Windows pour SÉLECTIONNER un
+            # ou plusieurs fichiers (avec retour des paths à l'app). Bouton
+            # "Ouvrir" du QFileDialog joue le rôle du "joindre" demandé Yvan.
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(length) if length > 0 else b'{}'
+                params = json.loads(body.decode('utf-8') or '{}')
+                initial_dir = (params.get('initial_dir') or '').strip()
+            except Exception:
+                initial_dir = ''
+            if not _ipc_bridge:
+                self._json_response({'ok': False, 'error': 'bridge_not_ready'}, 503)
+                return
+            import uuid
+            request_id = uuid.uuid4().hex
+            ev = threading.Event()
+            with _pick_folder_lock:
+                _pick_folder_events[request_id] = ev
+            try:
+                # Réutilise le signal pick_folder_requested mais en mode 'file'
+                # (request_id préfixé pour distinguer)
+                _ipc_bridge.pick_folder_requested.emit('FILE_' + request_id, initial_dir)
+                ev.wait(timeout=120)
+                with _pick_folder_lock:
+                    paths_str = _pick_folder_results.pop(request_id, '')
+                    _pick_folder_events.pop(request_id, None)
+                # paths_str peut contenir plusieurs paths séparés par '|'
+                paths = [p for p in (paths_str or '').split('|') if p.strip()]
+                self._json_response({'ok': True, 'paths': paths})
+            except Exception as e:
+                with _pick_folder_lock:
+                    _pick_folder_events.pop(request_id, None)
                 self._json_response({'ok': False, 'error': str(e)[:200]}, 500)
             return
         if self.path == '/pick_folder':
