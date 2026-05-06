@@ -1136,7 +1136,9 @@ function _renderAttachmentsList() {
     if (!container) {
         container = document.createElement('div');
         container.id = 'attachedFilesList';
-        container.style.cssText = 'padding:10px 12px;background:#fff8e1;border-left:3px solid #fbc02d;border-radius:4px;margin:8px 0;font-size:12px;font-family:inherit;';
+        container.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:4px 0;margin:4px 0;font-family:inherit;';
+        // Affichage uniquement — note discrète en title sur chaque chip
+        container.title = 'Affichage uniquement. L\'envoi réel des PJ sera disponible dans une prochaine mise à jour.';
         var modeRow = document.getElementById('modeRow');
         if (modeRow && modeRow.parentNode) {
             modeRow.parentNode.insertBefore(container, modeRow.nextSibling);
@@ -1147,17 +1149,32 @@ function _renderAttachmentsList() {
         container.innerHTML = '';
         return;
     }
-    container.style.display = 'block';
-    var html = '<div style="font-weight:600;margin-bottom:6px;color:#e65100;">Pieces jointes (' + _attachedFiles.length + ')</div>';
-    html += '<div style="font-size:10px;color:#888;margin-bottom:8px;font-style:italic;">Affichage uniquement — l\'envoi reel des PJ sera disponible dans une prochaine mise a jour.</div>';
+    container.style.display = 'flex';
+    // Chip compact par fichier (type Outlook) : icône + nom tronqué + ×
+    var html = '';
     _attachedFiles.forEach(function(f, idx) {
-        html += '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;">'
-            + '<span>' + (f.source === 'drop' ? 'glisse' : 'choisi') + ' :</span>'
-            + '<span style="flex:1;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + _escapeHtml(f.path || f.name) + '">' + _escapeHtml(f.name) + '</span>'
-            + '<button onclick="_removeAttachment(' + idx + ')" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:14px;padding:2px 6px;" title="Retirer">x</button>'
-            + '</div>';
+        var ext = (f.name.split('.').pop() || '').toLowerCase();
+        var icon = _attachmentIcon(ext);
+        html += '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;background:#f0f4ff;border:1px solid #d0d7e8;border-radius:14px;font-size:11px;color:#333;max-width:240px;" title="' + _escapeHtml(f.path || f.name) + ' (' + (f.source === 'drop' ? 'glissé' : 'choisi') + ')">'
+            + '<span style="font-size:13px;">' + icon + '</span>'
+            + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _escapeHtml(f.name) + '</span>'
+            + '<button onclick="_removeAttachment(' + idx + ')" style="background:none;border:none;color:#888;cursor:pointer;font-size:13px;padding:0 0 0 2px;line-height:1;" title="Retirer">×</button>'
+            + '</span>';
     });
     container.innerHTML = html;
+}
+
+function _attachmentIcon(ext) {
+    var iconMap = {
+        pdf: '📕', doc: '📘', docx: '📘', odt: '📘',
+        xls: '📗', xlsx: '📗', csv: '📊', ods: '📗',
+        ppt: '📙', pptx: '📙', odp: '📙',
+        png: '🖼', jpg: '🖼', jpeg: '🖼', gif: '🖼', bmp: '🖼', svg: '🖼', webp: '🖼',
+        zip: '🗜', rar: '🗜', '7z': '🗜', tar: '🗜', gz: '🗜',
+        txt: '📄', md: '📄', log: '📄', json: '📄', xml: '📄',
+        mp3: '🎵', wav: '🎵', mp4: '🎬', mov: '🎬', avi: '🎬',
+    };
+    return iconMap[ext] || '📎';
 }
 
 function _addAttachmentItem(name, source, path) {
