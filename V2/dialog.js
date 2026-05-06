@@ -1109,6 +1109,22 @@ function includeSelectedFwdAttachments() {
 // SMART PAPERCLIP (trombone intelligent — comme le proto)
 // =============================================================================
 
+// Toast custom (gap 05/05 v17) : remplace window.alert qui throw une
+// exception silencieuse dans le contexte Office.js add-in
+// ("Function window.alert is not supported"). Affiche un message
+// temporaire en bas à droite, auto-disparaît après 3.5s.
+function _toast(msg, kind) {
+    var div = document.createElement('div');
+    var bg = (kind === 'error') ? '#c62828' : '#1a1a2e';
+    div.style.cssText = 'position:fixed;bottom:20px;right:20px;background:' + bg
+        + ';color:#fff;padding:12px 20px;border-radius:6px;z-index:99999;'
+        + 'font-size:13px;max-width:400px;box-shadow:0 4px 16px rgba(0,0,0,0.2);'
+        + 'font-family:Aptos,Arial,sans-serif;';
+    div.textContent = msg;
+    document.body.appendChild(div);
+    setTimeout(function() { try { div.remove(); } catch(e){} }, 3500);
+}
+
 function smartPaperclip() {
     console.log('[paperclip] smartPaperclip() appelé, _mode=' + _mode);
     // Mode new (gap 05/05 v15) : utiliser le destinataire saisi (fieldTo)
@@ -1119,14 +1135,14 @@ function smartPaperclip() {
         var fieldTo = document.getElementById('fieldTo');
         emailToUse = (fieldTo && fieldTo.value || '').trim();
         if (!emailToUse || emailToUse.indexOf('@') < 0) {
-            alert('Veuillez d\'abord saisir un destinataire dans le champ "À".');
+            _toast('Veuillez d\'abord saisir un destinataire dans le champ "À".', 'error');
             return;
         }
         var subjectField = document.getElementById('fieldSubject');
         subjectToUse = (subjectField && subjectField.value || '').trim();
     }
     if (!emailToUse) {
-        alert('Aucun correspondant detecte.');
+        _toast('Aucun correspondant détecté.', 'error');
         return;
     }
     fetch(_backendUrl + '/api/smart_paperclip?email=' + encodeURIComponent(emailToUse) +
