@@ -16,6 +16,7 @@ import hashlib
 import subprocess
 import shutil
 import traceback
+import functools
 from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
 
