@@ -430,7 +430,8 @@ function _loadEcheancesUrgentes() {
     }
 
     // Boutons mode : highlight le bon, masquer juste les 3 boutons Reply en mode new
-    // (gap v14 : garder modeRow visible pour conserver le bouton PJ 📎 + chips R/S/H)
+    // (gap v14 : garder modeRow visible pour conserver le bouton PJ 📎)
+    // (gap v74 : cacher AUSSI les chips R/S/H en mode new — décision Yvan 06/05)
     var modeRow = document.getElementById('modeRow');
     if (modeRow) {
         if (_mode === 'new') {
@@ -439,6 +440,9 @@ function _loadEcheancesUrgentes() {
                 var b = document.getElementById(id);
                 if (b) b.style.display = 'none';
             });
+            // Cacher les chips R/S/H importance (Yvan v74 : pas pertinent en mode new)
+            var impGroup = document.querySelector('.em-imp-group');
+            if (impGroup) impGroup.style.display = 'none';
             // Afficher Cc en mode new (caché par défaut, normalement masqué jusqu'à clic 'Ajouter Cc')
             var rowCcShow = document.getElementById('rowCc');
             if (rowCcShow) rowCcShow.style.display = '';
@@ -1513,9 +1517,9 @@ function _renderRecipientContext(email, profile) {
                 d2 += '<div style="font-size:12px;color:#555;padding:6px 8px;font-style:italic;line-height:1.5;background:#fffde7;border-left:3px solid #fbc02d;border-radius:3px;">📝 ' + _escapeHtml(profileText) + '</div>';
             }
 
-            // Lien modifier
+            // Lien modifier (gap 06/05 v74 : focus sur le contact courant)
             d2 += '<div style="margin-top:12px;text-align:center;">'
-               + '<a href="#" onclick="event.preventDefault();_openDashboard(\'contacts\');return false;" style="font-size:11px;color:#0F6CBD;text-decoration:underline;">✏️ Modifier ce profil dans la page Contacts</a>'
+               + '<a href="#" onclick="event.preventDefault();_openDashboard(\'contacts\', \'focus=' + encodeURIComponent(email) + '\');return false;" style="font-size:11px;color:#0F6CBD;text-decoration:underline;">✏️ Modifier ce profil dans la page Contacts</a>'
                + '</div>';
         }
         resumeActions.innerHTML = d2;
@@ -4877,14 +4881,11 @@ function _showSuccessOverlay() {
 // correspondantes en surimpression dans la fenêtre BoosterMail actuelle.
 // Le brouillon en cours est préservé (overlay z-index:200 par-dessus).
 
-function _openDashboard(view) {
+function _openDashboard(view, queryString) {
     /** Affiche le dashboard (Profil/Contacts/Échéances) dans un overlay
      * iframe AU-DESSUS du dialog principal. view ∈ {'profile', 'contacts', 'echeances'}.
-     *
-     * Décision Yvan 01/05/2026 — REVERT du commit ec6d009 (window.open).
-     * L'ancienne implémentation iframe overlay au-dessus du dialog est
-     * la bonne UX. Le window.open ouvrait une fenêtre browser détachée,
-     * gênante en pratique. */
+     * queryString optionnel (ex: 'focus=email@ex.com') pour cibler un élément
+     * dans la page (gap 06/05 v74 : focus contact depuis lien profil mode new). */
     var VALID_VIEWS = {'profile': 1, 'contacts': 1, 'echeances': 1};
     if (!VALID_VIEWS[view]) {
         console.warn('[dashboard] view non autorisée :', view);
@@ -4903,7 +4904,9 @@ function _openDashboard(view) {
     var overlay = document.getElementById('dashboardOverlay');
     if (!frame || !overlay) return;
 
-    frame.src = _backendUrl + '/plugin/' + view;
+    var url = _backendUrl + '/plugin/' + view;
+    if (queryString) url += '?' + queryString;
+    frame.src = url;
     overlay.style.display = 'block';
 }
 

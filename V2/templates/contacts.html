@@ -500,6 +500,23 @@
                 }).catch(function() { clearInterval(interval); alert('Erreur de connexion'); window.location.reload(); });
             }, 1500);
         }
+
+        // Focus contact via URL ?focus=email (gap 06/05 v74)
+        // Pré-remplit la recherche avec l'email passé en query → filterContacts
+        // ne laisse visible que ce contact. Utilisé par le lien "Modifier ce
+        // profil dans la page Contacts" du dialog mode new.
+        (function() {
+            try {
+                var params = new URLSearchParams(window.location.search);
+                var focus = (params.get('focus') || '').trim().toLowerCase();
+                if (!focus) return;
+                var input = document.getElementById('search-input');
+                if (input) {
+                    input.value = focus;
+                    if (typeof filterContacts === 'function') filterContacts();
+                }
+            } catch (e) { /* noop */ }
+        })();
     </script>
 </body>
 </html>
