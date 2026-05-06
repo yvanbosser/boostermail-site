@@ -7087,7 +7087,16 @@ def api_email_body():
 
 @app.route('/api/folders')
 def api_folders():
-    """Retourne l'arborescence des dossiers Outlook (classement mail)."""
+    """Retourne l'arborescence des dossiers Outlook (classement mail).
+
+    v85 (06/05) — utilise _get_outlook_folders_cached (TTL 5min) au lieu
+    d'appeler graph.get_all_folders() à chaque requête. Évite ~5-8s de
+    re-crawl Graph qui retardaient l'ouverture du popup classement.
+    """
+    folders = _get_outlook_folders_cached()
+    if folders:
+        return jsonify({"folders": folders})
+    # Cache vide → tentative live (auth peut manquer / 1er load)
     graph = get_graph()
     if not graph:
         return jsonify({"error": "Mode Standard requis", "folders": []}), 403
@@ -12077,54 +12086,206 @@ def _store_proposed(message_id, html):
                 del _last_proposed[k]
 
 
+def _compose_synthetic_mid(to, subject, body):
+    """Génère un message_id déterministe pour un mail composé.
+    Permet le cache hit si le user re-génère le même contenu (économie API)."""
+    h = hashlib.md5((to + '|' + subject + '|' + body[:500]).encode('utf-8')).hexdigest()
+    return f'compose_{h}'
+
+
 @app.route('/api/post_generation_analyze', methods=['POST'])
 def api_post_generation_analyze():
-    """Option C (gap 06/05 v75) — Commis Haiku unifié post-génération mode new.
+    """Option C (gap 06/05 v81) — Analyse post-génération mode new.
 
-    Le user vient de générer un mail brouillon (mode compose). 1 seul appel
-    Haiku via analyze_one_mail_stream produit échéance + folder mail + folder
-    PJ. Économie ~67% sur les calls Haiku vs 3 appels séparés.
+    Refactor v81 (consigne Yvan : "réutiliser exactement le même système")
+    → délègue à _prewarm_classement_for_mail / _prewarm_pj_classement_for_mail
+    avec un message_id synthétique. Aucune réinvention.
 
-    POST {to, subject, body} → {echeance, folder, pj_folder}
+    POST {to, subject, body, pj_names?} → {echeance, folder, pj_folder, folder_data, pj_folder_data}
     """
     data = request.get_json() or {}
-    to = (data.get('to') or '').strip()
+    to = (data.get('to') or '').strip().lower()
     subject = (data.get('subject') or '').strip()
     body = (data.get('body') or '').strip()
+    pj_names = data.get('pj_names') or []
     if not body:
         return jsonify({"error": "body requis"}), 400
 
-    builder = _get_prompt_builder()
-    if not builder or not hasattr(builder, 'analyze_one_mail_stream'):
-        return jsonify({"error": "AI non configuré"}), 503
-
-    # Mail brouillon → format mail attendu par le commis
-    mail = {
+    # mail_data au format attendu par _prewarm_*. Dans le contexte compose,
+    # le destinataire (to) joue le role de from_email (= contact pour DB lookups).
+    # C'est exactement ce qu'on veut : "surtout le destinataire" (Yvan).
+    mail_data = {
+        'from_email': to,
+        'from_name': '',
         'subject': subject,
         'body': body[:3000],
-        'from_name': '',
-        'from_email': to,  # destinataire (le mail est sortant, pas reçu)
+        'body_preview': body[:500],
+        'has_attachments': bool(pj_names),
+        'attachments': [{'name': n} for n in pj_names if n],
     }
-    folders_outlook = _get_outlook_folders_cached() or []
-    folders_windows = _get_windows_folders_cached() or []
+    mid = _compose_synthetic_mid(to, subject, body)
+    logger.info(f"[post_gen_analyze] mid={mid[:30]} to={to[:40]} subj={subject[:40]} "
+                f"body_len={len(body)} pj={len(pj_names)}")
 
-    result = {'echeance': None, 'folder': None, 'pj_folder': None}
+    # Tier 0 compose-specific (SPEC §4 cas C2 — 06/05 v83) :
+    # "Contact connu + objet vide → Dossier habituel du contact"
+    # Si destinataire a un historique de classement, suggère le folder le
+    # plus utilisé AVANT d'appeler le prewarm (qui exige >=3 classifications
+    # pour Tier 1 — trop strict pour le mode compose).
+    compose_tier0_suggestion = None
+    folders_outlook = _get_outlook_folders_cached() or []
     try:
-        for kind, payload in builder.analyze_one_mail_stream(
-            mail, folders_outlook=folders_outlook, folders_windows=folders_windows
-        ):
-            if kind == 'echeance':
-                result['echeance'] = payload
-            elif kind == 'folder':
-                result['folder'] = payload
-            elif kind == 'pj_folder':
-                result['pj_folder'] = payload
-            elif kind == 'end':
-                break
-        return jsonify(result)
+        contact_recent = _db.get_recent_classifications(to, None, limit=50)
+        if contact_recent:
+            from collections import Counter
+            counts = Counter()
+            for r in contact_recent:
+                fp = r.get('folder_path')
+                if fp:
+                    counts[fp] += 1
+            if counts:
+                top_folder, top_count = counts.most_common(1)[0]
+                # Lookup folder_id depuis la liste des folders Outlook.
+                # Stratégie cascade (DB stocke souvent "Boîte de réception/X/Y"
+                # mais live folders peuvent être "X/Y" ou "Inbox/X/Y") :
+                #   1. Match exact path (lowercase)
+                #   2. Match en strippant le préfixe "Boîte de réception/" ou "Inbox/"
+                #   3. Match suffix (le path live se termine par le path DB)
+                #   4. Match dernier segment (le name)
+                def _norm_path(p):
+                    return (p or '').lower().strip().replace('\\', '/')
+                top_norm = _norm_path(top_folder)
+                top_no_inbox = top_norm
+                for prefix in ('boîte de réception/', 'boite de reception/', 'inbox/'):
+                    if top_no_inbox.startswith(prefix):
+                        top_no_inbox = top_no_inbox[len(prefix):]
+                        break
+                last_seg = top_norm.rstrip('/').split('/')[-1]
+                folder_id = ''
+                match_strategy = 'none'
+                for f in folders_outlook:
+                    fp = _norm_path(f.get('path'))
+                    if fp == top_norm:
+                        folder_id = f.get('id', '')
+                        match_strategy = 'exact'
+                        break
+                if not folder_id and top_no_inbox != top_norm:
+                    for f in folders_outlook:
+                        fp = _norm_path(f.get('path'))
+                        if fp == top_no_inbox or fp.endswith('/' + top_no_inbox):
+                            folder_id = f.get('id', '')
+                            match_strategy = 'no_inbox_prefix'
+                            break
+                if not folder_id:
+                    for f in folders_outlook:
+                        fp = _norm_path(f.get('path'))
+                        if fp.endswith('/' + top_norm) or top_norm.endswith('/' + fp):
+                            folder_id = f.get('id', '')
+                            match_strategy = 'suffix'
+                            break
+                if not folder_id and last_seg:
+                    for f in folders_outlook:
+                        if (f.get('name') or '').lower().strip() == last_seg:
+                            folder_id = f.get('id', '')
+                            match_strategy = 'last_segment'
+                            break
+                if not folder_id:
+                    # Match plus tolérant : extraire les mots-clés du dernier segment
+                    # et chercher un folder dont le name contient un de ces mots
+                    # (ex: "Phiwest-vesta partner" → cherche "phiwest" ou "vesta")
+                    seg_words = [w for w in last_seg.replace('-', ' ').split() if len(w) >= 4]
+                    for word in seg_words:
+                        for f in folders_outlook:
+                            fn = (f.get('name') or '').lower()
+                            if word in fn:
+                                folder_id = f.get('id', '')
+                                match_strategy = f'fuzzy_word({word})'
+                                # Mettre à jour le folder_path à celui live
+                                compose_tier0_suggestion_path_override = f.get('path')
+                                top_folder = f.get('path') or top_folder
+                                break
+                        if folder_id:
+                            break
+                if not folder_id:
+                    # Diagnostic : log les paths live qui contiennent le dernier segment ou un mot
+                    seg_words_dbg = [w for w in last_seg.replace('-', ' ').split() if len(w) >= 4]
+                    related = []
+                    for f in folders_outlook:
+                        fp = (f.get('path', '') or '').lower()
+                        fn = (f.get('name', '') or '').lower()
+                        if last_seg in fp or any(w in fp or w in fn for w in seg_words_dbg):
+                            related.append(f.get('path', ''))
+                            if len(related) >= 5: break
+                    logger.warning(f"[post_gen_analyze] Tier 0 lookup ECHEC pour "
+                                   f"top={top_folder!r} | last_seg={last_seg!r} | "
+                                   f"seg_words={seg_words_dbg} | "
+                                   f"related_live_paths={related}")
+                compose_tier0_suggestion = {
+                    'folder_path': top_folder,
+                    'folder_id': folder_id,
+                    'count': top_count,
+                }
+                logger.info(f"[post_gen_analyze] Tier 0 compose → {top_folder} "
+                            f"(contact_history count={top_count}, folder_id={match_strategy if folder_id else 'NONE'})")
+                # Pré-charge le cache pour que le prewarm skip et renvoie ce résultat
+                _set_mail_preview(mid, 'classement', 'done', {
+                    'suggestion': compose_tier0_suggestion,
+                    'suggestions': [compose_tier0_suggestion],
+                    'source': 'rule_compose',
+                })
     except Exception as e:
-        logger.warning(f"[post_gen_analyze] {e}")
-        return jsonify({"error": str(e)[:200]}), 500
+        logger.warning(f"[post_gen_analyze] Tier 0 compose erreur: {e}")
+
+    # Délégation pure aux helpers existants (mêmes 7 tiers que mode reply)
+    # Si Tier 0 compose a déjà rempli le cache, le prewarm le détectera et skipera.
+    if not compose_tier0_suggestion:
+        try:
+            _prewarm_classement_for_mail(mid, mail_data)
+        except Exception as e:
+            logger.warning(f"[post_gen_analyze] prewarm classement: {e}")
+    try:
+        _prewarm_pj_classement_for_mail(mid, mail_data)
+    except Exception as e:
+        logger.warning(f"[post_gen_analyze] prewarm pj: {e}")
+
+    # Échéance via le commis (mail brouillon → échéance probable que le user prend)
+    echeance_data = None
+    try:
+        builder = _get_prompt_builder()
+        if builder and hasattr(builder, 'analyze_one_mail_stream'):
+            for kind, payload in builder.analyze_one_mail_stream(
+                mail_data, folders_outlook=[], folders_windows=[]
+            ):
+                if kind == 'echeance':
+                    echeance_data = payload
+                elif kind == 'end':
+                    break
+    except Exception as e:
+        logger.warning(f"[post_gen_analyze] echeance: {e}")
+
+    # Lecture résultat depuis _mail_preview_cache (alimenté par les prewarm)
+    with _mail_preview_lock:
+        cache_entry = _mail_preview_cache.get(mid, {}) or {}
+    cls_entry = cache_entry.get('classement', {}) or {}
+    pj_entry = cache_entry.get('pj_classement', {}) or {}
+    cls_data = cls_entry.get('data') or {}
+    pj_data = pj_entry.get('data') or {}
+
+    cls_sugg = cls_data.get('suggestion')
+    pj_sugg = pj_data.get('suggestion')
+    result = {
+        'echeance': echeance_data,
+        'folder': (cls_sugg.get('folder_path') if isinstance(cls_sugg, dict) else None),
+        'folder_data': cls_data,
+        'folder_source': cls_data.get('source'),
+        'pj_folder': (pj_sugg.get('folder_path') if isinstance(pj_sugg, dict) else None),
+        'pj_folder_data': pj_data,
+        'pj_folder_source': pj_data.get('source'),
+    }
+    logger.info(f"[post_gen_analyze] result: echeance={bool(result['echeance'])} "
+                f"folder={result['folder']} ({result['folder_source']}) "
+                f"pj_folder={result['pj_folder']} ({result['pj_folder_source']})")
+    return jsonify(result)
 
 
 @app.route('/api/post_send', methods=['POST'])

@@ -82,6 +82,21 @@ var _companionAvailable = false;
     _btn('navContactsFixed', function () { _openDashboardWindow('contacts'); });
     _btn('navProfilFixed', function () { _openDashboardWindow('profile'); });
 
+    // 06/05 v82 — Pré-fetch dialog.html en BG dès l'overlay actif.
+    // Warming Chromium HTTP cache + connexion TCP/TLS déjà ouverte → clic
+    // suivant = page disponible quasi-instantanément (gain ~300-500ms).
+    // no-store sur dialog.html → mais DNS/TCP/TLS+JS+CSS restent en cache.
+    setTimeout(function () {
+        try {
+            fetch(_backendUrl + '/plugin/dialog.html?mode=new&_warm=1', {
+                method: 'GET',
+                credentials: 'include',
+                cache: 'no-store',
+                priority: 'low',
+            }).catch(function() {});
+        } catch (_) {}
+    }, 800);
+
     // 05/05/2026 — Bouton ✏️ Nouveau : ouvre dialog.html en mode 'new'.
     // Fix 05/05 PM : utilise '_blank' au lieu d'un nom de target spécifique
     // (le QWebEngineView popup_pyqt avec nom de window non-_blank + query

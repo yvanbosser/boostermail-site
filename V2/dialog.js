@@ -405,6 +405,15 @@ function _loadEcheancesUrgentes() {
 // =============================================================================
 
 (function init() {
+    // Masque le splash instantané dès que init JS commence
+    // (06/05 v82 — Yvan : fenêtre lente à apparaître)
+    var _splashEl = document.getElementById('emInitSplash');
+    if (_splashEl) {
+        _splashEl.style.transition = 'opacity 200ms ease-out';
+        _splashEl.style.opacity = '0';
+        setTimeout(function() { if (_splashEl.parentNode) _splashEl.parentNode.removeChild(_splashEl); }, 220);
+    }
+
     // Header
     _updateHeader();
 
@@ -446,6 +455,9 @@ function _loadEcheancesUrgentes() {
             // Afficher Cc en mode new (caché par défaut, normalement masqué jusqu'à clic 'Ajouter Cc')
             var rowCcShow = document.getElementById('rowCc');
             if (rowCcShow) rowCcShow.style.display = '';
+            // Cacher la carte "Classement PJ suggéré" en mode new (Yvan v79 : pas pertinent)
+            var pjCardHide = document.getElementById('infoClassementPJ');
+            if (pjCardHide) pjCardHide.style.display = 'none';
         } else {
             document.querySelectorAll('.em-mode-btn').forEach(function(btn) {
                 btn.classList.toggle('active', btn.getAttribute('data-mode') === _mode);
@@ -3010,39 +3022,93 @@ function _onGenerationDone(streamedText) {
     if (_btnUndo) _btnUndo.style.display = _undoStack.length > 0 ? '' : 'none';
     _safeSetSendBtn({ disabled: false });
 
-    // Option C (gap 06/05 v75) : commis post-génération mode new pour
-    // peupler échéance + classement mail + classement PJ en 1 appel Haiku
+    // Option C (gap 06/05 v79) : commis post-génération mode new pour
+    // peupler échéance + classement mail en 1 appel (PJ caché en mode new)
     if (_mode === 'new' && _modeNewGenerationStarted) {
         var _toV = (document.getElementById('fieldTo') || {}).value || '';
         var _subjV = (document.getElementById('fieldSubject') || {}).value || '';
         var _bodyV = ((document.getElementById('editor') || {}).innerText || '').trim();
+        // Brief = intention user (souvent + informatif que le body généré)
+        var _briefField = document.getElementById('fieldBrief');
+        var _briefV = (_briefField && _briefField.value) ? _briefField.value.trim() : '';
+        // Affiche "Analyse en cours…" sur les 2 cartes visibles (PJ cachée en mode new)
+        var _echStart = document.getElementById('infoEcheanceContent');
+        var _clsStart = document.getElementById('infoClassementContent');
+        if (_echStart) _echStart.textContent = 'Analyse en cours…';
+        if (_clsStart) _clsStart.textContent = 'Analyse en cours…';
         if (_bodyV) {
+            console.log('[option-c] POST /api/post_generation_analyze', {to: _toV, subject: _subjV, body_len: _bodyV.length, brief_len: _briefV.length});
             fetch(_backendUrl + '/api/post_generation_analyze', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({to: _toV, subject: _subjV, body: _bodyV})
+                credentials: 'include',
+                body: JSON.stringify({to: _toV, subject: _subjV, body: _bodyV, brief: _briefV, pj_names: []})
             }).then(function(r) { return r.json(); }).then(function(data) {
-                if (!data || data.error) return;
-                // Peuple échéance détectée
-                if (data.echeance) {
-                    var echEl = document.getElementById('infoEcheanceContent');
-                    if (echEl) {
+                console.log('[option-c] response:', data);
+                if (!data) data = {};
+                // Échéance
+                var echEl = document.getElementById('infoEcheanceContent');
+                if (echEl) {
+                    if (data.echeance) {
                         var d = data.echeance;
                         echEl.innerHTML = _escapeHtml((d.description || '').slice(0, 80))
                             + (d.date_echeance ? '<br><span style="color:#888;font-size:11px;">' + _escapeHtml(d.date_echeance) + '</span>' : '');
+                    } else {
+                        echEl.textContent = 'Néant';
                     }
                 }
-                // Peuple classement mail
-                if (data.folder) {
-                    var clsEl = document.getElementById('infoClassementContent');
-                    if (clsEl) clsEl.innerHTML = _escapeHtml(String(data.folder).slice(0, 80));
+                // Classement mail (toujours cliquable, même null → permet classement manuel)
+                // v83 fix : data.folder_data = {suggestion, suggestions, source}
+                // (shape attendue par le popup pré-envoi). On l'utilise tel quel.
+                var clsEl = document.getElementById('infoClassementContent');
+                if (clsEl) {
+                    if (data.folder) {
+                        clsEl.textContent = String(data.folder).slice(0, 80);
+                        if (data.folder_data && data.folder_data.suggestion) {
+                            _classementCacheData = data.folder_data;
+                        } else {
+                            var _fObj = { folder_path: data.folder };
+                            _classementCacheData = {
+                                suggestion: _fObj,
+                                suggestions: [_fObj],
+                                source: data.folder_source || 'ai'
+                            };
+                        }
+                    } else {
+                        clsEl.textContent = 'Néant';
+                        _classementCacheData = { suggestion: null, suggestions: [], source: 'none' };
+                    }
+                    if (typeof _setClassementFieldClickable === 'function') _setClassementFieldClickable(true);
                 }
-                // Peuple classement PJ
-                if (data.pj_folder) {
-                    var pjEl = document.getElementById('infoClassementPJContent');
-                    if (pjEl) pjEl.innerHTML = _escapeHtml(String(data.pj_folder).slice(0, 80));
+                // Classement PJ (caché en mode new, mais on remplit le cache au cas où)
+                var pjEl = document.getElementById('infoClassementPJContent');
+                if (pjEl) {
+                    if (data.pj_folder) {
+                        pjEl.textContent = String(data.pj_folder).slice(0, 80);
+                        if (data.pj_folder_data && data.pj_folder_data.suggestion) {
+                            _classementPJCacheData = data.pj_folder_data;
+                        } else {
+                            var _pjObj = { folder_path: data.pj_folder };
+                            _classementPJCacheData = {
+                                suggestion: _pjObj,
+                                suggestions: [_pjObj],
+                                source: data.pj_folder_source || 'ai'
+                            };
+                        }
+                    } else {
+                        pjEl.textContent = (_attachedFiles && _attachedFiles.length > 0) ? 'Néant' : 'Aucune PJ';
+                        _classementPJCacheData = null;
+                    }
+                    if (typeof _setClassementPJFieldClickable === 'function') {
+                        _setClassementPJFieldClickable(_attachedFiles && _attachedFiles.length > 0);
+                    }
                 }
-            }).catch(function() { /* silencieux : non bloquant */ });
+            }).catch(function(e) {
+                console.warn('[option-c] error:', e);
+                if (_echStart) _echStart.textContent = 'Erreur';
+                if (_clsStart) _clsStart.textContent = 'Erreur';
+                if (_pjStart) _pjStart.textContent = 'Erreur';
+            });
         }
     }
     var btnRestore = document.getElementById('btnRestore');
@@ -3738,24 +3804,59 @@ function _showClassMailPopup(suggestion, folders, mode) {
         // Scroll auto vers la row de la suggestion principale (déjà highlightée
         // en bleu via .selected dans le helper). L'algo de filtrage garantit
         // que la row est dans le DOM si la suggestion match l'arbo.
-        try {
-            if (_selectedFolderId) {
+        // v85 (06/05) : double rAF pour attendre que le layout soit fait après
+        // l'innerHTML. Scroll manuel du conteneur (treeEl) si scrollIntoView
+        // ne fonctionne pas (popup avec overflow custom).
+        var _scrollToSelected = function() {
+            try {
                 var rows = treeEl.querySelectorAll('.em-folder-item.selected');
-                if (rows.length > 0 && rows[0].scrollIntoView) {
-                    rows[0].scrollIntoView({ block: 'center', behavior: 'auto' });
+                if (rows.length > 0) {
+                    var row = rows[0];
+                    // Scroll manuel du conteneur (plus fiable que scrollIntoView)
+                    var rowOffsetTop = row.offsetTop;
+                    var treeHeight = treeEl.clientHeight;
+                    var rowHeight = row.offsetHeight;
+                    treeEl.scrollTop = Math.max(0, rowOffsetTop - (treeHeight / 2) + (rowHeight / 2));
+                    // Bonus : aussi appeler scrollIntoView sur la modale si besoin
+                    if (row.scrollIntoView) {
+                        row.scrollIntoView({ block: 'center', behavior: 'auto' });
+                    }
                 }
-            }
-        } catch (e) { /* scroll non critique */ }
+            } catch (e) { /* scroll non critique */ }
+        };
+        // Double rAF : 1er attend le layout, 2e attend le paint
+        if (_selectedFolderId) {
+            requestAnimationFrame(function() {
+                requestAnimationFrame(_scrollToSelected);
+            });
+        }
     }
 
     // Phase 3 (30/04 PM) — brancher l'input de saisie manuelle.
     // Étape 4' (02/05 PM) : pré-remplir si l'user avait tapé un path manuel
     // en mode pré-envoi (cohérence post-envoi avec choix pré-envoi).
+    // v84 (06/05) : si la suggestion existe mais le folder n'a pas été
+    // trouvé dans l'arbo live (folder_id vide), pré-remplir l'input avec le
+    // path suggéré pour que le user puisse confirmer (création récursive
+    // via Graph API au moment du Confirmer).
     var manualInput = document.getElementById('classMailManualPath');
     if (manualInput) {
-        manualInput.value = initialManualPath || '';
-        if (initialManualPath) {
-            _selectedFolderManualPath = initialManualPath;
+        var fillPath = initialManualPath || '';
+        if (!fillPath && suggestions.length > 0 && !_selectedFolderId) {
+            var sugMain = suggestions[0];
+            fillPath = sugMain.folder_path || sugMain.folder_name || '';
+            // Strip le préfixe "Boîte de réception/" pour la création (Graph
+            // API utilise des paths relatifs à inbox).
+            if (fillPath) {
+                var stripped = fillPath.replace(/^(Boîte de réception|Boite de reception|Inbox)\//i, '');
+                if (stripped !== fillPath) fillPath = stripped;
+            }
+        }
+        manualInput.value = fillPath;
+        if (fillPath) {
+            _selectedFolderManualPath = fillPath;
+            var btnP = document.getElementById('btnClassMail');
+            if (btnP) btnP.disabled = false;
         }
         manualInput.removeEventListener('input', _onManualPathInput);
         manualInput.addEventListener('input', _onManualPathInput);
@@ -3988,10 +4089,18 @@ function _buildOutlookFolderTreeHtml(folders, suggestedFolderId) {
     var pathFolderIds = {};
     if (pathFound) {
         var cur = byId[realFolderId];
-        while (cur) {
+        var _depth = 0;
+        while (cur && _depth < 20) {
             pathFolderIds[cur.id] = true;
-            cur = (cur.parentFolderId && byId[cur.parentFolderId]) ? byId[cur.parentFolderId] : null;
+            var parentId = cur.parentFolderId || cur.parent_folder_id || cur.parentId;
+            cur = (parentId && byId[parentId]) ? byId[parentId] : null;
+            _depth++;
         }
+        try {
+            console.log('[tree] suggested=', suggestedFolderId, 'realFolderId=', realFolderId,
+                'pathFolderIds=', Object.keys(pathFolderIds).length,
+                'sample folder=', byId[realFolderId]);
+        } catch (_) {}
     }
     var hasFilter = pathFound;
 
@@ -4002,10 +4111,11 @@ function _buildOutlookFolderTreeHtml(folders, suggestedFolderId) {
         var hasChildren = next && (next.depth || 0) > depth;
         var indent = depth * 14;
 
+        var fParentId = f.parentFolderId || f.parent_folder_id || f.parentId;
         var isOnPath = !!pathFolderIds[f.id];
-        var parentOnPath = !!(f.parentFolderId && pathFolderIds[f.parentFolderId]);
+        var parentOnPath = !!(fParentId && pathFolderIds[fParentId]);
         // Top-level : parent absent ou pas dans la liste
-        var isTopLevel = !f.parentFolderId || !byId[f.parentFolderId];
+        var isTopLevel = !fParentId || !byId[fParentId];
 
         var visible, expanded;
         if (!hasFilter) {

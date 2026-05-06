@@ -182,10 +182,16 @@ class _ChildPopupPage(QWebEnginePage):
                 else:
                     v.resize(700, 600)
 
+                # Fix 06/05 (Yvan v82) — apparition instantanée :
+                # par défaut QWebEngineView est transparent jusqu'au 1er paint.
+                # Fond blanc explicite sur le widget → fenêtre visible dès show().
+                v.setStyleSheet('background:#ffffff;')
+
                 v.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
                 v.show()
                 v.raise_()
                 v.activateWindow()
+                logger.info(f"[child-popup] window shown immediately (mode_new={'mode=new' in url_str})")
                 self._child_view = v
                 logger.info(f"[child-popup] fenêtre secondaire ouverte : {url.toString()[:80]}")
             return True
@@ -2242,6 +2248,10 @@ def main():
                     sys.exit(0)
         except Exception:
             pass  # Pas de hot instance en place, on continue le démarrage
+
+    # DevTools remote debugging (debug session 06/05) — accessible via
+    # http://localhost:9222 dans Chrome pour inspecter le QWebEngineView.
+    os.environ.setdefault('QTWEBENGINE_REMOTE_DEBUGGING', '9222')
 
     app = QApplication(sys.argv)
     app.setApplicationName('BoosterMail')

@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BoosterMail</title>
+    <!-- v82 (06/05) — Préchauffage TCP/TLS vers OVH pour accélérer le 1er
+         clic "Nouveau message" / Profil / Contacts (-200 à -400ms). -->
+    <link rel="preconnect" href="https://api.boostermail.ai" crossorigin>
+    <link rel="dns-prefetch" href="https://api.boostermail.ai">
     <!-- (B13) Chargement conditionnel Office.js : uniquement en mode taskpane -->
     <script>
     (function() {
@@ -328,6 +332,6 @@
          l'overlay 280×70 px est trop petit pour une modale interne.
          Voir templates/help.html. -->
 
-    <script src="popup.js?v=v29-compose-rollback-blank-05-05"></script>
+    <script src="popup.js?v=v30-preconnect-prefetch-06-05"></script>
 </body>
 </html>
