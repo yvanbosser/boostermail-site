@@ -1132,9 +1132,11 @@ function smartPaperclip() {
           '&subject=' + encodeURIComponent(subjectToUse || ''))
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            if (data.folder) {
-                _smartPaperclipFolder = data.folder;
-                document.getElementById('smartPaperclipFolder').textContent = '\uD83D\uDCC1 ' + data.folder;
+            // Fix v16 : API retourne folder_path (mismatch silencieux)
+            var folderPath = data.folder_path || data.folder;
+            if (folderPath) {
+                _smartPaperclipFolder = folderPath;
+                document.getElementById('smartPaperclipFolder').textContent = '\uD83D\uDCC1 ' + folderPath;
                 document.getElementById('popupSmartPaperclip').classList.add('active');
             } else {
                 // Pas de suggestion → fallback upload classique
