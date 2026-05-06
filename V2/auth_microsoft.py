@@ -99,19 +99,21 @@ class MicrosoftAuthProvider(AuthProvider):
     # Cache MSAL ↔ DB
     # -------------------------------------------------------------------------
 
-    def _load_cache_from_db(self) -> None:
-        """Charge le cache MSAL depuis la DB (déchiffré)."""
-        cache_data = self._store.load_token_cache()
+    def _load_cache_from_db(self, user_id: str = None) -> None:
+        """Charge le cache MSAL depuis la DB (déchiffré).
+        Si user_id fourni, charge le cache per-user (multi-user safe)."""
+        cache_data = self._store.load_token_cache(user_id=user_id)
         if cache_data:
             try:
                 self._cache.deserialize(cache_data)
             except Exception as e:
                 logger.warning(f"Cache MSAL corrompu, réinitialisé : {e}")
 
-    def _save_cache_to_db(self) -> None:
-        """Sauvegarde le cache MSAL en DB (chiffré) si modifié."""
+    def _save_cache_to_db(self, user_id: str = None) -> None:
+        """Sauvegarde le cache MSAL en DB (chiffré) si modifié.
+        Si user_id fourni, sauvegarde sous clé per-user (multi-user safe)."""
         if self._cache.has_state_changed:
-            self._store.save_token_cache(self._cache.serialize())
+            self._store.save_token_cache(self._cache.serialize(), user_id=user_id)
             self._cache.has_state_changed = False
 
     # -------------------------------------------------------------------------
@@ -282,8 +284,9 @@ class MicrosoftAuthProvider(AuthProvider):
         MSAL gère le refresh automatiquement via acquire_token_silent().
         Multi-user safe via _resolve_current_account().
         """
-        # Fix multi-user : session Flask = token per-user (évite la collision MSAL accounts[0])
-        # Valide uniquement en contexte de requête (pas pour les BG threads)
+        # Multi-user : session Flask = token per-user (évite la collision MSAL accounts[0])
+        # Valide uniquement en contexte de requête HTTP (pas pour les BG threads)
+        current_user_id = None
         try:
             from flask import session as _s, has_request_context
             if has_request_context():
@@ -291,11 +294,22 @@ class MicrosoftAuthProvider(AuthProvider):
                 expires_at = _s.get('ms_token_expires_at', 0)
                 if token and time.time() < expires_at - 60:
                     return token
+                current_user_id = _s.get('auth_user_id')
         except Exception:
             pass
 
-        # Recharger le cache depuis la DB (au cas où il a changé)
-        self._load_cache_from_db()
+        # BG threads : récupérer le user_id via thread-local
+        if not current_user_id:
+            try:
+                from user_context import get_current_user_id
+                uid = get_current_user_id()
+                if uid and uid != 'default':
+                    current_user_id = uid
+            except Exception:
+                pass
+
+        # Recharger le cache per-user depuis la DB (évite d'écraser les tokens d'un autre user)
+        self._load_cache_from_db(user_id=current_user_id)
 
         # Trouver les comptes dans le cache
         accounts = self._msal_app.get_accounts()
@@ -327,8 +341,8 @@ class MicrosoftAuthProvider(AuthProvider):
             logger.error(f"Erreur token silent : {result.get('error_description', result['error'])}")
             return None
 
-        # Sauvegarder le cache si MSAL a rafraîchi le token
-        self._save_cache_to_db()
+        # Sauvegarder le cache si MSAL a rafraîchi le token (per-user)
+        self._save_cache_to_db(user_id=current_user_id)
 
         return result.get('access_token')
 

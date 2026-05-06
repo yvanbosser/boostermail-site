@@ -86,21 +86,26 @@ class TokenStore:
         self._db = db
         self._enc = encryptor
 
-    def save_token_cache(self, cache_data: str) -> None:
-        """Sauvegarde le cache de tokens (sérialisé) en DB, chiffré."""
+    def save_token_cache(self, cache_data: str, user_id: str = None) -> None:
+        """Sauvegarde le cache de tokens (sérialisé) en DB, chiffré.
+        Si user_id fourni, clé per-user (multi-user) ; sinon clé globale (legacy)."""
+        key = f'auth_token_cache_{user_id}' if user_id else 'auth_token_cache'
         encrypted = self._enc.encrypt(cache_data)
-        self._db.save_setting('auth_token_cache', encrypted)
+        self._db.save_setting(key, encrypted)
 
-    def load_token_cache(self) -> str | None:
-        """Charge le cache de tokens depuis la DB, déchiffré. None si absent."""
-        encrypted = self._db.get_setting('auth_token_cache')
+    def load_token_cache(self, user_id: str = None) -> str | None:
+        """Charge le cache de tokens depuis la DB, déchiffré. None si absent.
+        Si user_id fourni, essaie d'abord la clé per-user, fallback global."""
+        key = f'auth_token_cache_{user_id}' if user_id else 'auth_token_cache'
+        encrypted = self._db.get_setting(key)
+        if not encrypted and user_id:
+            encrypted = self._db.get_setting('auth_token_cache')  # fallback migration
         if not encrypted:
             return None
         try:
             return self._enc.decrypt(encrypted)
         except Exception:
-            # Cache corrompu → on le supprime
-            self._db.save_setting('auth_token_cache', '')
+            self._db.save_setting(key, '')
             return None
 
     def save_user_info(self, user_id: str, email: str, name: str, provider: str) -> None:
@@ -305,6 +310,14 @@ def create_auth_blueprint(auth_provider_factory) -> Blueprint:
         session['auth_provider'] = provider.PROVIDER_NAME
         session.permanent = True  # Durée = app.permanent_session_lifetime
 
+        # Cache MSAL per-user : isole les refresh tokens de chaque utilisateur
+        # (sans ça, le dernier login écrase le cache global et les autres perdent leur refresh token)
+        try:
+            if hasattr(provider, '_cache'):
+                provider._store.save_token_cache(provider._cache.serialize(), user_id=db_user_id)
+        except Exception:
+            pass
+
         # Passer en Mode Standard
         provider._store.set_mode('standard')
 
@@ -330,7 +343,8 @@ def create_auth_blueprint(auth_provider_factory) -> Blueprint:
 
     @auth_bp.route('/auth/status')
     def auth_status():
-        """Retourne le statut d'authentification courant."""
+        """Retourne le statut d'authentification courant (per-session, multi-user safe)."""
+        import time as _time
         try:
             provider = auth_provider_factory()
         except Exception:
@@ -345,15 +359,44 @@ def create_auth_blueprint(auth_provider_factory) -> Blueprint:
                 'auth_available': False,
             })
 
-        authenticated = provider.is_authenticated()
-        mode = provider.get_mode()
-        user = provider.get_stored_user_info()
+        # Multi-user : lire l'état depuis la session Flask (cookie per-user),
+        # pas les settings globaux DB (qui appartiennent au dernier connecté).
+        user_id = session.get('auth_user_id')
+        ms_token = session.get('ms_access_token', '')
+        ms_expires = session.get('ms_token_expires_at', 0)
+        session_ok = bool(user_id and ms_token and _time.time() < ms_expires - 60)
 
+        if session_ok:
+            # Infos utilisateur depuis la table users (pas les settings globaux)
+            try:
+                user_row = provider._store._db.get_user(user_id)
+            except Exception:
+                user_row = None
+
+            user_data = None
+            if user_row:
+                user_data = {
+                    'user_id': user_id,
+                    'email': user_row.get('email', ''),
+                    'name': user_row.get('display_name', ''),
+                    'provider': session.get('auth_provider', provider.PROVIDER_NAME),
+                    'last_login': user_row.get('last_login_at', ''),
+                }
+
+            return jsonify({
+                'authenticated': True,
+                'mode': 'standard',
+                'provider': session.get('auth_provider', provider.PROVIDER_NAME),
+                'user': user_data,
+                'auth_available': True,
+            })
+
+        # Session absente ou token expiré → non authentifié
         return jsonify({
-            'authenticated': authenticated,
-            'mode': mode,
-            'provider': provider.PROVIDER_NAME if authenticated else None,
-            'user': user,
+            'authenticated': False,
+            'mode': 'reduced',
+            'provider': None,
+            'user': None,
             'auth_available': True,
         })
 
