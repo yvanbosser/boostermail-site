@@ -3009,6 +3009,42 @@ function _onGenerationDone(streamedText) {
     var _btnUndo = document.getElementById('btnUndo');
     if (_btnUndo) _btnUndo.style.display = _undoStack.length > 0 ? '' : 'none';
     _safeSetSendBtn({ disabled: false });
+
+    // Option C (gap 06/05 v75) : commis post-génération mode new pour
+    // peupler échéance + classement mail + classement PJ en 1 appel Haiku
+    if (_mode === 'new' && _modeNewGenerationStarted) {
+        var _toV = (document.getElementById('fieldTo') || {}).value || '';
+        var _subjV = (document.getElementById('fieldSubject') || {}).value || '';
+        var _bodyV = ((document.getElementById('editor') || {}).innerText || '').trim();
+        if (_bodyV) {
+            fetch(_backendUrl + '/api/post_generation_analyze', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({to: _toV, subject: _subjV, body: _bodyV})
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (!data || data.error) return;
+                // Peuple échéance détectée
+                if (data.echeance) {
+                    var echEl = document.getElementById('infoEcheanceContent');
+                    if (echEl) {
+                        var d = data.echeance;
+                        echEl.innerHTML = _escapeHtml((d.description || '').slice(0, 80))
+                            + (d.date_echeance ? '<br><span style="color:#888;font-size:11px;">' + _escapeHtml(d.date_echeance) + '</span>' : '');
+                    }
+                }
+                // Peuple classement mail
+                if (data.folder) {
+                    var clsEl = document.getElementById('infoClassementContent');
+                    if (clsEl) clsEl.innerHTML = _escapeHtml(String(data.folder).slice(0, 80));
+                }
+                // Peuple classement PJ
+                if (data.pj_folder) {
+                    var pjEl = document.getElementById('infoClassementPJContent');
+                    if (pjEl) pjEl.innerHTML = _escapeHtml(String(data.pj_folder).slice(0, 80));
+                }
+            }).catch(function() { /* silencieux : non bloquant */ });
+        }
+    }
     var btnRestore = document.getElementById('btnRestore');
     if (btnRestore) btnRestore.style.display = _versionStack.length > 0 ? '' : 'none';
     _perfMonitor.mark('T5_reply_done');

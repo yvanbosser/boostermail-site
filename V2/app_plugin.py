@@ -12077,6 +12077,56 @@ def _store_proposed(message_id, html):
                 del _last_proposed[k]
 
 
+@app.route('/api/post_generation_analyze', methods=['POST'])
+def api_post_generation_analyze():
+    """Option C (gap 06/05 v75) — Commis Haiku unifié post-génération mode new.
+
+    Le user vient de générer un mail brouillon (mode compose). 1 seul appel
+    Haiku via analyze_one_mail_stream produit échéance + folder mail + folder
+    PJ. Économie ~67% sur les calls Haiku vs 3 appels séparés.
+
+    POST {to, subject, body} → {echeance, folder, pj_folder}
+    """
+    data = request.get_json() or {}
+    to = (data.get('to') or '').strip()
+    subject = (data.get('subject') or '').strip()
+    body = (data.get('body') or '').strip()
+    if not body:
+        return jsonify({"error": "body requis"}), 400
+
+    builder = _get_prompt_builder()
+    if not builder or not hasattr(builder, 'analyze_one_mail_stream'):
+        return jsonify({"error": "AI non configuré"}), 503
+
+    # Mail brouillon → format mail attendu par le commis
+    mail = {
+        'subject': subject,
+        'body': body[:3000],
+        'from_name': '',
+        'from_email': to,  # destinataire (le mail est sortant, pas reçu)
+    }
+    folders_outlook = _get_outlook_folders_cached() or []
+    folders_windows = _get_windows_folders_cached() or []
+
+    result = {'echeance': None, 'folder': None, 'pj_folder': None}
+    try:
+        for kind, payload in builder.analyze_one_mail_stream(
+            mail, folders_outlook=folders_outlook, folders_windows=folders_windows
+        ):
+            if kind == 'echeance':
+                result['echeance'] = payload
+            elif kind == 'folder':
+                result['folder'] = payload
+            elif kind == 'pj_folder':
+                result['pj_folder'] = payload
+            elif kind == 'end':
+                break
+        return jsonify(result)
+    except Exception as e:
+        logger.warning(f"[post_gen_analyze] {e}")
+        return jsonify({"error": str(e)[:200]}), 500
+
+
 @app.route('/api/post_send', methods=['POST'])
 def api_post_send():
     """
