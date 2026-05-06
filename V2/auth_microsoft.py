@@ -205,6 +205,7 @@ class MicrosoftAuthProvider(AuthProvider):
 
         # Récupérer les infos utilisateur via Graph API
         access_token = result.get('access_token', '')
+        token_expires_at = time.time() + result.get('expires_in', 3600)
         user_info = self._fetch_user_info(access_token)
         email = user_info.get('mail', '') or user_info.get('userPrincipalName', '')
 
@@ -216,21 +217,22 @@ class MicrosoftAuthProvider(AuthProvider):
             provider=self.PROVIDER_NAME,
         )
 
-        # Récupérer le home_account_id MSAL (fiable pour matching multi-user,
-        # car l'OID Graph ≠ MSAL local_account_id pour les comptes perso outlook.com)
+        # home_account_id pour le matching MSAL (BG threads)
         ms_home_account_id = ''
         for acc in self._msal_app.get_accounts():
             if acc.get('username', '').lower() == email.lower():
                 ms_home_account_id = acc.get('home_account_id', '')
                 break
 
-        logger.info(f"Auth Microsoft réussie : {user_info.get('displayName', '?')} (haid={ms_home_account_id[:8]}...)")
+        logger.info(f"Auth Microsoft réussie : {user_info.get('displayName', '?')}")
 
         return {
             'user_id': user_info.get('id', ''),
             'email': email,
             'name': user_info.get('displayName', ''),
             'ms_home_account_id': ms_home_account_id,
+            'access_token': access_token,
+            'token_expires_at': token_expires_at,
         }
 
     def _resolve_current_account(self, accounts: list) -> dict:
@@ -280,6 +282,18 @@ class MicrosoftAuthProvider(AuthProvider):
         MSAL gère le refresh automatiquement via acquire_token_silent().
         Multi-user safe via _resolve_current_account().
         """
+        # Fix multi-user : session Flask = token per-user (évite la collision MSAL accounts[0])
+        # Valide uniquement en contexte de requête (pas pour les BG threads)
+        try:
+            from flask import session as _s, has_request_context
+            if has_request_context():
+                token = _s.get('ms_access_token', '')
+                expires_at = _s.get('ms_token_expires_at', 0)
+                if token and time.time() < expires_at - 60:
+                    return token
+        except Exception:
+            pass
+
         # Recharger le cache depuis la DB (au cas où il a changé)
         self._load_cache_from_db()
 
