@@ -1987,6 +1987,32 @@ class _IPCHandler(BaseHTTPRequestHandler):
                 logger.warning(f"[install-addin] exception : {e}")
                 self._json_response({'ok': False, 'error': str(e)[:200]}, 500)
             return
+        if self.path == '/open_folder':
+            # Gap 06/05/2026 — Bouton trombone PJ mode new : ouvre un dossier
+            # Windows existant dans l'Explorateur. Pas de QFileDialog (pas
+            # interactif), juste os.startfile sur le path fourni.
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(length) if length > 0 else b'{}'
+                params = json.loads(body.decode('utf-8') or '{}')
+                path = (params.get('path') or '').strip()
+            except Exception as e:
+                self._json_response({'ok': False, 'error': 'bad_request: ' + str(e)[:100]}, 400)
+                return
+            if not path:
+                self._json_response({'ok': False, 'error': 'path requis'}, 400)
+                return
+            if not os.path.isdir(path):
+                self._json_response({'ok': False, 'error': 'Dossier introuvable: ' + path[:120]}, 404)
+                return
+            try:
+                os.startfile(path)
+                logger.info(f"[open-folder] {path}")
+                self._json_response({'ok': True, 'path': path})
+            except Exception as e:
+                logger.warning(f"[open-folder] exception : {e}")
+                self._json_response({'ok': False, 'error': str(e)[:200]}, 500)
+            return
         if self.path == '/pick_folder':
             # Phase Bouton Parcourir 02/05/2026 — ouvre une fenêtre native
             # Windows (QFileDialog) pour que l'user choisisse son dossier

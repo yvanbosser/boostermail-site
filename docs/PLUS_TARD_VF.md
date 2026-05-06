@@ -1,5 +1,10 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
+> **🆕 06/05/2026** :
+> - **🟡 Trombone intelligent (smart_paperclip) — différé** : la suggestion automatique de dossier de classement basée sur destinataire+sujet existe en backend (`/api/smart_paperclip` + `_db.get_pj_folder_suggestion` matching keywords) et la popup `popupSmartPaperclip` existe en HTML. Comportement actuel mode new (décision Yvan 06/05) = bouton 📎 ouvre directement le dossier racine PJ via companion local (`/open_folder` sur 5052). Réactiver le smart paperclip avec preview popup quand on aura plus de feedback users beta. Code à restaurer : ancien `smartPaperclip()` dans `dialog.js` (commits `40f5135` et antérieurs sur branche dev).
+>
+> ---
+>
 > **Dernière mise à jour** : 03/05/2026 fin d'après-midi (session déclenchée par factures Anthropic ~$75/jour — audit Workflow 4 PLAYBOOK appliqué intégralement, identification d'une **boucle infinie d'appels API Claude** ~4 000/jour indépendamment de l'usage user, **3 root causes** + **4 fixes** déployés, validation live -98%. Économie projetée ~$700-1 200/mois. Bilan complet [`OUTLOOK_BILAN_SESSION_20260503.md`](sessions/OUTLOOK_BILAN_SESSION_20260503.md). Pattern #24 + I-LEARN-01/02 ajoutés au kit audit.)
 >
 > **🆕 Sujets traités session 03/05/2026 (3 commits)** :
