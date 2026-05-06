@@ -1128,25 +1128,83 @@ function _toast(msg, kind) {
     setTimeout(function() { try { div.remove(); } catch(e){} }, 3500);
 }
 
-function smartPaperclip() {
-    // Mode new (gap 05/05 v15) : utiliser le destinataire saisi (fieldTo)
-    // au lieu de _fromEmail (qui est vide en mode new).
-    var emailToUse = _fromEmail;
-    var subjectToUse = _subject;
-    if (_mode === 'new') {
-        var fieldTo = document.getElementById('fieldTo');
-        emailToUse = (fieldTo && fieldTo.value || '').trim();
-        if (!emailToUse || emailToUse.indexOf('@') < 0) {
-            _toast('Veuillez d\'abord saisir un destinataire dans le champ "À".', 'error');
-            return;
+// État des PJ attachées (gap 06/05 v20) — drag-drop + pick file
+var _attachedFiles = [];
+
+function _renderAttachmentsList() {
+    var container = document.getElementById('attachedFilesList');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'attachedFilesList';
+        container.style.cssText = 'padding:10px 12px;background:#fff8e1;border-left:3px solid #fbc02d;border-radius:4px;margin:8px 0;font-size:12px;font-family:inherit;';
+        var modeRow = document.getElementById('modeRow');
+        if (modeRow && modeRow.parentNode) {
+            modeRow.parentNode.insertBefore(container, modeRow.nextSibling);
         }
-        var subjectField = document.getElementById('fieldSubject');
-        subjectToUse = (subjectField && subjectField.value || '').trim();
     }
-    if (!emailToUse) {
-        _toast('Aucun correspondant détecté.', 'error');
+    if (_attachedFiles.length === 0) {
+        container.style.display = 'none';
+        container.innerHTML = '';
         return;
     }
+    container.style.display = 'block';
+    var html = '<div style="font-weight:600;margin-bottom:6px;color:#e65100;">Pieces jointes (' + _attachedFiles.length + ')</div>';
+    html += '<div style="font-size:10px;color:#888;margin-bottom:8px;font-style:italic;">Affichage uniquement — l\'envoi reel des PJ sera disponible dans une prochaine mise a jour.</div>';
+    _attachedFiles.forEach(function(f, idx) {
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;">'
+            + '<span>' + (f.source === 'drop' ? 'glisse' : 'choisi') + ' :</span>'
+            + '<span style="flex:1;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + _escapeHtml(f.path || f.name) + '">' + _escapeHtml(f.name) + '</span>'
+            + '<button onclick="_removeAttachment(' + idx + ')" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:14px;padding:2px 6px;" title="Retirer">x</button>'
+            + '</div>';
+    });
+    container.innerHTML = html;
+}
+
+function _addAttachmentItem(name, source, path) {
+    _attachedFiles.push({name: name, source: source, path: path || ''});
+    _renderAttachmentsList();
+}
+
+function _removeAttachment(idx) {
+    _attachedFiles.splice(idx, 1);
+    _renderAttachmentsList();
+}
+
+function _setupDragDropAttachments() {
+    var bodyEl = document.body;
+    var overlay = null;
+    bodyEl.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'dragDropOverlay';
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,108,189,0.15);border:4px dashed #0F6CBD;z-index:9998;display:flex;align-items:center;justify-content:center;font-size:22px;color:#0F6CBD;font-weight:600;pointer-events:none;';
+            overlay.textContent = 'Deposez vos fichiers pour les joindre au mail';
+            bodyEl.appendChild(overlay);
+        }
+    });
+    bodyEl.addEventListener('dragleave', function(e) {
+        if (e.clientX <= 0 || e.clientY <= 0
+            || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
+            if (overlay) { overlay.remove(); overlay = null; }
+        }
+    });
+    bodyEl.addEventListener('drop', function(e) {
+        e.preventDefault();
+        if (overlay) { overlay.remove(); overlay = null; }
+        var files = (e.dataTransfer && e.dataTransfer.files) || [];
+        if (!files.length) return;
+        for (var i = 0; i < files.length; i++) {
+            _addAttachmentItem(files[i].name, 'drop', '');
+        }
+        _toast(files.length + ' fichier(s) attache(s)', 'info');
+    });
+}
+
+function smartPaperclip() {
+    // V20 (06/05) : ouvre QFileDialog natif via companion local (multi-select).
+    // Plus de pre-condition destinataire (Yvan 06/05).
     // V19 (06/05) : version simplifi\u00E9e. Smart_paperclip diff\u00E9r\u00E9 (cf
     // PLUS_TARD_VF.md). Ouvre direct le dossier racine PJ via companion
     // local. R\u00E9cup\u00E8re le path depuis settings OVH puis POST companion 5052.
