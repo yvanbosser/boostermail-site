@@ -1144,28 +1144,33 @@ function smartPaperclip() {
         _toast('Aucun correspondant détecté.', 'error');
         return;
     }
-    fetch(_backendUrl + '/api/smart_paperclip?email=' + encodeURIComponent(emailToUse) +
-          '&subject=' + encodeURIComponent(subjectToUse || ''))
+    // V19 (06/05) : version simplifi\u00E9e. Smart_paperclip diff\u00E9r\u00E9 (cf
+    // PLUS_TARD_VF.md). Ouvre direct le dossier racine PJ via companion
+    // local. R\u00E9cup\u00E8re le path depuis settings OVH puis POST companion 5052.
+    fetch(_backendUrl + '/api/settings/pj_root_folder')
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            // Fix v16 : API retourne folder_path (mismatch silencieux)
-            // Fix v69 : afficher TOUJOURS la popup. Si pas de suggestion,
-            // proposer d'ouvrir le dossier racine de classement (fallback).
-            var folderPath = data.folder_path || data.folder;
-            var fldEl = document.getElementById('smartPaperclipFolder');
-            if (folderPath) {
-                _smartPaperclipFolder = folderPath;
-                if (fldEl) fldEl.textContent = '\uD83D\uDCC1 ' + folderPath;
-            } else {
-                // Aucune suggestion : laisser _smartPaperclipFolder vide
-                // \u2192 openSuggestedFolder() ouvrira le dossier racine
-                _smartPaperclipFolder = '';
-                if (fldEl) fldEl.innerHTML = '<span style="color:#888;font-style:italic;">Aucune suggestion automatique</span><br><span style="font-size:11px;color:#1565c0;">Cliquer pour ouvrir votre dossier racine de classement</span>';
+            var rootPath = (data && data.value) || '';
+            if (!rootPath) {
+                _toast('Dossier racine PJ non configur\u00E9 dans le profil.', 'error');
+                return null;
             }
-            document.getElementById('popupSmartPaperclip').classList.add('active');
+            return fetch('http://127.0.0.1:5052/open_folder', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({path: rootPath})
+            }).then(function(r) { return r.json(); });
+        })
+        .then(function(data) {
+            if (!data) return;
+            if (data.ok) {
+                _toast('\uD83D\uDCC1 Dossier racine ouvert dans l\'Explorateur', 'info');
+            } else {
+                _toast('Erreur : ' + (data.error || 'inconnu'), 'error');
+            }
         })
         .catch(function() {
-            _toast('Erreur de connexion au backend.', 'error');
+            _toast('Companion local non joignable. V\u00E9rifiez que BoosterMail est actif.', 'error');
         });
 }
 
