@@ -1110,6 +1110,7 @@ function includeSelectedFwdAttachments() {
 // =============================================================================
 
 function smartPaperclip() {
+    console.log('[paperclip] smartPaperclip() appelé, _mode=' + _mode);
     // Mode new (gap 05/05 v15) : utiliser le destinataire saisi (fieldTo)
     // au lieu de _fromEmail (qui est vide en mode new).
     var emailToUse = _fromEmail;
