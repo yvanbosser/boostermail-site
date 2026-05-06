@@ -354,19 +354,38 @@ class MicrosoftAuthProvider(AuthProvider):
         return self._fetch_user_info(token)
 
     def logout(self) -> None:
-        """Supprime les tokens MSAL et les données d'auth en DB."""
-        # Vider le cache MSAL
+        """Supprime les tokens MSAL du user courant uniquement (multi-user safe).
+        Ne touche PAS aux tokens des autres users connectés simultanément."""
+        # Identifier le user courant
+        current_user_id = None
+        try:
+            from flask import session as _s, has_request_context
+            if has_request_context():
+                current_user_id = _s.get('auth_user_id')
+        except Exception:
+            pass
+        if not current_user_id:
+            try:
+                from user_context import get_current_user_id
+                uid = get_current_user_id()
+                if uid and uid != 'default':
+                    current_user_id = uid
+            except Exception:
+                pass
+
+        # Charger le cache per-user et supprimer seulement son account MSAL
+        self._load_cache_from_db(user_id=current_user_id)
         accounts = self._msal_app.get_accounts()
-        for account in accounts:
+        if accounts:
+            account = self._resolve_current_account(accounts)
             self._msal_app.remove_account(account)
+            self._save_cache_to_db(user_id=current_user_id)
 
-        # Sauvegarder le cache vidé
-        self._save_cache_to_db()
+        # Effacer uniquement le cache per-user en DB (pas les settings globaux)
+        if current_user_id:
+            self._store.save_token_cache('', user_id=current_user_id)
 
-        # Supprimer les données d'auth en DB (via TokenStore)
-        super().logout()
-
-        logger.info("Logout Microsoft effectué")
+        logger.info(f"Logout Microsoft effectué (user: {current_user_id or 'unknown'})")
 
     # -------------------------------------------------------------------------
     # Helpers privés

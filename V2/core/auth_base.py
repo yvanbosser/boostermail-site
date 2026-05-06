@@ -336,8 +336,9 @@ def create_auth_blueprint(auth_provider_factory) -> Blueprint:
         if provider is not None:
             provider.logout()
 
-        session.pop('auth_user_id', None)
-        session.pop('auth_provider', None)
+        for _k in ('auth_user_id', 'auth_provider', 'auth_microsoft_oid',
+                   'ms_home_account_id', 'ms_access_token', 'ms_token_expires_at'):
+            session.pop(_k, None)
 
         return jsonify({'status': 'logged_out'})
 

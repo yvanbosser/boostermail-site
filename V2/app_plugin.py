@@ -2931,7 +2931,8 @@ def _prewarm_unified_for_mail(mid, mail_data):
         except Exception:
             folders_outlook = []
         try:
-            wf_row = _db.get_user_windows_folders()
+            _wf_uid = _get_current_user_id() or 'default' if _get_current_user_id else 'default'
+            wf_row = _db.get_user_windows_folders(_wf_uid)
             folders_windows = wf_row.get('folders', []) if wf_row else []
         except Exception:
             folders_windows = []
@@ -6928,10 +6929,9 @@ def api_save_setting():
     if key not in _ALLOWED_SETTINGS:
         return jsonify({"error": f"Clé '{key}' non autorisée"}), 403
     _db.save_setting(key, value)
-    # Invalider le cache arborescence Windows si le dossier racine PJ change
+    # Invalider le cache arborescence Windows du user courant si le dossier racine PJ change
     if key == 'pj_root_folder':
-        global _windows_folders_cache
-        _windows_folders_cache = None
+        _windows_folders_cache.pop('folders', None)
     return jsonify({"status": "ok"})
 
 
@@ -8602,20 +8602,21 @@ def api_windows_folders_push():
         # l'ancien horodatage quand l'user clique « Recalibrer » volontaire-
         # ment. Fix 02/05/2026 (signal Yvan : « le message synchronisé il
         # y a 17 min reste, or il devrait être modifié »).
-        existing = _db.get_user_windows_folders()
+        # Résoudre le user courant (session companion ou fallback 'default')
+        _uid = _get_current_user_id() or 'default' if _get_current_user_id else 'default'
+        existing = _db.get_user_windows_folders(_uid)
         if existing and existing.get('hash') == server_hash:
             # Re-save : même contenu, mais synced_at refresh (datetime now)
-            _db.save_user_windows_folders(root_path, folders, server_hash)
+            _db.save_user_windows_folders(root_path, folders, server_hash, user_id=_uid)
             return jsonify({
                 "status": "ok",
                 "count": existing.get('count', 0),
                 "changed": False,
             })
 
-        # Sauvegarde + invalidation cache RAM
-        _db.save_user_windows_folders(root_path, folders, server_hash)
-        global _windows_folders_cache
-        _windows_folders_cache = None
+        # Sauvegarde per-user + invalidation cache RAM du user courant
+        _db.save_user_windows_folders(root_path, folders, server_hash, user_id=_uid)
+        _windows_folders_cache.pop('folders', None)
 
         # Aussi mettre à jour le setting pj_root_folder si différent
         # (utile pour la cohérence avec la page Profil)
@@ -9158,7 +9159,11 @@ _upload_dir = os.path.join(tempfile.gettempdir(), 'easymail_uploads')
 os.makedirs(_upload_dir, exist_ok=True)
 
 # --- Classement PJ Windows ----------------------------------------------------
-_windows_folders_cache = None
+# Multi-user : cache per-user via UserScopedDict (fix bug "Michael voit l'arbo d'Yvan")
+if _UserScopedDict is not None:
+    _windows_folders_cache = _UserScopedDict('windows_folders')
+else:
+    _windows_folders_cache = {}
 _windows_folders_lock = threading.Lock()
 _PJ_ROOT_DEFAULT = r'C:\Users\yvanb\Documents'
 _WINDOWS_SKIP = {'.git', '__pycache__', '$recycle.bin', 'node_modules', '.claude', '.venv', 'venv', '.vs'}
@@ -9199,34 +9204,35 @@ def _scan_windows_folders(root_path, max_depth=5):
 
 
 def _get_windows_folders_cached():
-    """Retourne l'arborescence Windows (cache session, invalide si pj_root_folder change).
+    """Retourne l'arborescence Windows pour le user courant (cache per-user).
 
     Phase A2 (02/05/2026) — gap SaaS : OVH ne voit pas le filesystem du PC user.
+    Multi-user (fix) : UserScopedDict résout le user courant à chaque accès
+    (session Flask en route, thread-local dans les BG threads via _spawn_bg).
     Pipeline 2 sources :
       1. PRIORITÉ : DB user_windows_folders (poussée par le companion local)
-      2. FALLBACK : scan filesystem local (utile en mode dev local uniquement,
-         retourne [] sur OVH Linux car le path Windows n'existe pas)
+      2. FALLBACK : scan filesystem local (mode dev local, retourne [] sur OVH)
     """
-    global _windows_folders_cache
-    # Lecture rapide sans lock (double-check pattern)
-    if _windows_folders_cache is not None:
-        return _windows_folders_cache
+    # Double-check pattern — UserScopedDict résout le user courant automatiquement
+    if _windows_folders_cache.get('folders') is not None:
+        return _windows_folders_cache['folders']
     with _windows_folders_lock:
-        # Re-vérifier sous le lock (un autre thread a pu remplir entre les deux)
-        if _windows_folders_cache is not None:
-            return _windows_folders_cache
-        # [1] DB en priorité (companion push)
+        if _windows_folders_cache.get('folders') is not None:
+            return _windows_folders_cache['folders']
+        # [1] DB en priorité (companion push) — per-user
         try:
-            row = _db.get_user_windows_folders()
+            _uid = _get_current_user_id() or 'default' if _get_current_user_id else 'default'
+            row = _db.get_user_windows_folders(_uid)
             if row and row.get('folders'):
-                _windows_folders_cache = row['folders']
-                return _windows_folders_cache
+                _windows_folders_cache['folders'] = row['folders']
+                return row['folders']
         except Exception as _e:
             logger.debug(f"[windows_folders] DB read échec : {_e}")
         # [2] Fallback scan filesystem local (mode dev seulement)
         root = _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
-        _windows_folders_cache = _scan_windows_folders(root)
-    return _windows_folders_cache
+        folders = _scan_windows_folders(root)
+        _windows_folders_cache['folders'] = folders
+        return folders
 
 
 # --- Fonction MAJ Git ---------------------------------------------------------
