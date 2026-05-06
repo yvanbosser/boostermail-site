@@ -223,10 +223,52 @@ class MicrosoftAuthProvider(AuthProvider):
             'name': user_info.get('displayName', ''),
         }
 
+    def _resolve_current_account(self, accounts: list) -> dict:
+        """Résout le compte MSAL pour l'utilisateur courant (multi-user safe).
+
+        Priorité :
+        1. Session Flask → auth_microsoft_oid (contexte route HTTP)
+        2. Thread-local user_id → DB → microsoft_oid (contexte BG thread)
+        3. Fallback accounts[0] (mono-user ou cas dégradé)
+        """
+        if len(accounts) == 1:
+            return accounts[0]
+
+        # 1. Session Flask
+        try:
+            from flask import session as _flask_session, has_request_context
+            if has_request_context():
+                oid = _flask_session.get('auth_microsoft_oid', '')
+                if oid:
+                    for acc in accounts:
+                        if acc.get('home_account_id', '').lower().startswith(oid.lower()):
+                            return acc
+        except Exception:
+            pass
+
+        # 2. Thread-local user_id → DB
+        try:
+            from user_context import get_current_user_id
+            user_id = get_current_user_id()
+            if user_id and user_id != 'default':
+                user_row = self._store._db.get_user(user_id)
+                if user_row:
+                    oid = user_row.get('microsoft_oid', '')
+                    if oid:
+                        for acc in accounts:
+                            if acc.get('home_account_id', '').lower().startswith(oid.lower()):
+                                return acc
+        except Exception:
+            pass
+
+        logger.warning("[auth] Impossible de résoudre le compte MSAL courant — fallback accounts[0]")
+        return accounts[0]
+
     def get_access_token(self) -> str | None:
         """
-        Retourne un access token valide.
+        Retourne un access token valide pour l'utilisateur courant.
         MSAL gère le refresh automatiquement via acquire_token_silent().
+        Multi-user safe via _resolve_current_account().
         """
         # Recharger le cache depuis la DB (au cas où il a changé)
         self._load_cache_from_db()
@@ -240,10 +282,13 @@ class MicrosoftAuthProvider(AuthProvider):
         # Filtrer offline_access
         api_scopes = [s for s in self._scopes if s != 'offline_access']
 
+        # Multi-user : résoudre le compte de l'utilisateur courant
+        account = self._resolve_current_account(accounts)
+
         # acquire_token_silent : retourne le token si valide, sinon refresh auto
         result = self._msal_app.acquire_token_silent(
             scopes=api_scopes,
-            account=accounts[0],  # Premier compte (mono-utilisateur)
+            account=account,
         )
 
         if not result:
