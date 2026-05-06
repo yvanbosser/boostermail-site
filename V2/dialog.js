@@ -1156,12 +1156,11 @@ function smartPaperclip() {
                 document.getElementById('smartPaperclipFolder').textContent = '\uD83D\uDCC1 ' + folderPath;
                 document.getElementById('popupSmartPaperclip').classList.add('active');
             } else {
-                // Pas de suggestion → fallback upload classique
-                alert('Aucune suggestion de dossier pour ce correspondant.');
+                _toast('Aucune suggestion de dossier pour ce correspondant.', 'error');
             }
         })
         .catch(function() {
-            alert('Erreur de connexion au backend.');
+            _toast('Erreur de connexion au backend.', 'error');
         });
 }
 
