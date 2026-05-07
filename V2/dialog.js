@@ -2019,16 +2019,37 @@ function _classifyClose() {
     try { window.close(); } catch (e) {}
 }
 
-// --- Fetch données mail ---
+// --- Fetch données mail (avec polling si suggestion pas encore prête) ---
 function _classifyFetchMailData() {
-    Promise.all([
-        _fetchWithBearer(_backendUrl + '/api/folders').then(function(r){return r.json();}).catch(function(){return {folders:[]};}),
-        _fetchWithBearer(_backendUrl + '/api/classement_mail/' + encodeURIComponent(_cfMessageId)).then(function(r){return r.json();}).catch(function(){return null;})
-    ]).then(function(results) {
-        _cfMailFolders = (results[0] && results[0].folders) || [];
-        _cfMailSuggestion = results[1] || {};
-        _classifyRenderMail();
-    });
+    // L'arbre Outlook est récupéré 1 seule fois (statique pendant la session)
+    _fetchWithBearer(_backendUrl + '/api/folders')
+        .then(function(r) { return r.json(); })
+        .catch(function() { return {folders: []}; })
+        .then(function(resp) {
+            _cfMailFolders = (resp && resp.folders) || [];
+            _classifyPollMailSuggestion(0);
+        });
+}
+
+function _classifyPollMailSuggestion(attempt) {
+    // Le BG prewarm classement met 1-5s à terminer ; on retente max 15 fois
+    // (toutes les 2s = 30s d'attente max) tant que la suggestion n'arrive pas.
+    _fetchWithBearer(_backendUrl + '/api/classement_mail/' + encodeURIComponent(_cfMessageId))
+        .then(function(r) { return r.json(); })
+        .catch(function() { return null; })
+        .then(function(resp) {
+            _cfMailSuggestion = resp || {};
+            var hasSuggestion = !!(resp && (resp.suggestion || (resp.suggestions && resp.suggestions[0])));
+            var stillRunning = !!(resp && (resp.status === 'running' || resp.status === 'miss'));
+            // Cas terminal : suggestion arrivée OU on a tenté 15 fois sans rien
+            if (hasSuggestion || (!stillRunning && attempt >= 2) || attempt >= 15) {
+                _classifyRenderMail();
+                return;
+            }
+            // Sinon : on rend ce qu'on a (= "Aucune suggestion") + retry 2s plus tard
+            _classifyRenderMail();
+            setTimeout(function() { _classifyPollMailSuggestion(attempt + 1); }, 2000);
+        });
 }
 
 function _classifyRenderMail() {
@@ -2202,16 +2223,32 @@ function _classifyUndoMail() {
     });
 }
 
-// --- Fetch données PJ ---
+// --- Fetch données PJ (avec polling identique à mail) ---
 function _classifyFetchPjData() {
-    Promise.all([
-        _fetchWithBearer(_backendUrl + '/api/windows_folders').then(function(r){return r.json();}).catch(function(){return {folders:[]};}),
-        _fetchWithBearer(_backendUrl + '/api/classement_pj/' + encodeURIComponent(_cfMessageId)).then(function(r){return r.json();}).catch(function(){return null;})
-    ]).then(function(results) {
-        _cfPjFolders = (results[0] && results[0].folders) || [];
-        _cfPjSuggestion = results[1] || {};
-        _classifyRenderPj();
-    });
+    _fetchWithBearer(_backendUrl + '/api/windows_folders')
+        .then(function(r) { return r.json(); })
+        .catch(function() { return {folders: []}; })
+        .then(function(resp) {
+            _cfPjFolders = (resp && resp.folders) || [];
+            _classifyPollPjSuggestion(0);
+        });
+}
+
+function _classifyPollPjSuggestion(attempt) {
+    _fetchWithBearer(_backendUrl + '/api/classement_pj/' + encodeURIComponent(_cfMessageId))
+        .then(function(r) { return r.json(); })
+        .catch(function() { return null; })
+        .then(function(resp) {
+            _cfPjSuggestion = resp || {};
+            var hasSuggestion = !!(resp && (resp.suggestion || (resp.suggestions && resp.suggestions[0])));
+            var stillRunning = !!(resp && (resp.status === 'running' || resp.status === 'miss'));
+            if (hasSuggestion || (!stillRunning && attempt >= 2) || attempt >= 15) {
+                _classifyRenderPj();
+                return;
+            }
+            _classifyRenderPj();
+            setTimeout(function() { _classifyPollPjSuggestion(attempt + 1); }, 2000);
+        });
 }
 
 function _classifyRenderPj() {
@@ -2334,7 +2371,7 @@ function _classifyResetPj() {
     var btnEl = document.getElementById('cfPjBtn');
     undoEl.style.display = 'none';
     btnEl.style.display = '';
-    btnEl.textContent = 'Ouvrir le dossier des PJ';
+    btnEl.textContent = 'Classer les PJ';
     btnEl.disabled = false;
 }
 
