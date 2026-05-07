@@ -351,7 +351,7 @@ from templates_mail import (detect_template, assemble_template,
 # pour validation dans les tests de démarrage).
 logger.info(f"[templates] {len(_FIXED_TEMPLATES)} templates fixes pré-chargés en RAM")
 
-_prompt_builder = None  # Instance ClaudeAssistant pour construction des prompts UNIQUEMENT
+_prompt_builder: dict = {}  # Per-user : {user_id: ClaudeAssistant} — un builder par user
 
 def _get_config_key(config, key):
     """Lookup case-insensitive dans config.json (ANTHROPIC_API_KEY ou anthropic_api_key)."""
@@ -401,28 +401,28 @@ def _get_user_pj_root() -> str:
 
 
 def _get_prompt_builder() -> ClaudeAssistant | None:
-    """Retourne le ClaudeAssistant pour construire les prompts (thread-safe #2)."""
-    global _prompt_builder
-    if _prompt_builder is not None:
-        return _prompt_builder
+    """Retourne le ClaudeAssistant per-user pour construire les prompts (thread-safe)."""
+    uid = (_get_current_user_id() or 'default') if _get_current_user_id else 'default'
+    if uid in _prompt_builder:
+        return _prompt_builder[uid]
     with _init_lock:
-        if _prompt_builder is not None:
-            return _prompt_builder
+        if uid in _prompt_builder:
+            return _prompt_builder[uid]
         try:
             with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
                 config = json.load(f)
             api_key = _get_config_key(config, 'anthropic_api_key').strip()
             user_name = _get_user_name('User')
             if api_key:
-                _prompt_builder = ClaudeAssistant(api_key=api_key, user_name=user_name)
-                # Charger le niveau rédactionnel
+                builder = ClaudeAssistant(api_key=api_key, user_name=user_name)
                 writing_level = _db.get_setting('writing_level')
                 if writing_level:
-                    _prompt_builder.reload_style(writing_level=writing_level)
-                logger.info(f"Prompt builder initialisé (user={user_name})")
+                    builder.reload_style(writing_level=writing_level)
+                _prompt_builder[uid] = builder
+                logger.info(f"Prompt builder initialisé (user={uid}, name={user_name})")
         except Exception as e:
             logger.error(f"Erreur init prompt builder: {e}")
-    return _prompt_builder
+    return _prompt_builder.get(uid)
 
 _ai_provider = None
 
@@ -464,13 +464,13 @@ def reset_ai_provider():
 
 
 def refresh_prompt_builder():
-    """Recharge le style profile et le writing level dans le prompt builder.
-    Appelé après un recalibrage ou un changement de profil de style."""
-    global _prompt_builder
-    if _prompt_builder:
+    """Recharge le style profile et le writing level dans le prompt builder du user courant."""
+    uid = (_get_current_user_id() or 'default') if _get_current_user_id else 'default'
+    builder = _prompt_builder.get(uid)
+    if builder:
         writing_level = _db.get_setting('writing_level')
-        _prompt_builder.reload_style(writing_level=writing_level)
-        logger.info(f"Prompt builder rafraîchi (niveau: {writing_level})")
+        builder.reload_style(writing_level=writing_level)
+        logger.info(f"Prompt builder rafraîchi (user={uid}, niveau: {writing_level})")
 
 
 # --- Graph Client Factory (étape 12e) ---------------------------------------
