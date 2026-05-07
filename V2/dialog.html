@@ -21,6 +21,16 @@
             var mode = p.get('mode') || '';
             if (mode === 'classify') {
                 document.documentElement.classList.add('mode-classify');
+                // 07/05 PM tardif — Style critique INLINE pour rendre
+                // classifyView visible et masquer le reste IMMÉDIATEMENT,
+                // sans attendre dialog.css externe. Sans ça la popup
+                // s'ouvrait vide → Outlook ou l'user la fermait avant que
+                // le CSS arrive.
+                try {
+                    var s = document.createElement('style');
+                    s.textContent = 'html.mode-classify .em-header,html.mode-classify .em-main,html.mode-classify .em-bottom-tools,html.mode-classify .em-popup-overlay,html.mode-classify #dashboardOverlay{display:none!important}html.mode-classify #classifyView{display:flex!important;flex-direction:column}html.mode-classify body{overflow:hidden;margin:0}';
+                    document.head.appendChild(s);
+                } catch (_) {}
                 // Log boot via fetch direct (le helper _debugLog n'est pas
                 // encore disponible côté dialog).
                 try {
@@ -524,13 +534,16 @@
     <!-- L'utilisateur ne voit pas du tout l'éditeur de réponse.     -->
     <!-- ============================================================ -->
     <div id="classifyView" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:300;background:#f8f9fb;flex-direction:column;">
+        <!-- Fallback visible IMMÉDIATEMENT si CSS / JS pas encore chargés.
+             Sans ça, la popup s'ouvrait vide et Outlook/user la fermait. -->
+        <noscript><div style="padding:20px;color:#c00;">JavaScript requis pour BoosterMail Classer rapide</div></noscript>
         <!-- En-tête : mail de X + objet + bouton Fermer -->
-        <div class="cf-header">
-            <div class="cf-header-text">
-                <div class="cf-header-from">Mail de <strong id="cfFrom">…</strong></div>
-                <div class="cf-header-subj" id="cfSubject">Objet…</div>
+        <div class="cf-header" style="background:linear-gradient(135deg,#0F6CBD 0%,#1976D2 100%);color:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;">
+            <div class="cf-header-text" style="flex:1;min-width:0;">
+                <div class="cf-header-from" style="font-size:13px;opacity:0.9;">Mail de <strong id="cfFrom">…</strong></div>
+                <div class="cf-header-subj" id="cfSubject" style="font-size:16px;font-weight:600;margin-top:2px;">Chargement…</div>
             </div>
-            <button class="cf-close" onclick="_classifyClose()" title="Fermer">&#x2715;</button>
+            <button class="cf-close" onclick="_classifyClose && _classifyClose()" title="Fermer" style="background:rgba(255,255,255,0.18);border:none;color:#fff;width:32px;height:32px;border-radius:6px;font-size:16px;cursor:pointer;">&#x2715;</button>
         </div>
 
         <!-- 2 colonnes : mail à gauche, PJ à droite -->
