@@ -572,6 +572,14 @@ Aucun doc vivant (`PROMPT_REPRISE_NEW_OUTLOOK`, `ONBOARDING_NEW_OUTLOOK_VIA_OVH`
 - **Action si violé** : remplacer la ref par `C:\EasyMail\...` ou par le chemin relatif équivalent (les chemins relatifs des docs supposent racine = `C:\EasyMail\`)
 - **Vérifié par** : `audit/tests/cloture_check.sh`
 
+### I-SESS-06 : Branche active ≠ dev/master en fin de session (ajout 07/05/2026)
+La branche active à la clôture d'une session ne doit jamais être `dev`, `master` ou `main`. Yvan travaille sur `feat/yvan/frontend`, Michael sur `feat/michael/multi-user`. `dev` est une branche d'intégration partagée — toute modification doit y arriver via PR depuis la branche du contributeur, jamais via push direct.
+- **Test** : `git branch --show-current` → ne doit pas retourner `dev`, `master`, ou `main` (sauf cas worktree temporaire en detached HEAD).
+- **Pourquoi** : 07/05/2026, mise en place du multi-contributeur (Yvan frontend + Michael multi-user). Le travail de chacun doit rester isolé pour permettre revue + rollback granulaire. Push direct sur `dev` = pollution de l'historique partagé.
+- **Action si violé** : créer la branche du contributeur depuis l'état actuel (`git checkout -b feat/yvan/frontend`), revert les commits sur `dev/master` si déjà poussés.
+- **Vérifié par** : `audit/tests/cloture_check.sh`
+- **Référence** : `docs/CONVENTIONS_GIT_BRANCHES.md`
+
 ## Catégorie 15 — Conventions code V2 (ajout 29/04/2026 PM tardif post-audit stabilisation)
 
 ### I-CODE-MODELS-01 : Modèles Claude centralisés (pas de hardcode)

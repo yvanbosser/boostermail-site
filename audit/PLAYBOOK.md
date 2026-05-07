@@ -227,10 +227,22 @@ Trou détecté **après 7-8 audits ULTRA passés sans le voir** (exemple popup.h
 
 ## Workflow 7 — "Kit fin de session" (trigger : Yvan tape "kit fin de session")
 
+### 🚨 RÈGLE GIT ABSOLUE (07/05/2026) — à vérifier AVANT toute opération
+| Contributeur | Branche de push obligatoire |
+|---|---|
+| **Yvan** | `feat/yvan/frontend` |
+| **Michael** | `feat/michael/multi-user` |
+
+**JAMAIS de push direct sur `dev` ou `master`.** Détails : [`docs/CONVENTIONS_GIT_BRANCHES.md`](../docs/CONVENTIONS_GIT_BRANCHES.md).
+
+Vérification mécanique en début d'étape 1 : `git branch --show-current` doit retourner la branche du contributeur (sinon switcher avant tout commit).
+
 ### Objectif
 Garantir une clôture de session 100% propre — aucune information perdue, aucune incohérence entre docs, aucune modif locale non commitée. Reproduit la rigueur du kit audit pour l'aspect documentaire.
 
 ### Engagement Claude (opposable)
+- **Je vérifie `git branch --show-current` AVANT tout commit ou push.** Si pas sur `feat/<user>/<scope>`, je switch avant.
+- **Je ne pousse JAMAIS sur `dev` ou `master`.** Push uniquement sur la branche du contributeur.
 - **Je ne déclare PAS la session close avant que `audit/tests/cloture_check.sh` retourne exit 0.**
 - **Si je modifie un doc qui contient un chiffre dynamique (commits, audits, etc.), je relance `cloture_check.sh` dans la foulée.**
 - **Je ne touche pas au `PROMPT_REPRISE_NEW_OUTLOOK.md` sans relancer le check de cohérence après.**
@@ -238,6 +250,7 @@ Garantir une clôture de session 100% propre — aucune information perdue, aucu
 ### Étapes (ordre strict)
 
 1. **Pré-clôture — état des lieux (2 min)**
+   - **`git branch --show-current` → doit retourner `feat/yvan/frontend` (ou `feat/michael/multi-user`).** Si pas le cas, switcher AVANT toute autre étape (cf règle git absolue ci-dessus).
    - `git status --short` → noter modifs locales en cours
    - `git log --oneline --since='today 00:00' | wc -l` → noter le compte de commits du jour
    - Si modifs en cours : commiter le travail technique en commits granulaires AVANT d'attaquer la doc
@@ -268,9 +281,10 @@ Garantir une clôture de session 100% propre — aucune information perdue, aucu
    - Si exit 0 → continuer étape 6
    - Si exit ≥ 1 → fix les anomalies listées + relancer le script + boucle jusqu'à exit 0
 
-6. **Commit final unique des MAJ docs**
+6. **Commit final unique des MAJ docs + push sur la branche du contributeur**
    - 1 seul commit thématique `docs(session): cloture session AAAAMMJJ — bilan + MAJ cascade`
-   - Fast-forward master
+   - **Push sur `feat/yvan/frontend` (ou `feat/michael/multi-user`)** : `git push product feat/yvan/frontend` — **JAMAIS sur `dev` ou `master`**
+   - Pour intégrer dans `dev` : créer une PR sur GitHub depuis la branche du contributeur (pas de merge local sur `dev`)
    - Si `cloture_check.sh` retournait exit 0 avant ce commit, il continuera à retourner exit 0 après (le commit ne touche pas aux invariants)
 
 7. **Validation finale (30 sec)**
@@ -280,12 +294,15 @@ Garantir une clôture de session 100% propre — aucune information perdue, aucu
 
 ### Critères de succès (tous obligatoires)
 - ✅ `git status --short` vide
+- ✅ `git branch --show-current` = `feat/yvan/frontend` (ou `feat/michael/multi-user`)
+- ✅ Push effectué sur la branche du contributeur, **pas sur `dev` ou `master`**
 - ✅ `cloture_check.sh` exit 0
 - ✅ `PROMPT_REPRISE_NEW_OUTLOOK.md` reflète l'état au moment de la clôture
 - ✅ Bilan de session complet (toutes sections obligatoires remplies)
 
-### Anomalies récurrentes à éviter (vécu 27/04/2026)
+### Anomalies récurrentes à éviter (vécu 27/04/2026 + 07/05/2026)
 - Annoncer "session close" sans avoir lancé `cloture_check.sh`
+- **Pousser sur `dev` ou `master` directement (07/05) → toujours sur `feat/<user>/<scope>`**
 - Modifier `PLUS_TARD_VF` sans propager dans `PROMPT_REPRISE`
 - Figer un chiffre de commits qui devient obsolète au commit suivant (auto-référence) → utiliser `git log` comme source dynamique
 - Oublier d'ajouter au backlog les sujets émergents constatés en cours de session
@@ -293,6 +310,16 @@ Garantir une clôture de session 100% propre — aucune information perdue, aucu
 ---
 
 ## Workflow 8 — "Kit ouverture de session" (trigger : Yvan copie le PROMPT_REPRISE)
+
+### 🚨 RÈGLE GIT ABSOLUE (07/05/2026) — à appliquer DÈS le démarrage
+| Contributeur | Branche de push obligatoire |
+|---|---|
+| **Yvan** | `feat/yvan/frontend` |
+| **Michael** | `feat/michael/multi-user` |
+
+**JAMAIS de push direct sur `dev` ou `master`.** Détails : [`docs/CONVENTIONS_GIT_BRANCHES.md`](../docs/CONVENTIONS_GIT_BRANCHES.md).
+
+Vérification mécanique en étape 1 ci-dessous.
 
 ### Objectif
 Démarrer une nouvelle session avec le contexte complet de la session précédente, sans rien perdre.
@@ -307,10 +334,11 @@ Yvan copie-colle `docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md` dans la nouvelle s
    - Si un `pwd` ou un Glob retourne un chemin OneDrive lié au projet → arrêter et alerter Yvan.
    - Couvert par `I-SESS-05` dans `audit/INVARIANTS.md` (vérification mécanique en fin de session via `cloture_check.sh`).
 
-1. **Vérification worktree (30 sec)**
-   - `git -C C:/EasyMail branch --show-current` → doit retourner `master`
+1. **Vérification branche + worktree (30 sec, MAJ 07/05/2026)**
+   - `git -C C:/EasyMail branch --show-current` → doit retourner **`feat/yvan/frontend`** (Yvan) ou **`feat/michael/multi-user`** (Michael). PAS `dev`, PAS `master`.
+   - Si pas sur la bonne branche : `git fetch product && git checkout feat/yvan/frontend` (ou la créer depuis dev à jour : `git checkout -b feat/yvan/frontend product/dev`)
    - `git -C C:/EasyMail log --oneline -5` → top doit matcher l'état décrit dans le PROMPT_REPRISE
-   - Si worktree différent (style `claude/happy-XXXX`), exécuter `git fetch && git merge master --no-edit`
+   - Si worktree différent (style `claude/happy-XXXX`), récupérer les changements : `git fetch product && git rebase product/dev`
 
 2. **Tests de validation infra (30 sec)**
    - `ssh -o BatchMode=yes -o ConnectTimeout=5 ubuntu@51.178.162.208 "echo OK_SSH_KEY_WORKS"`

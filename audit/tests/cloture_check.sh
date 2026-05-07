@@ -194,6 +194,29 @@ else
 fi
 
 # --------------------------------------------------------------------------
+# I-SESS-06 : pas de session sur la branche `dev` ou `master` (07/05/2026)
+#
+# Convention git absolue : Yvan travaille sur `feat/yvan/frontend`,
+# Michael sur `feat/michael/multi-user`. Aucun commit/push direct sur
+# `dev` ou `master`. Si la branche active est dev/master en fin de
+# session, c'est un signal qu'on a oublié la convention.
+# --------------------------------------------------------------------------
+print_section "I-SESS-06 — branche active != dev/master (convention contributeur)"
+
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
+if [ -z "$CURRENT_BRANCH" ]; then
+    ok "I-SESS-06 : detached HEAD (worktree temporaire OK)"
+elif [ "$CURRENT_BRANCH" = "dev" ] || [ "$CURRENT_BRANCH" = "master" ] || [ "$CURRENT_BRANCH" = "main" ]; then
+    ko "I-SESS-06 : branche active = '$CURRENT_BRANCH' — INTERDIT"
+    echo "    → Yvan doit travailler sur 'feat/yvan/frontend'"
+    echo "    → Michael doit travailler sur 'feat/michael/multi-user'"
+    echo "    → Voir docs/CONVENTIONS_GIT_BRANCHES.md"
+else
+    ok "I-SESS-06 : branche active = '$CURRENT_BRANCH' (pas dev/master)"
+fi
+
+
+# --------------------------------------------------------------------------
 # Synthèse finale
 # --------------------------------------------------------------------------
 print_section "SYNTHÈSE"
