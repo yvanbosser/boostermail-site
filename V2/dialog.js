@@ -2021,6 +2021,17 @@ function _classifyClose() {
 
 // --- Fetch données mail (avec polling si suggestion pas encore prête) ---
 function _classifyFetchMailData() {
+    // 07/05 fix Anna Chu — Si le mail n'est pas en email_cache (cas typique
+    // pour un mail récent qui n'a pas encore été ouvert dans le dialog
+    // principal BoosterMail), le BG prewarm classement est silencieusement
+    // skippé dans _fetch_single_preview_plate (étape 3, condition
+    // `if cached:`). Conséquence : status='miss' éternellement.
+    // → On force un GET /api/email_body au boot, qui fait le fetch Graph
+    //   live et persiste en email_cache. Le polling classement prendra
+    //   ensuite le relais (le BG _prewarm_mail_preview pourra démarrer).
+    _fetchWithBearer(_backendUrl + '/api/email_body?messageId=' + encodeURIComponent(_cfMessageId))
+        .catch(function() { /* peu importe le résultat, on enchaîne */ });
+
     // L'arbre Outlook est récupéré 1 seule fois (statique pendant la session)
     _fetchWithBearer(_backendUrl + '/api/folders')
         .then(function(r) { return r.json(); })
