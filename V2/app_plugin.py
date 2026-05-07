@@ -351,7 +351,7 @@ from templates_mail import (detect_template, assemble_template,
 # pour validation dans les tests de démarrage).
 logger.info(f"[templates] {len(_FIXED_TEMPLATES)} templates fixes pré-chargés en RAM")
 
-_prompt_builder = None  # Instance ClaudeAssistant pour construction des prompts UNIQUEMENT
+_prompt_builder: dict = {}  # Per-user : {user_id: ClaudeAssistant} — un builder par user
 
 def _get_config_key(config, key):
     """Lookup case-insensitive dans config.json (ANTHROPIC_API_KEY ou anthropic_api_key)."""
@@ -362,29 +362,67 @@ def _get_config_key(config, key):
             return v
     return ''
 
+def _get_user_name(fallback: str = 'User') -> str:
+    """Retourne le nom de l'utilisateur courant pour les signatures/prompts.
+
+    Lit display_name dans la table users (per-user) → fallback settings.user_name
+    (global, mono-user legacy). Garantit que Michael voit son propre nom, pas celui
+    de Yvan, dans les mails générés.
+    """
+    try:
+        from user_context import get_current_user_id
+        uid = get_current_user_id()
+        if uid and uid != 'default':
+            # Nom éditable (saisi onboarding/profil) en priorité
+            name = _db.get_user_editable_name(uid)
+            if not name:
+                user_row = _db.get_user(uid)
+                if user_row:
+                    name = (user_row.get('display_name') or '').strip()
+            if name:
+                return name
+    except Exception:
+        pass
+    return (_db.get_setting('user_name', fallback) or fallback)
+
+
+def _get_user_pj_root() -> str:
+    """Retourne le dossier PJ racine du user courant (per-user)."""
+    try:
+        from user_context import get_current_user_id
+        uid = get_current_user_id() or 'default'
+        if uid != 'default':
+            path = _db.get_user_pj_root(uid)
+            if path:
+                return path
+    except Exception:
+        pass
+    return _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
+
+
 def _get_prompt_builder() -> ClaudeAssistant | None:
-    """Retourne le ClaudeAssistant pour construire les prompts (thread-safe #2)."""
-    global _prompt_builder
-    if _prompt_builder is not None:
-        return _prompt_builder
+    """Retourne le ClaudeAssistant per-user pour construire les prompts (thread-safe)."""
+    uid = (_get_current_user_id() or 'default') if _get_current_user_id else 'default'
+    if uid in _prompt_builder:
+        return _prompt_builder[uid]
     with _init_lock:
-        if _prompt_builder is not None:
-            return _prompt_builder
+        if uid in _prompt_builder:
+            return _prompt_builder[uid]
         try:
             with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
                 config = json.load(f)
             api_key = _get_config_key(config, 'anthropic_api_key').strip()
-            user_name = _db.get_setting('user_name', 'User')
+            user_name = _get_user_name('User')
             if api_key:
-                _prompt_builder = ClaudeAssistant(api_key=api_key, user_name=user_name)
-                # Charger le niveau rédactionnel
+                builder = ClaudeAssistant(api_key=api_key, user_name=user_name)
                 writing_level = _db.get_setting('writing_level')
                 if writing_level:
-                    _prompt_builder.reload_style(writing_level=writing_level)
-                logger.info(f"Prompt builder initialisé (user={user_name})")
+                    builder.reload_style(writing_level=writing_level)
+                _prompt_builder[uid] = builder
+                logger.info(f"Prompt builder initialisé (user={uid}, name={user_name})")
         except Exception as e:
             logger.error(f"Erreur init prompt builder: {e}")
-    return _prompt_builder
+    return _prompt_builder.get(uid)
 
 _ai_provider = None
 
@@ -426,13 +464,13 @@ def reset_ai_provider():
 
 
 def refresh_prompt_builder():
-    """Recharge le style profile et le writing level dans le prompt builder.
-    Appelé après un recalibrage ou un changement de profil de style."""
-    global _prompt_builder
-    if _prompt_builder:
+    """Recharge le style profile et le writing level dans le prompt builder du user courant."""
+    uid = (_get_current_user_id() or 'default') if _get_current_user_id else 'default'
+    builder = _prompt_builder.get(uid)
+    if builder:
         writing_level = _db.get_setting('writing_level')
-        _prompt_builder.reload_style(writing_level=writing_level)
-        logger.info(f"Prompt builder rafraîchi (niveau: {writing_level})")
+        builder.reload_style(writing_level=writing_level)
+        logger.info(f"Prompt builder rafraîchi (user={uid}, niveau: {writing_level})")
 
 
 # --- Graph Client Factory (étape 12e) ---------------------------------------
@@ -5875,7 +5913,7 @@ def _start_speculative(mail_data):
                 importance_override=importance_int,
             )
             if template:
-                user_name = _db.get_setting('user_name', '')
+                user_name = _get_user_name()
                 # PLUS_TARD_VF #3 (28/04) — signature personnalisée par contact :
                 # utiliser la signature résolue (contact_profile override sinon fallback global)
                 signature = _resolve_user_signature(contact_profile, user_name)
@@ -6928,7 +6966,14 @@ def api_set_ai_model():
 @app.route('/api/settings/<key>', methods=['GET'])
 def api_get_setting(key):
     """Lecture d'un réglage utilisateur."""
-    value = _db.get_setting(key)
+    from user_context import get_current_user_id
+    uid = get_current_user_id() or 'default'
+    if uid != 'default' and key == 'user_name':
+        value = _db.get_user_editable_name(uid) or _db.get_setting(key)
+    elif uid != 'default' and key == 'pj_root_folder':
+        value = _db.get_user_pj_root(uid) or _db.get_setting(key)
+    else:
+        value = _db.get_setting(key)
     return jsonify({"key": key, "value": value})
 
 
@@ -6961,10 +7006,17 @@ def api_save_setting():
         return jsonify({"error": "Clé requise"}), 400
     if key not in _ALLOWED_SETTINGS:
         return jsonify({"error": f"Clé '{key}' non autorisée"}), 403
-    _db.save_setting(key, value)
-    # Invalider le cache arborescence Windows du user courant si le dossier racine PJ change
-    if key == 'pj_root_folder':
+    from user_context import get_current_user_id
+    uid = get_current_user_id() or 'default'
+    if uid != 'default' and key == 'user_name':
+        _db.save_user_editable_name(uid, value)
+    elif uid != 'default' and key == 'pj_root_folder':
+        _db.save_user_pj_root(uid, value)
         _windows_folders_cache.pop('folders', None)
+    else:
+        _db.save_setting(key, value)
+        if key == 'pj_root_folder':
+            _windows_folders_cache.pop('folders', None)
     return jsonify({"status": "ok"})
 
 
@@ -7155,7 +7207,7 @@ def _extract_subject_keywords(subject):
     if not subject:
         return ''
     cleaned = re.sub(r'^(Re|Fw|Fwd|Tr|FW|RE)\s*:\s*', '', subject, flags=re.IGNORECASE).strip()
-    user_name = (_db.get_setting('user_name') or '').lower()
+    user_name = _get_user_name('').lower()
     user_last = user_name.split()[-1] if user_name else ''
     _STOP = {'le','la','les','un','une','des','et','ou','de','du','en','est','pour','avec','sur',
              'par','dans','au','aux','ce','son','sa','ses','mon','ma','mes','ton','ta','tes',
@@ -8590,7 +8642,7 @@ def api_windows_folders():
     """Retourne l'arborescence des dossiers Windows (cache session)."""
     try:
         folders = _get_windows_folders_cached()
-        root = _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
+        root = _get_user_pj_root()
         return jsonify({"folders": folders or [], "root": root})
     except Exception as e:
         return jsonify({"error": _safe_err(e)}), 500
@@ -8651,11 +8703,11 @@ def api_windows_folders_push():
         _db.save_user_windows_folders(root_path, folders, server_hash, user_id=_uid)
         _windows_folders_cache.pop('folders', None)
 
-        # Aussi mettre à jour le setting pj_root_folder si différent
-        # (utile pour la cohérence avec la page Profil)
+        # Mettre à jour le dossier PJ racine per-user (cohérence page Profil)
         try:
-            current_root = _db.get_setting('pj_root_folder')
-            if current_root != root_path:
+            if _uid != 'default':
+                _db.save_user_pj_root(_uid, root_path)
+            else:
                 _db.save_setting('pj_root_folder', root_path)
         except Exception:
             pass
@@ -8694,7 +8746,7 @@ def api_windows_folders_status():
             return jsonify({
                 "synced": False,
                 "count": 0,
-                "root_path": _db.get_setting('pj_root_folder') or '',
+                "root_path": _get_user_pj_root() or '',
                 "synced_at": None,
                 "synced_at_human": "Aucune arborescence détectée",
                 "freshness": "missing",
@@ -8877,7 +8929,7 @@ def api_smart_paperclip():
 def api_open_windows_folder():
     """Ouvre un dossier Windows dans l'explorateur (Windows uniquement)."""
     folder_path = request.args.get('path', '')
-    root = _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
+    root = _get_user_pj_root()
     full_path = os.path.normpath(os.path.join(root, folder_path.replace('/', os.sep)))
     # Securite path traversal
     if not os.path.normcase(os.path.realpath(full_path)).startswith(
@@ -9262,7 +9314,7 @@ def _get_windows_folders_cached():
         except Exception as _e:
             logger.debug(f"[windows_folders] DB read échec : {_e}")
         # [2] Fallback scan filesystem local (mode dev seulement)
-        root = _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
+        root = _get_user_pj_root()
         folders = _scan_windows_folders(root)
         _windows_folders_cache['folders'] = folders
         return folders
@@ -9633,7 +9685,7 @@ def api_instant_reply():
                 pass
             greeting = ((contact_profile or {}).get('greeting', '') or 'Bonjour,')
             closing = ((contact_profile or {}).get('closing', '') or 'Cordialement,')
-            user_name = _db.get_setting('user_name', '') or ''
+            user_name = _get_user_name()
             # PLUS_TARD_VF #3 (28/04) — signature personnalisée par contact.
             # `user_name` reste utilisé pour les gardes anti-self-greeting
             # (extraction patronyme canonique), `signature` pour le rendu final.
@@ -9777,7 +9829,7 @@ def api_instant_reply():
                 contact_profile = _db.get_contact_profile(from_email)
         except Exception:
             pass
-        user_name = _db.get_setting('user_name', '') or ''
+        user_name = _get_user_name()
         # PLUS_TARD_VF #3 (28/04) — signature résolue par contact
         signature = _resolve_user_signature(contact_profile, user_name)
         if m['source'] == 'fixed':
@@ -9923,7 +9975,7 @@ def api_match_template():
     except Exception:
         pass
 
-    user_name = _db.get_setting('user_name', '') or ''
+    user_name = _get_user_name()
     # PLUS_TARD_VF #3 (28/04) — signature résolue par contact
     signature = _resolve_user_signature(contact_profile, user_name)
 
@@ -10779,13 +10831,13 @@ def generate_reply():
             _preemptive_imp = cached.get('importance', 'S')
             _preemptive_cp = _db.get_contact_profile(_preemptive_from) if _preemptive_from else None
             # STAND-BY S4 — helper centralisé (avant : ~30 lignes dupliquées)
+            _preemptive_uname = _get_user_name()
             _preemptive_greeting, _preemptive_closing = _normalize_reply_greeting_closing(
-                _preemptive_cp, _preemptive_from, _db.get_setting('user_name', '')
+                _preemptive_cp, _preemptive_from, _preemptive_uname
             )
             # PLUS_TARD_VF #3 (28/04) — signature résolue par contact
             # (override par contact_profile sinon settings.user_name).
-            _preemptive_sig = _resolve_user_signature(_preemptive_cp,
-                                                      _db.get_setting('user_name', ''))
+            _preemptive_sig = _resolve_user_signature(_preemptive_cp, _preemptive_uname)
 
             def stream_from_preemptive():
                 # Greeting (même structure que generate_sse)
@@ -11144,7 +11196,7 @@ INSTRUCTIONS ECHEANCES :
 
     # --- 12l : Pré-injection greeting / closing / signature ---
     # correspondent déjà défini plus haut (to_email si forward, sinon from_email)
-    user_name = _db.get_setting('user_name', '')
+    user_name = _get_user_name()
     # STAND-BY S4 — helper centralisé (avant : ~30 lignes dupliquées avec preemptive)
     greeting, closing = _normalize_reply_greeting_closing(
         contact_profile, correspondent, user_name
@@ -11281,7 +11333,7 @@ INSTRUCTIONS ECHEANCES :
 
                 # 2. Nom utilisateur dans le greeting
                 try:
-                    _uname = _db.get_setting('user_name') or ''
+                    _uname = _get_user_name()
                     _ulast = _uname.split()[-1].lower() if _uname else ''
                     if _ulast and len(_ulast) >= 3 and _ulast in _first_line.lower():
                         _pg_warnings.append('greeting_self_name')
@@ -13197,7 +13249,7 @@ def api_setup_status():
         "companion_installed": companion_installed == 'true',
         "onboarding_done": onboarding_done == 'true',
         "button_activated": onboarding_done == 'true',
-        "user_name": _db.get_setting('user_name', ''),
+        "user_name": _get_user_name(''),
     })
 
 
@@ -13215,11 +13267,16 @@ def api_setup_complete():
     if step not in valid_steps:
         return jsonify({"error": f"Étape invalide : {step}"}), 400
 
-    # Étape 2 : Compte EasyMail — sauvegarder le nom
+    # Étape 2 : Compte EasyMail — sauvegarder le nom per-user
     if step == '2':
         user_name = step_data.get('user_name', '').strip()
         if user_name:
-            _db.save_setting('user_name', user_name)
+            from user_context import get_current_user_id
+            _uid2 = get_current_user_id() or 'default'
+            if _uid2 != 'default':
+                _db.save_user_editable_name(_uid2, user_name)
+            else:
+                _db.save_setting('user_name', user_name)
 
     # Étape 3 : Companion
     if step == '3':
@@ -13563,9 +13620,9 @@ def page_profile():
         default_importance = int(_db.get_setting('default_importance', '2') or 2)
     except Exception:
         default_importance = 2
-    user_name = _db.get_setting('user_name') or ''
+    user_name = _get_user_name()
     user_email = _get_my_email() or ''
-    pj_root = _db.get_setting('pj_root_folder', 'C:\\Documents')
+    pj_root = _get_user_pj_root() or 'C:\\Documents'
     mail_count = _db.get_setting('onboarding_mail_count', '800')
     show_sig = _db.get_setting('show_marketing_signature', '1') == '1'
     return render_template('profile.html',
@@ -13714,7 +13771,7 @@ def api_style_status():
         'needs_setup': not has_style,
         'step': 'done' if has_style else 'idle',
         'chunks': 0,
-        'detected_name': (_db.get_setting('user_name') or '').split(' ')[0] if _db.get_setting('user_name') else '',
+        'detected_name': _get_user_name('').split(' ')[0],
     })
 
 

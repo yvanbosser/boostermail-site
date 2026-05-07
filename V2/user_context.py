@@ -148,22 +148,18 @@ def get_current_user_id() -> str:
     -----
     Niveaux de fallback (par ordre) :
 
-    1. ``request.auth_user_id`` (posé par le décorateur ``@require_auth``
-       de ``auth_base.py`` ou par ``@require_user`` ci-dessous)
-    2. ``session.get('auth_user_id')`` (route sans décorateur mais user
-       déjà loggé via OAuth)
-    3. **Bridge mono-user DB** (``settings.auth_user_id``) — pour les
-       BG threads, atexit hooks, scripts CLI sans Flask context. Garantit
-       la cohérence routes Flask ↔ BG en mode mono-user (Yvan).
+    0. Thread-local ``user_id`` (BG thread avec user_id capturé au spawn via ``_spawn_bg``)
+    1. ``request.auth_user_id`` (posé par ``@require_auth`` ou ``@require_user``)
+    2. ``session.get('auth_user_id')`` (route sans décorateur, user loggé, cookie présent)
+    2.5 **Bearer JWT** ``Authorization: Bearer <token>`` (dialog Office.js cross-origin
+       → pas de cookie session transmis → ``_fetchWithBearer()`` dans dialog.js).
+    3. ``''`` — en contexte HTTP, jamais le bridge DB. Un utilisateur sans auth valide
+       obtient ``''`` (→ ``or 'default'`` chez l'appelant). Évite la fuite cross-user :
+       le bridge DB retournerait le dernier user loggé, ce qui est faux en multi-tenant.
 
-    Le niveau 3 est crucial : sans lui, le BG cont-spec écrirait dans
-    ``_reply_cache['default']`` mais les routes Flask de Yvan (qui ont
-    ``auth_user_id`` en session) liraient ``_reply_cache['user_yvan']``
-    → MISS systématique. Avec le bridge DB, BG et routes convergent
-    vers le même user_id.
-
-    Le bridge DB sera supprimé quand BoosterMail passera en multi-user
-    actif simultané (le BG devra alors iterate users).
+    **Hors contexte HTTP** (BG thread sans thread-local, atexit, scripts CLI) :
+    → Bridge DB (``settings.auth_user_id``) — garantit la cohérence cache BG ↔ routes
+      en mode quasi-mono-user (le BG écrit dans le bon cache user).
 
     L'appelant peut faire ``user_id = get_current_user_id() or 'default'``
     pour avoir un fallback ultime si la DB elle-même n'est pas accessible.
@@ -193,7 +189,30 @@ def get_current_user_id() -> str:
         except RuntimeError:
             pass
 
-    # Priorité 3 : bridge DB (BG thread, atexit, etc.)
+        # Préférence 2.5 : Bearer JWT (dialog Office.js cross-origin → pas de cookie)
+        # _fetchWithBearer() dans dialog.js envoie Authorization: Bearer <token>
+        # ce fallback évite que le bridge DB (priorité 3) retourne le mauvais user_id
+        try:
+            auth_header = request.headers.get('Authorization', '')
+            if auth_header.startswith('Bearer '):
+                bearer = auth_header[7:]
+                from auth_jwt import decode_token as _decode_jwt
+                from flask import current_app
+                jwt_uid = _decode_jwt(bearer, current_app.secret_key)
+                if jwt_uid:
+                    return jwt_uid
+        except Exception:
+            pass
+
+        # En contexte HTTP sans auth trouvée → retourner '' (JAMAIS le bridge DB).
+        # Le bridge DB retourne le dernier user loggé en DB → fuite cross-user en
+        # multi-tenant. En HTTP, un utilisateur sans session valide doit obtenir ''
+        # (l'appelant fait `or 'default'`) plutôt que les données d'un autre user.
+        # Le bridge DB reste uniquement pour les BG threads / atexit sans Flask context.
+        return ''
+
+    # Hors contexte HTTP (BG thread sans thread-local, atexit, scripts CLI)
+    # → bridge DB OK : le BG doit écrire dans le bon cache user.
     return _get_user_id_from_db()
 
 
