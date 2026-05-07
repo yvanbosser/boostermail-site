@@ -2198,7 +2198,12 @@ class Database:
         return [dict(r) for r in c.fetchall()]
 
     def purge_archived_echeances(self):
-        """Supprime les echeances terminees et annulees du user courant."""
+        """Supprime les echeances terminees et annulees du user courant.
+
+        Action manuelle : appelée par le bouton « Vider l'archive » dans
+        l'overlay echeances. Vide TOUT (sans filtre d'âge), pour ce user
+        uniquement.
+        """
         uid = self._uid()
         conn = self._conn()
         c = conn.cursor()
@@ -2206,6 +2211,49 @@ class Database:
         deleted = c.rowcount
         conn.commit()
         return deleted
+
+    def purge_old_echeances_all_users(self):
+        """Purge automatique des vieilles echeances pour TOUS les users
+        (pas user-scoped — appelée par un thread BG quotidien).
+
+        Règles (07/05) :
+        1. terminee ou annulee → supprimées 30 jours après completed_at
+        2. active jamais traitée, en retard > 30 jours → supprimées
+        3. pending_confirmation jamais arbitrée → supprimées 60 jours après création
+
+        Retourne (n_validees_annulees, n_actives_mortes, n_pending_orphelines).
+        Silencieux côté user (pas de notif), juste log INFO côté serveur.
+        """
+        conn = self._conn()
+        c = conn.cursor()
+
+        # Règle 1 : terminée/annulée vieilles de 30+ jours
+        c.execute("""
+            DELETE FROM echeances
+            WHERE statut IN ('terminee', 'annulee')
+              AND completed_at IS NOT NULL
+              AND completed_at < datetime('now', '-30 days')
+        """)
+        n1 = c.rowcount
+
+        # Règle 2 : active jamais traitée, en retard de 30+ jours
+        c.execute("""
+            DELETE FROM echeances
+            WHERE statut = 'active'
+              AND date_echeance < date('now', '-30 days')
+        """)
+        n2 = c.rowcount
+
+        # Règle 3 : pending_confirmation jamais arbitrée, > 60 jours
+        c.execute("""
+            DELETE FROM echeances
+            WHERE statut = 'pending_confirmation'
+              AND created_at < datetime('now', '-60 days')
+        """)
+        n3 = c.rowcount
+
+        conn.commit()
+        return (n1, n2, n3)
 
     def update_echeance(self, echeance_id, updates):
         """Met a jour une echeance."""

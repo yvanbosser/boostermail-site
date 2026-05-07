@@ -49,6 +49,12 @@ var _fromEmail = _params.get('fromEmail') || _params.get('from') || '';
 var _toEmail = _params.get('to') || '';
 var _ccEmail = _params.get('cc') || '';
 var _subject = _params.get('subject') || '';
+// 07/05 — `brief` pré-rempli quand le dialog est ouvert depuis l'overlay
+// échéances pour une relance (tableau de bord → bouton « Relance rapide »).
+// Le brief est riche (ton + historique relances + extrait mail d'origine —
+// cf api_echeance_relance) et est destiné au textarea fieldBrief.
+var _briefPrefilled = _params.get('brief') || '';
+var _relanceId = _params.get('relance_id') || '';
 var _hasAttachments = _params.get('hasAttachments') === '1';
 
 // 02/05/2026 — Section « Connexion Outlook » dans Profil : on capture la
@@ -436,6 +442,14 @@ function _loadEcheancesUrgentes() {
         briefField.placeholder = 'Decrivez votre mail en quelques mots (obligatoire)';
     } else {
         briefField.placeholder = 'Instructions (optionnel)';
+    }
+
+    // 07/05 — Pré-remplissage brief pour les relances depuis l'overlay
+    // échéances. Le brief riche (ton + historique + extrait) est passé en
+    // ?brief=... et l'utilisateur n'a qu'à cliquer « Générer » pour lancer
+    // le streaming Claude. Il peut éditer avant si besoin.
+    if (_briefPrefilled && briefField && !briefField.value) {
+        briefField.value = _briefPrefilled;
     }
 
     // Boutons mode : highlight le bon, masquer juste les 3 boutons Reply en mode new

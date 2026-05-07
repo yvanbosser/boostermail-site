@@ -3411,6 +3411,31 @@ threading.Thread(target=_cohesion_refresh_loop, daemon=True, name='cache-cohesio
 threading.Thread(target=_continuous_speculation_loop, daemon=True, name='cont-spec').start()
 
 
+# 07/05/2026 — Purge auto des vieilles échéances (silencieuse, cross-user).
+# Règles SPEC §x : terminée/annulée 30j+ / active morte 30j+ / pending 60j+.
+# Évite que la table `echeances` enfle indéfiniment en SaaS multi-user.
+def _periodic_echeances_purge_loop():
+    """Thread BG : purge vieilles échéances 1× par 24h. Silencieux côté user."""
+    time.sleep(120)  # Laisser le boot se stabiliser (warmup, init Graph, etc.)
+    while True:
+        try:
+            n1, n2, n3 = _db.purge_old_echeances_all_users()
+            total = n1 + n2 + n3
+            if total > 0:
+                logger.info(
+                    f"[echeances-purge] {total} ligne(s) supprimées : "
+                    f"{n1} validée/annulée >30j, {n2} active morte >30j, "
+                    f"{n3} pending orpheline >60j"
+                )
+        except Exception as e:
+            logger.warning(f"[echeances-purge] erreur silencieuse : {e}")
+        time.sleep(86400)  # 24h
+
+
+threading.Thread(target=_periodic_echeances_purge_loop, daemon=True,
+                 name='echeances-purge').start()
+
+
 
 # Audit Pass 9 — sérialisation des écritures drafts_v2.json.
 # 7 sites appellent _persist_reply_cache() en thread daemon → 7 threads
@@ -13745,11 +13770,16 @@ def api_add_contact_keyword():
 
 @app.route('/api/echeances/<int:echeance_id>/relance')
 def api_echeance_relance(echeance_id):
-    """Retourne les infos pré-remplies pour un mail de relance via mailto:.
+    """Retourne un brief STRUCTURÉ destiné à Claude pour générer un mail
+    de relance riche (streaming via /api/echeances/<id>/generate_relance).
 
-    Le frontend ouvre Outlook avec to/subject/body via window.location.href = 'mailto:...'.
-    Décision 05/05 : option mailto: pour MVP (limité au plain text, brief court neutre).
-    Spec : docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md §10 gap 1+2 (close).
+    Restauration 07/05 du comportement proto (app.py:3599) : ton adaptatif
+    selon nb_relances, historique des relances précédentes avec dates,
+    extrait du mail d'origine. Le frontend echeances.html consomme ce brief
+    et ouvre le dialog principal en mode 'relance' qui lance le streaming.
+
+    Avant 07/05 : retournait un body plain-text fixe pour mailto: (régression
+    vs proto, 2 templates seulement, pas d'historique). Cf SPEC §10 Gap 1.
     """
     try:
         ech = _db.get_echeance_by_id(echeance_id) if hasattr(_db, 'get_echeance_by_id') else None
@@ -13768,42 +13798,107 @@ def api_echeance_relance(echeance_id):
         except Exception:
             pass
 
+        # Date formatée FR (ex : "15 mai 2026") pour le brief lisible
+        date_formatted = ech.get('date_echeance') or 'non définie'
+        try:
+            from datetime import datetime as _dt
+            _MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+                     'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+            _d = _dt.strptime(ech['date_echeance'], '%Y-%m-%d')
+            date_formatted = f"{_d.day} {_MOIS[_d.month - 1]} {_d.year}"
+        except Exception:
+            pass
+
         # Sujet : strip Re:/Fw: et préfixe avec Re:
         original = (ech.get('original_subject') or ech.get('description') or '').strip()
         subject_clean = re.sub(r'^(Re|Fw|Fwd|Tr)\s*:\s*', '', original, flags=re.IGNORECASE).strip()
         subject = ('Re: ' + subject_clean) if subject_clean else 'Relance'
 
-        # Body texte plain (compatible mailto:)
-        nom = (ech.get('correspondant_nom') or '').strip()
-        salutation = f"Bonjour {nom}," if nom else "Bonjour,"
+        # Type humanisé pour le brief
+        _TYPE_LABELS = {
+            'engagement_recu': "engagement reçu de sa part",
+            'engagement_pris': "engagement que j'ai pris",
+            'deadline': "deadline",
+            'obligation': "obligation",
+        }
+        type_label = _TYPE_LABELS.get(ech.get('type', 'deadline'), ech.get('type', 'deadline'))
+
         nb_rel = ech.get('nb_relances', 0) or 0
 
+        # Ton adaptatif selon le nombre de relances déjà envoyées
         if nb_rel == 0:
-            corps = (
-                f"Pour faire suite à mon mail \"{subject_clean}\", je me permets de revenir vers vous.\n\n"
-                "Pourriez-vous m'indiquer où en est ce sujet ?\n\n"
-                "Bien cordialement,"
+            ton = "Relance courtoise"
+        elif nb_rel == 1:
+            ton = "2ème relance — ton plus direct"
+        else:
+            ton = (f"{nb_rel + 1}ème relance — ton ferme, "
+                   "rappeler les relances précédentes restées sans réponse")
+
+        # Historique des relances précédentes (avec dates)
+        relances_history = ''
+        if nb_rel > 0:
+            try:
+                rel_dates = json.loads(ech.get('relances_dates') or '[]')
+                if rel_dates:
+                    lines = []
+                    for idx, rd in enumerate(rel_dates):
+                        rd_date = rd['date'] if isinstance(rd, dict) else rd
+                        parts = rd_date.split('-')
+                        rd_fmt = (f"{parts[2]}/{parts[1]}/{parts[0]}"
+                                  if len(parts) == 3 else rd_date)
+                        ordinal = '1ère' if idx == 0 else f'{idx + 1}ème'
+                        lines.append(f"{ordinal} relance le {rd_fmt}")
+                    relances_history = (
+                        f"Historique des relances précédentes restées sans réponse : "
+                        f"{', '.join(lines)}. OBLIGATOIRE : mentionne dans le mail que tu as "
+                        f"déjà relancé {nb_rel} fois (cite les dates). "
+                    )
+            except Exception:
+                relances_history = f"Déjà relancé {nb_rel} fois sans réponse. "
+
+        # Brief structuré pour Claude
+        if days_late > 0:
+            brief = (
+                f"{ton}. "
+                f"Contexte : {ech.get('description', '')}. "
+                f"Type : {type_label}. "
+                f"Date convenue : {date_formatted} (dépassée de {days_late} "
+                f"jour{'s' if days_late > 1 else ''}). "
+                f"{relances_history}"
+                f"Rappeler l'engagement initial et demander un retour rapide."
+            )
+        elif days_late == 0:
+            brief = (
+                f"{ton}. "
+                f"Contexte : {ech.get('description', '')}. "
+                f"Type : {type_label}. "
+                f"Échéance : aujourd'hui ({date_formatted}). "
+                f"{relances_history}"
+                f"Rappeler que le retour est attendu pour aujourd'hui."
             )
         else:
-            corps = (
-                f"Pour faire suite à mes précédents échanges concernant \"{subject_clean}\", "
-                "et n'ayant pas reçu votre retour à ce jour, je me permets de relancer ma demande.\n\n"
-                "Pouvez-vous m'indiquer où en est ce sujet ?\n\n"
-                "Bien cordialement,"
+            brief = (
+                f"{ton}. "
+                f"Contexte : {ech.get('description', '')}. "
+                f"Type : {type_label}. "
+                f"Échéance prévue : {date_formatted}. "
+                f"{relances_history}"
+                f"Rappeler l'échéance à venir et s'assurer que tout est en bonne voie."
             )
 
-        body = f"{salutation}\n\n{corps}"
+        if ech.get('extrait_mail'):
+            brief += f" Extrait du mail d'origine : \"{ech['extrait_mail']}\""
 
         return jsonify({
             'status': 'ok',
             'to': ech.get('correspondant', ''),
             'to_name': ech.get('correspondant_nom', ''),
             'subject': subject,
-            'brief': body,  # Le JS l'utilisera comme body du mailto:
+            'brief': brief,                # Brief Claude (riche), PAS un body mailto:
             'type': ech.get('type', ''),
             'nb_relances': nb_rel,
             'days_late': days_late,
-            'echeance': ech,  # Pour permettre au JS d'incrémenter relances_dates
+            'echeance': ech,               # Pour tracking côté JS (relances_dates)
         })
     except Exception as e:
         logger.warning(f"[echeance_relance/{echeance_id}] {e}")
@@ -13812,11 +13907,12 @@ def api_echeance_relance(echeance_id):
 
 @app.route('/api/echeances/<int:echeance_id>/mail')
 def api_echeance_mail(echeance_id):
-    """Retourne les infos d'aperçu du mail original associé à une échéance.
+    """Retourne les infos du mail original + webLink Graph pour ouverture
+    directe dans Outlook Web/Desktop (cf SPEC §10 Gap 1, intégration 07/05).
 
-    Pas de redirection vers Outlook (pas de route /email/<id> en SaaS) — l'overlay
-    affiche une modale d'aperçu. Gap §10 spec : intégration Graph webLink à venir
-    pour permettre l'ouverture directe du mail dans Outlook Web/Desktop.
+    Le frontend echeances.html peut soit afficher la modale d'aperçu (extrait
+    tronqué) si webLink absent, soit faire `window.open(webLink)` pour
+    ouvrir le mail dans Outlook (au choix UX).
     """
     try:
         ech = _db.get_echeance_by_id(echeance_id) if hasattr(_db, 'get_echeance_by_id') else None
@@ -13825,15 +13921,30 @@ def api_echeance_mail(echeance_id):
             ech = next((e for e in allech if e.get('id') == echeance_id), None)
         if not ech:
             return jsonify({'status': 'error', 'reason': 'Échéance introuvable'}), 404
+
+        # Récupération du webLink Graph (best-effort, n'échoue jamais la route)
+        web_link = ''
+        message_id = ech.get('email_entry_id', '')
+        if message_id:
+            try:
+                graph = get_graph()
+                if graph:
+                    # Appel ciblé : on ne veut que le webLink, pas le mail entier
+                    data = graph._get(f'/me/messages/{message_id}?$select=webLink')
+                    web_link = (data or {}).get('webLink', '') or ''
+            except Exception as e:
+                logger.debug(f"[echeance_mail/{echeance_id}] webLink fetch silencieux : {e}")
+
         return jsonify({
             'status': 'ok',
-            'message_id': ech.get('email_entry_id', ''),
+            'message_id': message_id,
             'subject': ech.get('original_subject', ''),
             'correspondant': ech.get('correspondant', ''),
             'correspondant_nom': ech.get('correspondant_nom', ''),
             'extrait_mail': ech.get('extrait_mail', ''),
             'created_at': ech.get('created_at', ''),
             'date_echeance': ech.get('date_echeance', ''),
+            'web_link': web_link,  # vide si Graph indispo / message archivé
         })
     except Exception as e:
         logger.warning(f"[echeance_mail/{echeance_id}] {e}")

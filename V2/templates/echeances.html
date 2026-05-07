@@ -475,7 +475,7 @@
                     html += '<div class="section-title" style="display:flex;align-items:center;">&Eacute;ch&eacute;ances archiv&eacute;es <span class="section-count">(' + archivees.length + ')</span><a href="#" onclick="event.preventDefault();_confirmViderArchive(this)" style="font-size:12px;color:#888;text-decoration:none;cursor:pointer;position:relative;transition:color 0.15s;margin-left:auto;" onmouseover="this.style.color=\'#e44\'" onmouseout="this.style.color=\'#888\'"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M2 4h12"/><path d="M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4"/><path d="M12.67 4v9.33a1.33 1.33 0 01-1.34 1.34H4.67a1.33 1.33 0 01-1.34-1.34V4"/><path d="M6.67 7.33v4"/><path d="M9.33 7.33v4"/></svg>Vider l\'archive</a></div>';
                     archivees.forEach(function(e) {
                         var displayName = e.correspondant_nom || e.correspondant || 'Inconnu';
-                        var statusLabel = e.statut === 'annulee' ? 'Annulée' : e.statut === 'terminee' ? 'Terminée' : 'Archivée (> 5j)';
+                        var statusLabel = e.statut === 'annulee' ? 'Annulée' : e.statut === 'terminee' ? 'Validée' : 'Archivée (> 5j)';
                         html += '<div class="card" style="opacity:0.6;cursor:default;"><div class="card-head" style="background:#9e9e9e;color:white;">';
                         html += '<div class="card-avatar" style="background:rgba(255,255,255,0.2);color:white;">' + getInitial(displayName) + '</div>';
                         html += '<div class="card-head-info"><div class="card-head-name">' + escHtml(displayName) + '</div>';
@@ -611,7 +611,7 @@
             html += '<div class="card-body">';
             html += '<div style="font-size:13px;color:#555;margin-bottom:12px;">Une réponse du correspondant a été détectée. Si elle traite votre demande, supprimez l\'échéance. Sinon, conservez-la.</div>';
             html += '<div class="card-buttons">';
-            html += '<button class="btn" style="background:#43a047;border-color:#43a047;color:#fff;" onclick="event.stopPropagation();confirmCancelPending(' + e.id + ')">✓ Confirmer la suppression</button>';
+            html += '<button class="btn" style="background:#43a047;border-color:#43a047;color:#fff;" onclick="event.stopPropagation();confirmCancelPending(' + e.id + ')">✓ Valider</button>';
             html += '<button class="btn" onclick="event.stopPropagation();keepPending(' + e.id + ')">Conserver l\'échéance</button>';
             html += '</div></div></div>';
             return html;
@@ -638,17 +638,17 @@
         }
 
         function relancer(id) {
-            // Décision 05/05 : ouvre Outlook via mailto: (MVP plain text, brief court neutre).
-            // Tracker la relance côté serveur (nb_relances + relances_dates) avant l'ouverture.
+            // 07/05 — Ouvre le dialog principal BoosterMail en mode 'new' (compose)
+            // avec to/subject/brief pré-remplis. Le brief retourné par /relance est
+            // riche (ton adaptatif + historique relances + extrait mail d'origine —
+            // restauration proto). L'utilisateur clique "Générer" → streaming Claude
+            // → édite si besoin → envoie via le pipeline standard /send_reply.
+            // Avant 07/05 : mailto: plain-text (régression vs proto).
             fetch('/api/echeances/' + id + '/relance').then(function(r) { return r.json(); }).then(function(data) {
                 if (data.status === 'error' || data.error) {
                     alert(data.reason || data.error || 'Erreur');
                     return;
                 }
-                var to = encodeURIComponent(data.to || '');
-                var subject = encodeURIComponent(data.subject || 'Relance');
-                var body = encodeURIComponent(data.brief || '');
-                var mailto = 'mailto:' + to + '?subject=' + subject + '&body=' + body;
 
                 // Tracker : incrément nb_relances + ajout date à relances_dates (JSON)
                 var newRelances = (data.nb_relances || 0) + 1;
@@ -656,6 +656,16 @@
                 try { existingDates = JSON.parse((data.echeance && data.echeance.relances_dates) || '[]'); } catch(e) {}
                 var today = new Date().toISOString().slice(0, 10);
                 existingDates.push({date: today, subject: data.subject || ''});
+
+                // Construire l'URL du dialog principal en mode 'new' avec params pré-remplis
+                var qs = new URLSearchParams({
+                    mode: 'new',
+                    to: data.to || '',
+                    subject: data.subject || 'Relance',
+                    brief: data.brief || '',
+                    relance_id: String(id)
+                });
+                var dialogUrl = '/plugin/dialog.html?' + qs.toString();
 
                 fetch('/api/echeances/' + id, {
                     method: 'PUT',
@@ -665,11 +675,17 @@
                         relances_dates: JSON.stringify(existingDates)
                     })
                 }).then(function() {
-                    window.location.href = mailto;
+                    var feats = 'width=1200,height=800,resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no';
+                    var nw = null;
+                    try { nw = window.open(dialogUrl, '_blank', feats); } catch (e) {}
+                    if (nw) { try { nw.focus(); } catch (e) {} }
+                    else { window.location.href = dialogUrl; }
                     setTimeout(loadEcheances, 500);
                 }).catch(function() {
-                    // Tracker en échec : ouvrir mailto: quand même pour ne pas bloquer l'utilisateur
-                    window.location.href = mailto;
+                    // Tracker en échec : ouvrir le dialog quand même pour ne pas bloquer
+                    var feats = 'width=1200,height=800,resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no';
+                    try { window.open(dialogUrl, '_blank', feats); }
+                    catch (e) { window.location.href = dialogUrl; }
                 });
             }).catch(function() { alert('Erreur de connexion'); });
         }
@@ -756,7 +772,7 @@
             var toast = document.createElement('div');
             toast.id = 'undo-toast';
             toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:white;padding:12px 20px;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:16px;box-shadow:0 4px 16px rgba(0,0,0,0.2);z-index:200;';
-            toast.innerHTML = 'Échéance marquée comme terminée ✓ <button onclick="_undoReponseRecue(' + id + ')" style="background:none;border:1px solid rgba(255,255,255,0.4);color:white;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;">Annuler</button>';
+            toast.innerHTML = 'Échéance validée ✓ <button onclick="_undoReponseRecue(' + id + ')" style="background:none;border:1px solid rgba(255,255,255,0.4);color:white;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;">Annuler</button>';
             document.body.appendChild(toast);
 
             _undoTimer = setTimeout(function() {
@@ -847,23 +863,30 @@
         }
 
         function voirMail(id) {
-            // Décision 05/05 : modale d'aperçu locale (pas d'ouverture Outlook —
-            // intégration Graph webLink à venir, gap §10 spec). Réutilise la modale
-            // 'relance-mail-modal' existante en adaptant le titre.
-            var modal = document.getElementById('relance-mail-modal');
-            var content = document.getElementById('relance-mail-content');
-            var titleEl = modal.querySelector('div[style*="font-size:15px"]');
-            if (titleEl) titleEl.textContent = 'Mail original';
-            content.innerHTML = '<div style="text-align:center;padding:32px;color:#888;">Chargement...</div>';
-            modal.style.display = 'flex';
-
+            // 07/05 — Si Graph webLink disponible → ouvre le mail directement dans
+            // Outlook Web/Desktop (UX du proto restaurée). Sinon fallback modale
+            // d'aperçu (extrait tronqué) pour les cas où le mail est archivé /
+            // hors mailbox / Graph indispo.
             fetch('/api/echeances/' + id + '/mail')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.status === 'error') {
-                        content.innerHTML = '<div style="text-align:center;padding:32px;color:#888;">' + escHtml(data.reason || 'Mail introuvable') + '</div>';
+                        alert(data.reason || 'Mail introuvable');
                         return;
                     }
+                    // Cas 1 : webLink présent → ouvre le vrai mail dans Outlook
+                    if (data.web_link) {
+                        var nw = null;
+                        try { nw = window.open(data.web_link, '_blank', 'noopener,noreferrer'); } catch (e) {}
+                        if (nw) { try { nw.focus(); } catch (e) {} return; }
+                        // Si le pop-up est bloqué, fallback navigation in-place
+                        try { window.location.href = data.web_link; return; } catch (e) {}
+                    }
+                    // Cas 2 : pas de webLink → modale d'aperçu locale (fallback)
+                    var modal = document.getElementById('relance-mail-modal');
+                    var content = document.getElementById('relance-mail-content');
+                    var titleEl = modal.querySelector('div[style*="font-size:15px"]');
+                    if (titleEl) titleEl.textContent = 'Mail original (aperçu)';
                     var html = '<div style="font-size:12px;color:#888;margin-bottom:8px;">';
                     html += '<strong>Correspondant :</strong> ' + escHtml(data.correspondant_nom || data.correspondant || '') + '<br>';
                     html += '<strong>Objet :</strong> ' + escHtml(data.subject || '(sans objet)') + '<br>';
@@ -876,11 +899,12 @@
                     } else {
                         html += '<div style="font-size:13px;color:#aaa;border-top:1px solid #eee;padding-top:12px;margin-top:12px;font-style:italic;">(extrait du mail non disponible)</div>';
                     }
-                    html += '<div style="font-size:11px;color:#aaa;margin-top:16px;text-align:center;">Pour ouvrir le mail complet dans Outlook, utilisez la recherche avec l\'objet ci-dessus</div>';
+                    html += '<div style="font-size:11px;color:#aaa;margin-top:16px;text-align:center;">Mail introuvable côté Graph (archivé ou supprimé). Cherchez par objet dans Outlook.</div>';
                     content.innerHTML = html;
+                    modal.style.display = 'flex';
                 })
                 .catch(function() {
-                    content.innerHTML = '<div style="text-align:center;padding:32px;color:#888;">Erreur de connexion</div>';
+                    alert('Erreur de connexion');
                 });
         }
 
