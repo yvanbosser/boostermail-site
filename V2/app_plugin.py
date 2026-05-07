@@ -7276,31 +7276,50 @@ def api_suggest_folder(message_id):
                       'folder_name': kw_match.get('folder_path', ''), 'confidence': 0.9,
                       'reason': f"Contact + sujet ({kw_match.get('count','?')} similaires)"})
 
-        # Tier 2 : Nom de dossier dans sujet/body (feuilles > 5 chars, > 1 mot)
+        # Tier 2 : Nom de dossier dans sujet/body
+        # 07/05 fix F1 (signal Yvan) — la garde précédente
+        # `len(clean_name) <= 5 or ' ' not in clean_name` rejetait tous les
+        # dossiers à 1 seul mot, ce qui bloquait Tier 2 sur l'essentiel de
+        # son arbo (Cardo, Greenpark, Kpla, RBUS, Météor, anna chu, …).
+        # Nouvelle garde : ≥ 4 chars (au lieu de > 5) + filtre _COMMON
+        # (mots trop génériques) + matching sur mot complet (\b…\b) pour
+        # éviter qu'un nom court matche une sous-chaîne d'un mot plus long
+        # (ex: « kpla » dans un autre contexte).
         if len(_suggestions) < 3:
             try:
                 folders = graph.get_all_folders()
-                _COMMON = {'divers', 'autre', 'autres', 'factures', 'facture', 'courrier',
-                           'inbox', 'archive', 'archives', 'boite de reception', 'envoyés', 'brouillons'}
+                _COMMON = {'divers', 'autre', 'autres', 'factures', 'facture',
+                           'courrier', 'mail', 'mails', 'inbox', 'archive',
+                           'archives', 'envoyés', 'envoyes', 'brouillons',
+                           'admin', 'compta', 'bilan', 'travaux', 'devis',
+                           'todo', 'note', 'notes', 'misc', 'general',
+                           'boite de reception'}
                 _search_text = f"{subject} {body_preview}".lower()
                 _search_norm = unicodedata.normalize('NFD', _search_text)
                 _search_norm = ''.join(c for c in _search_norm if unicodedata.category(c) != 'Mn')
                 # Identifier les feuilles (dossiers sans enfants)
-                all_ids = {f.get('id') for f in folders}
                 parent_ids = {f.get('parentFolderId') for f in folders if f.get('parentFolderId')}
                 for f in folders:
                     is_leaf = f.get('id') not in parent_ids
                     if not is_leaf:
                         continue
                     name = f.get('name', '')
-                    clean_name = re.sub(r'^\d+[\.\-\s]+\s*', '', name).strip()
-                    if len(clean_name) <= 5 or ' ' not in clean_name:
+                    # Strip préfixe numérique (« 23---anna---chu » → « anna---chu »
+                    # ou « 10--Le-Cardo » → « Le-Cardo »)
+                    clean_name = re.sub(r'^\d+[\.\-\s_]+\s*', '', name).strip()
+                    if len(clean_name) < 4:
                         continue
                     if clean_name.lower() in _COMMON:
                         continue
                     _name_norm = unicodedata.normalize('NFD', clean_name.lower())
                     _name_norm = ''.join(c for c in _name_norm if unicodedata.category(c) != 'Mn')
-                    if _name_norm in _search_norm:
+                    # Match mot complet : « cardo » match « le cardo » mais pas
+                    # « cardomètre ». Tirets et underscores convertis en espaces.
+                    _name_for_match = re.sub(r'[\-_]+', ' ', _name_norm).strip()
+                    if not _name_for_match:
+                        continue
+                    pattern = r'\b' + re.escape(_name_for_match) + r'\b'
+                    if re.search(pattern, _search_norm):
                         _add({'source': 'folder_name', 'folder_id': f['id'],
                               'folder_name': name, 'confidence': 0.8,
                               'reason': 'Nom du dossier détecté dans le mail'})

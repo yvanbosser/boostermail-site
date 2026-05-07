@@ -4675,11 +4675,16 @@ function _buildOutlookFolderTreeHtml(folders, suggestedFolderId) {
         // Top-level : parent absent ou pas dans la liste
         var isTopLevel = !fParentId || !byId[fParentId];
 
+        // 07/05 fix F2 (signal Yvan) — quand AUCUNE suggestion, on ne déplie
+        // QUE le top-level (Boîte de réception, Archive, etc.). Avant : tout
+        // était déplié, ce qui inondait l'UI (les 415 dossiers visibles d'un
+        // coup, impossible à parcourir).
         var visible, expanded;
         if (!hasFilter) {
-            // Pas de suggestion (ou suggestion introuvable) : tout déplié
-            visible = true;
-            expanded = true;
+            // Pas de suggestion : seulement les racines visibles, repliées,
+            // l'utilisateur déplie au clic ce qui l'intéresse.
+            if (isTopLevel) { visible = true; expanded = false; }
+            else { visible = false; expanded = false; }
         } else if (isOnPath) {
             visible = true;
             expanded = true;
