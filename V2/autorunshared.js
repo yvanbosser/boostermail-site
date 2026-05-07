@@ -35,7 +35,7 @@ function _debugLog(eventName, details) {
 
 // Marqueur de version : s'écrit dès le chargement du JS → permet de vérifier
 // en lisant addin_debug.log que Outlook a bien rechargé le nouveau fichier.
-var _ADDIN_VERSION = 'v26-quick-classify-07-05';
+var _ADDIN_VERSION = 'v27-classify-keep-runtime-07-05';
 _debugLog('js_loaded', { version: _ADDIN_VERSION });
 
 // =============================================================================
@@ -833,17 +833,67 @@ function quickClassifyMail(event) {
 
         Office.context.ui.displayDialogAsync(
             dialogUrl,
-            { width: 50, height: 60, promptBeforeOpen: false },
+            { width: 50, height: 60, promptBeforeOpen: false, displayInIframe: true },
             function (asyncResult) {
                 if (asyncResult.status === Office.AsyncResultStatus.Failed) {
                     _debugLog('quick_classify_dialog_failed', {
                         code: (asyncResult.error || {}).code || 0,
                         msg: (asyncResult.error || {}).message || 'unknown'
                     });
-                } else {
-                    _debugLog('quick_classify_dialog_open', {});
+                    try { event.completed(); } catch (e) {}
+                    return;
                 }
-                try { event.completed(); } catch (e) {}
+                _debugLog('quick_classify_dialog_open', {});
+
+                var dialog = asyncResult.value;
+
+                // CRITIQUE — NE PAS appeler event.completed() ici. Le shared
+                // runtime doit rester actif tant que le dialog est ouvert,
+                // sinon New Outlook ferme le dialog automatiquement (cf bug
+                // identifié 07/05 PM tardif via diagnostic Yvan : popup
+                // apparaissait puis disparaissait immédiatement).
+                // Pattern aligné sur _buildAndOpenDialog (l. 599-632).
+
+                var _runtimeReleased = false;
+                function _releaseRuntimeQC(reason) {
+                    if (_runtimeReleased) return;
+                    _runtimeReleased = true;
+                    _debugLog('quick_classify_runtime_released', { reason: reason });
+                    try { event.completed(); } catch (e) {}
+                }
+
+                // Transmettre le JWT au dialog ASAP via messageChild
+                // (le dialog l'injectera dans Authorization: Bearer pour
+                // ses fetches /api/folders, /api/classement_mail, etc.).
+                var _qcDelays = [200, 800, 1500];
+                _qcDelays.forEach(function (delay) {
+                    setTimeout(function () {
+                        if (!_BM_TOKEN) return;
+                        try {
+                            dialog.messageChild(JSON.stringify({
+                                action: 'auth_token',
+                                token: _BM_TOKEN,
+                                expires_in: _BM_TOKEN_TTL,
+                                issued_at_ts: _BM_TOKEN_TS
+                            }));
+                        } catch (e) {}
+                    }, delay);
+                });
+
+                // Libérer le runtime à la fermeture du dialog (par user
+                // ou par auto-close après UNDO countdown)
+                try {
+                    dialog.addEventHandler(Office.EventType.DialogEventReceived, function () {
+                        _releaseRuntimeQC('dialog_closed');
+                    });
+                } catch (e) {}
+
+                // Timeout 10 min : si l'user a oublié le dialog ouvert,
+                // libérer le runtime de force pour ne pas geler Outlook.
+                setTimeout(function () {
+                    _releaseRuntimeQC('timeout_10min');
+                    try { dialog.close(); } catch (e) {}
+                }, 10 * 60 * 1000);
             }
         );
     } catch (err) {
