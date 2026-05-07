@@ -2306,15 +2306,23 @@ def _set_mail_preview(mid, kind, status, data):
 
 
 def _prewarm_echeance_for_mail(mid, mail_data):
-    """Scan heuristique + Claude pour échéance d'un mail. Stocke dans
-    cache DB persistant (mail_echeance_cache) + cache RAM.
+    """[Scope V1 07/05] Coupure douce sur les mails reçus.
 
-    Pattern idempotent aligné sur mail_summaries :
-    1. Check DB d'abord → skip si déjà scanné (économie API 100%)
-    2. Sinon : filtre heuristique (_has_echeance_pattern) — économie si pas de pattern
-    3. Sinon : scan Claude via scan_echeances_batch
-    4. Stocke résultat en DB + RAM
+    Spec : SPEC_ECHEANCES_BOOSTERMAIL.md §2 — scope V1 = sortants uniquement.
+    Cette fonction est appelée en BG sur les mails *reçus* (warmup, ouverture
+    mail) → hors scope. On retourne [] sans appeler Claude pour économiser
+    les appels IA (~30% du volume échéance) et éviter de polluer la DB.
+
+    Code de scan conservé en commentaire pour réactivation simple si scope
+    élargi un jour. Le pipeline sortant passe par api_echeances_post_send
+    (direction='sent') qui reste actif et crée les vraies entrées DB.
     """
+    _set_mail_preview(mid, 'echeance', 'done', [])
+    return
+
+    # ═══════════════════════════════════════════════════════════════════
+    # CODE INACTIF (réactivation : retirer le return ci-dessus)
+    # ═══════════════════════════════════════════════════════════════════
     try:
         # [1] Cache DB : check idempotent (comme has_mail_summary)
         try:
@@ -11769,8 +11777,12 @@ def _cache_cleanup():
 
 @app.route('/api/echeances/post_send/<path:message_id>')
 def api_echeances_post_send(message_id):
-    """
-    Scan IA des échéances détectées dans le mail envoyé/reçu.
+    """Scan IA des échéances détectées dans la réponse envoyée par l'utilisateur.
+
+    Scope V1 (cf SPEC_ECHEANCES_BOOSTERMAIL.md §2) : sortants uniquement.
+    On scanne le brouillon que le user vient d'envoyer (engagements pris
+    par lui), jamais le mail reçu (faux-positifs garantis : « peux-tu me
+    confirmer avant lundi » du correspondant n'est PAS un engagement user).
     Lancé en background au post-envoi, le dialog poll cette route.
     """
     _cache_cleanup()  # Nettoyage TTL
@@ -11797,7 +11809,8 @@ def api_echeances_post_send(message_id):
                     _cache_set(cache_key, [])
                     return
 
-                # Récupérer le mail reçu et la réponse envoyée
+                # Récupérer la réponse envoyée par l'utilisateur (déposée
+                # dans le cache par /api/post_send au moment de l'envoi).
                 body = _post_send_cache.get(f'body_{message_id}', '')
                 subject = _post_send_cache.get(f'subject_{message_id}', '')
                 from_email = _post_send_cache.get(f'from_{message_id}', '')
@@ -11806,12 +11819,14 @@ def api_echeances_post_send(message_id):
                     _cache_set(cache_key, [])
                     return
 
-                # Utiliser le scanner d'échéances de claude_ai.py
+                # Scope V1 : on scanne le mail SORTANT uniquement.
+                # `from_email` ici est le correspondant (destinataire du mail
+                # envoyé par le user), conservé pour le contexte du prompt.
                 mails_batch = [{
                     'subject': subject,
                     'body': body[:2000],
                     'from': from_email,
-                    'direction': 'received',
+                    'direction': 'sent',
                 }]
                 try:
                     detected = builder.scan_echeances_batch(mails_batch)
@@ -12322,11 +12337,15 @@ def api_post_send():
     # Cleanup cache post-envoi (TTL)
     _cache_cleanup()
 
-    # Stocker les données du mail pour les workflows post-envoi (12i)
+    # Stocker les données du mail pour les workflows post-envoi (12i).
     # Utiliser _cache_set() pour acquérir le lock + tracker le timestamp TTL
     # (sinon ces 3 entrées échappent au cleanup _cache_cleanup()).
+    # 07/05 — body_{mid} = la RÉPONSE ENVOYÉE par le user (pas le mail reçu).
+    # Scope V1 échéances = sortants only : api_echeances_post_send scanne
+    # ce body avec direction='sent' pour détecter les engagements pris par
+    # le user dans son mail envoyé (cf SPEC_ECHEANCES_BOOSTERMAIL.md §2).
     if message_id:
-        _cache_set(f'body_{message_id}', received_body or body[:2000])
+        _cache_set(f'body_{message_id}', body[:2000] or final_reply[:2000])
         _cache_set(f'subject_{message_id}', subject)
         _cache_set(f'from_{message_id}', from_email)
 
