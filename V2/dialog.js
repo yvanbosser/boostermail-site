@@ -1888,6 +1888,54 @@ function _formatRecipients(field) {
     return '';
 }
 
+// 07/05 — Helpers échéance partagés par les 3 sites d'affichage
+// (_applyMailPreview / _applySinglePlate / option-c post_generation_analyze).
+
+/** Formate une date YYYY-MM-DD en lisible FR (ex: "15 mai 2026").
+ * Retourne "" si la date est absente ou non parsable (pour que l'appelant
+ * affiche "(date à préciser)"). Préserve la chaîne brute si format
+ * inattendu (mieux que rien).
+ */
+function _formatEcheanceDateFR(dateStr) {
+    if (!dateStr || typeof dateStr !== 'string') return '';
+    var m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return dateStr;
+    var mois = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+                'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+    var d = parseInt(m[3], 10);
+    var mIdx = parseInt(m[2], 10) - 1;
+    if (mIdx < 0 || mIdx > 11) return dateStr;
+    return d + ' ' + mois[mIdx] + ' ' + m[1];
+}
+
+/** Active/désactive le clic sur la card #infoEcheance.
+ * Au clic : ouvre /plugin/echeances dans une nouvelle fenêtre overlay
+ * (pour que l'utilisateur puisse voir/modifier ses échéances).
+ * Avant 07/05 : la card n'était jamais cliquable (signalé par Yvan).
+ */
+function _setEcheanceCardClickable(clickable) {
+    var card = document.getElementById('infoEcheance');
+    if (!card) return;
+    if (clickable) {
+        card.style.cursor = 'pointer';
+        card.title = 'Voir toutes les échéances';
+        card.onclick = function(ev) {
+            if (ev) ev.stopPropagation();
+            var url = _backendUrl + '/plugin/echeances';
+            var feats = 'width=1200,height=800,resizable=yes,scrollbars=yes';
+            try {
+                var nw = window.open(url, '_blank', feats);
+                if (nw) { nw.focus(); return; }
+            } catch (e) {}
+            window.location.href = url;
+        };
+    } else {
+        card.style.cursor = '';
+        card.title = '';
+        card.onclick = null;
+    }
+}
+
 /** Phase 2.A (24/04) — Applique le preview mail pré-chauffé (échéance + classement)
  * aux cards `infoEcheance` et `infoClassement` du dialog 80%.
  * Si preview null ou données vides → "Néant" (demande user : ne pas laisser vide).
@@ -1901,22 +1949,27 @@ function _applyMailPreview(preview) {
     if (echEl) {
         if (!preview || !preview.echeance) {
             echEl.textContent = 'Néant';
+            _setEcheanceCardClickable(false);
         } else {
             var echStatus = preview.echeance.status;
             var echData = preview.echeance.data;
             if (echStatus === 'running' || echStatus === 'miss') {
                 echEl.textContent = 'Analyse en cours…';
+                _setEcheanceCardClickable(false);
             } else if (echStatus === 'error') {
-                echEl.textContent = 'Néant';  // fallback en cas d'erreur scan
+                echEl.textContent = 'Néant';
+                _setEcheanceCardClickable(false);
             } else if (Array.isArray(echData) && echData.length > 0) {
-                // Afficher la première échéance (plus récente / plus importante)
+                // 07/05 fix Yvan — date FR + fallback "(date à préciser)" si vide,
+                // card cliquable → ouvre /plugin/echeances dans une nouvelle fenêtre.
                 var e = echData[0];
-                var txt = '';
-                if (e.description) txt += e.description;
-                if (e.date_echeance) txt += (txt ? ' — ' : '') + e.date_echeance;
-                echEl.textContent = txt || 'Échéance détectée';
+                var desc = e.description || 'Échéance détectée';
+                var dateStr = _formatEcheanceDateFR(e.date_echeance);
+                echEl.textContent = dateStr ? (desc + ' — ' + dateStr) : (desc + ' (date à préciser)');
+                _setEcheanceCardClickable(true);
             } else {
                 echEl.textContent = 'Néant';
+                _setEcheanceCardClickable(false);
             }
         }
     }
@@ -2099,19 +2152,27 @@ function _applySinglePlate(plateName, res) {
     // Appliquer 1 seul plat sans toucher aux 2 autres.
     if (plateName === 'echeance') {
         var echEl = document.getElementById('infoEcheanceContent');
+        var echCard = document.getElementById('infoEcheance');
         if (!echEl) return;
         if (res.status === 'running' || res.status === 'miss') {
             echEl.textContent = 'Analyse en cours…';
+            _setEcheanceCardClickable(false);
         } else if (res.status === 'error') {
             echEl.textContent = 'Néant';
+            _setEcheanceCardClickable(false);
         } else if (Array.isArray(res.data) && res.data.length > 0) {
+            // 07/05 fix Yvan — afficher description + date formatée FR ; si la
+            // date manque (Claude n'a pas converti "mardi prochain" en YYYY-MM-DD),
+            // afficher "(date à préciser)" pour signaler clairement à l'user, et
+            // rendre la card cliquable → ouvre la page échéances complète.
             var e = res.data[0];
-            var txt = '';
-            if (e.description) txt += e.description;
-            if (e.date_echeance) txt += (txt ? ' — ' : '') + e.date_echeance;
-            echEl.textContent = txt || 'Échéance détectée';
+            var desc = e.description || 'Échéance détectée';
+            var dateStr = _formatEcheanceDateFR(e.date_echeance);
+            echEl.textContent = dateStr ? (desc + ' — ' + dateStr) : (desc + ' (date à préciser)');
+            _setEcheanceCardClickable(true);
         } else {
             echEl.textContent = 'Néant';
+            _setEcheanceCardClickable(false);
         }
     } else if (plateName === 'classement') {
         var clsEl = document.getElementById('infoClassementContent');
@@ -3078,15 +3139,25 @@ function _onGenerationDone(streamedText) {
             }).then(function(r) { return r.json(); }).then(function(data) {
                 console.log('[option-c] response:', data);
                 if (!data) data = {};
-                // Échéance
+                // Échéance — 07/05 fix Yvan : date formatée FR ; fallback
+                // "(date à préciser)" si Claude n'a pas converti ; card cliquable.
                 var echEl = document.getElementById('infoEcheanceContent');
                 if (echEl) {
                     if (data.echeance) {
                         var d = data.echeance;
-                        echEl.innerHTML = _escapeHtml((d.description || '').slice(0, 80))
-                            + (d.date_echeance ? '<br><span style="color:#888;font-size:11px;">' + _escapeHtml(d.date_echeance) + '</span>' : '');
+                        var desc = (d.description || 'Échéance détectée').slice(0, 80);
+                        var dateStr = _formatEcheanceDateFR(d.date_echeance);
+                        if (dateStr) {
+                            echEl.innerHTML = _escapeHtml(desc)
+                                + '<br><span style="color:#888;font-size:11px;">' + _escapeHtml(dateStr) + '</span>';
+                        } else {
+                            echEl.innerHTML = _escapeHtml(desc)
+                                + '<br><span style="color:#c62828;font-size:11px;font-style:italic;">date à préciser</span>';
+                        }
+                        _setEcheanceCardClickable(true);
                     } else {
                         echEl.textContent = 'Néant';
+                        _setEcheanceCardClickable(false);
                     }
                 }
                 // Classement mail (toujours cliquable, même null → permet classement manuel)

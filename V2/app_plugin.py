@@ -12291,8 +12291,20 @@ def api_post_generation_analyze():
                     # Match plus tolérant : extraire les mots-clés du dernier segment
                     # et chercher un folder dont le name contient un de ces mots
                     # (ex: "Phiwest-vesta partner" → cherche "phiwest" ou "vesta")
+                    #
+                    # 07/05 fix Yvan : ne plus déclencher cette stratégie si le
+                    # mail actuel (subject + body) ne contient AUCUN des mots-clés.
+                    # Avant : un contact dont 11 mails passés étaient classés dans
+                    # "BIM-Pop/ouverture-compte-bancaire" voyait son nouveau mail
+                    # "Pouvez-vous me confirmer pour le déjeuner ?" matcher
+                    # fuzzy_word(compte) → suggestion absurde. Désormais, fuzzy
+                    # exige au moins 1 mot commun entre le folder candidat et le
+                    # contenu actuel — sinon on laisse l'IA décider.
                     seg_words = [w for w in last_seg.replace('-', ' ').split() if len(w) >= 4]
+                    current_text = (subject + ' ' + body).lower()
                     for word in seg_words:
+                        if word not in current_text:
+                            continue  # mot du folder absent du mail courant → skip
                         for f in folders_outlook:
                             fn = (f.get('name') or '').lower()
                             if word in fn:
