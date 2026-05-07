@@ -126,7 +126,7 @@
                  au lieu de commands.html (qui ne gere pas le compose ni le notifyBackend) -->
             <FunctionFile resid="autorunHtmlUrl"/>
 
-            <!-- Bouton lecture : ouvre le dialog -->
+            <!-- Bouton lecture : ouvre le dialog (réponse IA) -->
             <ExtensionPoint xsi:type="MessageReadCommandSurface">
               <OfficeTab id="TabDefault">
                 <Group id="easymailReadGroup">
@@ -146,9 +146,13 @@
                       <FunctionName>openEasyMailDialog</FunctionName>
                     </Action>
                   </Control>
-                  <!-- 07/05/2026 — Quick Classify : bouton dédié au classement
-                       du mail + PJ, sans passer par le flow de réponse IA.
-                       Cf docs/PLUS_TARD_VF.md #15. -->
+                </Group>
+                <!-- 07/05/2026 — Quick Classify : bouton dans un GROUP SÉPARÉ
+                     pour qu'il s'affiche comme bouton distinct dans la barre
+                     d'action New Outlook (pas dans le menu déroulant
+                     BoosterMail). Cf signal Yvan 07/05 PM tardif. -->
+                <Group id="easymailClassifyGroup">
+                  <Label resid="classifyLabel"/>
                   <Control xsi:type="Button" id="easymailClassifyButton">
                     <Label resid="classifyLabel"/>
                     <Supertip>

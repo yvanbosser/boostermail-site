@@ -783,54 +783,73 @@ function _notifyBackend(route, data) {
 // avec UNDO 4s. Cf docs/PLUS_TARD_VF.md #15.
 //
 function quickClassifyMail(event) {
-    var item = (Office && Office.context && Office.context.mailbox && Office.context.mailbox.item) || null;
-    if (!item) {
-        _debugLog('quick_classify_no_item', {});
-        try { event.completed({ allowEvent: false }); } catch (e) {}
-        return;
-    }
-    var messageId = item.itemId || '';
-    var subject = item.subject || '';
-    var hasAttachments = false;
+    // Trace entrée : confirmer que la fonction est bien appelée par Office au clic
+    _debugLog('quick_classify_entry', { ts: Date.now() });
     try {
-        var atts = item.attachments || [];
-        // Filtrer inline (cid:) — seulement vraies pièces jointes
-        for (var i = 0; i < atts.length; i++) {
-            if (atts[i] && atts[i].isInline === false) { hasAttachments = true; break; }
-            if (atts[i] && !atts[i].cid) { hasAttachments = true; break; }
+        var item = (Office && Office.context && Office.context.mailbox && Office.context.mailbox.item) || null;
+        if (!item) {
+            _debugLog('quick_classify_no_item', {});
+            try { event.completed({ allowEvent: false }); } catch (e) {}
+            return;
         }
-    } catch (e) {}
-
-    var fromName = '';
-    var fromEmail = '';
-    try {
-        var f = item.from || item.sender || {};
-        fromName = f.displayName || '';
-        fromEmail = f.emailAddress || '';
-    } catch (e) {}
-
-    var qs = new URLSearchParams({
-        mode: 'classify',
-        messageId: messageId,
-        subject: subject,
-        from: fromEmail,
-        fromName: fromName,
-        hasAttachments: hasAttachments ? '1' : '0'
-    });
-    var dialogUrl = _backendUrl + '/plugin/dialog.html?' + qs.toString();
-
-    _debugLog('quick_classify_open', { mid: (messageId || '').substring(0, 30), pj: hasAttachments });
-
-    Office.context.ui.displayDialogAsync(
-        dialogUrl,
-        { width: 50, height: 60, promptBeforeOpen: false },
-        function (asyncResult) {
-            if (asyncResult.status === Office.AsyncResultStatus.Failed) {
-                _debugLog('quick_classify_dialog_failed', { msg: (asyncResult.error || {}).message || '' });
+        var messageId = item.itemId || '';
+        var subject = item.subject || '';
+        var hasAttachments = false;
+        try {
+            var atts = item.attachments || [];
+            for (var i = 0; i < atts.length; i++) {
+                if (atts[i] && atts[i].isInline === false) { hasAttachments = true; break; }
+                if (atts[i] && !atts[i].cid) { hasAttachments = true; break; }
             }
-            try { event.completed(); } catch (e) {}
-        }
-    );
+        } catch (e) {}
+
+        var fromName = '';
+        var fromEmail = '';
+        try {
+            var f = item.from || item.sender || {};
+            fromName = f.displayName || '';
+            fromEmail = f.emailAddress || '';
+        } catch (e) {}
+
+        // 07/05 (PM tardif) — encodeURIComponent au lieu de URLSearchParams
+        // (URLSearchParams peut ne pas être dispo dans le shared runtime
+        // selon la version Office.js, source d'erreur "Désolé... pas pu
+        // accéder à BoosterMail" remontée par Yvan).
+        // On tronque aussi le subject à 200 chars pour éviter URL trop longue.
+        var subjectTrunc = (subject || '').substring(0, 200);
+        var dialogUrl = _backendUrl + '/plugin/dialog.html'
+            + '?mode=classify'
+            + '&messageId=' + encodeURIComponent(messageId)
+            + '&subject=' + encodeURIComponent(subjectTrunc)
+            + '&from=' + encodeURIComponent(fromEmail)
+            + '&fromName=' + encodeURIComponent(fromName)
+            + '&hasAttachments=' + (hasAttachments ? '1' : '0');
+
+        _debugLog('quick_classify_open', {
+            mid_len: (messageId || '').length,
+            url_len: dialogUrl.length,
+            pj: hasAttachments
+        });
+
+        Office.context.ui.displayDialogAsync(
+            dialogUrl,
+            { width: 50, height: 60, promptBeforeOpen: false },
+            function (asyncResult) {
+                if (asyncResult.status === Office.AsyncResultStatus.Failed) {
+                    _debugLog('quick_classify_dialog_failed', {
+                        code: (asyncResult.error || {}).code || 0,
+                        msg: (asyncResult.error || {}).message || 'unknown'
+                    });
+                } else {
+                    _debugLog('quick_classify_dialog_open', {});
+                }
+                try { event.completed(); } catch (e) {}
+            }
+        );
+    } catch (err) {
+        _debugLog('quick_classify_exception', { msg: String(err) });
+        try { event.completed(); } catch (e) {}
+    }
 }
 
 // ============================================================================
