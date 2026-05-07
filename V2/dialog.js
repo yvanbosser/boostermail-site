@@ -22,11 +22,10 @@ var _params = new URLSearchParams(window.location.search);
 // Audit B1 : URL de base du backend (robuste meme si le dialog est ouvert depuis un autre domaine)
 var _backendUrl = window.location.origin || 'https://localhost:3443';
 
-// Étape 7 finale (29/04/2026 PM) — Auth Token Bearer JWT reçu du shared
-// runtime via DialogParentMessageReceived (action: 'auth_token').
-// Stocké en mémoire JS pour injection dans Authorization: Bearer XXX.
-// Activation Phase 4 (future) : remplacer fetch() par _fetchWithBearer()
-// dans les routes critiques (instant_reply, dialog_init, etc.).
+// Auth Token Bearer JWT reçu du shared runtime via DialogParentMessageReceived
+// (action: 'auth_token'). Injecté dans Authorization: Bearer XXX par _fetchWithBearer().
+// Activé 07/05/2026 sur tous les appels fetch(_backendUrl...) pour isoler les
+// utilisateurs multi-tenant (dialog cross-origin n'envoie pas de cookie session).
 var _bmAuthToken = '';
 var _bmAuthTokenTs = 0;
 var _bmAuthTokenTtl = 900;
@@ -60,7 +59,7 @@ var _hasAttachments = _params.get('hasAttachments') === '1';
         var platform = (_params.get('platform') || '').trim();
         // Valeurs attendues : newOutlook, classicOutlook, outlookWeb
         if (!platform) return;
-        fetch(_backendUrl + '/api/save_setting', {
+        _fetchWithBearer(_backendUrl + '/api/save_setting', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ key: 'last_outlook_platform', value: platform }),
@@ -144,7 +143,7 @@ window.addEventListener('error', function(ev) {
             _showErrorToast('BoosterMail : ' + msg.substring(0, 80));
         }
         // POST diagnostic toujours envoye (utile pour debugger meme sans details visibles)
-        fetch(_backendUrl + '/api/debug_addin_log', {
+        _fetchWithBearer(_backendUrl + '/api/debug_addin_log', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -254,7 +253,7 @@ var _perfMonitor = (function() {
                 user_agent: navigator.userAgent.substring(0, 200),
                 ts: new Date().toISOString(),
             };
-            fetch(_backendUrl + '/api/perf_log', {
+            _fetchWithBearer(_backendUrl + '/api/perf_log', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
@@ -672,7 +671,7 @@ function _loadContactTags() {
     // être fetchés directement pour apparaître. Architecture 3 portes : chaque
     // livreur a sa porte dédiée, celle-ci est celle du livreur "fiche contact".
     if (!_fromEmail) return;
-    fetch(_backendUrl + '/api/contact_profile/' + encodeURIComponent(_fromEmail))
+    _fetchWithBearer(_backendUrl + '/api/contact_profile/' + encodeURIComponent(_fromEmail))
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data && data.profile) _applyContactProfile(data.profile);
@@ -984,7 +983,7 @@ async function acceptPjAnalysis() {
         _markPjSpinning(s);
         var itemEl = document.getElementById('pj-item-' + s.index);
         try {
-            var res = await fetch(_backendUrl + '/api/extract_attachments/' + encodeURIComponent(_messageId), {
+            var res = await _fetchWithBearer(_backendUrl + '/api/extract_attachments/' + encodeURIComponent(_messageId), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ indices: [s.index] }),
@@ -1241,7 +1240,7 @@ function smartPaperclip() {
     // V19 (06/05) : version simplifi\u00E9e. Smart_paperclip diff\u00E9r\u00E9 (cf
     // PLUS_TARD_VF.md). Ouvre direct le dossier racine PJ via companion
     // local. R\u00E9cup\u00E8re le path depuis settings OVH puis POST companion 5052.
-    fetch(_backendUrl + '/api/settings/pj_root_folder')
+    _fetchWithBearer(_backendUrl + '/api/settings/pj_root_folder')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var rootPath = (data && data.value) || '';
@@ -1272,7 +1271,7 @@ function smartPaperclip() {
 
 function openSuggestedFolder() {
     if (!_smartPaperclipFolder) return;
-    fetch(_backendUrl + '/api/open_windows_folder?path=' + encodeURIComponent(_smartPaperclipFolder))
+    _fetchWithBearer(_backendUrl + '/api/open_windows_folder?path=' + encodeURIComponent(_smartPaperclipFolder))
         .catch(function() {});
     closeSmartPaperclip();
 }
@@ -1376,7 +1375,7 @@ function _loadRecipientContext(email) {
             + '<div style="font-size:12px;color:#999;padding:8px 0;">⏳ Chargement du profil...</div>';
     }
 
-    fetch(_backendUrl + '/api/contact_profile/' + encodeURIComponent(email))
+    _fetchWithBearer(_backendUrl + '/api/contact_profile/' + encodeURIComponent(email))
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var profile = (data && data.profile) || null;
@@ -1996,7 +1995,7 @@ function _applyMailPreview(preview) {
                 window.__mailPreviewPolling = false;
                 return;
             }
-            fetch(_backendUrl + '/api/mail_preview/' + encodeURIComponent(pollMid))
+            _fetchWithBearer(_backendUrl + '/api/mail_preview/' + encodeURIComponent(pollMid))
                 .then(function(r) { return r.ok ? r.json() : null; })
                 .then(function(newPreview) {
                     if (!newPreview) { window.__mailPreviewPolling = false; return; }
@@ -2043,7 +2042,7 @@ function _fetchSinglePlate(plateName, urlPrefix, messageId, attempt) {
     // Garde Pattern #17 : si l'user a navigué vers un autre mail, abort
     // (on n'écrira pas les données de l'ancien mail dans le DOM courant).
     if (_messageId !== messageId) return;
-    fetch(_backendUrl + urlPrefix + encodeURIComponent(messageId))
+    _fetchWithBearer(_backendUrl + urlPrefix + encodeURIComponent(messageId))
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(res) {
             if (!res) return;
@@ -2208,7 +2207,7 @@ function _renderSummaryInstant(points, actions) {
 
 /** Fallback body : ancien /api/email_body (si bundle KO) */
 function _legacyFetchBody() {
-    fetch(_backendUrl + '/api/email_body?messageId=' + encodeURIComponent(_messageId))
+    _fetchWithBearer(_backendUrl + '/api/email_body?messageId=' + encodeURIComponent(_messageId))
         .then(function(r) {
             if (r.status === 403) {
                 document.getElementById('mailBody').innerHTML =
@@ -2235,7 +2234,7 @@ function _legacyFetchBody() {
 /** Fallback tags contact : ancien /api/contact_profile/<email> (si bundle KO) */
 function _legacyFetchContactTags() {
     if (!_fromEmail) return;
-    fetch(_backendUrl + '/api/contact_profile/' + encodeURIComponent(_fromEmail))
+    _fetchWithBearer(_backendUrl + '/api/contact_profile/' + encodeURIComponent(_fromEmail))
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data && data.profile) _applyContactProfile(data.profile);
@@ -2494,7 +2493,7 @@ function generateReply() {
     if (!_mailBodyForGeneration && _messageId && _mode !== 'new') {
         // Récupérer le body manquant avant génération
         document.getElementById('headerStatus').textContent = 'Chargement du mail...';
-        fetch(_backendUrl + '/api/email_body?messageId=' + encodeURIComponent(_messageId))
+        _fetchWithBearer(_backendUrl + '/api/email_body?messageId=' + encodeURIComponent(_messageId))
             .then(function(r) { return r.json(); })
             .then(function(ebody) {
                 if (ebody && (ebody.body || ebody.html_body)) {
@@ -2534,7 +2533,7 @@ function _tryTemplateMatch(brief, callback) {
 
     document.getElementById('headerStatus').textContent = 'Vérification template...';
 
-    fetch(_backendUrl + '/api/match_template', {
+    _fetchWithBearer(_backendUrl + '/api/match_template', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: payload,
@@ -2618,7 +2617,7 @@ function _tryInstantReply() {
         from_email: _fromEmail || '',
     });
 
-    fetch(_backendUrl + '/api/instant_reply', {
+    _fetchWithBearer(_backendUrl + '/api/instant_reply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: payload,
@@ -2746,7 +2745,7 @@ var _draftSaveTimer = null;
 
 function _restoreDraft() {
     if (!_messageId) return;
-    fetch(_backendUrl + '/api/get_draft?message_id=' + encodeURIComponent(_messageId))
+    _fetchWithBearer(_backendUrl + '/api/get_draft?message_id=' + encodeURIComponent(_messageId))
         .then(function(r) { return r.json(); })
         .then(function(res) {
             if (!res || !res.found) return;
@@ -2808,7 +2807,7 @@ function _saveDraftFor(messageId, fromEmail, importance) {
     if (!editor) return;
     var text = (editor.innerText || '').trim();
     if (!text) return;  // n'écrase pas avec un éditeur vide
-    fetch(_backendUrl + '/api/save_draft', {
+    _fetchWithBearer(_backendUrl + '/api/save_draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         keepalive: true,  // survit au beforeunload
@@ -2863,7 +2862,7 @@ function _fetchGenerateReply(body) {
         (typeof AbortController !== 'undefined') ? new AbortController() : null
     );
     // SSE streaming
-    fetch(_backendUrl + '/generate_reply', {
+    _fetchWithBearer(_backendUrl + '/generate_reply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: body,
@@ -3038,7 +3037,7 @@ function _onGenerationDone(streamedText) {
         if (_clsStart) _clsStart.textContent = 'Analyse en cours…';
         if (_bodyV) {
             console.log('[option-c] POST /api/post_generation_analyze', {to: _toV, subject: _subjV, body_len: _bodyV.length, brief_len: _briefV.length});
-            fetch(_backendUrl + '/api/post_generation_analyze', {
+            _fetchWithBearer(_backendUrl + '/api/post_generation_analyze', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 credentials: 'include',
@@ -3142,7 +3141,7 @@ function refineReply() {
     var _refAbort = _registerStream(
         (typeof AbortController !== 'undefined') ? new AbortController() : null
     );
-    fetch(_backendUrl + '/refine_reply', {
+    _fetchWithBearer(_backendUrl + '/refine_reply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3283,7 +3282,7 @@ var _skipTemplateMatch = false;
 /** Envoie un feedback success/reject au backend pour la learning loop. */
 function _sendTemplateFeedback(match, feedback) {
     try {
-        fetch(_backendUrl + '/api/template_feedback', {
+        _fetchWithBearer(_backendUrl + '/api/template_feedback', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3398,7 +3397,7 @@ function _detectMode() {
     }
 
     // Revalidation réseau en arrière-plan (met à jour le cache si changé)
-    fetch(_backendUrl + '/api/status')
+    _fetchWithBearer(_backendUrl + '/api/status')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             _applyStatus(data);
@@ -3651,7 +3650,7 @@ function _runPostSendWorkflows() {
 function _pollEcheances(attempt) {
     if (attempt >= 8) { _startClassMail(); return; }  // Timeout 4s (8 × 500ms)
 
-    fetch(_backendUrl + '/api/echeances/post_send/' + encodeURIComponent(_messageId))
+    _fetchWithBearer(_backendUrl + '/api/echeances/post_send/' + encodeURIComponent(_messageId))
         .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(function(data) {
             if (data.status === 'scanning') {
@@ -3693,13 +3692,13 @@ function dismissEcheance() {
 function _startClassMail() {
     if (!_isStandardMode) { _startClassPJ(); return; }
 
-    fetch(_backendUrl + '/api/classification/post_send/' + encodeURIComponent(_messageId))
+    _fetchWithBearer(_backendUrl + '/api/classification/post_send/' + encodeURIComponent(_messageId))
         .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(function(data) {
             if (data.status === 'scanning') {
                 // Poll 1 fois de plus
                 setTimeout(function() {
-                    fetch(_backendUrl + '/api/classification/post_send/' + encodeURIComponent(_messageId))
+                    _fetchWithBearer(_backendUrl + '/api/classification/post_send/' + encodeURIComponent(_messageId))
                         .then(function(r) { return r.json(); })
                         .then(function(data2) {
                             if (data2.status === 'done' && data2.suggestion) {
@@ -4216,7 +4215,7 @@ function _openPreSendClassPopup() {
     if (_classementFoldersCache && _classementFoldersCache.length) {
         openWithFolders(_classementFoldersCache);
     } else {
-        fetch(_backendUrl + '/api/folders')
+        _fetchWithBearer(_backendUrl + '/api/folders')
             .then(function(r) { return r.ok ? r.json() : null; })
             .then(function(data) {
                 _classementFoldersCache = (data && data.folders) || [];
@@ -4315,7 +4314,7 @@ function _openPreSendClassPJPopup() {
     // attachments + suggestion + suggestions (top 3) + source + folders
     // (étape 1'' backend exposé). Bénéfice : 1 seul round-trip + données
     // toujours fraîches (pas d'incohérence vs cache RAM front).
-    fetch(_backendUrl + '/api/pj_classification/post_send/' + encodeURIComponent(_messageId))
+    _fetchWithBearer(_backendUrl + '/api/pj_classification/post_send/' + encodeURIComponent(_messageId))
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(data) {
             var pjs = (data && data.pj_suggestions) || {};
@@ -4949,7 +4948,7 @@ function doClassPJ() {
     var promises = [];
     _postSendPJData.attachments.forEach(function(att) {
         promises.push(
-            fetch(_backendUrl + '/api/classify_pj', {
+            _fetchWithBearer(_backendUrl + '/api/classify_pj', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -5922,7 +5921,7 @@ function _fetchMailSummary() {
     }
 
     // 1re tentative : cache DB long-poll (2s max côté backend)
-    fetch(_backendUrl + '/api/mail_summary?message_id=' + encodeURIComponent(_messageId) + '&wait=2')
+    _fetchWithBearer(_backendUrl + '/api/mail_summary?message_id=' + encodeURIComponent(_messageId) + '&wait=2')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var status = (data && data.status) || 'none';

@@ -148,22 +148,21 @@ def get_current_user_id() -> str:
     -----
     Niveaux de fallback (par ordre) :
 
-    1. ``request.auth_user_id`` (posé par le décorateur ``@require_auth``
-       de ``auth_base.py`` ou par ``@require_user`` ci-dessous)
-    2. ``session.get('auth_user_id')`` (route sans décorateur mais user
-       déjà loggé via OAuth)
-    3. **Bridge mono-user DB** (``settings.auth_user_id``) — pour les
-       BG threads, atexit hooks, scripts CLI sans Flask context. Garantit
-       la cohérence routes Flask ↔ BG en mode mono-user (Yvan).
+    0. Thread-local ``user_id`` (BG thread avec user_id capturé au spawn via ``_spawn_bg``)
+    1. ``request.auth_user_id`` (posé par ``@require_auth`` ou ``@require_user``)
+    2. ``session.get('auth_user_id')`` (route sans décorateur, user loggé, cookie présent)
+    2.5 **Bearer JWT** ``Authorization: Bearer <token>`` (dialog Office.js cross-origin
+       → pas de cookie session transmis → ``_fetchWithBearer()`` dans dialog.js).
+       Garantit que chaque user voit ses propres données même depuis le WebView2 popup.
+    3. **Bridge mono-user DB** (``settings.auth_user_id``) — BG threads, atexit hooks,
+       scripts CLI sans Flask context. Retourne le dernier user loggé en DB.
 
-    Le niveau 3 est crucial : sans lui, le BG cont-spec écrirait dans
-    ``_reply_cache['default']`` mais les routes Flask de Yvan (qui ont
-    ``auth_user_id`` en session) liraient ``_reply_cache['user_yvan']``
-    → MISS systématique. Avec le bridge DB, BG et routes convergent
-    vers le même user_id.
+    Le niveau 2.5 (Bearer JWT) est crucial pour le multi-user : sans lui, le dialog
+    Office.js (cross-origin, pas de cookie) tombait au niveau 3 et lisait le user_id
+    du dernier login en DB → Michael voyait les dossiers Outlook de Yvan.
 
-    Le bridge DB sera supprimé quand BoosterMail passera en multi-user
-    actif simultané (le BG devra alors iterate users).
+    Le bridge DB (niveau 3) sera supprimé quand BoosterMail passera en multi-user
+    actif simultané (le BG devra alors itérer sur les users actifs).
 
     L'appelant peut faire ``user_id = get_current_user_id() or 'default'``
     pour avoir un fallback ultime si la DB elle-même n'est pas accessible.
@@ -191,6 +190,21 @@ def get_current_user_id() -> str:
             if session_uid:
                 return session_uid
         except RuntimeError:
+            pass
+
+        # Préférence 2.5 : Bearer JWT (dialog Office.js cross-origin → pas de cookie)
+        # _fetchWithBearer() dans dialog.js envoie Authorization: Bearer <token>
+        # ce fallback évite que le bridge DB (priorité 3) retourne le mauvais user_id
+        try:
+            auth_header = request.headers.get('Authorization', '')
+            if auth_header.startswith('Bearer '):
+                bearer = auth_header[7:]
+                from auth_jwt import decode_token as _decode_jwt
+                from flask import current_app
+                jwt_uid = _decode_jwt(bearer, current_app.secret_key)
+                if jwt_uid:
+                    return jwt_uid
+        except Exception:
             pass
 
     # Priorité 3 : bridge DB (BG thread, atexit, etc.)
