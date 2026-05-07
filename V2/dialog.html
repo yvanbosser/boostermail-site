@@ -14,10 +14,30 @@
             var p = new URLSearchParams(window.location.search);
             var plat = p.get('platform') || '';
             if (plat) document.documentElement.classList.add('platform-' + plat);
+            // 07/05 — Mode classify détecté dès le parsing HTML (avant le bundle
+            // dialog.js) pour afficher la vue split immédiatement. Sans ça, la
+            // popup ouverte par quickClassifyMail apparaissait vide pendant
+            // 1-2s le temps que le JS se charge → l'utilisateur la fermait.
+            var mode = p.get('mode') || '';
+            if (mode === 'classify') {
+                document.documentElement.classList.add('mode-classify');
+                // Log boot via fetch direct (le helper _debugLog n'est pas
+                // encore disponible côté dialog).
+                try {
+                    fetch('/api/debug_addin_log', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            event: 'classify_dialog_html_boot',
+                            data: { ts: Date.now(), url_len: window.location.href.length }
+                        })
+                    }).catch(function(){});
+                } catch (_) {}
+            }
         } catch (_) { /* noop */ }
     })();
     </script>
-    <link rel="stylesheet" href="dialog.css?v=v28-echeances-compose-05-05">
+    <link rel="stylesheet" href="dialog.css?v=v29-classify-pre-boot-07-05">
     <!-- Fix 23/04 : 'defer' → 'async' sur Office.js CDN.
          Diagnostic via perf_log + popup_pyqt.log : il y avait un gap de ~2 s
          entre "full-load DONE" côté QWebEngineView et "T0_script_start" côté
@@ -547,6 +567,6 @@
         </div>
     </div>
 
-    <script defer src="dialog.js?v=v88-quick-classify-07-05"></script>
+    <script defer src="dialog.js?v=v89-classify-pre-boot-07-05"></script>
 </body>
 </html>

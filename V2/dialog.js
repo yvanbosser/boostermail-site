@@ -1962,6 +1962,20 @@ var _cfPjManualPath = '';
 function _classifyInit() {
     if (_mode !== 'classify') return;
 
+    // Trace boot JS bundle (le HTML a déjà loggé classify_dialog_html_boot
+    // dans le <script> inline du <head>). Si ce log n'apparaît PAS dans les
+    // logs serveur, c'est que dialog.js n'a pas pu se charger / s'exécuter.
+    try {
+        fetch(_backendUrl + '/api/debug_addin_log', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                event: 'classify_dialog_js_init',
+                data: { ts: Date.now(), mid_len: (_params.get('messageId')||'').length }
+            })
+        }).catch(function(){});
+    } catch (_) {}
+
     // Pré-remplir l'en-tête depuis les params URL
     var fromDisplay = _fromName || _fromEmail || '(expéditeur inconnu)';
     var fromEl = document.getElementById('cfFrom');

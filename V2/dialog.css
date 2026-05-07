@@ -1101,6 +1101,24 @@ html.platform-newOutlook .em-hdr-return {
  * Mail à gauche, PJ à droite, en-tête commun en haut.
  * Cf docs/PLUS_TARD_VF.md #15.
  * ============================================================ */
+
+/* Mode classify — bascule UI dès le parsing HTML (avant le bundle dialog.js)
+   via la classe html.mode-classify posée dans le <script> inline du <head>.
+   Sans ce mécanisme, la popup ouverte par quickClassifyMail apparaît vide
+   pendant 1-2s le temps que le JS charge et exécute _classifyInit, ce qui
+   provoque sa fermeture immédiate (Outlook ferme une popup vide). */
+html.mode-classify .em-header,
+html.mode-classify .em-main,
+html.mode-classify .em-bottom-tools,
+html.mode-classify .em-popup-overlay,
+html.mode-classify #dashboardOverlay { display: none !important; }
+
+html.mode-classify #classifyView {
+    display: flex !important;
+    flex-direction: column;
+}
+
+html.mode-classify body { overflow: hidden; }
 .cf-header {
     background: linear-gradient(135deg, #0F6CBD 0%, #1976D2 100%);
     color: #fff;
