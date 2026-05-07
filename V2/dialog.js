@@ -87,6 +87,25 @@ try {
                         Office.context.ui && typeof Office.context.ui.messageParent === 'function');
 } catch(e) { _isOfficeContext = false; }
 
+// Auth-success handler : dialog.html chargé dans le popup OAuth après callback.
+// Le popup a le cookie session (même contexte que le callback). Il fetch le JWT,
+// le stocke en localStorage (partagé same-origin avec le shared runtime), puis
+// se ferme. autorunshared.js récupère le JWT depuis localStorage au prochain cycle.
+(function() {
+    if (_params.get('auth_success') !== '1') return;
+    fetch(_backendUrl + '/api/auth/issue_token', { method: 'POST', credentials: 'include' })
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(data) {
+            if (data && data.token) {
+                try { localStorage.setItem('bm_pending_jwt', data.token); } catch(e) {}
+            }
+        })
+        .catch(function() {})
+        .finally(function() {
+            setTimeout(function() { try { window.close(); } catch(e) {} }, 400);
+        });
+})();
+
 // STAND-BY S2 (déclarés en TOP — fix incident 30/04 PM "Cannot read properties
 // of undefined reading 'push'") — registry global des autocomplete pour partager
 // UN SEUL handler click document, au lieu d'un handler PAR input. Le hoisting

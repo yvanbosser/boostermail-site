@@ -149,6 +149,31 @@ Office.onReady(function (info) {
         _fetchAuthToken();
         _scheduleTokenRefresh();
 
+        // Retry toutes les 30s si _BM_TOKEN est vide.
+        // Deux sources : /api/auth/issue_token (cookie session) ou localStorage
+        // bm_pending_jwt (deposé par dialog.html au retour du callback OAuth —
+        // contourne l'isolement WebView2 entre le popup auth et le shared runtime).
+        var _noTokenRetry = setInterval(function() {
+            if (_BM_TOKEN) {
+                clearInterval(_noTokenRetry);
+                return;
+            }
+            // 1. Tenter localStorage (popup auth l'a deposé après callback OAuth)
+            try {
+                var _pending = localStorage.getItem('bm_pending_jwt');
+                if (_pending) {
+                    _BM_TOKEN = _pending;
+                    _BM_TOKEN_TS = Date.now();
+                    localStorage.removeItem('bm_pending_jwt');
+                    _debugLog('jwt_from_localstorage', { len: _BM_TOKEN.length });
+                    clearInterval(_noTokenRetry);
+                    return;
+                }
+            } catch(e) {}
+            // 2. Fallback: re-tenter issue_token (si cookie accessible)
+            _fetchAuthToken();
+        }, 30 * 1000);
+
         // Enregistrer ItemChanged pour alimenter la popup PyQt en continu
         // Le shared runtime persiste — pas besoin de taskpane
         try {

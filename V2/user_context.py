@@ -153,16 +153,13 @@ def get_current_user_id() -> str:
     2. ``session.get('auth_user_id')`` (route sans décorateur, user loggé, cookie présent)
     2.5 **Bearer JWT** ``Authorization: Bearer <token>`` (dialog Office.js cross-origin
        → pas de cookie session transmis → ``_fetchWithBearer()`` dans dialog.js).
-       Garantit que chaque user voit ses propres données même depuis le WebView2 popup.
-    3. **Bridge mono-user DB** (``settings.auth_user_id``) — BG threads, atexit hooks,
-       scripts CLI sans Flask context. Retourne le dernier user loggé en DB.
+    3. ``''`` — en contexte HTTP, jamais le bridge DB. Un utilisateur sans auth valide
+       obtient ``''`` (→ ``or 'default'`` chez l'appelant). Évite la fuite cross-user :
+       le bridge DB retournerait le dernier user loggé, ce qui est faux en multi-tenant.
 
-    Le niveau 2.5 (Bearer JWT) est crucial pour le multi-user : sans lui, le dialog
-    Office.js (cross-origin, pas de cookie) tombait au niveau 3 et lisait le user_id
-    du dernier login en DB → Michael voyait les dossiers Outlook de Yvan.
-
-    Le bridge DB (niveau 3) sera supprimé quand BoosterMail passera en multi-user
-    actif simultané (le BG devra alors itérer sur les users actifs).
+    **Hors contexte HTTP** (BG thread sans thread-local, atexit, scripts CLI) :
+    → Bridge DB (``settings.auth_user_id``) — garantit la cohérence cache BG ↔ routes
+      en mode quasi-mono-user (le BG écrit dans le bon cache user).
 
     L'appelant peut faire ``user_id = get_current_user_id() or 'default'``
     pour avoir un fallback ultime si la DB elle-même n'est pas accessible.
@@ -207,7 +204,15 @@ def get_current_user_id() -> str:
         except Exception:
             pass
 
-    # Priorité 3 : bridge DB (BG thread, atexit, etc.)
+        # En contexte HTTP sans auth trouvée → retourner '' (JAMAIS le bridge DB).
+        # Le bridge DB retourne le dernier user loggé en DB → fuite cross-user en
+        # multi-tenant. En HTTP, un utilisateur sans session valide doit obtenir ''
+        # (l'appelant fait `or 'default'`) plutôt que les données d'un autre user.
+        # Le bridge DB reste uniquement pour les BG threads / atexit sans Flask context.
+        return ''
+
+    # Hors contexte HTTP (BG thread sans thread-local, atexit, scripts CLI)
+    # → bridge DB OK : le BG doit écrire dans le bon cache user.
     return _get_user_id_from_db()
 
 
