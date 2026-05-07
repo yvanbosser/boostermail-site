@@ -373,14 +373,31 @@ def _get_user_name(fallback: str = 'User') -> str:
         from user_context import get_current_user_id
         uid = get_current_user_id()
         if uid and uid != 'default':
-            user_row = _db.get_user(uid)
-            if user_row:
-                name = (user_row.get('display_name') or '').strip()
-                if name:
-                    return name
+            # Nom éditable (saisi onboarding/profil) en priorité
+            name = _db.get_user_editable_name(uid)
+            if not name:
+                user_row = _db.get_user(uid)
+                if user_row:
+                    name = (user_row.get('display_name') or '').strip()
+            if name:
+                return name
     except Exception:
         pass
     return (_db.get_setting('user_name', fallback) or fallback)
+
+
+def _get_user_pj_root() -> str:
+    """Retourne le dossier PJ racine du user courant (per-user)."""
+    try:
+        from user_context import get_current_user_id
+        uid = get_current_user_id() or 'default'
+        if uid != 'default':
+            path = _db.get_user_pj_root(uid)
+            if path:
+                return path
+    except Exception:
+        pass
+    return _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
 
 
 def _get_prompt_builder() -> ClaudeAssistant | None:
@@ -395,7 +412,7 @@ def _get_prompt_builder() -> ClaudeAssistant | None:
             with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
                 config = json.load(f)
             api_key = _get_config_key(config, 'anthropic_api_key').strip()
-            user_name = _db.get_setting('user_name', 'User')
+            user_name = _get_user_name('User')
             if api_key:
                 _prompt_builder = ClaudeAssistant(api_key=api_key, user_name=user_name)
                 # Charger le niveau rédactionnel
@@ -6916,7 +6933,14 @@ def api_set_ai_model():
 @app.route('/api/settings/<key>', methods=['GET'])
 def api_get_setting(key):
     """Lecture d'un réglage utilisateur."""
-    value = _db.get_setting(key)
+    from user_context import get_current_user_id
+    uid = get_current_user_id() or 'default'
+    if uid != 'default' and key == 'user_name':
+        value = _db.get_user_editable_name(uid) or _db.get_setting(key)
+    elif uid != 'default' and key == 'pj_root_folder':
+        value = _db.get_user_pj_root(uid) or _db.get_setting(key)
+    else:
+        value = _db.get_setting(key)
     return jsonify({"key": key, "value": value})
 
 
@@ -6949,10 +6973,17 @@ def api_save_setting():
         return jsonify({"error": "Clé requise"}), 400
     if key not in _ALLOWED_SETTINGS:
         return jsonify({"error": f"Clé '{key}' non autorisée"}), 403
-    _db.save_setting(key, value)
-    # Invalider le cache arborescence Windows du user courant si le dossier racine PJ change
-    if key == 'pj_root_folder':
+    from user_context import get_current_user_id
+    uid = get_current_user_id() or 'default'
+    if uid != 'default' and key == 'user_name':
+        _db.save_user_editable_name(uid, value)
+    elif uid != 'default' and key == 'pj_root_folder':
+        _db.save_user_pj_root(uid, value)
         _windows_folders_cache.pop('folders', None)
+    else:
+        _db.save_setting(key, value)
+        if key == 'pj_root_folder':
+            _windows_folders_cache.pop('folders', None)
     return jsonify({"status": "ok"})
 
 
@@ -8578,7 +8609,7 @@ def api_windows_folders():
     """Retourne l'arborescence des dossiers Windows (cache session)."""
     try:
         folders = _get_windows_folders_cached()
-        root = _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
+        root = _get_user_pj_root()
         return jsonify({"folders": folders or [], "root": root})
     except Exception as e:
         return jsonify({"error": _safe_err(e)}), 500
@@ -8639,11 +8670,11 @@ def api_windows_folders_push():
         _db.save_user_windows_folders(root_path, folders, server_hash, user_id=_uid)
         _windows_folders_cache.pop('folders', None)
 
-        # Aussi mettre à jour le setting pj_root_folder si différent
-        # (utile pour la cohérence avec la page Profil)
+        # Mettre à jour le dossier PJ racine per-user (cohérence page Profil)
         try:
-            current_root = _db.get_setting('pj_root_folder')
-            if current_root != root_path:
+            if _uid != 'default':
+                _db.save_user_pj_root(_uid, root_path)
+            else:
                 _db.save_setting('pj_root_folder', root_path)
         except Exception:
             pass
@@ -8682,7 +8713,7 @@ def api_windows_folders_status():
             return jsonify({
                 "synced": False,
                 "count": 0,
-                "root_path": _db.get_setting('pj_root_folder') or '',
+                "root_path": _get_user_pj_root() or '',
                 "synced_at": None,
                 "synced_at_human": "Aucune arborescence détectée",
                 "freshness": "missing",
@@ -8865,7 +8896,7 @@ def api_smart_paperclip():
 def api_open_windows_folder():
     """Ouvre un dossier Windows dans l'explorateur (Windows uniquement)."""
     folder_path = request.args.get('path', '')
-    root = _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
+    root = _get_user_pj_root()
     full_path = os.path.normpath(os.path.join(root, folder_path.replace('/', os.sep)))
     # Securite path traversal
     if not os.path.normcase(os.path.realpath(full_path)).startswith(
@@ -9250,7 +9281,7 @@ def _get_windows_folders_cached():
         except Exception as _e:
             logger.debug(f"[windows_folders] DB read échec : {_e}")
         # [2] Fallback scan filesystem local (mode dev seulement)
-        root = _db.get_setting('pj_root_folder') or _PJ_ROOT_DEFAULT
+        root = _get_user_pj_root()
         folders = _scan_windows_folders(root)
         _windows_folders_cache['folders'] = folders
         return folders
@@ -13174,7 +13205,7 @@ def api_setup_status():
         "companion_installed": companion_installed == 'true',
         "onboarding_done": onboarding_done == 'true',
         "button_activated": onboarding_done == 'true',
-        "user_name": _db.get_setting('user_name', ''),
+        "user_name": _get_user_name(''),
     })
 
 
@@ -13192,11 +13223,16 @@ def api_setup_complete():
     if step not in valid_steps:
         return jsonify({"error": f"Étape invalide : {step}"}), 400
 
-    # Étape 2 : Compte EasyMail — sauvegarder le nom
+    # Étape 2 : Compte EasyMail — sauvegarder le nom per-user
     if step == '2':
         user_name = step_data.get('user_name', '').strip()
         if user_name:
-            _db.save_setting('user_name', user_name)
+            from user_context import get_current_user_id
+            _uid2 = get_current_user_id() or 'default'
+            if _uid2 != 'default':
+                _db.save_user_editable_name(_uid2, user_name)
+            else:
+                _db.save_setting('user_name', user_name)
 
     # Étape 3 : Companion
     if step == '3':
@@ -13542,7 +13578,7 @@ def page_profile():
         default_importance = 2
     user_name = _get_user_name()
     user_email = _get_my_email() or ''
-    pj_root = _db.get_setting('pj_root_folder', 'C:\\Documents')
+    pj_root = _get_user_pj_root() or 'C:\\Documents'
     mail_count = _db.get_setting('onboarding_mail_count', '800')
     show_sig = _db.get_setting('show_marketing_signature', '1') == '1'
     return render_template('profile.html',

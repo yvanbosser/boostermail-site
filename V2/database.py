@@ -693,10 +693,12 @@ class Database:
         c.execute("CREATE INDEX IF NOT EXISTS idx_org_rules_org ON organization_rules(organization_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_org_rules_type ON organization_rules(rule_type)")
 
-        # Migration : ajouter organization_id et org_role sur users
+        # Migration : ajouter organization_id, org_role, user_name, pj_root_folder sur users
         for col_def in [
             "organization_id TEXT",
             "org_role TEXT NOT NULL DEFAULT 'member'",
+            "user_name TEXT",
+            "pj_root_folder TEXT",
         ]:
             col_name = col_def.split()[0]
             try:
@@ -1468,6 +1470,28 @@ class Database:
     def save_setting(self, key, value):
         conn = self._conn()
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
+        conn.commit()
+
+    def get_user_editable_name(self, user_id: str) -> str:
+        c = self._conn().cursor()
+        c.execute("SELECT user_name FROM users WHERE id = ?", (user_id,))
+        row = c.fetchone()
+        return (row[0] or '').strip() if row else ''
+
+    def save_user_editable_name(self, user_id: str, name: str) -> None:
+        conn = self._conn()
+        conn.execute("UPDATE users SET user_name = ? WHERE id = ?", (name, user_id))
+        conn.commit()
+
+    def get_user_pj_root(self, user_id: str) -> str:
+        c = self._conn().cursor()
+        c.execute("SELECT pj_root_folder FROM users WHERE id = ?", (user_id,))
+        row = c.fetchone()
+        return (row[0] or '').strip() if row else ''
+
+    def save_user_pj_root(self, user_id: str, path: str) -> None:
+        conn = self._conn()
+        conn.execute("UPDATE users SET pj_root_folder = ? WHERE id = ?", (path, user_id))
         conn.commit()
 
     # --- ARBORESCENCE WINDOWS (Phase A1 02/05/2026) -----------------------
