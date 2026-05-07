@@ -67,7 +67,7 @@ CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
 - RC2 : branche « Re-analyse forcee sample_count=0 » sans condition d'arrêt → `yvan@gmail` + `support@coaxis` en vraie boucle Claude (1 080 appels/jour chacun)
 - RC3 : `_should_analyze_contact()` sans mémoire « déjà analysé » → 34 contacts dans le schedule re-analysés à chaque cycle BG (~80 s)
 
-**4 fixes déployés** (commit `05b34a3`) :
+**4 fixes déployés** (commit dédié, hash dans le bilan 03/05) :
 - S1 : tuple `_AUTO_EMAIL_PATTERNS` + skip silencieux early (parité commis Haiku unifié)
 - S2 : cooldown 24h via `_force_analysis_attempts` cache RAM + paramètre `bypass_cooldown=True` ajouté à `_maybe_analyze_contact()` (les 3 routes user `api_analyze_contact` + `api_recalibrate_contacts` + `_post_send_learning` passent True)
 - S3 : `_should_analyze_contact(mail_count, existing_sample_count)` avec mémoire (skip si sample >= mail)
