@@ -1936,6 +1936,406 @@ function _setEcheanceCardClickable(clickable) {
     }
 }
 
+// ============================================================================
+// QUICK CLASSIFY (07/05/2026) — mode `classify` du dialog
+// ----------------------------------------------------------------------------
+// Ouvert depuis le bouton ribbon « Classer rapide » via quickClassifyMail()
+// dans autorunshared.js. Vue split : mail à gauche, PJ à droite, en-tête
+// commun en haut. Réutilise les helpers existants (_buildOutlookFolderTreeHtml,
+// _findFolderMatch, _buildPJFolderTreeHtml, _findPJFolderMatch).
+// Cf docs/PLUS_TARD_VF.md #15.
+// ============================================================================
+
+var _cfMessageId = '';
+var _cfHasAttachments = false;
+var _cfMailFolders = [];
+var _cfMailSuggestion = null;
+var _cfMailSelectedId = '';
+var _cfMailManualPath = '';
+var _cfMailUndoTimer = null;
+var _cfMailLastPath = '';
+var _cfPjFolders = [];
+var _cfPjSuggestion = null;
+var _cfPjSelectedPath = '';
+var _cfPjManualPath = '';
+
+function _classifyInit() {
+    if (_mode !== 'classify') return;
+
+    // Pré-remplir l'en-tête depuis les params URL
+    var fromDisplay = _fromName || _fromEmail || '(expéditeur inconnu)';
+    var fromEl = document.getElementById('cfFrom');
+    var subjEl = document.getElementById('cfSubject');
+    if (fromEl) fromEl.textContent = fromDisplay;
+    if (subjEl) subjEl.textContent = _subject || '(sans objet)';
+
+    // Cacher l'UI réponse normale (header + main + bottom-tools)
+    var sel = ['.em-header', '.em-main', '.em-bottom-tools'];
+    sel.forEach(function(s) {
+        var el = document.querySelector(s);
+        if (el) el.style.display = 'none';
+    });
+
+    // Afficher la vue classify
+    var cv = document.getElementById('classifyView');
+    if (cv) cv.style.display = 'flex';
+
+    _cfMessageId = _params.get('messageId') || '';
+    _cfHasAttachments = (_params.get('hasAttachments') === '1');
+
+    // Cacher la colonne PJ si pas de pièces jointes
+    if (!_cfHasAttachments) {
+        var colPj = document.getElementById('cfColPj');
+        if (colPj) colPj.style.display = 'none';
+    }
+
+    // Bind événements de recherche
+    var sm = document.getElementById('cfMailSearch');
+    if (sm) sm.addEventListener('input', _classifyOnMailSearchInput);
+    var sp = document.getElementById('cfPjSearch');
+    if (sp) sp.addEventListener('input', _classifyOnPjSearchInput);
+
+    // Fetch arbres + suggestions en parallèle
+    _classifyFetchMailData();
+    if (_cfHasAttachments) _classifyFetchPjData();
+}
+
+function _classifyClose() {
+    try { Office.context.ui.messageParent(JSON.stringify({action:'classify_close'})); } catch (e) {}
+    try { window.close(); } catch (e) {}
+}
+
+// --- Fetch données mail ---
+function _classifyFetchMailData() {
+    Promise.all([
+        _fetchWithBearer(_backendUrl + '/api/folders').then(function(r){return r.json();}).catch(function(){return {folders:[]};}),
+        _fetchWithBearer(_backendUrl + '/api/classement_mail/' + encodeURIComponent(_cfMessageId)).then(function(r){return r.json();}).catch(function(){return null;})
+    ]).then(function(results) {
+        _cfMailFolders = (results[0] && results[0].folders) || [];
+        _cfMailSuggestion = results[1] || {};
+        _classifyRenderMail();
+    });
+}
+
+function _classifyRenderMail() {
+    var sug = _cfMailSuggestion || {};
+    var primary = sug.suggestion || (sug.suggestions && sug.suggestions[0]) || null;
+    var alts = (sug.suggestions || []).slice(1, 3);
+    var sugEl = document.getElementById('cfMailSuggestion');
+    var altsEl = document.getElementById('cfMailAlternatives');
+    var btnEl = document.getElementById('cfMailBtn');
+
+    if (primary && primary.folder_path) {
+        _cfMailSelectedId = primary.folder_id || '';
+        sugEl.innerHTML = '<div class="em-folder-suggestion selected" data-folder-id="' + _escapeAttr(primary.folder_id||'') + '">📁 ' + _escapeHtml(primary.folder_path) + '</div>';
+        var sugClickable = sugEl.querySelector('.em-folder-suggestion');
+        if (sugClickable) sugClickable.onclick = function() { _classifyMailSelect(primary.folder_id||'', this); };
+        if (btnEl) btnEl.disabled = false;
+    } else {
+        _cfMailSelectedId = '';
+        sugEl.innerHTML = '<div style="font-style:italic;color:#888;">Aucune suggestion — choisissez un dossier dans l\'arbre ou la barre de recherche.</div>';
+        if (btnEl) btnEl.disabled = true;
+    }
+
+    var altsHtml = '';
+    alts.forEach(function(a) {
+        if (!a || !a.folder_path) return;
+        altsHtml += '<div class="em-folder-alternative" data-folder-id="' + _escapeAttr(a.folder_id||'') + '">'
+            + '<span class="em-folder-alt-bullet">●</span><span>' + _escapeHtml(a.folder_path) + '</span></div>';
+    });
+    altsEl.innerHTML = altsHtml;
+    altsEl.querySelectorAll('.em-folder-alternative').forEach(function(el) {
+        el.onclick = function() { _classifyMailSelect(el.getAttribute('data-folder-id')||'', el); };
+    });
+
+    var treeEl = document.getElementById('cfMailTree');
+    treeEl.innerHTML = _buildOutlookFolderTreeHtml(_cfMailFolders, _cfMailSelectedId);
+    _classifyBindMailRows(treeEl);
+    var sel = treeEl.querySelector('.em-folder-item.selected');
+    if (sel && sel.scrollIntoView) sel.scrollIntoView({block:'center', behavior:'auto'});
+}
+
+function _classifyBindMailRows(container) {
+    container.querySelectorAll('.em-folder-item').forEach(function(row) {
+        row.onclick = function(e) {
+            if (e.target && e.target.classList && e.target.classList.contains('em-folder-chevron')) return;
+            _classifyMailSelect(row.getAttribute('data-folder-id')||'', row);
+        };
+    });
+    container.querySelectorAll('.em-folder-chevron').forEach(function(ch) {
+        ch.onclick = function(e) {
+            e.stopPropagation();
+            _toggleFolderChildren(e, ch.parentElement);
+        };
+    });
+}
+
+function _classifyMailSelect(folderId, element) {
+    _cfMailSelectedId = folderId || '';
+    _cfMailManualPath = '';
+    var searchEl = document.getElementById('cfMailSearch');
+    if (searchEl && searchEl.value) searchEl.value = '';
+    document.querySelectorAll('#cfColMail .em-folder-item, #cfColMail .em-folder-suggestion, #cfColMail .em-folder-alternative').forEach(function(el) {
+        el.classList.remove('selected');
+    });
+    if (element && element.classList) element.classList.add('selected');
+    var btn = document.getElementById('cfMailBtn');
+    if (btn) btn.disabled = !folderId;
+}
+
+function _classifyOnMailSearchInput(e) {
+    var val = (e.target.value || '').trim();
+    if (val.length === 0) {
+        _cfMailManualPath = '';
+        _classifyRenderMail();
+        return;
+    }
+    _cfMailManualPath = val;
+    var match = _findFolderMatch(_cfMailFolders, val);
+    var btn = document.getElementById('cfMailBtn');
+    if (match) {
+        _cfMailSelectedId = match.id;
+        _cfMailManualPath = '';
+        var treeEl = document.getElementById('cfMailTree');
+        treeEl.innerHTML = _buildOutlookFolderTreeHtml(_cfMailFolders, match.id);
+        _classifyBindMailRows(treeEl);
+        var sel = treeEl.querySelector('.em-folder-item.selected');
+        if (sel && sel.scrollIntoView) sel.scrollIntoView({block:'center', behavior:'auto'});
+        if (btn) btn.disabled = false;
+    } else {
+        _cfMailSelectedId = '';  // mode création
+        if (btn) btn.disabled = false;
+    }
+}
+
+function _classifyDoMail() {
+    var btn = document.getElementById('cfMailBtn');
+    btn.disabled = true;
+
+    // Déterminer le path : priorité arbre selected, fallback manual path
+    var path = '';
+    if (_cfMailSelectedId) {
+        for (var i = 0; i < _cfMailFolders.length; i++) {
+            if (_cfMailFolders[i].id === _cfMailSelectedId) {
+                path = _cfMailFolders[i].path || _cfMailFolders[i].name || '';
+                break;
+            }
+        }
+    } else if (_cfMailManualPath) {
+        path = _cfMailManualPath;
+    }
+    if (!path || !_cfMessageId) { alert('Aucun dossier sélectionné'); btn.disabled = false; return; }
+
+    _fetchWithBearer(_backendUrl + '/api/classify_email_manual', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message_id: _cfMessageId, path: path})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data && (data.success || data.ok || data.status === 'ok')) {
+            _classifyShowMailUndo(path);
+        } else {
+            alert(data && data.error ? data.error : 'Erreur de classement');
+            btn.disabled = false;
+        }
+    })
+    .catch(function() { alert('Erreur de connexion'); btn.disabled = false; });
+}
+
+function _classifyShowMailUndo(path) {
+    var undoEl = document.getElementById('cfMailUndo');
+    var btnEl = document.getElementById('cfMailBtn');
+    var seconds = 2;
+    btnEl.style.display = 'none';
+    undoEl.style.display = 'flex';
+    undoEl.innerHTML = '<span>✓ Mail classé dans <strong>' + _escapeHtml(path) + '</strong> &nbsp;(<span id="cfMailUndoCnt">' + seconds + '</span>s)</span>'
+                     + '<button onclick="_classifyUndoMail()">Annuler</button>';
+    _cfMailLastPath = path;
+    var cnt = seconds;
+    if (_cfMailUndoTimer) clearInterval(_cfMailUndoTimer);
+    _cfMailUndoTimer = setInterval(function() {
+        cnt--;
+        var cntEl = document.getElementById('cfMailUndoCnt');
+        if (cntEl) cntEl.textContent = cnt;
+        if (cnt <= 0) {
+            clearInterval(_cfMailUndoTimer); _cfMailUndoTimer = null;
+            undoEl.innerHTML = '<span>✓ Mail classé dans <strong>' + _escapeHtml(path) + '</strong></span>';
+            // Auto-fermeture du dialog si pas de PJ ou PJ déjà traitée
+            if (!_cfHasAttachments) setTimeout(_classifyClose, 1500);
+        }
+    }, 1000);
+}
+
+function _classifyUndoMail() {
+    if (_cfMailUndoTimer) { clearInterval(_cfMailUndoTimer); _cfMailUndoTimer = null; }
+    var undoEl = document.getElementById('cfMailUndo');
+    var btnEl = document.getElementById('cfMailBtn');
+    undoEl.innerHTML = '<span>Annulation en cours…</span>';
+    _fetchWithBearer(_backendUrl + '/api/classify_email_manual', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message_id: _cfMessageId, path: 'Boîte de réception'})
+    })
+    .then(function() {
+        undoEl.style.display = 'none';
+        btnEl.style.display = '';
+        btnEl.textContent = 'Classer le mail';
+        btnEl.disabled = false;
+    })
+    .catch(function() {
+        alert('Erreur lors de l\'annulation. Le mail est dans ' + _cfMailLastPath + ', à reprendre manuellement dans Outlook.');
+    });
+}
+
+// --- Fetch données PJ ---
+function _classifyFetchPjData() {
+    Promise.all([
+        _fetchWithBearer(_backendUrl + '/api/windows_folders').then(function(r){return r.json();}).catch(function(){return {folders:[]};}),
+        _fetchWithBearer(_backendUrl + '/api/classement_pj/' + encodeURIComponent(_cfMessageId)).then(function(r){return r.json();}).catch(function(){return null;})
+    ]).then(function(results) {
+        _cfPjFolders = (results[0] && results[0].folders) || [];
+        _cfPjSuggestion = results[1] || {};
+        _classifyRenderPj();
+    });
+}
+
+function _classifyRenderPj() {
+    var sug = _cfPjSuggestion || {};
+    var primary = sug.suggestion || (sug.suggestions && sug.suggestions[0]) || null;
+    var alts = (sug.suggestions || []).slice(1, 3);
+    var sugEl = document.getElementById('cfPjSuggestion');
+    var altsEl = document.getElementById('cfPjAlternatives');
+    var btnEl = document.getElementById('cfPjBtn');
+
+    if (primary && (primary.dest_folder || primary.folder_path)) {
+        _cfPjSelectedPath = primary.dest_folder || primary.folder_path || '';
+        sugEl.innerHTML = '<div class="em-folder-suggestion selected">📁 ' + _escapeHtml(_cfPjSelectedPath) + '</div>';
+        if (btnEl) btnEl.disabled = false;
+    } else {
+        _cfPjSelectedPath = '';
+        sugEl.innerHTML = '<div style="font-style:italic;color:#888;">Aucune suggestion — choisissez un dossier dans l\'arbre ou la barre de recherche.</div>';
+        if (btnEl) btnEl.disabled = true;
+    }
+
+    var altsHtml = '';
+    alts.forEach(function(a) {
+        if (!a) return;
+        var p = a.dest_folder || a.folder_path || '';
+        if (!p) return;
+        altsHtml += '<div class="em-folder-alternative" data-pj-path="' + _escapeAttr(p) + '">'
+            + '<span class="em-folder-alt-bullet">●</span><span>' + _escapeHtml(p) + '</span></div>';
+    });
+    altsEl.innerHTML = altsHtml;
+    altsEl.querySelectorAll('.em-folder-alternative').forEach(function(el) {
+        el.onclick = function() { _classifyPjSelect(el.getAttribute('data-pj-path')||'', el); };
+    });
+
+    var treeEl = document.getElementById('cfPjTree');
+    treeEl.innerHTML = _buildPJFolderTreeHtml(_cfPjFolders, _cfPjSelectedPath);
+    _classifyBindPjRows(treeEl);
+    var sel = treeEl.querySelector('.em-folder-item.selected');
+    if (sel && sel.scrollIntoView) sel.scrollIntoView({block:'center', behavior:'auto'});
+}
+
+function _classifyBindPjRows(container) {
+    container.querySelectorAll('.em-folder-item').forEach(function(row) {
+        row.onclick = function(e) {
+            if (e.target && e.target.classList && e.target.classList.contains('em-folder-chevron')) return;
+            _classifyPjSelect(row.getAttribute('data-folder-path')||'', row);
+        };
+    });
+    container.querySelectorAll('.em-folder-chevron').forEach(function(ch) {
+        ch.onclick = function(e) {
+            e.stopPropagation();
+            _togglePJFolderChildren(e, ch.parentElement);
+        };
+    });
+}
+
+function _classifyPjSelect(path, element) {
+    _cfPjSelectedPath = path || '';
+    _cfPjManualPath = '';
+    var searchEl = document.getElementById('cfPjSearch');
+    if (searchEl && searchEl.value) searchEl.value = '';
+    document.querySelectorAll('#cfColPj .em-folder-item, #cfColPj .em-folder-suggestion, #cfColPj .em-folder-alternative').forEach(function(el) {
+        el.classList.remove('selected');
+    });
+    if (element && element.classList) element.classList.add('selected');
+    var btn = document.getElementById('cfPjBtn');
+    if (btn) btn.disabled = !path;
+}
+
+function _classifyOnPjSearchInput(e) {
+    var val = (e.target.value || '').trim();
+    if (val.length === 0) {
+        _cfPjManualPath = '';
+        _classifyRenderPj();
+        return;
+    }
+    _cfPjManualPath = val;
+    var match = _findPJFolderMatch(_cfPjFolders, val);
+    var btn = document.getElementById('cfPjBtn');
+    if (match) {
+        _cfPjSelectedPath = match.path || match.full_path || val;
+        _cfPjManualPath = '';
+        var treeEl = document.getElementById('cfPjTree');
+        treeEl.innerHTML = _buildPJFolderTreeHtml(_cfPjFolders, _cfPjSelectedPath);
+        _classifyBindPjRows(treeEl);
+        var sel = treeEl.querySelector('.em-folder-item.selected');
+        if (sel && sel.scrollIntoView) sel.scrollIntoView({block:'center', behavior:'auto'});
+        if (btn) btn.disabled = false;
+    } else {
+        _cfPjSelectedPath = '';  // mode création (le companion crée le dossier)
+        if (btn) btn.disabled = false;
+    }
+}
+
+function _classifyDoPj() {
+    // Phase 1 MVP : ouvre le dossier Windows dans Explorer via Companion local.
+    // L'extraction automatique des PJ est documentée pour V2 (cf PLUS_TARD_VF #15).
+    var btn = document.getElementById('cfPjBtn');
+    btn.disabled = true;
+    var path = _cfPjSelectedPath || _cfPjManualPath || '';
+    if (!path) { alert('Aucun dossier sélectionné'); btn.disabled = false; return; }
+    _fetchWithBearer(_backendUrl + '/api/open_windows_folder?path=' + encodeURIComponent(path))
+        .then(function() { _classifyShowPjConfirm(path); })
+        .catch(function() {
+            alert('Companion local indisponible — impossible d\'ouvrir le dossier Windows.');
+            btn.disabled = false;
+        });
+}
+
+function _classifyShowPjConfirm(path) {
+    var undoEl = document.getElementById('cfPjUndo');
+    var btnEl = document.getElementById('cfPjBtn');
+    btnEl.style.display = 'none';
+    undoEl.style.display = 'flex';
+    undoEl.innerHTML = '<span>✓ Dossier ouvert dans Explorer : <strong>' + _escapeHtml(path) + '</strong> — glissez vos PJ dedans</span>'
+                     + '<button onclick="_classifyResetPj()">OK</button>';
+}
+
+function _classifyResetPj() {
+    var undoEl = document.getElementById('cfPjUndo');
+    var btnEl = document.getElementById('cfPjBtn');
+    undoEl.style.display = 'none';
+    btnEl.style.display = '';
+    btnEl.textContent = 'Ouvrir le dossier des PJ';
+    btnEl.disabled = false;
+}
+
+// Boot : init au chargement si _mode === 'classify'
+if (typeof window !== 'undefined') {
+    var _classifyBootHandler = function() {
+        try { _classifyInit(); } catch (e) { console.error('classifyInit error', e); }
+    };
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _classifyBootHandler);
+    } else {
+        _classifyBootHandler();
+    }
+}
+
 /** Phase 2.A (24/04) — Applique le preview mail pré-chauffé (échéance + classement)
  * aux cards `infoEcheance` et `infoClassement` du dialog 80%.
  * Si preview null ou données vides → "Néant" (demande user : ne pas laisser vide).

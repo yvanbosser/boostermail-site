@@ -146,6 +146,24 @@
                       <FunctionName>openEasyMailDialog</FunctionName>
                     </Action>
                   </Control>
+                  <!-- 07/05/2026 — Quick Classify : bouton dédié au classement
+                       du mail + PJ, sans passer par le flow de réponse IA.
+                       Cf docs/PLUS_TARD_VF.md #15. -->
+                  <Control xsi:type="Button" id="easymailClassifyButton">
+                    <Label resid="classifyLabel"/>
+                    <Supertip>
+                      <Title resid="classifyLabel"/>
+                      <Description resid="classifyDesc"/>
+                    </Supertip>
+                    <Icon>
+                      <bt:Image size="16" resid="icon16"/>
+                      <bt:Image size="32" resid="icon32"/>
+                      <bt:Image size="80" resid="icon80"/>
+                    </Icon>
+                    <Action xsi:type="ExecuteFunction">
+                      <FunctionName>quickClassifyMail</FunctionName>
+                    </Action>
+                  </Control>
                 </Group>
               </OfficeTab>
             </ExtensionPoint>
@@ -200,9 +218,11 @@
         <bt:ShortStrings>
           <bt:String id="groupLabel" DefaultValue="BoosterMail"/>
           <bt:String id="buttonLabel" DefaultValue="BoosterMail"/>
+          <bt:String id="classifyLabel" DefaultValue="Classer rapide"/>
         </bt:ShortStrings>
         <bt:LongStrings>
           <bt:String id="buttonDesc" DefaultValue="Ouvrir le panneau BoosterMail pour repondre intelligemment"/>
+          <bt:String id="classifyDesc" DefaultValue="Classer ce mail dans le bon dossier Outlook (et extraire les pieces jointes vers Windows) avec la suggestion intelligente BoosterMail"/>
         </bt:LongStrings>
       </Resources>
     </VersionOverrides>

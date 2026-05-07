@@ -850,6 +850,20 @@ Quand on attaquera demain :
 
 ---
 
+### 15. Quick Classify — bouton ribbon « 📁 Classer » (mail + PJ, livré 07/05/2026)
+
+**Origine** : feature lancée 07/05/2026 — bouton ribbon Outlook « 📁 Classer » qui propose un classement intelligent **sans passer par le flow de réponse IA**. Cible : utilisateurs Outlook qui trient mais ne répondent pas (ou ne veulent pas générer une réponse), et qui veulent quand même bénéficier des 7 tiers de classement BoosterMail (thread, règle contact, keywords, dossier dans sujet/body, domaine, cross-contact, momentum, IA).
+
+**Scope phase 1 — intégral** :
+- **Classement mail** : propose un dossier Outlook + UNDO 4s pour annuler le déplacement
+- **Classement PJ** (si pièces jointes présentes) : propose en parallèle un dossier Windows (via companion local) où les PJ seront extraites
+
+Décision Yvan 07/05 : pas de différé du PJ — l'utilisateur attend une action « tout en un » au clic « Classer », pas 2 features séparées dans le temps.
+
+**Implémentation** : réutilise tout le pipeline classement existant (`_prewarm_classement_for_mail` + `_prewarm_pj_classement_for_mail`) + endpoints `/api/classify_email_manual` + `/api/classify_pj` déjà présents. Frontend : nouveau mode `classify` dans `dialog.js` qui masque l'éditeur/refine et n'affiche que les cards classement.
+
+---
+
 ## ⏸️ DIFFÉRÉ STRATÉGIQUE
 
 ### MPN (Microsoft Cloud Partner Program) — différé business

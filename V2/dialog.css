@@ -1095,3 +1095,152 @@ html.platform-newOutlook .em-hdr-return {
     padding: 0 10px;
     font-size: 11px;
 }
+
+/* ============================================================
+ * QUICK CLASSIFY (07/05/2026) — vue split mode `classify`
+ * Mail à gauche, PJ à droite, en-tête commun en haut.
+ * Cf docs/PLUS_TARD_VF.md #15.
+ * ============================================================ */
+.cf-header {
+    background: linear-gradient(135deg, #0F6CBD 0%, #1976D2 100%);
+    color: #fff;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+.cf-header-text { flex: 1; min-width: 0; }
+.cf-header-from {
+    font-size: 13px;
+    opacity: 0.9;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cf-header-from strong { font-weight: 600; }
+.cf-header-subj {
+    font-size: 16px;
+    font-weight: 600;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cf-close {
+    background: rgba(255,255,255,0.18);
+    border: none;
+    color: #fff;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    font-size: 16px;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-left: 16px;
+}
+.cf-close:hover { background: rgba(255,255,255,0.32); }
+
+.cf-cols {
+    flex: 1;
+    display: flex;
+    gap: 12px;
+    padding: 16px;
+    overflow: hidden;
+    min-height: 0;
+}
+.cf-col {
+    flex: 1;
+    background: #fff;
+    border-radius: 8px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    overflow: hidden;
+    min-height: 0;
+}
+.cf-col-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #0F6CBD;
+    margin-bottom: 12px;
+    flex-shrink: 0;
+}
+.cf-suggestion {
+    font-size: 13px;
+    color: #444;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+.cf-alternatives {
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+.cf-search {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    font-size: 13px;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+.cf-search:focus { outline: none; border-color: #0F6CBD; box-shadow: 0 0 0 3px rgba(15,108,189,0.12); }
+.cf-tree {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 4px 0;
+    background: #fafbfc;
+    min-height: 100px;
+}
+.cf-actions {
+    margin-top: 12px;
+    flex-shrink: 0;
+    display: flex;
+    justify-content: flex-end;
+}
+.cf-btn {
+    padding: 9px 18px;
+    border-radius: 6px;
+    border: 1px solid #d0d7de;
+    background: #fff;
+    color: #444;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+}
+.cf-btn:hover:not(:disabled) { background: #f6f8fa; }
+.cf-btn.primary {
+    background: #0F6CBD;
+    border-color: #0F6CBD;
+    color: #fff;
+}
+.cf-btn.primary:hover:not(:disabled) { background: #0d5aa3; }
+.cf-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.cf-undo {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: #2e7d32;
+    color: #fff;
+    border-radius: 6px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+}
+.cf-undo button {
+    background: rgba(255,255,255,0.18);
+    border: 1px solid rgba(255,255,255,0.4);
+    color: #fff;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+}
+.cf-undo button:hover { background: rgba(255,255,255,0.3); }

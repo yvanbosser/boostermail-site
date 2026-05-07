@@ -773,6 +773,67 @@ function _notifyBackend(route, data) {
 }
 
 // ============================================================================
+// QUICK CLASSIFY (07/05/2026) — bouton ribbon « 📁 Classer rapide »
+// ============================================================================
+//
+// Permet à l'utilisateur de bénéficier du classement intelligent BoosterMail
+// (mail Outlook + PJ Windows) SANS passer par le flow de réponse IA. Le
+// bouton ribbon (cf manifest.xml MessageReadCommandSurface) appelle cette
+// fonction qui ouvre le dialog en mode 'classify' — UI minimaliste 2 cards
+// avec UNDO 4s. Cf docs/PLUS_TARD_VF.md #15.
+//
+function quickClassifyMail(event) {
+    var item = (Office && Office.context && Office.context.mailbox && Office.context.mailbox.item) || null;
+    if (!item) {
+        _debugLog('quick_classify_no_item', {});
+        try { event.completed({ allowEvent: false }); } catch (e) {}
+        return;
+    }
+    var messageId = item.itemId || '';
+    var subject = item.subject || '';
+    var hasAttachments = false;
+    try {
+        var atts = item.attachments || [];
+        // Filtrer inline (cid:) — seulement vraies pièces jointes
+        for (var i = 0; i < atts.length; i++) {
+            if (atts[i] && atts[i].isInline === false) { hasAttachments = true; break; }
+            if (atts[i] && !atts[i].cid) { hasAttachments = true; break; }
+        }
+    } catch (e) {}
+
+    var fromName = '';
+    var fromEmail = '';
+    try {
+        var f = item.from || item.sender || {};
+        fromName = f.displayName || '';
+        fromEmail = f.emailAddress || '';
+    } catch (e) {}
+
+    var qs = new URLSearchParams({
+        mode: 'classify',
+        messageId: messageId,
+        subject: subject,
+        from: fromEmail,
+        fromName: fromName,
+        hasAttachments: hasAttachments ? '1' : '0'
+    });
+    var dialogUrl = _backendUrl + '/plugin/dialog.html?' + qs.toString();
+
+    _debugLog('quick_classify_open', { mid: (messageId || '').substring(0, 30), pj: hasAttachments });
+
+    Office.context.ui.displayDialogAsync(
+        dialogUrl,
+        { width: 50, height: 60, promptBeforeOpen: false },
+        function (asyncResult) {
+            if (asyncResult.status === Office.AsyncResultStatus.Failed) {
+                _debugLog('quick_classify_dialog_failed', { msg: (asyncResult.error || {}).message || '' });
+            }
+            try { event.completed(); } catch (e) {}
+        }
+    );
+}
+
+// ============================================================================
 // ENREGISTREMENT DES HANDLERS
 // ============================================================================
 
@@ -780,4 +841,5 @@ if (typeof Office !== 'undefined') {
     Office.actions = Office.actions || {};
     Office.actions.associate("openEasyMailDialog", openEasyMailDialog);
     Office.actions.associate("onNewMessageComposeHandler", onNewMessageComposeHandler);
+    Office.actions.associate("quickClassifyMail", quickClassifyMail);
 }

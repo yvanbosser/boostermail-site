@@ -497,6 +497,56 @@
         </div>
     </div>
 
-    <script defer src="dialog.js?v=v87-echeance-clickable-date-fr-07-05"></script>
+    <!-- ============================================================ -->
+    <!-- QUICK CLASSIFY (07/05/2026)                                 -->
+    <!-- Mode `classify` du dialog : ouvert depuis le bouton ribbon  -->
+    <!-- « Classer rapide ». Vue split : mail à gauche, PJ à droite. -->
+    <!-- L'utilisateur ne voit pas du tout l'éditeur de réponse.     -->
+    <!-- ============================================================ -->
+    <div id="classifyView" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:300;background:#f8f9fb;flex-direction:column;">
+        <!-- En-tête : mail de X + objet + bouton Fermer -->
+        <div class="cf-header">
+            <div class="cf-header-text">
+                <div class="cf-header-from">Mail de <strong id="cfFrom">…</strong></div>
+                <div class="cf-header-subj" id="cfSubject">Objet…</div>
+            </div>
+            <button class="cf-close" onclick="_classifyClose()" title="Fermer">&#x2715;</button>
+        </div>
+
+        <!-- 2 colonnes : mail à gauche, PJ à droite -->
+        <div class="cf-cols">
+            <!-- Colonne MAIL (gauche) -->
+            <div class="cf-col" id="cfColMail">
+                <div class="cf-col-title">📁 Classement du mail</div>
+                <div id="cfMailSuggestion" class="cf-suggestion">Analyse en cours…</div>
+                <div id="cfMailAlternatives" class="cf-alternatives"></div>
+                <input type="text" id="cfMailSearch" class="cf-search"
+                       placeholder="Rechercher ou créer un dossier (ex : IMMOBILIER/Greenpark)"
+                       autocomplete="off" spellcheck="false" maxlength="200"/>
+                <div class="cf-tree" id="cfMailTree"></div>
+                <div class="cf-actions">
+                    <button class="cf-btn primary" id="cfMailBtn" onclick="_classifyDoMail()" disabled>Classer le mail</button>
+                </div>
+                <div class="cf-undo" id="cfMailUndo" style="display:none;"></div>
+            </div>
+
+            <!-- Colonne PJ (droite) — visible seulement si hasAttachments=1 -->
+            <div class="cf-col" id="cfColPj">
+                <div class="cf-col-title">📎 Classement des pièces jointes</div>
+                <div id="cfPjSuggestion" class="cf-suggestion">Analyse en cours…</div>
+                <div id="cfPjAlternatives" class="cf-alternatives"></div>
+                <input type="text" id="cfPjSearch" class="cf-search"
+                       placeholder="Rechercher ou créer un dossier Windows (ex : Madame Truc/Factures)"
+                       autocomplete="off" spellcheck="false" maxlength="200"/>
+                <div class="cf-tree" id="cfPjTree"></div>
+                <div class="cf-actions">
+                    <button class="cf-btn primary" id="cfPjBtn" onclick="_classifyDoPj()" disabled>Ouvrir le dossier des PJ</button>
+                </div>
+                <div class="cf-undo" id="cfPjUndo" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script defer src="dialog.js?v=v88-quick-classify-07-05"></script>
 </body>
 </html>
