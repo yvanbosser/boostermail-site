@@ -3388,10 +3388,14 @@ function _detectMode() {
     // Si on a un cache frais, on l'utilise instantanément + on revalide en BG.
     var _applyStatus = function(data) {
         _isStandardMode = data.authenticated && data.mode === 'standard';
-        // Mode new (gap 05/05 v6) : le label est géré par init mode new
-        // (✨ Generer en phase 1). Ne pas l'écraser tant que generation
-        // pas démarrée. Sinon le bouton bascule prématurément en
-        // "Relire et envoyer" alors qu'on attend la saisie d'instructions.
+
+        // Bannière proactive : si non authentifié, on l'affiche immédiatement
+        // sans attendre qu'une action échoue. UX produit : l'utilisateur sait
+        // tout de suite quoi faire, pas de "Mode Dégradé" silencieux.
+        if (!data.authenticated) {
+            _showReauthBanner('Connectez-vous à Microsoft pour utiliser BoosterMail.');
+        }
+
         if (_mode === 'new' && !_modeNewGenerationStarted) {
             _sendStartTime = Date.now();
             return;
@@ -5525,14 +5529,28 @@ function _showReauthBanner(message) {
         'background:#0F6CBD;color:#fff;border:none;padding:5px 12px;' +
         'border-radius:3px;cursor:pointer;font-size:12px;flex-shrink:0;';
     btnReauth.onclick = function() {
+        var _popup = null;
         try {
-            window.open(_backendUrl + '/profile', 'BoosterMailReauth',
-                        'width=520,height=640,resizable=yes,scrollbars=yes');
+            _popup = window.open(_backendUrl + '/auth/login', 'BoosterMailReauth',
+                                 'width=520,height=640,resizable=yes,scrollbars=yes');
         } catch(_) {
-            // Fallback si popup bloquée : redirige le dialog lui-même
-            window.location.href = _backendUrl + '/profile';
+            window.location.href = _backendUrl + '/auth/login';
+            return;
         }
-        // Le bandeau reste visible — disparaît au refresh ou retry envoi
+        // Polling fermeture popup → refresh mode + suppression bannière automatique
+        if (_popup) {
+            var _pollClose = setInterval(function() {
+                try {
+                    if (_popup.closed) {
+                        clearInterval(_pollClose);
+                        try { banner.remove(); } catch(_) {}
+                        // Re-check auth : si reconnexion réussie → Mode Standard activé
+                        try { localStorage.removeItem('em_status_v1'); } catch(_) {}
+                        _detectMode();
+                    }
+                } catch(_) { clearInterval(_pollClose); }
+            }, 600);
+        }
     };
     var btnClose = document.createElement('button');
     btnClose.textContent = '✕';
