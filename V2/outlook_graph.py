@@ -940,20 +940,40 @@ class GraphClient(EmailProvider):
                         'children_count': child_count,
                     })
 
-                    # Récursion dans les sous-dossiers
+                    # Récursion dans les sous-dossiers.
+                    # Bug 07/05 (signal Yvan) : `$expand=childFolders` au niveau
+                    # parent ne retourne QUE les ~10 premiers enfants en tri
+                    # lexical, sans pagination. Sur l'arbo Yvan : 22 SCI sous
+                    # IMMOBILIER/1--SCI, mais Graph n'en remontait que 10
+                    # (1, 10, 11, 12, 14-19) → SCI 2-9, 20-23 invisibles, dont
+                    # « 23---anna---chu » jamais proposable au classement.
+                    # Fix : si Graph annonce plus d'enfants que ce qu'on a
+                    # reçu, on refetch la liste paginée complète via
+                    # /childFolders?$top=100.
                     children = folder.get('childFolders', [])
-                    if children:
-                        _scan(children, path, depth + 1)
-                    elif child_count > 0:
-                        # childFolders pas inclus (2e+ niveau) → requête explicite
+                    needs_full_fetch = (child_count > 0 and child_count > len(children))
+                    if needs_full_fetch:
                         try:
                             child_data = self._get(
                                 f"/me/mailFolders/{folder['id']}/childFolders"
                                 f"?$top=100&$expand=childFolders"
                             )
-                            _scan(child_data.get('value', []), path, depth + 1)
+                            children = child_data.get('value', [])
+                            # Pagination Graph : @odata.nextLink si > 100
+                            next_link = child_data.get('@odata.nextLink')
+                            _safety = 0
+                            while next_link and _safety < 10:
+                                try:
+                                    next_data = self._session.get(next_link, timeout=20).json()
+                                    children.extend(next_data.get('value', []))
+                                    next_link = next_data.get('@odata.nextLink')
+                                except Exception:
+                                    break
+                                _safety += 1
                         except Exception as e:
                             logger.warning(f"Erreur scan sous-dossiers {path}: {e}")
+                    if children:
+                        _scan(children, path, depth + 1)
 
             _scan(top_folders)
             # Tri alphabétique (comme Outlook)
