@@ -6,6 +6,19 @@
 
 ---
 
+## 🚨 RÈGLE GIT ABSOLUE (07/05/2026)
+
+| Contributeur | Branche de push obligatoire |
+|---|---|
+| **Yvan** | `feat/yvan/frontend` |
+| **Michael** | `feat/michael/multi-user` |
+
+**JAMAIS de push direct sur `dev` ou `master`.** Détails : [`docs/CONVENTIONS_GIT_BRANCHES.md`](../CONVENTIONS_GIT_BRANCHES.md).
+
+Avant tout commit : vérifier `git branch --show-current` est sur la branche du contributeur. Sinon switcher.
+
+---
+
 ## A. Lis d'abord (priorité 1)
 
 Avant TOUTE action :

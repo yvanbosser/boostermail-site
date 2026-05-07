@@ -10,9 +10,31 @@
 
 ---
 
+## 🚨 RÈGLE GIT ABSOLUE (07/05/2026)
+
+| Contributeur | Branche de push obligatoire |
+|---|---|
+| **Yvan** | `feat/yvan/frontend` |
+| **Michael** | `feat/michael/multi-user` |
+
+**JAMAIS de push direct sur `dev` ou `master`.** Détails : [`docs/CONVENTIONS_GIT_BRANCHES.md`](../CONVENTIONS_GIT_BRANCHES.md).
+
+Le prompt ci-dessous référence cette règle — il faut **vérifier au début de chaque session** que la branche active est `feat/yvan/frontend` (ou la créer/switcher si besoin).
+
+---
+
 ## 📋 Prompt à copier-coller dans la prochaine session
 
 ```
+⚠️ RÈGLE GIT ABSOLUE : tu travailles sur la branche `feat/yvan/frontend`.
+JAMAIS de push direct sur `dev` ou `master`. Voir `docs/CONVENTIONS_GIT_BRANCHES.md`.
+
+Avant tout commit :
+  git branch --show-current      # doit retourner `feat/yvan/frontend`
+  # Si pas le cas :
+  git fetch product
+  git checkout feat/yvan/frontend  # ou : git checkout -b feat/yvan/frontend product/dev
+
 ⚠️ AVANT TOUT : vérifie que ta session tourne bien dans un worktree qui peut accéder au repo C:\EasyMail\.
 
 Test rapide :

@@ -9,6 +9,21 @@
 
 ---
 
+## 🚨 RÈGLE GIT ABSOLUE (07/05/2026) — branches par contributeur
+
+| Contributeur | Branche de push obligatoire |
+|---|---|
+| **Yvan** | `feat/yvan/frontend` |
+| **Michael** | `feat/michael/multi-user` |
+
+> **JAMAIS de push direct sur `dev` ou `master`**. Toute intégration dans `dev` = via PR depuis la branche du contributeur.
+>
+> Détails complets : [`docs/CONVENTIONS_GIT_BRANCHES.md`](CONVENTIONS_GIT_BRANCHES.md).
+>
+> **Déploiement OVH** : `cd /opt/boostermail && sudo git pull origin dev && sudo systemctl restart boostermail` — donc merger ma branche dans `dev` avant tout déploiement.
+
+---
+
 ## ⚠️ AVERTISSEMENT — Docs potentiellement périmés
 
 **Certaines décisions ont évolué entre deux documents. Des docs plus anciens peuvent contenir des choix qui ont été remplacés par d'autres choix plus récents.**
