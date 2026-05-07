@@ -362,6 +362,27 @@ def _get_config_key(config, key):
             return v
     return ''
 
+def _get_user_name(fallback: str = 'User') -> str:
+    """Retourne le nom de l'utilisateur courant pour les signatures/prompts.
+
+    Lit display_name dans la table users (per-user) → fallback settings.user_name
+    (global, mono-user legacy). Garantit que Michael voit son propre nom, pas celui
+    de Yvan, dans les mails générés.
+    """
+    try:
+        from user_context import get_current_user_id
+        uid = get_current_user_id()
+        if uid and uid != 'default':
+            user_row = _db.get_user(uid)
+            if user_row:
+                name = (user_row.get('display_name') or '').strip()
+                if name:
+                    return name
+    except Exception:
+        pass
+    return (_db.get_setting('user_name', fallback) or fallback)
+
+
 def _get_prompt_builder() -> ClaudeAssistant | None:
     """Retourne le ClaudeAssistant pour construire les prompts (thread-safe #2)."""
     global _prompt_builder
@@ -5842,7 +5863,7 @@ def _start_speculative(mail_data):
                 importance_override=importance_int,
             )
             if template:
-                user_name = _db.get_setting('user_name', '')
+                user_name = _get_user_name()
                 # PLUS_TARD_VF #3 (28/04) — signature personnalisée par contact :
                 # utiliser la signature résolue (contact_profile override sinon fallback global)
                 signature = _resolve_user_signature(contact_profile, user_name)
@@ -7122,7 +7143,7 @@ def _extract_subject_keywords(subject):
     if not subject:
         return ''
     cleaned = re.sub(r'^(Re|Fw|Fwd|Tr|FW|RE)\s*:\s*', '', subject, flags=re.IGNORECASE).strip()
-    user_name = (_db.get_setting('user_name') or '').lower()
+    user_name = _get_user_name('').lower()
     user_last = user_name.split()[-1] if user_name else ''
     _STOP = {'le','la','les','un','une','des','et','ou','de','du','en','est','pour','avec','sur',
              'par','dans','au','aux','ce','son','sa','ses','mon','ma','mes','ton','ta','tes',
@@ -9600,7 +9621,7 @@ def api_instant_reply():
                 pass
             greeting = ((contact_profile or {}).get('greeting', '') or 'Bonjour,')
             closing = ((contact_profile or {}).get('closing', '') or 'Cordialement,')
-            user_name = _db.get_setting('user_name', '') or ''
+            user_name = _get_user_name()
             # PLUS_TARD_VF #3 (28/04) — signature personnalisée par contact.
             # `user_name` reste utilisé pour les gardes anti-self-greeting
             # (extraction patronyme canonique), `signature` pour le rendu final.
@@ -9744,7 +9765,7 @@ def api_instant_reply():
                 contact_profile = _db.get_contact_profile(from_email)
         except Exception:
             pass
-        user_name = _db.get_setting('user_name', '') or ''
+        user_name = _get_user_name()
         # PLUS_TARD_VF #3 (28/04) — signature résolue par contact
         signature = _resolve_user_signature(contact_profile, user_name)
         if m['source'] == 'fixed':
@@ -9890,7 +9911,7 @@ def api_match_template():
     except Exception:
         pass
 
-    user_name = _db.get_setting('user_name', '') or ''
+    user_name = _get_user_name()
     # PLUS_TARD_VF #3 (28/04) — signature résolue par contact
     signature = _resolve_user_signature(contact_profile, user_name)
 
@@ -10746,13 +10767,13 @@ def generate_reply():
             _preemptive_imp = cached.get('importance', 'S')
             _preemptive_cp = _db.get_contact_profile(_preemptive_from) if _preemptive_from else None
             # STAND-BY S4 — helper centralisé (avant : ~30 lignes dupliquées)
+            _preemptive_uname = _get_user_name()
             _preemptive_greeting, _preemptive_closing = _normalize_reply_greeting_closing(
-                _preemptive_cp, _preemptive_from, _db.get_setting('user_name', '')
+                _preemptive_cp, _preemptive_from, _preemptive_uname
             )
             # PLUS_TARD_VF #3 (28/04) — signature résolue par contact
             # (override par contact_profile sinon settings.user_name).
-            _preemptive_sig = _resolve_user_signature(_preemptive_cp,
-                                                      _db.get_setting('user_name', ''))
+            _preemptive_sig = _resolve_user_signature(_preemptive_cp, _preemptive_uname)
 
             def stream_from_preemptive():
                 # Greeting (même structure que generate_sse)
@@ -11111,7 +11132,7 @@ INSTRUCTIONS ECHEANCES :
 
     # --- 12l : Pré-injection greeting / closing / signature ---
     # correspondent déjà défini plus haut (to_email si forward, sinon from_email)
-    user_name = _db.get_setting('user_name', '')
+    user_name = _get_user_name()
     # STAND-BY S4 — helper centralisé (avant : ~30 lignes dupliquées avec preemptive)
     greeting, closing = _normalize_reply_greeting_closing(
         contact_profile, correspondent, user_name
@@ -11248,7 +11269,7 @@ INSTRUCTIONS ECHEANCES :
 
                 # 2. Nom utilisateur dans le greeting
                 try:
-                    _uname = _db.get_setting('user_name') or ''
+                    _uname = _get_user_name()
                     _ulast = _uname.split()[-1].lower() if _uname else ''
                     if _ulast and len(_ulast) >= 3 and _ulast in _first_line.lower():
                         _pg_warnings.append('greeting_self_name')
@@ -13519,7 +13540,7 @@ def page_profile():
         default_importance = int(_db.get_setting('default_importance', '2') or 2)
     except Exception:
         default_importance = 2
-    user_name = _db.get_setting('user_name') or ''
+    user_name = _get_user_name()
     user_email = _get_my_email() or ''
     pj_root = _db.get_setting('pj_root_folder', 'C:\\Documents')
     mail_count = _db.get_setting('onboarding_mail_count', '800')
@@ -13670,7 +13691,7 @@ def api_style_status():
         'needs_setup': not has_style,
         'step': 'done' if has_style else 'idle',
         'chunks': 0,
-        'detected_name': (_db.get_setting('user_name') or '').split(' ')[0] if _db.get_setting('user_name') else '',
+        'detected_name': _get_user_name('').split(' ')[0],
     })
 
 
