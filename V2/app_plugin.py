@@ -6253,12 +6253,13 @@ def _start_speculative(mail_data):
             # génère le mail complet (suit Block D pour le greeting/closing
             # personnalisés du profil), et le local skip l'injection si le
             # body contient déjà ouverture/clôture (helpers _body_has_*).
-            user_prompt += (
+            # Audit fix P1-A5 — insertion AVANT le RAPPEL FINAL (recency bias).
+            user_prompt = _append_before_reminder(user_prompt, (
                 "\n\nFORMAT OBLIGATOIRE : texte brut uniquement. N'utilise AUCUNE "
                 "balise HTML (pas de <p>, <br>, <div>, <strong>, etc.). "
                 "Sépare les paragraphes par une ligne vide (double saut de ligne \\n\\n). "
                 "La mise en forme HTML est appliquée automatiquement côté affichage."
-            )
+            ))
         except Exception as e:
             logger.error(f"Speculative prompt error: {e}\n{traceback.format_exc()}")
             with _reply_lock:
@@ -8081,6 +8082,57 @@ def api_download_attachment(message_id, attachment_id):
 # documents pro (PDF, Word, Excel) sans bloquer les usages légitimes.
 _UPLOAD_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
 
+# Audit fix P1-A1 (08/05/2026) — limite cumulée par mail : 25 MB total
+# tous fichiers confondus pour un même message_id. Prévient un user qui
+# uploaderait 5×9 MB pour DoS via taille cumulée. Tracker {message_id:
+# total_bytes} avec TTL 24 h pour éviter la croissance infinie.
+# Audit fix P1-A5 (08/05/2026) — pour respecter le recency bias, le
+# « RAPPEL FINAL » sécurité doit rester EN DERNIER dans le prompt envoyé
+# à Claude. Avant : `user_prompt += FORMAT OBLIGATOIRE` plaçait le format
+# APRÈS le RAPPEL FINAL, diluant son effet. Ce helper insère un postfix
+# AVANT le RAPPEL FINAL si présent, sinon append en queue (fallback).
+_RAPPEL_FINAL_TOKEN = "\n\nRAPPEL FINAL"
+
+
+def _append_before_reminder(user_prompt, postfix):
+    """Insère postfix avant le RAPPEL FINAL pour préserver le recency bias."""
+    if _RAPPEL_FINAL_TOKEN in user_prompt:
+        head, sep, tail = user_prompt.rpartition(_RAPPEL_FINAL_TOKEN)
+        return head + postfix + sep + tail
+    return user_prompt + postfix
+
+
+_UPLOAD_PER_MAIL_MAX_BYTES = 25 * 1024 * 1024  # 25 MB
+_UPLOAD_TOTALS_TTL = 24 * 3600  # 24 h
+_upload_totals_lock = threading.Lock()
+_upload_totals = {}  # {message_id: {'bytes': int, 'ts': float}}
+
+
+def _upload_totals_get(message_id):
+    """Lit le total cumulé d'uploads pour un message_id. Cleanup TTL."""
+    if not message_id:
+        return 0
+    now = time.time()
+    with _upload_totals_lock:
+        # Cleanup opportuniste des entrées expirées
+        expired = [k for k, v in _upload_totals.items() if now - v.get('ts', 0) > _UPLOAD_TOTALS_TTL]
+        for k in expired:
+            _upload_totals.pop(k, None)
+        entry = _upload_totals.get(message_id, {})
+        return entry.get('bytes', 0)
+
+
+def _upload_totals_add(message_id, n_bytes):
+    """Incrémente le total cumulé pour un message_id."""
+    if not message_id or n_bytes <= 0:
+        return
+    now = time.time()
+    with _upload_totals_lock:
+        entry = _upload_totals.get(message_id) or {'bytes': 0, 'ts': now}
+        entry['bytes'] = entry.get('bytes', 0) + n_bytes
+        entry['ts'] = now
+        _upload_totals[message_id] = entry
+
 
 @app.route('/api/upload_attachment', methods=['POST'])
 def api_upload_attachment():
@@ -8102,6 +8154,25 @@ def api_upload_attachment():
             "error": "Fichier trop volumineux",
             "limit_bytes": _UPLOAD_MAX_BYTES,
         }), 413
+
+    # Audit fix P1-A1 — garde cumulée par mail (HTTP 413 si total > 25 MB).
+    # message_id optionnel : best-effort si frontend l'envoie via form ou query.
+    upload_message_id = (
+        request.form.get('message_id', '').strip()
+        or (request.args.get('message_id', '') or '').strip()
+    )
+    if upload_message_id and declared_len:
+        cumul = _upload_totals_get(upload_message_id)
+        if cumul + declared_len > _UPLOAD_PER_MAIL_MAX_BYTES:
+            logger.warning(
+                "[upload-block] mid=%s cumul=%d + new=%d > limit=%d",
+                upload_message_id[:30], cumul, declared_len, _UPLOAD_PER_MAIL_MAX_BYTES,
+            )
+            return jsonify({
+                "error": "Total des pieces jointes trop volumineux pour ce mail",
+                "limit_bytes": _UPLOAD_PER_MAIL_MAX_BYTES,
+                "current_total": cumul,
+            }), 413
 
     original_name = f.filename
     safe_name = secure_filename(f.filename) or 'upload'
@@ -8125,6 +8196,25 @@ def api_upload_attachment():
             "error": "Fichier trop volumineux",
             "limit_bytes": _UPLOAD_MAX_BYTES,
         }), 413
+
+    # Audit fix P1-A1 — vérification cumul post-save aussi.
+    if upload_message_id and actual_size:
+        cumul = _upload_totals_get(upload_message_id)
+        if cumul + actual_size > _UPLOAD_PER_MAIL_MAX_BYTES:
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
+            logger.warning(
+                "[upload-block] mid=%s cumul=%d + actual=%d > limit=%d (post-save cleanup)",
+                upload_message_id[:30], cumul, actual_size, _UPLOAD_PER_MAIL_MAX_BYTES,
+            )
+            return jsonify({
+                "error": "Total des pieces jointes trop volumineux pour ce mail",
+                "limit_bytes": _UPLOAD_PER_MAIL_MAX_BYTES,
+                "current_total": cumul,
+            }), 413
+        _upload_totals_add(upload_message_id, actual_size)
 
     return jsonify({
         "name": original_name,
@@ -11053,6 +11143,20 @@ def generate_reply():
     _signal_user_activity()  # Phase 1.5 : pause le préchargement BG (30s)
     data = request.get_json() or {}
     message_id = data.get('message_id', '')
+
+    # Audit fix P2-A5 (08/05/2026) — canonicalisation IMID best-effort.
+    # Le frontend (autorunshared.js) envoie l'IMID au format RFC 2822
+    # `<...@domain>`. On normalise (strip) et on log un warning si la forme
+    # n'est pas canonique — utile pour détecter une régression côté frontend.
+    # Pas de blocage strict ici (la route doit rester tolérante au legacy).
+    if message_id:
+        message_id = message_id.strip()
+        if not (message_id.startswith('<') and '@' in message_id and message_id.endswith('>')):
+            logger.warning(
+                "[generate_reply] message_id non-canonique (attendu RFC 2822 <...@...>): %r",
+                message_id[:80],
+            )
+
     brief = data.get('brief', '')[:2000]
 
     # Phase 3.1 — 5 variations de style (rotation sur compteur 1-5+)
@@ -11505,12 +11609,13 @@ INSTRUCTIONS ECHEANCES :
             # Claude génère le mail dans son intégralité (ouverture + corps +
             # clôture + signature) en suivant Block D du contexte. Plus de
             # postfix "NE PAS inclure" qui contredisait le reste.
-            user_prompt += (
+            # Audit fix P1-A5 — insertion AVANT le RAPPEL FINAL (recency bias).
+            user_prompt = _append_before_reminder(user_prompt, (
                 "\n\nFORMAT OBLIGATOIRE : texte brut uniquement. N'utilise AUCUNE "
                 "balise HTML (pas de <p>, <br>, <div>, <strong>, etc.). "
                 "Sépare les paragraphes par une ligne vide (double saut de ligne \\n\\n). "
                 "La mise en forme HTML est appliquée automatiquement côté affichage."
-            )
+            ))
         except Exception as e:
             logger.error(f"Erreur construction prompt: {e}\n{traceback.format_exc()}")
             system_prompt = "Tu es un assistant email professionnel."

@@ -59,6 +59,18 @@ _RE_PII_SIRET = re.compile(
     r'\b\d{3}[\s\.]?\d{3}[\s\.]?\d{3}[\s\.]?\d{5}\b')
 _RE_PII_PHONE_FR = re.compile(
     r'(?<!\d)(?:\+33\s?[1-9]|0[1-9])(?:[\s\.\-]?\d{2}){4}(?!\d)')
+# Audit fix P1-A6 (08/05/2026) — couvrir téléphones internationaux UE/UK/US.
+# Avant : seul +33/0X-FR redacté → fuite possible si conv tierce mentionne
+# un tel UE. Patterns conservateurs : au moins 8 chiffres après l'indicatif
+# pays pour limiter les faux positifs sur des nombres longs aléatoires.
+#   +1   US/CA
+#   +30  GR, +31 NL, +32 BE, +33 FR (overlap PHONE_FR ok), +34 ES, +39 IT
+#   +41  CH, +43 AT, +44 UK, +45 DK, +46 SE, +47 NO, +48 PL, +49 DE
+#   +351 PT, +352 LU
+_RE_PII_PHONE_INTL = re.compile(
+    r'(?<!\d)\+(?:1|3[012349]|4[13456789]|35[12])'
+    r'(?:[\s\.\-]?\d){8,12}(?!\d)'
+)
 _RE_PII_EMAIL = re.compile(
     r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b')
 _RE_PII_ADDRESS_FR = re.compile(
@@ -69,6 +81,70 @@ _RE_PII_ADDRESS_FR = re.compile(
 )
 _RE_PII_ZIP_CITY = re.compile(
     r'\b\d{5}\s+[A-ZÀ-ÝÉÈÊËÎÏÔÖÙÛÜÇ][\wÀ-ÿ\-\' ]{2,40}\b')
+
+
+# Phase 3.1 audit remediation 08/05/2026 — format date court pour Bloc A.
+# Converti '2026-05-08T10:30:00Z' / '2026-05-08' / '08/05/2026' en '08/05'.
+# Économie : ~50 tokens par long thread (5 chars vs ~15 par item).
+_RE_DATE_ISO = re.compile(r'^(\d{4})-(\d{2})-(\d{2})')
+_RE_DATE_FR = re.compile(r'^(\d{2})/(\d{2})/\d{4}')
+
+
+def _compact_date(date_str):
+    """Format date compact 'dd/mm' à partir d'un string date.
+
+    Tolère ISO 8601, 'YYYY-MM-DD', 'DD/MM/YYYY'. En cas d'échec, retourne
+    la chaîne d'origine tronquée à 10 chars (fallback safe).
+    """
+    if not date_str or not isinstance(date_str, str):
+        return ''
+    s = date_str.strip()
+    m = _RE_DATE_ISO.match(s)
+    if m:
+        return f"{m.group(3)}/{m.group(2)}"
+    m = _RE_DATE_FR.match(s)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}"
+    return s[:10]
+
+
+# Phase 3.2 audit remediation 08/05/2026 — skip Bloc C si sujet trop court
+# ou stopword-only. Les sujets génériques (« Devis », « RDV », « Re », etc.)
+# produisent des résultats keyword non pertinents qui polluent le prompt
+# sans aider Claude à mieux répondre. Économie : ~1500 tokens sur ~40 % des
+# mails. Le bloc C reste appliqué pour les sujets riches.
+_C_SUBJECT_MIN_LEN = 15
+_C_STOPWORDS = frozenset({
+    'devis', 'info', 'information', 'informations', 'contact', 'rdv',
+    'rendez-vous', 'rendezvous', 'bonjour', 'salut', 'hello', 'hi',
+    're', 'tr', 'fwd', 'fw', 'ref',
+    'urgent', 'important', 'merci', 'mail', 'email', 'message',
+    'question', 'demande', 'reponse', 'réponse', 'reply',
+    'suite', 'cordialement', 'salutations',
+    'compte', 'rendu', 'rdv',
+    'votre', 'vos', 'notre', 'nos', 'mon', 'ma', 'mes',
+    'le', 'la', 'les', 'un', 'une', 'des', 'de', 'du',
+    'pour', 'avec', 'dans', 'sur', 'par', 'a', 'au', 'aux',
+})
+_RE_C_TOKENIZE = re.compile(r'[^\w\-]+', re.UNICODE)
+
+
+def _subject_is_too_generic(subject):
+    """True si le sujet est trop court ou ne contient que des stopwords.
+
+    Critère : longueur < 15 chars OU 100% des tokens significatifs sont
+    dans la liste _C_STOPWORDS. Tokens "significatifs" = chaînes ≥ 2 chars
+    après tokenisation (ignore les sigles 1 lettre).
+    """
+    if not subject or not isinstance(subject, str):
+        return True
+    s = subject.strip()
+    if len(s) < _C_SUBJECT_MIN_LEN:
+        return True
+    tokens = [t.lower() for t in _RE_C_TOKENIZE.split(s) if len(t) >= 2]
+    if not tokens:
+        return True
+    return all(t in _C_STOPWORDS for t in tokens)
 
 
 def _hash_email_partial(email):
@@ -113,6 +189,8 @@ def _redact_pii_in_text(text, *, correspondent_email=None, counter=None):
     out = _RE_PII_IBAN_FR.sub(lambda m: (_bump('iban'), '<IBAN>')[1], text)
     out = _RE_PII_NIR.sub(lambda m: (_bump('nir'), '<NIR>')[1], out)
     out = _RE_PII_SIRET.sub(lambda m: (_bump('siret'), '<SIRET>')[1], out)
+    # Phone international AVANT phone FR (le pattern intl est plus restrictif).
+    out = _RE_PII_PHONE_INTL.sub(lambda m: (_bump('phone'), '<phone>')[1], out)
     out = _RE_PII_PHONE_FR.sub(lambda m: (_bump('phone'), '<phone>')[1], out)
     out = _RE_PII_ADDRESS_FR.sub(lambda m: (_bump('address'), '<address>')[1], out)
     out = _RE_PII_ZIP_CITY.sub(lambda m: (_bump('zip_city'), '<address>')[1], out)
@@ -868,22 +946,46 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
                     correspondent_email=_correspondent_for_redaction,
                     counter=_pii_counter,
                 )
-                line = f"[{m['date']}] {m['from_name']} ({'envoye' if m['direction']=='sent' else 'recu'}) :"
+                # Phase 3.1 — format date court 'dd/mm' + flèche direction.
+                # Avant : '[2026-05-08] Marie (envoye) :' (~30 chars header)
+                # Après : '08/05 Marie >' (envoyé) / '08/05 Marie <' (reçu)
+                #   ~14 chars header → économie ~16 chars/item × N items.
+                _date_short = _compact_date(m.get('date', ''))
+                _arrow = '>' if m.get('direction') == 'sent' else '<'
+                _name = m.get('from_name', '') or '?'
+                line = f"{_date_short} {_name} {_arrow}"
                 if body:
                     line += f"\n{body}"
                 else:
-                    line += f"\n(Objet: {m.get('subject', '')})"
+                    line += f" (Objet: {m.get('subject', '')})"
                 lines.append(line)
             _a_header = "## A — Fil de conversation en cours :"
             if _dedup_filtered:
+                # Audit fix P2-A4 — wording clarifié : le mail courant n'est
+                # PAS dans ce bloc (retiré par dédup), il est rendu en détail
+                # dans `## Mail recu` plus bas.
                 _a_header += (
-                    "\n(Le mail le plus récent du thread ci-dessous est celui "
-                    "auquel tu réponds ; il est rendu en détail dans `## Mail "
-                    "recu` plus bas.)"
+                    "\n(Note : le mail auquel tu réponds N'EST PAS dans ce "
+                    "bloc — il a été retiré pour éviter le doublon. "
+                    "Il est rendu en détail dans `## Mail recu` plus bas. "
+                    "Les items ci-dessous sont les mails ANTÉRIEURS du thread.)"
                 )
             blocks.append(_a_header + "\n\n" + "\n\n---\n\n".join(lines))
 
         # -- C : Contexte lie au sujet --
+        # Phase 3.2 — skip si sujet trop court ou stopword-only.
+        # Les sujets génériques produisent des résultats keyword bruyants
+        # qui n'aident pas Claude → on coupe avant d'injecter le bloc.
+        _c_subject_for_check = subject or (
+            (incoming_email or {}).get('subject', '') if incoming_email else ''
+        )
+        if keyword_context and _subject_is_too_generic(_c_subject_for_check):
+            logger.info(
+                "[prompt-skip-c] sujet trop generique (len=%d) → bloc C skip pour %d items",
+                len(_c_subject_for_check or ''), len(keyword_context),
+            )
+            keyword_context = []
+
         if keyword_context:
             lines = []
             for m in keyword_context:
@@ -903,6 +1005,33 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
         # -- D2 : Corrections recentes — avec analyse Claude du diff --
         # Phase 2.3 audit remediation 08/05/2026 — troncation 250 → 500 chars
         # (préservation contexte) + date relative (« il y a N jours »).
+        # Phase 3.3 audit remediation 08/05/2026 — skip D2 si profil récent
+        # confiant (≥ 70 % AND last_analysis < 30 jours). Logique : les
+        # corrections sont déjà intégrées dans le profil enrichi récent.
+        # Économie : ~300 tokens par draft (sur ~30-40 % des cas).
+        if recent_corrections and contact_profile and contact_profile.get('profile_text'):
+            _raw_conf = contact_profile.get('confidence', 0)
+            _updated_at = contact_profile.get('updated_at', '')
+            try:
+                _conf_pct = int((_raw_conf or 0) * 100)
+                if _conf_pct >= 70 and _updated_at:
+                    if 'T' in _updated_at:
+                        _u = datetime.fromisoformat(_updated_at.replace('Z', '+00:00'))
+                        if _u.tzinfo is not None:
+                            _u = _u.replace(tzinfo=None)
+                    else:
+                        _u = datetime.strptime(_updated_at, '%Y-%m-%d %H:%M:%S')
+                    _days_since_analysis = (datetime.now() - _u).days
+                    if _days_since_analysis < 30:
+                        logger.info(
+                            "[prompt-skip-d2] profil confiant et récent "
+                            "(conf=%d%%, %dj depuis MAJ) → bloc D2 skip pour %d corrections",
+                            _conf_pct, _days_since_analysis, len(recent_corrections),
+                        )
+                        recent_corrections = []
+            except Exception:
+                pass
+
         if recent_corrections:
             _D2_TRUNCATE = 500
             _now = datetime.now()
@@ -926,7 +1055,15 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
                         else:
                             _dt = datetime.strptime(str(_ts), '%Y-%m-%d %H:%M:%S')
                         _days = (_now - _dt).days
-                        if _days <= 0:
+                        if _days < 0:
+                            # Audit fix P2-A6 — timestamp futur = clock skew
+                            # ou serialization broken. Warning pour détection.
+                            logger.warning(
+                                "[D2-timestamp] futur (%dj) ts=%r → affiché 'aujourd''hui'",
+                                _days, _ts,
+                            )
+                            _rel_date = " (aujourd'hui)"
+                        elif _days == 0:
                             _rel_date = " (aujourd'hui)"
                         elif _days == 1:
                             _rel_date = " (hier)"
