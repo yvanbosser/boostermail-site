@@ -261,6 +261,26 @@ def _hash_email_partial(email):
     return f"{local[:3]}***@{domain}"
 
 
+def _hash_email_anonymous(email):
+    """Audit angle 3 P1-GDPR-A1 (08/05/2026) — hash plus strict pour les
+    blocs A/B/C envoyés à Anthropic. Hashe aussi le domaine (8 hex chars)
+    pour empêcher la ré-identification quand le user est seul à un domaine
+    unique (ex: pdg@petite-entreprise.fr).
+
+    Ex: 'manon.rabiller@airbee-conseil.fr' → 'man***@d:1f6a2b3c'
+    """
+    import hashlib as _h
+    if not isinstance(email, str) or '@' not in email:
+        return '<email>'
+    local, _, domain = email.partition('@')
+    if not domain:
+        return '<email>'
+    domain_hash = _h.sha256(domain.lower().encode('utf-8', errors='replace')).hexdigest()[:8]
+    if not local:
+        return f"***@d:{domain_hash}"
+    return f"{local[:3]}***@d:{domain_hash}"
+
+
 def _redact_pii_in_text(text, *, correspondent_email=None, counter=None):
     """Anonymise les PII tierces dans un body_snippet avant injection prompt.
 
@@ -303,7 +323,9 @@ def _redact_pii_in_text(text, *, correspondent_email=None, counter=None):
         if correspondent_norm and addr.lower() == correspondent_norm:
             return addr
         _bump('email')
-        return _hash_email_partial(addr)
+        # Audit angle 3 P1-GDPR-A1 — pour les blocs A/B/C envoyés à
+        # Anthropic, hash domaine inclus (anti-ré-identification SaaS).
+        return _hash_email_anonymous(addr)
 
     out = _RE_PII_EMAIL.sub(_email_sub, out)
     return out
@@ -707,11 +729,18 @@ class ClaudeAssistant:
         # Phase 6.1 audit remediation — détection subject piégé.
         # Pure observabilité : SECURITY_GUARD instruit déjà Claude d'ignorer.
         # Permet de mesurer le taux d'attaques tentées par subject.
+        # Audit angle 3 P6-Leak-A1 (08/05/2026) — l'attaquant peut placer
+        # de la PII dans son subject piégé. On redact le subject AVANT log.
         _incoming_subject = ((incoming_email or {}).get('subject', '') or '').strip()
         if _incoming_subject and _RE_SUBJECT_TRAP.search(_incoming_subject):
+            _subject_safe_for_log = _redact_pii_in_text(
+                _incoming_subject[:80],
+                correspondent_email=_correspondent_for_redaction,
+                counter={},
+            )
             logger.warning(
                 "[security-block] vector=subject pattern_detected subject=%r",
-                _incoming_subject[:80],
+                _subject_safe_for_log,
             )
 
         # -- D : Profil du correspondant (PREMIER — prime Claude sur la relation) --

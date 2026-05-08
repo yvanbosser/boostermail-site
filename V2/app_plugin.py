@@ -11149,12 +11149,18 @@ def generate_reply():
     # `<...@domain>`. On normalise (strip) et on log un warning si la forme
     # n'est pas canonique — utile pour détecter une régression côté frontend.
     # Pas de blocage strict ici (la route doit rester tolérante au legacy).
+    # Audit angle 3 P6-Leak-A2 (08/05/2026) — un message_id non-canonique
+    # peut contenir un email user (ex: 'user@email.fr:action'). On redact
+    # via _hash_email_partial avant log + tronque court (20 chars).
     if message_id:
         message_id = message_id.strip()
         if not (message_id.startswith('<') and '@' in message_id and message_id.endswith('>')):
+            _mid_for_log = message_id[:20]
+            if '@' in _mid_for_log:
+                _mid_for_log = '<email-redacted>:' + _mid_for_log.split('@', 1)[1][:10]
             logger.warning(
                 "[generate_reply] message_id non-canonique (attendu RFC 2822 <...@...>): %r",
-                message_id[:80],
+                _mid_for_log,
             )
 
     brief = data.get('brief', '')[:2000]

@@ -175,11 +175,49 @@ def run():
         recent_corrections=None,
     )
     log = log_capture.getvalue()
+    # Audit angle 3 P1-GDPR-A1 — le hash domaine est désormais SHA-256 tronqué
+    # ('d:xxxxxxxx') au lieu du domaine en clair. On vérifie la présence du
+    # nouveau format.
     ok = ('<SIRET>' in p and '<IBAN>' in p and '<phone>' in p
-          and 'joh***@autre.com' in p
+          and 'joh***@d:' in p  # nouveau format anonyme
+          and 'autre.com' not in p  # domaine tiers absent
           and '542 107 651 00012' not in p
           and 'pii-redacted' in log)
-    results.append(('S10 PII Bloc B redaction', ok))
+    results.append(('S10 PII Bloc B redaction (anonyme)', ok))
+
+    # --- Audit angle 3 P5-Cov-A1 — couverture mode forward
+    p = ai._build_prompt(
+        incoming_email={'from': 'sender@x.fr', 'from_name': 'Sender',
+                        'subject': 'Sujet original', 'body': 'Body original'},
+        project=None, is_first_mail=False, is_forward=True, brief='',
+        conversation_history=None, sender_history=None, keyword_context=None,
+        importance=2, to_email='collegue@boite.fr', subject='Fwd Sujet original',
+        contact_profile={
+            'display_name': 'Mon Col', 'email': 'collegue@boite.fr',
+            'profile_text': 'Profil col', 'greeting': 'Salut,', 'closing': 'A+,',
+            'register': 'tutoiement', 'tone': 'amical', 'typical_length': 'court',
+            'language': 'fr', 'confidence': 0.85,
+            'updated_at': '2026-04-30T12:00:00',
+        },
+    )
+    ok = ('TRANSFERT' in p and 'RAPPEL FINAL' in p
+          and 'Mail original a transferer' in p)
+    results.append(('S11 mode forward', ok))
+
+    # --- Audit angle 3 P5-Cov-A1 — couverture mode first_mail
+    p = ai._build_prompt(
+        incoming_email=None,
+        project=None, is_first_mail=True, is_forward=False,
+        brief='Demande un devis détaillé pour le bail commercial.',
+        conversation_history=None, sender_history=None, keyword_context=None,
+        importance=2, to_email='client@boite.fr',
+        subject='Demande devis bail commercial',
+        contact_profile=None, recent_corrections=None,
+    )
+    ok = ('Redige un nouveau mail' in p and 'RAPPEL FINAL' in p
+          and 'Demande un devis' in p
+          and '<user_brief>' in p)
+    results.append(('S12 mode first_mail', ok))
 
     # --- Récap
     print('=' * 50)
