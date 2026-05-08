@@ -864,6 +864,76 @@ Décision Yvan 07/05 : pas de différé du PJ — l'utilisateur attend une actio
 
 ---
 
+### 16. Signature & carte de visite — approche hybride (différé post-beta, décision 08/05/2026)
+
+**Origine** : audit doublons ouverture/clôture/signature 08/05/2026 (rapport `audit/rapports/2026-05-08_audit_arbre_decisionnel_complet.md` + audit complémentaire). Constat : les templates locaux pour ouverture/clôture/signature génèrent des doublons (10-20 % des drafts) à cause d'instructions contradictoires dans le prompt Claude.
+
+**Décision intermédiaire 08/05/2026** : on simplifie en **laissant Claude générer ouverture + corps + clôture + signature en intégralité**. Plus de template local. Économie qualité immédiate, coût Anthropic +$5-9/an/user (négligeable à l'échelle).
+
+**Fonctionnalité différée** : approche **hybride enrichie** où le template local s'occupe de la signature mais avec un contenu beaucoup plus riche que le simple « Yvan Bosser ».
+
+**Vision cible** :
+
+| Élément | Source | Format |
+|---|---|---|
+| Ouverture | Claude (génère naturellement, contexte profil D + historique B) | Variable selon ton |
+| Corps | Claude | Variable |
+| Clôture | Claude (idem ouverture) | Variable |
+| **Signature enrichie** | **Template local** | Bloc HTML/markdown structuré |
+
+**Contenu de la signature template enrichie** :
+
+1. **Carte de visite user** (paramétrable par user dans Settings)
+   - Nom complet + prénom
+   - Titre / fonction
+   - Entreprise + département
+   - Téléphone (mobile + fixe)
+   - Email
+   - Adresse postale (optionnelle)
+   - Site web / LinkedIn
+
+2. **Logo entreprise** (image inline ou lien)
+   - Upload depuis Settings → stocké en DB user_logo
+   - Insertion dans le HTML du mail (CID inline pour Outlook, base64 fallback pour clients web)
+   - Taille standardisée (~80 px hauteur)
+
+3. **Mentions légales personnalisables**
+   - SIRET, RCS, capital social
+   - TVA intracommunautaire
+   - Mention RGPD (« Conformément au RGPD, vous disposez d'un droit d'accès… »)
+   - Disclaimer confidentialité (« Ce mail et ses pièces jointes sont confidentiels… »)
+   - Mention environnementale (« Imprimer ce mail seulement si nécessaire »)
+
+4. **Variations contextuelles** (avancé) :
+   - Signature « short » (mails internes, contacts amicaux) : nom + tel
+   - Signature « pro » (clients, prospects) : full carte de visite
+   - Signature « legal » (contrats, mentions juridiques) : full + mentions légales
+   - Choix automatique via `_should_append_signature` étendu (analyse contact_profile.category)
+
+**Architecture envisagée** :
+- Table DB `user_signatures` : 1 row par user × type (short / pro / legal)
+- Endpoint `/api/admin/signature/upload` pour le logo (multipart upload)
+- Page Settings BoosterMail : éditeur WYSIWYG des signatures
+- Côté envoi : `_assemble_signature(user_id, contact_profile)` → HTML inline
+- Côté Claude : prompt mis à jour pour ne PAS générer de signature (uniquement ouverture+corps+clôture)
+
+**Pré-requis** :
+- Étape 8 SaaS Beta livrée (multi-user opérationnel)
+- Welcome wizard étendu avec « Configurer ta signature » comme étape obligatoire
+- Système d'upload + stockage logos (S3 / OVH Object Storage / DB BLOB)
+
+**Bénéfices business** :
+- **Branding cohérent** : logo + mentions standards sur tous les mails
+- **Conformité légale garantie** : RGPD, SIRET, RCS — Claude pourrait omettre
+- **Différenciation produit** : « BoosterMail gère ta signature corporate, pas juste le contenu »
+- **Upsell potentiel** : feature « signature pro » réservée aux plans payants
+
+**Effort estimé** : 2-3 sessions dédiées (backend signature CRUD + frontend Settings + intégration envoi).
+
+**Priorité** : 🟡 Post-beta. Pas bloquant pour l'expérience actuelle, mais nice-to-have pour le pitch corporate B2B.
+
+---
+
 ## ⏸️ DIFFÉRÉ STRATÉGIQUE
 
 ### MPN (Microsoft Cloud Partner Program) — différé business

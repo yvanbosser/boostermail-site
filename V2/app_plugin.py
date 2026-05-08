@@ -6202,14 +6202,16 @@ def _start_speculative(mail_data):
                 recent_corrections=recent_corrections,
                 learning_priorities=[],
             )
+            # Audit 08/05 fix doublons — décision Yvan : « Claude partout ».
+            # Avant : postfix "NE PAS inclure d'ouverture/clôture/signature"
+            # contredisait Block D ("Ouverture OBLIGATOIRE: '{greeting}'") +
+            # ligne 715/784/804 ("Ouverture + corps + clôture + signature
+            # habituelle") → doublons ~10-20% des drafts. Maintenant : Claude
+            # génère le mail complet (suit Block D pour le greeting/closing
+            # personnalisés du profil), et le local skip l'injection si le
+            # body contient déjà ouverture/clôture (helpers _body_has_*).
             user_prompt += (
-                "\n\nINSTRUCTION CRITIQUE : Génère UNIQUEMENT le corps du mail. "
-                "NE PAS inclure d'ouverture (Bonjour, Salut, Cher...), "
-                "NE PAS inclure de clôture (Cordialement, Bien à vous...), "
-                "NE PAS inclure de signature (nom). "
-                "Commence directement par le contenu. L'ouverture, la clôture et la signature "
-                "seront ajoutées automatiquement par le système.\n\n"
-                "FORMAT OBLIGATOIRE : texte brut uniquement. N'utilise AUCUNE "
+                "\n\nFORMAT OBLIGATOIRE : texte brut uniquement. N'utilise AUCUNE "
                 "balise HTML (pas de <p>, <br>, <div>, <strong>, etc.). "
                 "Sépare les paragraphes par une ligne vide (double saut de ligne \\n\\n). "
                 "La mise en forme HTML est appliquée automatiquement côté affichage."
@@ -11072,23 +11074,35 @@ def generate_reply():
             # (override par contact_profile sinon settings.user_name).
             _preemptive_sig = _resolve_user_signature(_preemptive_cp, _preemptive_uname)
 
+            # Audit 08/05 fix doublons — détection migration douce.
+            # Le cached_text peut être :
+            #   - LEGACY (corps seul, généré sous l'ancien postfix "NE PAS
+            #     inclure d'ouverture") → on injecte greeting/closing/signature
+            #     en local pour rendre le draft complet
+            #   - NEW (mail complet, généré sous le nouveau prompt « Claude
+            #     partout ») → on skip l'injection (sinon doublon)
+            _cached_has_greeting = _body_has_greeting(cached_text)
+            _cached_has_closing = _body_has_closing(cached_text)
+
             def stream_from_preemptive():
-                # Greeting (même structure que generate_sse)
-                _greeting_html = f"{_preemptive_greeting}\n\n"
-                yield f"data: {json.dumps({'chunk': _greeting_html})}\n\n"
-                # Corps (chunks du cache — générés sans greeting/closing)
+                # Greeting — skip si cached_text en a déjà un (cas Claude génère tout)
+                _greeting_html = ''
+                if not _cached_has_greeting:
+                    _greeting_html = f"{_preemptive_greeting}\n\n"
+                    yield f"data: {json.dumps({'chunk': _greeting_html})}\n\n"
+                # Corps (chunks du cache)
                 for chunk in cached_chunks:
                     yield f"data: {json.dumps({'chunk': chunk})}\n\n"
                     time.sleep(0.05)  # Délai progressif (perception)
-                # Closing + signature
-                # Fix 24/04 (Bug C) : skip signature si closing contient déjà
-                # le prénom user (évite doublon "Cdlt yvan\nYvan BOSSER...")
-                _closing_html = f"\n\n{_preemptive_closing}"
-                # Niveau B (26/04) : passer body=cached_text à _should_append_signature
-                # pour détecter signatures inline déjà présentes dans le cache.
-                if _preemptive_sig and _should_append_signature(_preemptive_closing, _preemptive_sig, body=cached_text):
-                    _closing_html += f"\n{_preemptive_sig}"
-                yield f"data: {json.dumps({'chunk': _closing_html})}\n\n"
+                # Closing + signature — skip si cached_text en a déjà
+                _closing_html = ''
+                if not _cached_has_closing:
+                    _closing_html = f"\n\n{_preemptive_closing}"
+                    # Fix 24/04 (Bug C) + Niveau B (26/04) : skip signature si
+                    # closing contient déjà le prénom user OU body a sig inline.
+                    if _preemptive_sig and _should_append_signature(_preemptive_closing, _preemptive_sig, body=cached_text):
+                        _closing_html += f"\n{_preemptive_sig}"
+                    yield f"data: {json.dumps({'chunk': _closing_html})}\n\n"
                 if message_id:
                     _store_proposed(message_id, _greeting_html + cached_text + _closing_html)
                 yield f"data: {json.dumps({'done': True, 'importance_used': _preemptive_imp})}\n\n"
@@ -11402,19 +11416,13 @@ INSTRUCTIONS ECHEANCES :
                     f"{pj_context[:5000]}"
                 )
 
-            # 12l — Instruction : NE PAS générer greeting/closing/signature
-            # Fix 24/04 (P1) — ajouter interdiction stricte des balises HTML.
-            # Symptôme observé sur Ombeline/Vincent/Camille/Ronan : Claude
-            # générait <p>...</p><p>...</p> que le dialog affichait en texte
-            # brut ("<p>Bonjour Ombeline,</p>..." visible dans l'éditeur).
+            # Audit 08/05 fix doublons — décision Yvan : « Claude partout ».
+            # Cf. _start_speculative (même bloc) pour l'historique complet.
+            # Claude génère le mail dans son intégralité (ouverture + corps +
+            # clôture + signature) en suivant Block D du contexte. Plus de
+            # postfix "NE PAS inclure" qui contredisait le reste.
             user_prompt += (
-                "\n\nINSTRUCTION CRITIQUE : Génère UNIQUEMENT le corps du mail. "
-                "NE PAS inclure d'ouverture (Bonjour, Salut, Cher...), "
-                "NE PAS inclure de clôture (Cordialement, Bien à vous...), "
-                "NE PAS inclure de signature (nom). "
-                "Commence directement par le contenu. L'ouverture, la clôture et la signature "
-                "seront ajoutées automatiquement par le système.\n\n"
-                "FORMAT OBLIGATOIRE : texte brut uniquement. N'utilise AUCUNE "
+                "\n\nFORMAT OBLIGATOIRE : texte brut uniquement. N'utilise AUCUNE "
                 "balise HTML (pas de <p>, <br>, <div>, <strong>, etc.). "
                 "Sépare les paragraphes par une ligne vide (double saut de ligne \\n\\n). "
                 "La mise en forme HTML est appliquée automatiquement côté affichage."
@@ -11486,29 +11494,34 @@ INSTRUCTIONS ECHEANCES :
     def generate_sse():
         full_text = []
         try:
-            # Envoyer le greeting en premier
-            greeting_html = f"{greeting}\n\n"
-            yield f"data: {json.dumps({'chunk': greeting_html})}\n\n"
-            full_text.append(greeting_html)
+            # Audit 08/05 fix doublons — décision « Claude partout » :
+            # Claude génère ouverture+corps+clôture+signature. On capture
+            # tous les chunks pour décider rétrospectivement si on doit
+            # injecter greeting/closing en local (cas dégradé : Claude a
+            # désobéi au prompt et n'a pas généré d'ouverture).
+            # Avant : greeting toujours injecté en tête → doublon si Claude
+            # générait aussi le sien.
+            _streamed_chunks = []  # accumulateur pour détecter post-stream
 
-            # Streaming du corps IA
+            # Streaming du corps IA (Claude génère TOUT : ouverture+corps+clôture)
             for chunk in ai.generate_reply(system_prompt, user_prompt,
                                            max_tokens=max_tokens, temperature=0.3,
                                            stream=True):
+                _streamed_chunks.append(chunk)
                 full_text.append(chunk)
                 yield f"data: {json.dumps({'chunk': chunk})}\n\n"
 
+            # Audit 08/05 fix doublons — full_text contient maintenant tout
+            # le draft Claude (ouverture+corps+clôture+signature). Avant :
+            # full_text[0] = greeting injecté en local, [1:] = body Claude.
             # Markdown cleanup (strip **bold**, *italic*, #headers, - bullets)
-            _body_text = ''.join(full_text[1:])  # Exclure le greeting (full_text[0])
+            _body_text = ''.join(full_text)
             _body_clean = re.sub(r'\*\*(.+?)\*\*', r'\1', _body_text)
             _body_clean = re.sub(r'\*(.+?)\*', r'\1', _body_clean)
             _body_clean = re.sub(r'^#+\s*', '', _body_clean, flags=re.MULTILINE)
             _body_clean = re.sub(r'^\s*[-•]\s+', '', _body_clean, flags=re.MULTILINE)
             # Fix 24/04 (P1) — filet de sécurité : strip balises HTML si Claude
             # a malgré tout généré du HTML (< = balise ouvrante détectée).
-            # Le prompt interdit déjà ces balises mais Claude peut ignorer
-            # l'instruction sur ~5% des cas. On strip et on reformate en plain
-            # text avec \n\n entre paragraphes.
             _had_html = '<' in _body_clean
             if _had_html:
                 _body_clean = re.sub(r'<br\s*/?>', '\n', _body_clean, flags=re.IGNORECASE)
@@ -11521,25 +11534,35 @@ INSTRUCTIONS ECHEANCES :
                 _body_clean = re.sub(r'\n{3,}', '\n\n', _body_clean).strip()
                 logger.info(f"[generate_reply] balises HTML strippées (Claude a ignoré l'instruction plain)")
             if _body_clean != _body_text:
-                # Remplacer le corps dans full_text (garder greeting en [0])
-                full_text[1:] = [_body_clean]
+                full_text[:] = [_body_clean]
 
-            # Envoyer closing + signature après le corps
-            # Fix 24/04 (Bug C) : skip signature si closing contient déjà
-            # le prénom user (évite doublon "Cdlt yvan\nYvan BOSSER...")
-            # Fix 26/04 (Niveau B) : aussi scanner body via _body_clean pour
-            # détecter signatures inline (Claude génère parfois "Yvan" en bas).
-            closing_html = f"\n\n{closing}"
-            if signature and _should_append_signature(closing, signature, body=_body_clean):
-                closing_html += f"\n{signature}"
-            yield f"data: {json.dumps({'chunk': closing_html})}\n\n"
-            full_text.append(closing_html)
+            # Audit 08/05 fix doublons — injection closing+signature en local
+            # UNIQUEMENT si Claude n'en a pas déjà généré (cas dégradé : Claude
+            # a oublié la clôture/signature malgré le contexte du Bloc D).
+            # Avant : closing+signature toujours injectés → doublon avec
+            # ce que Claude générait selon Bloc D ("Cordialement, Yvan").
+            if not _body_has_closing(_body_clean):
+                closing_html = f"\n\n{closing}"
+                if signature and _should_append_signature(closing, signature, body=_body_clean):
+                    closing_html += f"\n{signature}"
+                yield f"data: {json.dumps({'chunk': closing_html})}\n\n"
+                full_text.append(closing_html)
 
+            # Audit 08/05 fix doublons — filet de sécurité greeting :
+            # Si Claude a misbehavé et omis l'ouverture (rare, mais possible
+            # quand le profil D a une confiance faible), on émet un
+            # replace_body avec le greeting injecté en tête. L'éditeur côté
+            # dialog swap d'un coup pour ne pas afficher un draft sans
+            # ouverture.
+            _final_check = ''.join(full_text)
+            if not _body_has_greeting(_final_check) and greeting:
+                _final_check = f"{greeting}\n\n{_final_check.lstrip()}"
+                full_text[:] = [_final_check]
+                yield f"data: {json.dumps({'replace_body': _final_check})}\n\n"
+                logger.info("[generate_reply] greeting injecté en post (Claude a omis l'ouverture)")
             # Fix 24/04 : si Claude a généré du HTML, émettre replace_body
-            # avec le texte FINAL complet (greeting + body clean + closing)
-            # pour que le dialog swap éditeur d'un coup. Évite que l'user voie
-            # les <p> bruts qui restent dans l'éditeur après le stream.
-            if _had_html:
+            # avec le texte FINAL complet pour que le dialog swap d'un coup.
+            elif _had_html:
                 _full_replace = ''.join(full_text)
                 yield f"data: {json.dumps({'replace_body': _full_replace})}\n\n"
 
@@ -11739,6 +11762,73 @@ _LEARNED_TPL_EXCLUDE_RE = re.compile(
     r'(?:https?://|www\.|\d{3,}|\d{1,2}[/\-]\d{1,2}|\d+\s*€|@\w)',
     re.IGNORECASE,
 )
+
+
+# Audit 08/05 fix doublons — patterns canoniques (alignés avec
+# /api/instant_reply qui faisait déjà cette détection localement).
+_GREETING_PATTERNS = (
+    'bonjour', 'bonsoir', 'hello', 'salut', 'coucou',
+    'cher ', 'chère ', 'chers ', 'chères ',
+    'monsieur', 'madame', 'mesdames', 'messieurs',
+    'hi ', 'hey ', 'dear ', 're-bonjour', 're,', 're :',
+)
+_CLOSING_PATTERNS = (
+    'cordialement', 'bien cordialement', 'cdlt', 'cdt', 'cordial',
+    'bien à vous', 'bien à toi',
+    'bien sincèrement', 'sincèrement',
+    'amicalement', 'à bientôt', 'à très vite', 'à très bientôt',
+    'bonne journée', 'belle journée', 'bonne soirée',
+    'merci', "merci d'avance", "à votre disposition",
+    'best regards', 'regards', 'salutations',
+)
+
+
+def _body_has_greeting(text):
+    """Audit 08/05 fix doublons — Détecte si le body commence par une
+    ouverture (Bonjour/Salut/Hello/Cher/Bonsoir/Hi/Hey...).
+
+    Utilisé pour la migration vers « Claude génère ouverture+corps+clôture+
+    signature en intégralité ». Permet à stream_from_preemptive et
+    generate_sse de skipper l'injection locale du greeting quand le body
+    en contient déjà un.
+
+    Strip HTML simple (cas des cached_text en HTML format) avant détection.
+    """
+    if not text or not isinstance(text, str):
+        return False
+    # Strip HTML basique pour détecter "Bonjour" même dans <p>Bonjour...</p>
+    plain = _HTML_TAG_RE.sub('', text) if '<' in text else text
+    for line in plain.split('\n'):
+        s = line.strip()
+        if s:
+            low = s.lower()
+            return any(low.startswith(g) for g in _GREETING_PATTERNS)
+    return False
+
+
+def _body_has_closing(text):
+    """Audit 08/05 fix doublons — Détecte si le body se termine par une
+    clôture (Cordialement/Cdlt/Bien à vous/Amicalement/...).
+
+    Pendant à _body_has_greeting, regarde les 2 dernières lignes non-vides
+    (couvre le cas "Cordialement,\\nYvan" où la signature suit le closing).
+    """
+    if not text or not isinstance(text, str):
+        return False
+    plain = _HTML_TAG_RE.sub('', text) if '<' in text else text
+    nonempty = [l.strip() for l in plain.split('\n') if l.strip()]
+    if not nonempty:
+        return False
+    # Dernière ligne
+    last = nonempty[-1].lower()
+    if any(last.startswith(c) for c in _CLOSING_PATTERNS):
+        return True
+    # Avant-dernière (cas closing suivi d'un nom signature)
+    if len(nonempty) >= 2:
+        penult = nonempty[-2].lower()
+        if any(penult.startswith(c) for c in _CLOSING_PATTERNS):
+            return True
+    return False
 
 
 def _strip_greeting_closing(text):
