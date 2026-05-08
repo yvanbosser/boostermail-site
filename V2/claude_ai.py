@@ -93,19 +93,32 @@ _RE_DATE_FR = re.compile(r'^(\d{2})/(\d{2})/\d{4}')
 def _compact_date(date_str):
     """Format date compact 'dd/mm' à partir d'un string date.
 
-    Tolère ISO 8601, 'YYYY-MM-DD', 'DD/MM/YYYY'. En cas d'échec, retourne
-    la chaîne d'origine tronquée à 10 chars (fallback safe).
+    Tolère ISO 8601, 'YYYY-MM-DD', 'DD/MM/YYYY'. Validation stricte : un
+    format syntaxiquement valide mais avec mois/jour invalides (ex
+    '2026-13-45') retourne ''. Audit fix P3-A1/A2 (08/05/2026).
+
+    Si format inconnu : retourne '' (skip date) plutôt que troncature
+    moche. Audit fix P3-A2.
     """
     if not date_str or not isinstance(date_str, str):
         return ''
     s = date_str.strip()
     m = _RE_DATE_ISO.match(s)
     if m:
-        return f"{m.group(3)}/{m.group(2)}"
+        yy, mm, dd = m.group(1), m.group(2), m.group(3)
+        # Validation : mois 01-12, jour 01-31 (validation stricte au mois
+        # peut être faite via datetime mais ici on reste sur les bornes
+        # générales pour tolérer les formats hors-norme).
+        if 1 <= int(mm) <= 12 and 1 <= int(dd) <= 31:
+            return f"{dd}/{mm}"
+        return ''
     m = _RE_DATE_FR.match(s)
     if m:
-        return f"{m.group(1)}/{m.group(2)}"
-    return s[:10]
+        dd, mm = m.group(1), m.group(2)
+        if 1 <= int(mm) <= 12 and 1 <= int(dd) <= 31:
+            return f"{dd}/{mm}"
+        return ''
+    return ''
 
 
 # Phase 3.2 audit remediation 08/05/2026 — skip Bloc C si sujet trop court
@@ -145,6 +158,87 @@ def _subject_is_too_generic(subject):
     if not tokens:
         return True
     return all(t in _C_STOPWORDS for t in tokens)
+
+
+# Phase 4.4 audit remediation 08/05/2026 — détection contradictions
+# inter-blocs au build-time. Permet de mesurer le taux de prompts
+# incohérents en production (Pattern #25 ANOMALIES_RECURRENTES).
+# Cas couverts :
+#   - D dit 'vouvoiement' mais ≥3 tutoiements récents dans B sent
+#   - D dit 'chaleureux'/'amical' mais correction « plus formel » récente
+#   - D dit 'formel'/'professionnel' mais correction « plus chaleureux » récente
+_RE_CONFLICT_FORMEL = re.compile(r'\b(plus\s+formel|plus\s+sobre|moins\s+familier|moins\s+chaleureux)\b', re.IGNORECASE)
+_RE_CONFLICT_CHALEUREUX = re.compile(r'\b(plus\s+chaleureux|plus\s+amical|plus\s+sympa|moins\s+formel|plus\s+familier)\b', re.IGNORECASE)
+_RE_CONFLICT_COURT = re.compile(r'\b(plus\s+court|plus\s+concis|raccourci|trop\s+long)\b', re.IGNORECASE)
+_RE_CONFLICT_LONG = re.compile(r'\b(plus\s+long|plus\s+detaille|plus\s+complet|trop\s+court)\b', re.IGNORECASE)
+
+
+def _detect_prompt_conflicts(cp, sender_history, recent_corrections):
+    """Détecte et logue les contradictions inter-blocs (D vs B vs D2).
+
+    Émet 1 log warning par conflit détecté. Phase 4.4 audit remediation.
+    """
+    if not cp:
+        return
+
+    # Conflit 1 : registre D vs marqueurs tu/vous dans B (sent uniquement)
+    _register = (cp.get('register') or '').strip().lower()
+    if _register and sender_history:
+        _sent_items = [m for m in sender_history if m.get('direction') == 'sent']
+        _tu_total = 0
+        _vous_total = 0
+        for _m in _sent_items:
+            _body = (_m.get('body_snippet') or _m.get('body') or '')[:1500]
+            _tu_total += len(_RE_TU_MARKERS_LONG.findall(_body))
+            _vous_total += len(_RE_VOUS_MARKERS_LONG.findall(_body))
+        if _register == 'vouvoiement' and _tu_total >= 3 and _vous_total < _tu_total:
+            logger.warning(
+                "[prompt-conflict] D=vouvoiement, B_detected=tutoiement (tu=%d, vous=%d)",
+                _tu_total, _vous_total,
+            )
+        elif _register == 'tutoiement' and _vous_total >= 3 and _tu_total < _vous_total:
+            logger.warning(
+                "[prompt-conflict] D=tutoiement, B_detected=vouvoiement (tu=%d, vous=%d)",
+                _tu_total, _vous_total,
+            )
+
+    # Conflit 2 : ton D vs corrections D2
+    _tone = (cp.get('tone') or '').strip().lower()
+    if _tone and recent_corrections:
+        _is_warm = any(t in _tone for t in ('chaleureux', 'amical', 'sympa', 'familier'))
+        _is_formal = any(t in _tone for t in ('formel', 'professionnel', 'sobre', 'distant'))
+        for c in recent_corrections:
+            _analysis = (c.get('analysis') or '') + ' ' + (c.get('sent') or '')[:500]
+            if _is_warm and _RE_CONFLICT_FORMEL.search(_analysis):
+                logger.warning(
+                    "[prompt-conflict] D.tone=%s, D2_correction=plus_formel",
+                    _tone,
+                )
+                break
+            if _is_formal and _RE_CONFLICT_CHALEUREUX.search(_analysis):
+                logger.warning(
+                    "[prompt-conflict] D.tone=%s, D2_correction=plus_chaleureux",
+                    _tone,
+                )
+                break
+
+    # Conflit 3 : longueur D vs corrections D2
+    _length = (cp.get('typical_length') or '').strip().lower()
+    if _length and recent_corrections:
+        for c in recent_corrections:
+            _analysis = (c.get('analysis') or '') + ' ' + (c.get('sent') or '')[:500]
+            if _length in ('long', 'detaille', 'detaillé') and _RE_CONFLICT_COURT.search(_analysis):
+                logger.warning(
+                    "[prompt-conflict] D.length=%s, D2_correction=plus_court",
+                    _length,
+                )
+                break
+            if _length in ('court', 'bref', 'concis') and _RE_CONFLICT_LONG.search(_analysis):
+                logger.warning(
+                    "[prompt-conflict] D.length=%s, D2_correction=plus_long",
+                    _length,
+                )
+                break
 
 
 def _hash_email_partial(email):
@@ -595,16 +689,51 @@ class ClaudeAssistant:
         if contact_profile and contact_profile.get('profile_text'):
             cp = contact_profile
             # Confidence avec decay temporel (perd 10% tous les 90 jours sans re-analyse)
+            # Phase 4.3 audit remediation 08/05/2026 — decay intelligent : pas
+            # de baisse si interaction effective dans les 30 derniers jours.
+            # Logique : si l'utilisateur a échangé récemment avec ce contact,
+            # le profil reste "calibré" même si analyze_contact_profile n'a pas
+            # été ré-exécuté → la confiance ne doit pas baisser. On utilise
+            # `sender_history` (passé en param) pour détecter une interaction
+            # récente. Cette correction évite une baisse mécanique injuste sur
+            # les contacts actifs avec profil ancien.
             raw_confidence = cp.get('confidence', 0)
             updated_at = cp.get('updated_at', '')
             if updated_at:
                 try:
                     _updated = datetime.fromisoformat(updated_at.replace('Z', '+00:00')) if 'T' in updated_at else datetime.strptime(updated_at, '%Y-%m-%d %H:%M:%S')
                     _days_since = (datetime.now() - _updated.replace(tzinfo=None)).days
-                    _decay = max(0, _days_since // 90) * 0.10  # -10% par trimestre
-                    raw_confidence = max(0.05, raw_confidence - _decay)
-                    if _decay > 0:
-                        logger.debug(f"[prompt] Confidence decay: {_days_since}j depuis MAJ → -{_decay:.0%} → {raw_confidence:.0%}")
+                    # Détecter interaction récente (≤ 30 jours) dans sender_history.
+                    _has_recent_interaction = False
+                    if sender_history:
+                        _now = datetime.now()
+                        for _m in sender_history:
+                            _d = (_m.get('date', '') or '').strip()
+                            if not _d:
+                                continue
+                            try:
+                                if 'T' in _d:
+                                    _md = datetime.fromisoformat(_d.replace('Z', '+00:00'))
+                                    if _md.tzinfo is not None:
+                                        _md = _md.replace(tzinfo=None)
+                                else:
+                                    _md = datetime.strptime(_d[:10], '%Y-%m-%d')
+                                if (_now - _md).days <= 30:
+                                    _has_recent_interaction = True
+                                    break
+                            except Exception:
+                                continue
+                    if _has_recent_interaction:
+                        logger.debug(
+                            "[prompt] decay skip : interaction <30j malgré profil "
+                            "ancien (%dj) → confiance préservée à %d%%",
+                            _days_since, int(raw_confidence * 100),
+                        )
+                    else:
+                        _decay = max(0, _days_since // 90) * 0.10  # -10% par trimestre
+                        raw_confidence = max(0.05, raw_confidence - _decay)
+                        if _decay > 0:
+                            logger.debug(f"[prompt] Confidence decay: {_days_since}j depuis MAJ → -{_decay:.0%} → {raw_confidence:.0%}")
                 except Exception:
                     pass
             confidence_pct = int(raw_confidence * 100)
@@ -950,10 +1079,16 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
                 # Avant : '[2026-05-08] Marie (envoye) :' (~30 chars header)
                 # Après : '08/05 Marie >' (envoyé) / '08/05 Marie <' (reçu)
                 #   ~14 chars header → économie ~16 chars/item × N items.
+                # Audit fix P3-A3 — strip pour éviter espaces orphelins quand
+                # date ou from_name est vide.
                 _date_short = _compact_date(m.get('date', ''))
                 _arrow = '>' if m.get('direction') == 'sent' else '<'
-                _name = m.get('from_name', '') or '?'
-                line = f"{_date_short} {_name} {_arrow}"
+                _name = (m.get('from_name', '') or '').strip() or '?'
+                # Construction conditionnelle pour éviter les doubles espaces
+                # quand _date_short est vide.
+                _header_parts = [p for p in (_date_short, _name) if p]
+                _header_parts.append(_arrow)
+                line = ' '.join(_header_parts)
                 if body:
                     line += f"\n{body}"
                 else:
@@ -986,6 +1121,40 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
             )
             keyword_context = []
 
+        # Phase 4.2 audit remediation 08/05/2026 — mode étranger.
+        # Si contact totalement inconnu (pas de profil ET pas d'historique B)
+        # ET pas de "collègue" du même domaine dans le keyword_context, on
+        # skip C : les mails sur le même sujet avec d'autres correspondants
+        # ne reflètent pas la relation avec ce nouveau contact (style/registre
+        # peuvent être très différents). Exception : si même domaine qu'un
+        # contact connu (= collègue prospect), garder C (contexte interne utile).
+        if keyword_context:
+            _is_known = bool(contact_profile and contact_profile.get('profile_text'))
+            _is_recurrent = bool(sender_history)
+            if not _is_known and not _is_recurrent:
+                _correspondent = (
+                    ((incoming_email or {}).get('from', '') or '').strip().lower()
+                    or (to_email or '').strip().lower()
+                )
+                _correspondent_domain = ''
+                if '@' in _correspondent:
+                    _correspondent_domain = _correspondent.split('@', 1)[1]
+                _has_colleague = False
+                if _correspondent_domain:
+                    for _m in keyword_context:
+                        _from_e = (_m.get('from_email', '') or '').lower()
+                        if _from_e and _from_e.endswith('@' + _correspondent_domain):
+                            _has_colleague = True
+                            break
+                if not _has_colleague:
+                    logger.info(
+                        "[prompt-skip-c-stranger] contact inconnu hors domaine "
+                        "connu (corr=%s domain=%s) → skip C pour %d items",
+                        _correspondent[:40], _correspondent_domain[:40],
+                        len(keyword_context),
+                    )
+                    keyword_context = []
+
         if keyword_context:
             lines = []
             for m in keyword_context:
@@ -1009,6 +1178,10 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
         # confiant (≥ 70 % AND last_analysis < 30 jours). Logique : les
         # corrections sont déjà intégrées dans le profil enrichi récent.
         # Économie : ~300 tokens par draft (sur ~30-40 % des cas).
+        # Audit fix P3-A5 — désynchronisation : ne skipper QUE si toutes les
+        # corrections sont antérieures à `updated_at`. Une correction TRÈS
+        # récente postérieure à la dernière analyse profil ne peut PAS être
+        # déjà intégrée → on la garde dans D2.
         if recent_corrections and contact_profile and contact_profile.get('profile_text'):
             _raw_conf = contact_profile.get('confidence', 0)
             _updated_at = contact_profile.get('updated_at', '')
@@ -1023,12 +1196,44 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
                         _u = datetime.strptime(_updated_at, '%Y-%m-%d %H:%M:%S')
                     _days_since_analysis = (datetime.now() - _u).days
                     if _days_since_analysis < 30:
-                        logger.info(
-                            "[prompt-skip-d2] profil confiant et récent "
-                            "(conf=%d%%, %dj depuis MAJ) → bloc D2 skip pour %d corrections",
-                            _conf_pct, _days_since_analysis, len(recent_corrections),
-                        )
-                        recent_corrections = []
+                        # P3-A5 : check qu'aucune correction n'est plus récente
+                        # que `updated_at` du profil (sinon elles ne sont pas
+                        # encore intégrées dans profile_text). Si timestamp
+                        # manquant ou non-parsable → on ne skip pas (prudent).
+                        _all_integrated = True
+                        for c in recent_corrections:
+                            _ts = c.get('timestamp') or c.get('created_at') or c.get('date') or ''
+                            if not _ts:
+                                # Pas de timestamp → ne pas skip (conservatif).
+                                _all_integrated = False
+                                break
+                            try:
+                                if isinstance(_ts, (int, float)):
+                                    _c_dt = datetime.fromtimestamp(float(_ts))
+                                elif 'T' in str(_ts):
+                                    _c_dt = datetime.fromisoformat(str(_ts).replace('Z', '+00:00'))
+                                    if _c_dt.tzinfo is not None:
+                                        _c_dt = _c_dt.replace(tzinfo=None)
+                                else:
+                                    _c_dt = datetime.strptime(str(_ts), '%Y-%m-%d %H:%M:%S')
+                                if _c_dt > _u:
+                                    _all_integrated = False
+                                    break
+                            except Exception:
+                                _all_integrated = False  # par prudence
+                                break
+                        if _all_integrated:
+                            logger.info(
+                                "[prompt-skip-d2] profil confiant + récent + corrections "
+                                "intégrées (conf=%d%%, %dj depuis MAJ) → skip %d corrections",
+                                _conf_pct, _days_since_analysis, len(recent_corrections),
+                            )
+                            recent_corrections = []
+                        else:
+                            logger.debug(
+                                "[prompt-keep-d2] profil récent mais correction "
+                                "postérieure à updated_at → D2 maintenu"
+                            )
             except Exception:
                 pass
 
@@ -1186,6 +1391,14 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
         # fin, donc on positionne le brief tôt + on ré-affirme la garde plus
         # bas via SECURITY_GUARD.
         context = _SECURITY_GUARD + brief_block + "\n\n" + "\n\n".join(blocks)
+
+        # Phase 4.4 audit remediation — détection contradictions inter-blocs
+        # (D vs B vs D2). Logue uniquement, ne modifie pas le prompt. Permet
+        # de mesurer le taux de prompts incohérents en production (Pattern #25).
+        try:
+            _detect_prompt_conflicts(cp, sender_history, recent_corrections)
+        except Exception as _e:
+            logger.debug(f"[prompt-conflict] détection échouée : {_e}")
 
         # Phase 1.1 audit remediation — observabilité redaction PII (Phase 6).
         if _pii_counter:

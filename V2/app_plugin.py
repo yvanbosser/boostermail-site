@@ -11449,13 +11449,32 @@ def generate_reply():
 
         # Contexte B : historique avec le correspondant (Mode Standard)
         # Inclut les mails REÇUS de ce correspondant ET les mails ENVOYÉS à ce correspondant
+        # Phase 4.1 audit remediation 08/05/2026 — équilibre 5 envoyés + 5
+        # reçus (au lieu du top 15 chronologique). Quand l'utilisateur a
+        # beaucoup envoyé récemment et peu reçu (ou inverse), le top chrono
+        # produit un Bloc B déséquilibré qui dégrade la qualité du draft :
+        # Claude a besoin DES DEUX directions pour comprendre la dynamique
+        # (reçus = ton du correspondant, envoyés = style de l'utilisateur).
         try:
             b_received = graph.search_by_sender(correspondent, max_results=10)
             b_sent = graph.search_emails(f'to:{correspondent}', max_results=10)
-            sender_history = _normalize_context_b(b_received + b_sent, correspondent, _my_email_v)
-            # Trier par date décroissante, garder les 15 plus récents
-            sender_history.sort(key=lambda x: x.get('date', ''), reverse=True)
-            sender_history = sender_history[:15]
+            _all_normalized = _normalize_context_b(b_received + b_sent, correspondent, _my_email_v)
+            _sent_items = sorted(
+                [m for m in _all_normalized if m.get('direction') == 'sent'],
+                key=lambda x: x.get('date', ''), reverse=True,
+            )[:5]
+            _received_items = sorted(
+                [m for m in _all_normalized if m.get('direction') == 'received'],
+                key=lambda x: x.get('date', ''), reverse=True,
+            )[:5]
+            sender_history = sorted(
+                _sent_items + _received_items,
+                key=lambda x: x.get('date', ''), reverse=True,
+            )
+            logger.debug(
+                "[context-b-balanced] %d envoyés + %d reçus (sur %d normalisés)",
+                len(_sent_items), len(_received_items), len(_all_normalized),
+            )
         except Exception as e:
             logger.warning(f"Erreur contexte B: {e}")
 
