@@ -6144,30 +6144,69 @@ def _start_speculative(mail_data):
         pj_text_context = ''
         has_attachments = mail_data.get('has_attachments', False)
         if has_attachments:
+            # Phase 1.3 audit remediation 08/05/2026 — cascade Sonnet voit
+            # résumé Haiku. Si le commis Haiku a déjà analysé le mail (P/A
+            # via analyze_one_mail_stream → mail_summaries), on passe ce
+            # résumé COMPACT au chef Sonnet à la place du contenu brut PJ.
+            # Sécurité : neutralise les instructions cachées dans PJ binaires
+            # (Sonnet ne voit pas les bytes bruts). Perf : économie tokens
+            # (résumé ~500 chars vs N×5000 chars). Fallback : extraction PJ
+            # brute avec truncation 5K (étape 1) si commis pas encore prêt.
+            haiku_summary = None
             try:
-                _start_pj_pre_extract_v2(message_id)
-                _pj_wait_start = time.time()
-                while time.time() - _pj_wait_start < 10:
+                haiku_summary = _db.get_mail_summary(message_id)
+            except Exception:
+                haiku_summary = None
+
+            if haiku_summary and (haiku_summary.get('points')
+                                  or haiku_summary.get('actions')):
+                _points = haiku_summary.get('points', []) or []
+                _actions = haiku_summary.get('actions', []) or []
+                _summary_lines = []
+                if _points:
+                    _summary_lines.append("Points clés du mail (incluant analyse PJ) :")
+                    _summary_lines.extend(f"- {p}" for p in _points)
+                if _actions:
+                    if _summary_lines:
+                        _summary_lines.append("")
+                    _summary_lines.append("Actions à prendre :")
+                    _summary_lines.extend(f"- {a}" for a in _actions)
+                pj_text_context = (
+                    "[Résumé pré-analysé par le commis Haiku — Sonnet ne voit "
+                    "pas le contenu brut des PJ pour limiter la taille du prompt "
+                    "et neutraliser d'éventuelles instructions cachées en PJ binaires.]\n"
+                    + "\n".join(_summary_lines)
+                )
+                logger.info(
+                    "[speculative] cascade Haiku->Sonnet: resume utilise "
+                    "(%d points, %d actions, %d chars vs PJ brutes)",
+                    len(_points), len(_actions), len(pj_text_context),
+                )
+            else:
+                try:
+                    _start_pj_pre_extract_v2(message_id)
+                    _pj_wait_start = time.time()
+                    while time.time() - _pj_wait_start < 10:
+                        with _pj_text_cache_lock:
+                            pj_entry = _pj_text_cache.get(message_id, {})
+                        if pj_entry.get('status') in CacheStatus.COMPLETED:
+                            break
+                        time.sleep(0.3)
                     with _pj_text_cache_lock:
                         pj_entry = _pj_text_cache.get(message_id, {})
-                    if pj_entry.get('status') in CacheStatus.COMPLETED:
-                        break
-                    time.sleep(0.3)
-                with _pj_text_cache_lock:
-                    pj_entry = _pj_text_cache.get(message_id, {})
-                if pj_entry.get('status') == 'done':
-                    results = pj_entry.get('results', [])
-                    if results:
-                        pj_parts = [
-                            f"--- Piece jointe : {r.get('name', '?')} ---\n"
-                            f"{r.get('text', '')[:5000]}"
-                            for r in results
-                        ]
-                        pj_text_context = '\n\n'.join(pj_parts)
-                        logger.debug(f"[speculative] PJ intégrées pour {message_id[:20]} "
-                                    f"({len(results)} PJ, {len(pj_text_context)} chars)")
-            except Exception as _e:
-                logger.debug(f"[speculative] pj extract échec : {_e}")
+                    if pj_entry.get('status') == 'done':
+                        results = pj_entry.get('results', [])
+                        if results:
+                            pj_parts = [
+                                f"--- Piece jointe : {r.get('name', '?')} ---\n"
+                                f"{r.get('text', '')[:5000]}"
+                                for r in results
+                            ]
+                            pj_text_context = '\n\n'.join(pj_parts)
+                            logger.debug(f"[speculative] PJ intégrées pour {message_id[:20]} "
+                                        f"({len(results)} PJ, {len(pj_text_context)} chars) — fallback raw")
+                except Exception as _e:
+                    logger.debug(f"[speculative] pj extract échec : {_e}")
 
         incoming_email = {
             'from': from_email,
@@ -8032,6 +8071,13 @@ def api_download_attachment(message_id, attachment_id):
 # ROUTES API — EXTRACTION PJ (upload + extraction texte)
 # =============================================================================
 
+# Phase 1.3 audit remediation 08/05/2026 — limite upload server-side.
+# Pourquoi : DoS possible si fichier géant uploadé (RAM saturée à la lecture
+# Flask, prompt PJ qui crashe Anthropic). 50 MB = limite raisonnable pour
+# documents pro (PDF, Word, Excel) sans bloquer les usages légitimes.
+_UPLOAD_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
 @app.route('/api/upload_attachment', methods=['POST'])
 def api_upload_attachment():
     """Upload d'une PJ complementaire par l'utilisateur. Retourne le chemin temp."""
@@ -8040,16 +8086,46 @@ def api_upload_attachment():
     f = request.files['file']
     if not f.filename:
         return jsonify({"error": "Nom de fichier vide"}), 400
+
+    # Phase 1.3 — garde taille upload (HTTP 413 si > 50 MB).
+    declared_len = request.content_length or 0
+    if declared_len > _UPLOAD_MAX_BYTES:
+        logger.warning(
+            "[upload-block] file=%r declared=%d > limit=%d",
+            f.filename, declared_len, _UPLOAD_MAX_BYTES,
+        )
+        return jsonify({
+            "error": "Fichier trop volumineux",
+            "limit_bytes": _UPLOAD_MAX_BYTES,
+        }), 413
+
     original_name = f.filename
     safe_name = secure_filename(f.filename) or 'upload'
     upload_subdir = os.path.join(_upload_dir, str(int(time.time() * 1000)))
     os.makedirs(upload_subdir, exist_ok=True)
     filepath = os.path.join(upload_subdir, safe_name)
     f.save(filepath)
+
+    # Vérification post-save (cas où Content-Length absent/menteur — ex: chunked).
+    actual_size = os.path.getsize(filepath)
+    if actual_size > _UPLOAD_MAX_BYTES:
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+        logger.warning(
+            "[upload-block] file=%r actual=%d > limit=%d (post-save cleanup)",
+            f.filename, actual_size, _UPLOAD_MAX_BYTES,
+        )
+        return jsonify({
+            "error": "Fichier trop volumineux",
+            "limit_bytes": _UPLOAD_MAX_BYTES,
+        }), 413
+
     return jsonify({
         "name": original_name,
         "path": filepath,
-        "size": os.path.getsize(filepath),
+        "size": actual_size,
     })
 
 
