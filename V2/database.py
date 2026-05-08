@@ -2112,6 +2112,44 @@ class Database:
                 pass
         return results
 
+    def find_entry_id_by_odata_id(self, odata_id):
+        """Audit 08/05 fix #8 — Recherche l'entry_id (= IMID canonique) à partir
+        d'un Graph OData ID (`AAMk...`).
+
+        Utilisé par le webhook deletion handler : Microsoft envoie l'OData id
+        dans la notif (le mail est déjà supprimé côté Graph donc impossible
+        de faire un GET pour récupérer son IMID), il faut donc retrouver le
+        mapping via le cache local email_cache où on a stocké les 2 ids.
+
+        Implémentation : LIKE sur email_json. Lent à l'échelle (~50ms sur
+        10k entrées), acceptable car deletion = rare (~1-2/jour/user).
+
+        Retourne entry_id ou None si pas trouvé (mail non caché localement).
+        """
+        if not odata_id:
+            return None
+        uid = self._uid()
+        c = self._conn().cursor()
+        # Pattern de recherche : "id":"<odata>" — le JSON Graph utilise
+        # la clé 'id' pour l'OData ID. On échappe les guillemets pour LIKE.
+        pattern = f'%"id": "{odata_id}"%'
+        c.execute(
+            "SELECT entry_id FROM email_cache WHERE email_json LIKE ? AND user_id = ? LIMIT 1",
+            (pattern, uid)
+        )
+        r = c.fetchone()
+        if r:
+            return r[0]
+        # Fallback : json.dumps peut produire "id":"..." sans espace selon
+        # les versions Python/sérialisation. On retente sans espace.
+        pattern2 = f'%"id":"{odata_id}"%'
+        c.execute(
+            "SELECT entry_id FROM email_cache WHERE email_json LIKE ? AND user_id = ? LIMIT 1",
+            (pattern2, uid)
+        )
+        r = c.fetchone()
+        return r[0] if r else None
+
     def save_email_cache(self, entry_id, email_data):
         """
         Sauvegarde un email dans le cache DB.

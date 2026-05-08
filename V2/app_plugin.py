@@ -4534,34 +4534,73 @@ def api_webhooks_graph():
         logger.warning("[graph webhooks] pas de client_state stocké, notif ignorée")
         return jsonify({"status": "no_subscription"}), 200
 
-    valid_ids = _gw.parse_notification_payload(payload, expected_cs)
-    if not valid_ids:
+    # Audit 08/05 fix #8 — parse_notification_payload retourne des tuples
+    # (change_type, message_id). On accepte 'created' et 'deleted'.
+    valid_notifications = _gw.parse_notification_payload(payload, expected_cs)
+    if not valid_notifications:
         # Soit clientState mismatch (déjà loggé par parse_notification_payload),
-        # soit aucun changeType=created. Réponse 200 pour ne pas inciter
+        # soit aucun changeType supporté. Réponse 200 pour ne pas inciter
         # Microsoft à retry inutilement.
         return jsonify({"status": "ok", "processed": 0}), 200
 
-    # Pour chaque mail créé : récupérer via Graph + déclencher _run_prefetch
-    # (le pré-génération existant qui peuple _reply_cache + _prefetch_cache).
+    # Pour chaque mail créé/supprimé : déclencher le bon handler en BG.
     # STAND-BY S10 (01/05/2026) — utiliser ThreadPoolExecutor partagé au lieu
     # d'un nouveau thread par notification. Évite spawn massif si Microsoft
     # envoie une rafale de notifs (sync initial, restoration mailbox).
-    _webhook_executor.submit(_handle_graph_webhook_notifications, valid_ids)
+    _webhook_executor.submit(_handle_graph_webhook_notifications, valid_notifications)
 
-    return jsonify({"status": "ok", "queued": len(valid_ids)}), 200
+    return jsonify({"status": "ok", "queued": len(valid_notifications)}), 200
 
 
-def _handle_graph_webhook_notifications(message_ids):
-    """Traite une liste de Graph message IDs reçus via webhook.
+def _handle_graph_webhook_notifications(notifications):
+    """Traite une liste de notifications webhook (created + deleted).
 
-    Pour chaque ID : récupère le mail via Graph + lance _run_prefetch en BG.
+    Audit 08/05 fix #8 : signature étendue — accepte une liste de tuples
+    ``(change_type, message_id)`` au lieu d'une liste plate de mids.
+
+    Pour chaque notif :
+      - 'created' : récupère le mail via Graph + lance _run_prefetch en BG
+      - 'deleted' : lookup IMID via email_cache, puis _event_purge_mail
+
     Best-effort : log les erreurs sans crash.
     """
     graph = get_graph()
+    # Audit 08/05 fix #8 : split par type de changement
+    created_ids = [mid for ct, mid in notifications if ct == 'created']
+    deleted_ids = [mid for ct, mid in notifications if ct == 'deleted']
+
+    # --- Branche DELETED (audit 08/05 fix #8) -------------------------------
+    # Le mail n'existe plus côté Graph → on ne peut pas faire get_email_by_id.
+    # On retrouve l'IMID canonique via email_cache (LIKE sur email_json) puis
+    # on appelle _event_purge_mail pour purger les caches RAM + 4 tables DB.
+    for odata_id in deleted_ids:
+        try:
+            imid = _db.find_entry_id_by_odata_id(odata_id)
+            if not imid:
+                # Mail jamais caché localement (ex: arrivé pendant que V2 était
+                # down). Pas grave, rien à purger.
+                logger.debug(
+                    f"[graph webhook deleted] mail {odata_id[:20]}... non caché → skip"
+                )
+                continue
+            _event_purge_mail(imid, 'deleted', 'graph_webhook')
+            logger.info(
+                f"[graph webhook deleted] purgé mid={imid[:30]} (odata={odata_id[:20]}...)"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[graph webhook deleted] erreur purge {odata_id[:20]}... : {e}"
+            )
+
+    # --- Branche CREATED (existant) ----------------------------------------
     if not graph:
-        logger.warning(f"[graph webhooks handler] Graph indisponible, {len(message_ids)} mail(s) non traité(s)")
+        if created_ids:
+            logger.warning(
+                f"[graph webhooks handler] Graph indisponible, "
+                f"{len(created_ids)} mail(s) created non traité(s)"
+            )
         return
-    for mid in message_ids:
+    for mid in created_ids:
         try:
             # Récupérer le mail complet via Graph (le webhook ne donne que l'ID).
             # Méthode correcte = get_email_by_id (et non get_message qui n'existe pas).

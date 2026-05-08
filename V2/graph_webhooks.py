@@ -92,7 +92,12 @@ logger = logging.getLogger('easymail.webhooks')
 
 GRAPH_BASE = 'https://graph.microsoft.com/v1.0'
 SUBSCRIPTION_RESOURCE = '/me/messages'
-SUBSCRIPTION_CHANGE_TYPE = 'created'
+# Audit 08/05 fix #8 : étendre la subscription aux deletions pour purger
+# les caches V2 quand l'user supprime un mail via Outlook Web (sans passer
+# par /api/delete_email). Avant : 'created' seul → caches stale jusqu'au
+# refresh cohésion 10 min. Microsoft accepte une CSV ; on ignore 'updated'
+# qui produirait trop de bruit (lecture/marquage = updates Graph).
+SUBSCRIPTION_CHANGE_TYPE = 'created,deleted'
 
 # Lifetime max pour /me/messages : 4230 minutes (~70.5h, ~2.94 jours).
 # On vise 3 jours mais on plafonne à 4230 pour respecter la limite Microsoft.
@@ -288,7 +293,7 @@ def should_renew(expiration_iso: Optional[str]) -> bool:
 
 
 def parse_notification_payload(payload: dict, expected_client_state: str) -> list:
-    """Extrait les message_id valides d'une notification webhook.
+    """Extrait les notifications valides d'un payload webhook.
 
     Parameters
     ----------
@@ -299,11 +304,11 @@ def parse_notification_payload(payload: dict, expected_client_state: str) -> lis
 
     Returns
     -------
-    list[str]
-        Liste des Graph message IDs (``resourceData.id``) à traiter.
-        Vide si :
+    list[tuple[str, str]]
+        Liste de tuples ``(change_type, message_id)`` où change_type vaut
+        ``'created'`` ou ``'deleted'`` (Audit 08/05 fix #8). Vide si :
         - payload mal formé
-        - aucun changeType "created" trouvé
+        - aucun changeType supporté trouvé
         - clientState ne matche pas (rejection silencieuse pour sécurité)
     """
     if not isinstance(payload, dict):
@@ -324,7 +329,12 @@ def parse_notification_payload(payload: dict, expected_client_state: str) -> lis
         )
         return []
 
-    valid_ids = []
+    # Audit 08/05 fix #8 : on accepte 'created' (nouveaux mails) ET 'deleted'
+    # (suppressions). 'updated' reste ignoré (trop de bruit : marquage lu,
+    # tag flag, etc. déclencheraient des updates incessants).
+    SUPPORTED_CHANGE_TYPES = ('created', 'deleted')
+
+    valid_notifications = []
     for notif in notifications:
         if not isinstance(notif, dict):
             continue
@@ -337,15 +347,14 @@ def parse_notification_payload(payload: dict, expected_client_state: str) -> lis
             )
             continue
         change_type = notif.get('changeType', '')
-        if change_type != 'created':
-            # On ne traite que les nouveaux mails (pas les updates/deletes)
+        if change_type not in SUPPORTED_CHANGE_TYPES:
             continue
         rd = notif.get('resourceData', {})
         if isinstance(rd, dict):
             mid = rd.get('id', '')
             if mid:
-                valid_ids.append(mid)
-    return valid_ids
+                valid_notifications.append((change_type, mid))
+    return valid_notifications
 
 
 # ============================================================================
@@ -393,9 +402,9 @@ if __name__ == '__main__':
              'resourceData': {'id': 'AAMkAGZ...'}},
         ]
     }
-    ids = parse_notification_payload(payload_ok, cs)
-    assert ids == ['AAMkAGI...', 'AAMkAGZ...'], f"got {ids}"
-    print(f"Test 4 OK : parse_notification_payload = {ids}")
+    notifs = parse_notification_payload(payload_ok, cs)
+    assert notifs == [('created', 'AAMkAGI...'), ('created', 'AAMkAGZ...')], f"got {notifs}"
+    print(f"Test 4 OK : parse_notification_payload = {notifs}")
 
     # Test 5 : clientState mismatch → rejeté
     payload_bad_cs = {
@@ -404,22 +413,25 @@ if __name__ == '__main__':
              'resourceData': {'id': 'AAMkAGI...'}},
         ]
     }
-    ids = parse_notification_payload(payload_bad_cs, cs)
-    assert ids == [], "clientState mismatch devrait rejeter"
+    notifs = parse_notification_payload(payload_bad_cs, cs)
+    assert notifs == [], "clientState mismatch devrait rejeter"
     print("Test 5 OK : clientState mismatch rejeté silencieusement")
 
-    # Test 6 : changeType non-created → ignoré
-    payload_other = {
+    # Test 6 : changeType supportés vs ignorés (audit 08/05 fix #8)
+    # 'created' et 'deleted' sont remontés ; 'updated' est ignoré.
+    payload_mixed = {
         'value': [
             {'changeType': 'updated', 'clientState': cs,
              'resourceData': {'id': 'AAMkAGI...'}},
             {'changeType': 'deleted', 'clientState': cs,
              'resourceData': {'id': 'AAMkAGZ...'}},
+            {'changeType': 'created', 'clientState': cs,
+             'resourceData': {'id': 'AAMkAGN...'}},
         ]
     }
-    ids = parse_notification_payload(payload_other, cs)
-    assert ids == [], "changeType non-created devrait être ignoré"
-    print("Test 6 OK : changeType non-created ignoré")
+    notifs = parse_notification_payload(payload_mixed, cs)
+    assert notifs == [('deleted', 'AAMkAGZ...'), ('created', 'AAMkAGN...')], f"got {notifs}"
+    print(f"Test 6 OK : changeType filtré (deleted+created OK, updated ignoré) = {notifs}")
 
     # Test 7 : payload malformé
     assert parse_notification_payload(None, cs) == []
