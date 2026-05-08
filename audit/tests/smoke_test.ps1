@@ -360,6 +360,46 @@ Check-Invariant "I-CODE-01" "Syntaxe Python valide" {
     return $true
 }
 
+# Phase 7 audit remediation 08/05/2026 — checks pour les 3 nouveaux invariants
+# I-PII-01, I-PROMPT-01, I-PROMPT-02 (audit fix P7-A3).
+# Le path est résolu via $PSScriptRoot pour fonctionner en main repo
+# (`C:\EasyMail\V2\`) ou en worktree (`C:\EasyMail\.claude\worktrees\...\V2\`).
+
+$script:_ClaudeAiPath = (Resolve-Path (Join-Path $PSScriptRoot '..\..\V2\claude_ai.py') -ErrorAction SilentlyContinue).Path
+if (-not $script:_ClaudeAiPath) {
+    # Fallback main repo
+    $script:_ClaudeAiPath = 'C:\EasyMail\V2\claude_ai.py'
+}
+
+Check-Invariant "I-PII-01" "Body_snippet A/B/C nettoyes via _redact_pii_in_text (>=4 occurrences)" {
+    if (-not (Test-Path $script:_ClaudeAiPath)) {
+        $script:Skipped += "I-PII-01 : claude_ai.py absent - skip"
+        return $true
+    }
+    $count = (Select-String -Path $script:_ClaudeAiPath -Pattern '_redact_pii_in_text' -SimpleMatch).Count
+    return ($count -ge 4)
+}
+
+Check-Invariant "I-PROMPT-01" "_SECURITY_GUARD + _SECURITY_REMINDER presents dans claude_ai.py" {
+    if (-not (Test-Path $script:_ClaudeAiPath)) {
+        $script:Skipped += "I-PROMPT-01 : claude_ai.py absent - skip"
+        return $true
+    }
+    $hasGuard = (Select-String -Path $script:_ClaudeAiPath -Pattern '_SECURITY_GUARD\s*=' -List).Count -ge 1
+    $hasReminder = (Select-String -Path $script:_ClaudeAiPath -Pattern '_SECURITY_REMINDER\s*=' -List).Count -ge 1
+    return ($hasGuard -and $hasReminder)
+}
+
+Check-Invariant "I-PROMPT-02" "Brief sanitize + isolation user_brief presents" {
+    if (-not (Test-Path $script:_ClaudeAiPath)) {
+        $script:Skipped += "I-PROMPT-02 : claude_ai.py absent - skip"
+        return $true
+    }
+    $hasSanitize = (Select-String -Path $script:_ClaudeAiPath -Pattern '_sanitize_user_brief' -SimpleMatch).Count -ge 2
+    $hasWrap = (Select-String -Path $script:_ClaudeAiPath -Pattern '<user_brief>' -SimpleMatch).Count -ge 1
+    return ($hasSanitize -and $hasWrap)
+}
+
 # ==========================================================================
 # Category 10 - UX Latence
 # ==========================================================================

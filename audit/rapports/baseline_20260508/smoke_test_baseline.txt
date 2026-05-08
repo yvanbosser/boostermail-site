@@ -1,0 +1,50 @@
+
+=== Category 1 : Infrastructure reseau ===
+  (Mode SaaS pur detecte - V2/Companion locaux non lances - I-RES-01/02 skippes)
+
+=== Category 2 : Certificats TLS ===
+  FAIL [I-CERT-05] Cert servi par V2 matche le fichier
+
+=== Category 3 : Endpoints HTTPS ===
+  FAIL [I-API-01a] GET https://127.0.0.1:3443/api/status -> HTTP 200
+  FAIL [I-API-01b] GET https://localhost:3443/api/status -> HTTP 200
+  FAIL [I-API-01c] GET https://[::1]:3443/api/status -> HTTP 200
+  FAIL [I-API-02a] GET https://localhost:3443/plugin/autorun.html -> HTTP 200
+  FAIL [I-API-02b] GET https://localhost:3443/plugin/autorunshared.js -> HTTP 200
+  FAIL [I-API-02c] GET https://localhost:3443/plugin/commands.html -> HTTP 200
+  FAIL [I-API-02d] GET https://localhost:3443/plugin/dialog.html -> HTTP 200
+  FAIL [I-API-02e] GET https://localhost:3443/plugin/taskpane.html -> HTTP 200
+  FAIL [I-API-02f] GET https://localhost:3443/plugin/popup.html?container=taskpane -> HTTP 200
+
+=== Category 4 : Addin Outlook sideload ===
+  FAIL [I-ADDIN-03] Manifest copie Classic presente et identique source
+
+=== Category 5 : Base de donnees ===
+
+=== Category 6 : Processus ===
+
+=== Category 9 : Coherence code ===
+
+=== Category 10 : UX Latence ===
+  FAIL [I-UX-02] GET /api/status repond en <500ms
+
+=== Category 11 : Etat des donnees ===
+
+============================================================
+Smoke test : 30 PASS / 12 FAIL / 6 SKIP
+============================================================
+
+ANOMALIES DETECTEES :
+  - I-CERT-05 : Cert servi par V2 matche le fichier
+  - I-API-01a : GET https://127.0.0.1:3443/api/status -> HTTP 200
+  - I-API-01b : GET https://localhost:3443/api/status -> HTTP 200
+  - I-API-01c : GET https://[::1]:3443/api/status -> HTTP 200
+  - I-API-02a : GET https://localhost:3443/plugin/autorun.html -> HTTP 200
+  - I-API-02b : GET https://localhost:3443/plugin/autorunshared.js -> HTTP 200
+  - I-API-02c : GET https://localhost:3443/plugin/commands.html -> HTTP 200
+  - I-API-02d : GET https://localhost:3443/plugin/dialog.html -> HTTP 200
+  - I-API-02e : GET https://localhost:3443/plugin/taskpane.html -> HTTP 200
+  - I-API-02f : GET https://localhost:3443/plugin/popup.html?container=taskpane -> HTTP 200
+  - I-ADDIN-03 : Manifest copie Classic presente et identique source
+  - I-UX-02 : GET /api/status repond en <500ms
+

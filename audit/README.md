@@ -1,7 +1,24 @@
 # Kit d'audit BoosterMail V2
 
-> **Dernière mise à jour** : 23/04/2026 (ajout Catégorie 11 "État des données")
+> **Dernière mise à jour** : 08/05/2026 (ajout pointage rapports session audit remediation 08/05)
 > **Rôle** : référentiel partagé pour tout audit du code V2 (+ companion, service, install). Zéro audit sans passer par ce kit.
+
+## 🆕 Session du 08/05/2026 — Audit remediation (clos)
+
+Plan d'intervention en 7 phases livré + 3 audits successifs sous angles différents :
+
+| Doc clé | Description |
+|---|---|
+| [`rapports/2026-05-08_audit_remediation_PLAN.md`](rapports/2026-05-08_audit_remediation_PLAN.md) | Plan source (15 fixes prévus) |
+| [`rapports/2026-05-08_audit_remediation_DONE.md`](rapports/2026-05-08_audit_remediation_DONE.md) | **Rapport synthèse de clôture** (hub) |
+| [`rapports/2026-05-08_audit_phase{0_1,2,3,4,5,6,7}_check.md`](rapports/) | 7 check-reports par phase (audit 1) |
+| [`rapports/2026-05-08_audit_complementaire_angles.md`](rapports/2026-05-08_audit_complementaire_angles.md) | Audit 2 — 7 angles complémentaires (red team / perf / data / UX / résilience / volume logs / maintenance) |
+| [`rapports/2026-05-08_audit_angle3_check.md`](rapports/2026-05-08_audit_angle3_check.md) | Audit 3 — 7 angles encore différents (i18n+GDPR / edge cases / déterminisme / cross-feature / coverage gap / PII leakage logs / SSOT) |
+| [`tests/validation_scenarios.py`](tests/validation_scenarios.py) | Test runner permanent (8 scénarios automatisables) |
+| [`../docs/saas/OBSERVABILITY_AUDIT_REMEDIATION_20260508.md`](../docs/saas/OBSERVABILITY_AUDIT_REMEDIATION_20260508.md) | 22 logs structurés + alertes OVH |
+
+**Invariants ajoutés** : `I-PII-01`, `I-PROMPT-01`, `I-PROMPT-02` (cf [`INVARIANTS.md`](INVARIANTS.md) Catégorie 8).
+**Pattern ajouté** : `#25` Contradictions inter-blocs (cf [`ANOMALIES_RECURRENTES.md`](ANOMALIES_RECURRENTES.md)).
 
 ---
 

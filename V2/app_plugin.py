@@ -6144,30 +6144,69 @@ def _start_speculative(mail_data):
         pj_text_context = ''
         has_attachments = mail_data.get('has_attachments', False)
         if has_attachments:
+            # Phase 1.3 audit remediation 08/05/2026 — cascade Sonnet voit
+            # résumé Haiku. Si le commis Haiku a déjà analysé le mail (P/A
+            # via analyze_one_mail_stream → mail_summaries), on passe ce
+            # résumé COMPACT au chef Sonnet à la place du contenu brut PJ.
+            # Sécurité : neutralise les instructions cachées dans PJ binaires
+            # (Sonnet ne voit pas les bytes bruts). Perf : économie tokens
+            # (résumé ~500 chars vs N×5000 chars). Fallback : extraction PJ
+            # brute avec truncation 5K (étape 1) si commis pas encore prêt.
+            haiku_summary = None
             try:
-                _start_pj_pre_extract_v2(message_id)
-                _pj_wait_start = time.time()
-                while time.time() - _pj_wait_start < 10:
+                haiku_summary = _db.get_mail_summary(message_id)
+            except Exception:
+                haiku_summary = None
+
+            if haiku_summary and (haiku_summary.get('points')
+                                  or haiku_summary.get('actions')):
+                _points = haiku_summary.get('points', []) or []
+                _actions = haiku_summary.get('actions', []) or []
+                _summary_lines = []
+                if _points:
+                    _summary_lines.append("Points clés du mail (incluant analyse PJ) :")
+                    _summary_lines.extend(f"- {p}" for p in _points)
+                if _actions:
+                    if _summary_lines:
+                        _summary_lines.append("")
+                    _summary_lines.append("Actions à prendre :")
+                    _summary_lines.extend(f"- {a}" for a in _actions)
+                pj_text_context = (
+                    "[Résumé pré-analysé par le commis Haiku — Sonnet ne voit "
+                    "pas le contenu brut des PJ pour limiter la taille du prompt "
+                    "et neutraliser d'éventuelles instructions cachées en PJ binaires.]\n"
+                    + "\n".join(_summary_lines)
+                )
+                logger.info(
+                    "[speculative] cascade Haiku->Sonnet: resume utilise "
+                    "(%d points, %d actions, %d chars vs PJ brutes)",
+                    len(_points), len(_actions), len(pj_text_context),
+                )
+            else:
+                try:
+                    _start_pj_pre_extract_v2(message_id)
+                    _pj_wait_start = time.time()
+                    while time.time() - _pj_wait_start < 10:
+                        with _pj_text_cache_lock:
+                            pj_entry = _pj_text_cache.get(message_id, {})
+                        if pj_entry.get('status') in CacheStatus.COMPLETED:
+                            break
+                        time.sleep(0.3)
                     with _pj_text_cache_lock:
                         pj_entry = _pj_text_cache.get(message_id, {})
-                    if pj_entry.get('status') in CacheStatus.COMPLETED:
-                        break
-                    time.sleep(0.3)
-                with _pj_text_cache_lock:
-                    pj_entry = _pj_text_cache.get(message_id, {})
-                if pj_entry.get('status') == 'done':
-                    results = pj_entry.get('results', [])
-                    if results:
-                        pj_parts = [
-                            f"--- Piece jointe : {r.get('name', '?')} ---\n"
-                            f"{r.get('text', '')[:5000]}"
-                            for r in results
-                        ]
-                        pj_text_context = '\n\n'.join(pj_parts)
-                        logger.debug(f"[speculative] PJ intégrées pour {message_id[:20]} "
-                                    f"({len(results)} PJ, {len(pj_text_context)} chars)")
-            except Exception as _e:
-                logger.debug(f"[speculative] pj extract échec : {_e}")
+                    if pj_entry.get('status') == 'done':
+                        results = pj_entry.get('results', [])
+                        if results:
+                            pj_parts = [
+                                f"--- Piece jointe : {r.get('name', '?')} ---\n"
+                                f"{r.get('text', '')[:5000]}"
+                                for r in results
+                            ]
+                            pj_text_context = '\n\n'.join(pj_parts)
+                            logger.debug(f"[speculative] PJ intégrées pour {message_id[:20]} "
+                                        f"({len(results)} PJ, {len(pj_text_context)} chars) — fallback raw")
+                except Exception as _e:
+                    logger.debug(f"[speculative] pj extract échec : {_e}")
 
         incoming_email = {
             'from': from_email,
@@ -6175,6 +6214,10 @@ def _start_speculative(mail_data):
             'subject': subject,
             'body': raw_body + (('\n\n' + pj_text_context) if pj_text_context else ''),
             'body_preview': raw_body[:300],
+            # Phase 2.1 audit remediation 08/05/2026 — passe l'IMID du mail
+            # courant pour que _build_prompt puisse dédup le mail courant
+            # vs le bloc A (conversation_history).
+            'internet_message_id': message_id,
         }
 
         # Corrections récentes (DB)
@@ -6210,12 +6253,13 @@ def _start_speculative(mail_data):
             # génère le mail complet (suit Block D pour le greeting/closing
             # personnalisés du profil), et le local skip l'injection si le
             # body contient déjà ouverture/clôture (helpers _body_has_*).
-            user_prompt += (
+            # Audit fix P1-A5 — insertion AVANT le RAPPEL FINAL (recency bias).
+            user_prompt = _append_before_reminder(user_prompt, (
                 "\n\nFORMAT OBLIGATOIRE : texte brut uniquement. N'utilise AUCUNE "
                 "balise HTML (pas de <p>, <br>, <div>, <strong>, etc.). "
                 "Sépare les paragraphes par une ligne vide (double saut de ligne \\n\\n). "
                 "La mise en forme HTML est appliquée automatiquement côté affichage."
-            )
+            ))
         except Exception as e:
             logger.error(f"Speculative prompt error: {e}\n{traceback.format_exc()}")
             with _reply_lock:
@@ -8032,6 +8076,64 @@ def api_download_attachment(message_id, attachment_id):
 # ROUTES API — EXTRACTION PJ (upload + extraction texte)
 # =============================================================================
 
+# Phase 1.3 audit remediation 08/05/2026 — limite upload server-side.
+# Pourquoi : DoS possible si fichier géant uploadé (RAM saturée à la lecture
+# Flask, prompt PJ qui crashe Anthropic). 50 MB = limite raisonnable pour
+# documents pro (PDF, Word, Excel) sans bloquer les usages légitimes.
+_UPLOAD_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+
+# Audit fix P1-A1 (08/05/2026) — limite cumulée par mail : 25 MB total
+# tous fichiers confondus pour un même message_id. Prévient un user qui
+# uploaderait 5×9 MB pour DoS via taille cumulée. Tracker {message_id:
+# total_bytes} avec TTL 24 h pour éviter la croissance infinie.
+# Audit fix P1-A5 (08/05/2026) — pour respecter le recency bias, le
+# « RAPPEL FINAL » sécurité doit rester EN DERNIER dans le prompt envoyé
+# à Claude. Avant : `user_prompt += FORMAT OBLIGATOIRE` plaçait le format
+# APRÈS le RAPPEL FINAL, diluant son effet. Ce helper insère un postfix
+# AVANT le RAPPEL FINAL si présent, sinon append en queue (fallback).
+_RAPPEL_FINAL_TOKEN = "\n\nRAPPEL FINAL"
+
+
+def _append_before_reminder(user_prompt, postfix):
+    """Insère postfix avant le RAPPEL FINAL pour préserver le recency bias."""
+    if _RAPPEL_FINAL_TOKEN in user_prompt:
+        head, sep, tail = user_prompt.rpartition(_RAPPEL_FINAL_TOKEN)
+        return head + postfix + sep + tail
+    return user_prompt + postfix
+
+
+_UPLOAD_PER_MAIL_MAX_BYTES = 25 * 1024 * 1024  # 25 MB
+_UPLOAD_TOTALS_TTL = 24 * 3600  # 24 h
+_upload_totals_lock = threading.Lock()
+_upload_totals = {}  # {message_id: {'bytes': int, 'ts': float}}
+
+
+def _upload_totals_get(message_id):
+    """Lit le total cumulé d'uploads pour un message_id. Cleanup TTL."""
+    if not message_id:
+        return 0
+    now = time.time()
+    with _upload_totals_lock:
+        # Cleanup opportuniste des entrées expirées
+        expired = [k for k, v in _upload_totals.items() if now - v.get('ts', 0) > _UPLOAD_TOTALS_TTL]
+        for k in expired:
+            _upload_totals.pop(k, None)
+        entry = _upload_totals.get(message_id, {})
+        return entry.get('bytes', 0)
+
+
+def _upload_totals_add(message_id, n_bytes):
+    """Incrémente le total cumulé pour un message_id."""
+    if not message_id or n_bytes <= 0:
+        return
+    now = time.time()
+    with _upload_totals_lock:
+        entry = _upload_totals.get(message_id) or {'bytes': 0, 'ts': now}
+        entry['bytes'] = entry.get('bytes', 0) + n_bytes
+        entry['ts'] = now
+        _upload_totals[message_id] = entry
+
+
 @app.route('/api/upload_attachment', methods=['POST'])
 def api_upload_attachment():
     """Upload d'une PJ complementaire par l'utilisateur. Retourne le chemin temp."""
@@ -8040,16 +8142,84 @@ def api_upload_attachment():
     f = request.files['file']
     if not f.filename:
         return jsonify({"error": "Nom de fichier vide"}), 400
+
+    # Phase 1.3 — garde taille upload (HTTP 413 si > 50 MB).
+    declared_len = request.content_length or 0
+    if declared_len > _UPLOAD_MAX_BYTES:
+        logger.warning(
+            "[upload-block] file=%r declared=%d > limit=%d",
+            f.filename, declared_len, _UPLOAD_MAX_BYTES,
+        )
+        return jsonify({
+            "error": "Fichier trop volumineux",
+            "limit_bytes": _UPLOAD_MAX_BYTES,
+        }), 413
+
+    # Audit fix P1-A1 — garde cumulée par mail (HTTP 413 si total > 25 MB).
+    # message_id optionnel : best-effort si frontend l'envoie via form ou query.
+    upload_message_id = (
+        request.form.get('message_id', '').strip()
+        or (request.args.get('message_id', '') or '').strip()
+    )
+    if upload_message_id and declared_len:
+        cumul = _upload_totals_get(upload_message_id)
+        if cumul + declared_len > _UPLOAD_PER_MAIL_MAX_BYTES:
+            logger.warning(
+                "[upload-block] mid=%s cumul=%d + new=%d > limit=%d",
+                upload_message_id[:30], cumul, declared_len, _UPLOAD_PER_MAIL_MAX_BYTES,
+            )
+            return jsonify({
+                "error": "Total des pieces jointes trop volumineux pour ce mail",
+                "limit_bytes": _UPLOAD_PER_MAIL_MAX_BYTES,
+                "current_total": cumul,
+            }), 413
+
     original_name = f.filename
     safe_name = secure_filename(f.filename) or 'upload'
     upload_subdir = os.path.join(_upload_dir, str(int(time.time() * 1000)))
     os.makedirs(upload_subdir, exist_ok=True)
     filepath = os.path.join(upload_subdir, safe_name)
     f.save(filepath)
+
+    # Vérification post-save (cas où Content-Length absent/menteur — ex: chunked).
+    actual_size = os.path.getsize(filepath)
+    if actual_size > _UPLOAD_MAX_BYTES:
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+        logger.warning(
+            "[upload-block] file=%r actual=%d > limit=%d (post-save cleanup)",
+            f.filename, actual_size, _UPLOAD_MAX_BYTES,
+        )
+        return jsonify({
+            "error": "Fichier trop volumineux",
+            "limit_bytes": _UPLOAD_MAX_BYTES,
+        }), 413
+
+    # Audit fix P1-A1 — vérification cumul post-save aussi.
+    if upload_message_id and actual_size:
+        cumul = _upload_totals_get(upload_message_id)
+        if cumul + actual_size > _UPLOAD_PER_MAIL_MAX_BYTES:
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
+            logger.warning(
+                "[upload-block] mid=%s cumul=%d + actual=%d > limit=%d (post-save cleanup)",
+                upload_message_id[:30], cumul, actual_size, _UPLOAD_PER_MAIL_MAX_BYTES,
+            )
+            return jsonify({
+                "error": "Total des pieces jointes trop volumineux pour ce mail",
+                "limit_bytes": _UPLOAD_PER_MAIL_MAX_BYTES,
+                "current_total": cumul,
+            }), 413
+        _upload_totals_add(upload_message_id, actual_size)
+
     return jsonify({
         "name": original_name,
         "path": filepath,
-        "size": os.path.getsize(filepath),
+        "size": actual_size,
     })
 
 
@@ -10973,6 +11143,26 @@ def generate_reply():
     _signal_user_activity()  # Phase 1.5 : pause le préchargement BG (30s)
     data = request.get_json() or {}
     message_id = data.get('message_id', '')
+
+    # Audit fix P2-A5 (08/05/2026) — canonicalisation IMID best-effort.
+    # Le frontend (autorunshared.js) envoie l'IMID au format RFC 2822
+    # `<...@domain>`. On normalise (strip) et on log un warning si la forme
+    # n'est pas canonique — utile pour détecter une régression côté frontend.
+    # Pas de blocage strict ici (la route doit rester tolérante au legacy).
+    # Audit angle 3 P6-Leak-A2 (08/05/2026) — un message_id non-canonique
+    # peut contenir un email user (ex: 'user@email.fr:action'). On redact
+    # via _hash_email_partial avant log + tronque court (20 chars).
+    if message_id:
+        message_id = message_id.strip()
+        if not (message_id.startswith('<') and '@' in message_id and message_id.endswith('>')):
+            _mid_for_log = message_id[:20]
+            if '@' in _mid_for_log:
+                _mid_for_log = '<email-redacted>:' + _mid_for_log.split('@', 1)[1][:10]
+            logger.warning(
+                "[generate_reply] message_id non-canonique (attendu RFC 2822 <...@...>): %r",
+                _mid_for_log,
+            )
+
     brief = data.get('brief', '')[:2000]
 
     # Phase 3.1 — 5 variations de style (rotation sur compteur 1-5+)
@@ -11191,6 +11381,10 @@ def generate_reply():
         'subject': subject,
         'body': raw_body,
         'body_preview': raw_body[:300],
+        # Phase 2.1 audit remediation 08/05/2026 — passe l'IMID du mail
+        # courant pour que _build_prompt puisse dédup le mail courant
+        # vs le bloc A (conversation_history).
+        'internet_message_id': message_id,
     }
 
     # Récupérer le contexte si Mode Standard
@@ -11261,13 +11455,32 @@ def generate_reply():
 
         # Contexte B : historique avec le correspondant (Mode Standard)
         # Inclut les mails REÇUS de ce correspondant ET les mails ENVOYÉS à ce correspondant
+        # Phase 4.1 audit remediation 08/05/2026 — équilibre 5 envoyés + 5
+        # reçus (au lieu du top 15 chronologique). Quand l'utilisateur a
+        # beaucoup envoyé récemment et peu reçu (ou inverse), le top chrono
+        # produit un Bloc B déséquilibré qui dégrade la qualité du draft :
+        # Claude a besoin DES DEUX directions pour comprendre la dynamique
+        # (reçus = ton du correspondant, envoyés = style de l'utilisateur).
         try:
             b_received = graph.search_by_sender(correspondent, max_results=10)
             b_sent = graph.search_emails(f'to:{correspondent}', max_results=10)
-            sender_history = _normalize_context_b(b_received + b_sent, correspondent, _my_email_v)
-            # Trier par date décroissante, garder les 15 plus récents
-            sender_history.sort(key=lambda x: x.get('date', ''), reverse=True)
-            sender_history = sender_history[:15]
+            _all_normalized = _normalize_context_b(b_received + b_sent, correspondent, _my_email_v)
+            _sent_items = sorted(
+                [m for m in _all_normalized if m.get('direction') == 'sent'],
+                key=lambda x: x.get('date', ''), reverse=True,
+            )[:5]
+            _received_items = sorted(
+                [m for m in _all_normalized if m.get('direction') == 'received'],
+                key=lambda x: x.get('date', ''), reverse=True,
+            )[:5]
+            sender_history = sorted(
+                _sent_items + _received_items,
+                key=lambda x: x.get('date', ''), reverse=True,
+            )
+            logger.debug(
+                "[context-b-balanced] %d envoyés + %d reçus (sur %d normalisés)",
+                len(_sent_items), len(_received_items), len(_all_normalized),
+            )
         except Exception as e:
             logger.warning(f"Erreur contexte B: {e}")
 
@@ -11421,12 +11634,13 @@ INSTRUCTIONS ECHEANCES :
             # Claude génère le mail dans son intégralité (ouverture + corps +
             # clôture + signature) en suivant Block D du contexte. Plus de
             # postfix "NE PAS inclure" qui contredisait le reste.
-            user_prompt += (
+            # Audit fix P1-A5 — insertion AVANT le RAPPEL FINAL (recency bias).
+            user_prompt = _append_before_reminder(user_prompt, (
                 "\n\nFORMAT OBLIGATOIRE : texte brut uniquement. N'utilise AUCUNE "
                 "balise HTML (pas de <p>, <br>, <div>, <strong>, etc.). "
                 "Sépare les paragraphes par une ligne vide (double saut de ligne \\n\\n). "
                 "La mise en forme HTML est appliquée automatiquement côté affichage."
-            )
+            ))
         except Exception as e:
             logger.error(f"Erreur construction prompt: {e}\n{traceback.format_exc()}")
             system_prompt = "Tu es un assistant email professionnel."

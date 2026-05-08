@@ -934,6 +934,29 @@ Décision Yvan 07/05 : pas de différé du PJ — l'utilisateur attend une actio
 
 ---
 
+### 17. Dashboard d'observabilité audit remediation (différé Phase 6.3, 08/05/2026)
+
+**Origine** : Phase 6 du plan `audit/rapports/2026-05-08_audit_remediation_PLAN.md`. La Phase 6.1 a livré 22 entrées de logs structurées + un fichier d'alertes documentées (`docs/saas/OBSERVABILITY_AUDIT_REMEDIATION_20260508.md`). La Phase 6.3 prévoyait un dashboard agrégé.
+
+**Décision 08/05/2026** : différer le dashboard à post-déploiement. Les logs structurés sont prêts, les alertes côté OVH se configurent via simple `journalctl + grep + cron`. Un dashboard Grafana ou panneau interne demande :
+- choix d'outil (Grafana hosted / self-hosted, panel custom, Sentry events…)
+- pipeline d'ingestion (parser les logs, exposer en métriques)
+- maintenance long terme
+
+**Pré-requis avant de lancer** :
+- 7-15 jours de logs en prod pour calibrer les seuils (5 % conflits ? 1 sanitize/user ? 50K tokens ?)
+- Décision sur l'outil (Grafana free tier ? Sentry events ? log4j-style aggregator ?)
+
+**À surveiller en attendant** :
+- `grep` quotidien des warnings critiques (`prompt-conflict`, `brief-sanitize`, `security-block`, `prompt-size-alert`, `upload-block`)
+- Volume tokens cumulé (commandes dans `OBSERVABILITY_AUDIT_REMEDIATION_20260508.md`)
+
+**Effort estimé** : 0.5-1 session (selon outil retenu).
+
+**Priorité** : 🟡 Post-beta + 7-15 jours d'observation prod.
+
+---
+
 ## ⏸️ DIFFÉRÉ STRATÉGIQUE
 
 ### MPN (Microsoft Cloud Partner Program) — différé business
