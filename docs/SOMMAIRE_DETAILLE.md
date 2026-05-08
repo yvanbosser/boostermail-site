@@ -1,6 +1,6 @@
 # SOMMAIRE DÉTAILLÉ — Documentation BoosterMail (ex EasyMail)
 
-> **Dernière mise à jour** : 07/05/2026 — bilan `OUTLOOK_BILAN_SESSION_20260506_to_20260507_compose_classement.md` ajouté (compose mode new : pipeline classement aligné sur reply via `_prewarm_classement_for_mail` + Tier 0 SPEC §4 cas C2 + lookup cascade fuzzy_word + popup auto-scroll). **Setup git OVH** : `/opt/boostermail` est désormais un repo git tracking `origin/dev` (auth deploy key SSH). **Règle git absolue par contributeur** : Yvan→`feat/yvan/frontend`, Michael→`feat/michael/multi-user`, JAMAIS push direct sur `dev`/`master` — banner cascadé + I-SESS-06 dans `cloture_check.sh`. Source de vérité `docs/CONVENTIONS_GIT_BRANCHES.md`.
+> **Dernière mise à jour** : 08/05/2026 PM — session **« Audit complet arbre décisionnel + plan remediation »** ajoutée. Nouveau dossier [`docs/architecture/`](architecture/) avec PowerPoint visuel + nouveau **`SPEC_ARBRE_DECISIONNEL.md`** comme source de vérité unique du flux post-O5. 9 anomalies arbre fixées (commits a14600b + 0d814bc + b000133), audit blocs prompt Claude (20 anomalies), plan d'intervention détaillé pour Phase 1 SaaS launch. Bilan complet `OUTLOOK_BILAN_SESSION_20260508_audit_complet.md`.
 
 > **Objectif** : index unique de TOUTE la documentation du projet.
 > À lire en début de session pour savoir **où trouver quoi** sans relire les docs entiers.
@@ -131,6 +131,7 @@ docs/
 | Si la question porte sur… | Je vais voir… |
 |---|---|
 | **Architecture globale, où est quoi** | `docs/STRUCTURE_PROJET.md` |
+| **Arbre décisionnel BoosterMail (flux mail entrant → frigos)** ⭐ | `docs/specs_proto/SPEC_ARBRE_DECISIONNEL.md` + visuel `docs/architecture/BoosterMail_Arbre_Decisionnel.pptx` |
 | **Règles de projet, contraintes** | `CLAUDE.md` (racine) |
 | **Ce qu'il faut faire cette session** | `docs/PLUS_TARD_VF.md` (TL;DR en haut) ⭐ |
 | **Pourquoi tel choix a été fait** | `docs/specs_proto/HISTORIQUE_DECISIONS.md` |
@@ -169,6 +170,13 @@ docs/
 | **`PLUS_TARD_VF.md`** ⭐ | **Référentiel UNIQUE des sujets « plus tard » BoosterMail (consolidation des 3 anciens fichiers, marquage des items obsolètes)** | `plus tard`, `backlog`, `dette` |
 | `PLUS_TARD.md` | ⚠️ **Archivé** — remplacé par `PLUS_TARD_VF.md` le 27/04/2026 PM | `archive` |
 
+#### B-bis. Architecture visuelle (`docs/architecture/` — depuis 08/05/2026)
+
+| Fichier | Rôle | Clés de recherche |
+|---|---|---|
+| **`BoosterMail_Arbre_Decisionnel.pptx`** ⭐ | **PowerPoint 9 slides** documentant visuellement le flux de traitement d'un mail post-O5 : 2 filtres → 3 branches (Écarté/Partiel/VIP) → 5 frigos → 7 tiers classement (mail + PJ) → contacts (création + purge) → comportement à l'usage. Référence visuelle pour onboarding, présentation produit, doc business. Source de vérité textuelle = [`docs/specs_proto/SPEC_ARBRE_DECISIONNEL.md`](specs_proto/SPEC_ARBRE_DECISIONNEL.md). | `arbre`, `flux`, `cuisine`, `frigos`, `branches` |
+| `BoosterMail_Arbre_Decisionnel_v2.pptx` | Variante avec slide 6 corrigée (règle 3 mail : suppression « nom PJ » qui n'était pas implémenté côté code) | `archive` |
+
 ---
 
 ### C. Specs moteur IA & proto (`docs/specs_proto/` — 24 fichiers)
@@ -177,6 +185,7 @@ docs/
 
 | Fichier | Sujet | Clés |
 |---|---|---|
+| **`SPEC_ARBRE_DECISIONNEL.md`** ⭐ | **Source de vérité unique de l'arbre décisionnel BoosterMail post-O5** (consolidée 08/05). 2 filtres (écarter / VIP-vs-PARTIEL), 3 branches (Écarté/Partiel/VIP), 5 frigos avec règles de nettoyage, 7 tiers classement mail + 7 tiers classement PJ (avec 2 différences), gestion contacts (création progressive + purge 24 mois), 7 optimisations O1-O7. Référence visuelle = [`docs/architecture/BoosterMail_Arbre_Decisionnel.pptx`](../architecture/). | `arbre`, `flux`, `filtres`, `branches`, `frigos`, `O1-O7` |
 | `SPEC_FONCTIONNALITES_PROTO.md` | **27 modules** du proto détaillés | `fonctionnalités`, `modules`, `proto` |
 | `SPEC_SYSTEM_PROMPT.md` | Prompt WOW, 3 phases (COMPRENDRE → RÉDIGER → VÉRIFIER), blocs D/B/A/C/D2/E | `prompt`, `claude`, `génération` |
 | `SPEC_ROUTES_API.md` | 50+ routes proto, 38+9 routes V2, 4 routes Companion | `routes`, `API`, `endpoints` |

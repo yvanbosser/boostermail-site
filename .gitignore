@@ -115,6 +115,7 @@ V2_stderr_test.log
 companion_stderr.log
 # - Backups DB pré-migration (gardés en local pour rollback ad-hoc)
 V2/boostermail.db.pre_migration_*
+V2/boostermail.db.pre_*
 drafts_v2.json.bak_*
 # - Notes perso Yvan (hors scope code)
 bloc note/
