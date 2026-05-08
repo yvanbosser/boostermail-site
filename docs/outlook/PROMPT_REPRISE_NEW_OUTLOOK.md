@@ -55,36 +55,36 @@ CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
 - Toutes les modifs (UX/UI/data) déployées sur OVH dans la foulée — plus de WIP local persistant
 - Yvan utilise BoosterMail au quotidien depuis https://api.boostermail.ai/
 
-ÉTAT DE FIN DE LA DERNIÈRE SESSION (03/05/2026 fin d'après-midi — audit factures Anthropic)
+ÉTAT DE FIN DE LA DERNIÈRE SESSION (08/05/2026 PM tardif — audit remediation exécution complète)
 
-- **Bilan complet** : [`docs/sessions/OUTLOOK_BILAN_SESSION_20260503.md`](../sessions/OUTLOOK_BILAN_SESSION_20260503.md)
-- Top commit master : voir `git log --oneline -1` (formulation dynamique pour respecter I-SESS-03)
+- **Bilan complet** : [`docs/sessions/OUTLOOK_BILAN_SESSION_20260508_audit_remediation.md`](../sessions/OUTLOOK_BILAN_SESSION_20260508_audit_remediation.md)
+- **Hub synthèse audit** : [`audit/rapports/2026-05-08_audit_remediation_DONE.md`](../../audit/rapports/2026-05-08_audit_remediation_DONE.md)
+- Top commit `feat/yvan/frontend` : voir `git log --oneline -1` (formulation dynamique pour respecter I-SESS-03). Le merge final est `Merge audit remediation 08/05/2026 (sub-branche → frontend)`.
+- Sub-branche conservée pour rollback fin : `feat/yvan/audit-remediation-08-05` (top `f527365`)
 
-**Investigation factures Anthropic** : 5 factures auto-recharge $45 chacune en 3 jours (~$225). Test du contrôle null sur dimanche calme (2 mails Bankin' noreply, 0 envoi, 0 user action) = par design 0 appel API attendu. Mesure : 4 000 appels API → **100% du coût = bug pur, pas le sprint dev**.
+**Plan exécuté en 7 phases (15 fixes plan + 16 corrections via 3 audits successifs)** sur sub-branche dédiée mergée `--no-ff` :
 
-**3 root causes identifiées** dans `V2/app_plugin.py:_maybe_analyze_contact` :
-- RC1 : pas de skip noreply (31 contacts piégés en boucle silencieuse, return early sur `if not sent_mails: return`)
-- RC2 : branche « Re-analyse forcee sample_count=0 » sans condition d'arrêt → `yvan@gmail` + `support@coaxis` en vraie boucle Claude (1 080 appels/jour chacun)
-- RC3 : `_should_analyze_contact()` sans mémoire « déjà analysé » → 34 contacts dans le schedule re-analysés à chaque cycle BG (~80 s)
+- **Phase 1 — Bloquants SaaS** : PII redaction (SIRET/IBAN/NIR/tel FR+UE/email tiers/adresse) sur Blocs A/B/C avec **hash domaine SHA-256 anti-ré-identification** + brief sanitization 3 couches (strip + isolation `<user_brief>` + repositionnement avant blocs) + cascade Sonnet voit résumé Haiku au lieu du contenu brut PJ + SECURITY_GUARD étendu (D2/E/PJ binaires) + RAPPEL FINAL en queue + upload limit 50 MB/fichier + 25 MB/mail
+- **Phase 2 — Quality** : dedup A vs Mail reçu, gradient confidence 4 niveaux (full/medium/light/none), D2 250→500 chars + dates relatives
+- **Phase 3 — Token optim** : compactage Bloc A `08/05 Marie >`, skip C si sujet stopword, skip D2 si profil confiant + récent + corrections déjà intégrées
+- **Phase 4 — Bonus qualité** : Bloc B équilibré 5+5, mode étranger (skip C si vrai inconnu), decay confiance intelligent (anti-gaming via body ≥ 20 chars), détection contradictions inter-blocs au build-time
+- **Phase 5 — Validation** : test runner permanent [`audit/tests/validation_scenarios.py`](../../audit/tests/validation_scenarios.py) **8/8 OK** (S5-S12)
+- **Phase 6 — Observabilité** : 22 logs structurés ([`docs/saas/OBSERVABILITY_AUDIT_REMEDIATION_20260508.md`](../saas/OBSERVABILITY_AUDIT_REMEDIATION_20260508.md)), seuils alertes documentés
+- **Phase 7 — Documentation** : 3 nouveaux invariants `I-PII-01` / `I-PROMPT-01` / `I-PROMPT-02` + Pattern `#25` Contradictions inter-blocs
 
-**4 fixes déployés** (commit dédié, hash dans le bilan 03/05) :
-- S1 : tuple `_AUTO_EMAIL_PATTERNS` + skip silencieux early (parité commis Haiku unifié)
-- S2 : cooldown 24h via `_force_analysis_attempts` cache RAM + paramètre `bypass_cooldown=True` ajouté à `_maybe_analyze_contact()` (les 3 routes user `api_analyze_contact` + `api_recalibrate_contacts` + `_post_send_learning` passent True)
-- S3 : `_should_analyze_contact(mail_count, existing_sample_count)` avec mémoire (skip si sample >= mail)
-- S4 : instrumentation `logger.warning` dans `claude_ai.py:analyze_contact_profile` pour révéler les paths `return None` silencieux (3 cas : pas de JSON, JSON invalide head, JSON invalide extrait)
+**3 audits successifs sous angles différents (initial + complémentaire + angle 3)** : 32 anomalies trouvées au cumul, 16 corrigées (les actionnables), 16 skippées (conformes plan / risque accepté / cosmétique). **0 anomalie critique non corrigée**. Anomalies notables corrigées :
+- **P3-Data-A1 (CRITIQUE)** : `confidence` non-float crashait `int(raw_conf * 100)` → fix `try float() + bornage [0,1]`
+- **P6-Leak-A1 (Moyen-Critique)** : subject piégé loggé en clair → fuite RGPD si attaquant met PII dans subject. Fix : redact via `_redact_pii_in_text` avant log
+- **P1-GDPR-A1 (Moyen)** : domaine email exposé permettait ré-identification SaaS → nouveau helper `_hash_email_anonymous` (domaine SHA-256 8 chars, format `man***@d:XXXXXXXX` — 8 hex)
 
-**Validation live** post-deploy 16:52 UTC : 3 appels API en 12 min (vs 13 attendus avant), -77% à -100% selon métrique. Économie projetée **~$700-1 200/mois (~$8 800-14 200/an)**.
+**Économies tokens mesurées** : ~−200 à −500 tokens / draft moyen (cible plan -30% atteignable en prod sur cas typiques).
 
-**Artefacts kit audit** :
-- `audit/rapports/2026-05-03_audit_boucle_learning_sample_count.md` (constat-only initial)
-- `audit/rapports/2026-05-03_audit_boucle_learning_FIX_DEPLOYE.md` (rapport final post-fix)
-- **Pattern #24** dans `audit/ANOMALIES_RECURRENTES.md` : Branche de rattrapage sans condition d'arrêt + sans cooldown = boucle API infinie
-- **I-LEARN-01** dans `audit/INVARIANTS.md` : cadence appels Anthropic API < 50/jour sur jour calme
-- **I-LEARN-02** dans `audit/INVARIANTS.md` : corrélation BG vs usage user (distribution horaire)
+**Smoke test** : 33 PASS / 12 FAIL / 6 SKIP (3 nouveaux PASS pour I-PII-01/I-PROMPT-01/I-PROMPT-02 ; FAIL = mode SaaS pur, V2 local arrêté = attendu).
 
-**Lessons learned méthodologie** (mea culpa documenté dans le rapport) : toujours commencer par le **signal le plus brut** (`POST api.anthropic.com count par heure`) avant interprétation des logs métier. Le **test du contrôle null** suggéré par Yvan (jour calme = baseline 0) est un outil systématique à ajouter au PLAYBOOK Workflow 4.
-
-**Anomalie résiduelle B2** (à investiguer en session suivante) : `yvan@gmail` et `support@coaxis` plantent silencieusement dans `analyze_contact_profile`. Le cooldown 24h les protège, mais la cause exacte (parsing JSON ? validation enum ? exception non capturée ?) sera révélée par l'instrumentation S4 demain matin (~17h UTC) post-expiration du cooldown.
+**Reste à valider en prod OVH** :
+- 4 scénarios cache (HIT/MISS/PARTIEL/ÉCARTÉ) avec Outlook live
+- `audit/tests/saas_smoke.sh` sur `api.boostermail.ai`
+- 7-15 jours d'observation logs structurés pour calibrer les seuils alertes
 
 🎯 PROCHAINE SESSION
 
@@ -92,7 +92,16 @@ CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
    - Vérifier OVH : `curl -sk https://api.boostermail.ai/api/warmup_status` (HTTP 200 attendu)
    - Vérifier service : `ssh ubuntu@51.178.162.208 "sudo systemctl is-active boostermail"`
 
-2. **Si Yvan signale un bug sur le flux classement (mail/PJ)** :
+2. **Validation prod du merge audit remediation 08/05** (priorité haute) :
+   - Pull `feat/yvan/frontend` sur OVH puis `systemctl restart boostermail`
+   - Tester les 4 scénarios cache (HIT/MISS/PARTIEL/ÉCARTÉ) sur Outlook live
+   - Lancer `audit/tests/saas_smoke.sh`
+   - Surveiller les logs structurés via `journalctl -u boostermail | grep -E '\[prompt-conflict\]|\[brief-sanitize\]|\[security-block\]|\[upload-block\]|\[pii-redacted\]|\[prompt-size\]'`
+   - Comparer le coût Anthropic réel vs baseline (cible -25% selon plan)
+   - **Critère de stop alertes** : aucun warning critique remonté sur 24h
+   - Si tout OK après 7-15 jours : la sub-branche `feat/yvan/audit-remediation-08-05` peut être supprimée (rollback safe entre-temps via `git revert -m 1 <merge-commit>`)
+
+3. **Si Yvan signale un bug sur le flux classement (mail/PJ)** :
    - Test attendu côté lui : champ « Classement suggéré » cliquable → popup ouverte avec **top 3** (#1 principale + #2/#3 boulettes ● avec `reason` lisible « thread déjà classé », « classement habituel pour ce contact », etc.) + arbo déroulée sur le chemin de la suggestion + barre de recherche live (highlight bleu sur match) + saisie manuelle pour créer un nouveau dossier
    - Test 100 SCI homonymes : vérifier que Tier DB tranche correctement vers la bonne SCI (pas le premier "Administratif" venu)
    - Test mail noreply : doit être skip silencieusement (source `none_auto_email`)
@@ -115,7 +124,7 @@ AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 
 1. **`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** ⭐ — référence vivante (workflow OVH-first, scope, interdits, profil Yvan, procédure purge cache WebView2)
 2. **`docs/PLUS_TARD_VF.md`** ⭐ — référentiel UNIQUE des sujets « plus tard » avec en-tête mis à jour 02/05 fin de journée
-3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260503.md`** ⭐ — bilan session 03/05 (audit boucle learning + fix -98% appels API). Bilans précédents : `OUTLOOK_BILAN_SESSION_20260502_soiree.md` (Cuisinier+Commis + audit classement) puis `OUTLOOK_BILAN_SESSION_20260502_3axes.md` (matin/midi).
+3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260508_audit_remediation.md`** ⭐ — bilan session 08/05 PM tardif (exécution plan audit remediation 7 phases + 3 audits). Bilan PM précédent : `OUTLOOK_BILAN_SESSION_20260508_audit_complet.md` (audit arbre + plan source). Bilans antérieurs : `OUTLOOK_BILAN_SESSION_20260506_to_20260507_compose_classement.md` (compose classement + git OVH + branches contributeurs), `OUTLOOK_BILAN_SESSION_20260505_echeances.md` (échéances V2 SaaS), `OUTLOOK_BILAN_SESSION_20260503.md` (audit boucle learning + fix -98% appels API).
 4. **`docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md`** — source de vérité unique du classement (mail + PJ + joindre fichier)
 5. **`docs/saas/ONBOARDING_SESSION_SAAS.md`** — référence infra OVH partagée
 6. **`audit/INVARIANTS.md`** + **`audit/ANOMALIES_RECURRENTES.md`** — invariants + Patterns
