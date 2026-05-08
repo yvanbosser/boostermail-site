@@ -2645,6 +2645,72 @@ class Database:
         )
         return c.fetchone() is not None
 
+    # --- PURGE PAR MESSAGE_ID (audit 08/05 fix #6) -------------------------
+    # Avant : aucun DELETE pour les 4 tables mail_* → croissance illimitée
+    # (~150 MB/an/user) + entrées stale possibles si un IMID est ré-utilisé.
+    # Après : 4 méthodes appelées par _purge_message_caches (V2/app_plugin.py)
+    # à chaque event terminal (classement, send, delete, archive).
+
+    def purge_mail_summary(self, message_id):
+        """Supprime l'entrée mail_summaries pour ce message_id (idempotent)."""
+        if not message_id:
+            return
+        uid = self._uid()
+        conn = self._conn()
+        try:
+            conn.execute(
+                "DELETE FROM mail_summaries WHERE message_id = ? AND user_id = ?",
+                (message_id, uid)
+            )
+            conn.commit()
+        except Exception:
+            pass
+
+    def purge_mail_classement(self, message_id):
+        """Supprime l'entrée mail_classement_cache pour ce message_id."""
+        if not message_id:
+            return
+        uid = self._uid()
+        conn = self._conn()
+        try:
+            conn.execute(
+                "DELETE FROM mail_classement_cache WHERE message_id = ? AND user_id = ?",
+                (message_id, uid)
+            )
+            conn.commit()
+        except Exception:
+            pass
+
+    def purge_mail_pj_classement(self, message_id):
+        """Supprime l'entrée mail_pj_classement_cache pour ce message_id."""
+        if not message_id:
+            return
+        uid = self._uid()
+        conn = self._conn()
+        try:
+            conn.execute(
+                "DELETE FROM mail_pj_classement_cache WHERE message_id = ? AND user_id = ?",
+                (message_id, uid)
+            )
+            conn.commit()
+        except Exception:
+            pass
+
+    def purge_mail_echeance(self, message_id):
+        """Supprime l'entrée mail_echeance_cache pour ce message_id."""
+        if not message_id:
+            return
+        uid = self._uid()
+        conn = self._conn()
+        try:
+            conn.execute(
+                "DELETE FROM mail_echeance_cache WHERE message_id = ? AND user_id = ?",
+                (message_id, uid)
+            )
+            conn.commit()
+        except Exception:
+            pass
+
     # --- MÉTRIQUES ---------------------------------------------------------
 
     def get_metrics_summary(self):

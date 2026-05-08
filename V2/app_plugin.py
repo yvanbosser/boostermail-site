@@ -578,6 +578,11 @@ def _purge_message_caches(message_id):
     (avant : seulement _reply_cache + _prefetch_cache → incohérence si user
     supprime/classe un mail, les autres caches conservaient des données stale).
 
+    Audit 08/05 fix #6 : étendu pour purger AUSSI les 4 tables DB persistantes
+    (mail_summaries, mail_classement_cache, mail_pj_classement_cache,
+    mail_echeance_cache). Avant : ces tables n'avaient AUCUN delete → fuite
+    long terme (~150 MB/an/user) + suggestions stale si IMID ré-utilisé.
+
     Sites visés : api_classify_email, api_send_reply, _event_purge_mail.
     Best-effort : ignore les caches non encore définis (lazy init au boot).
     """
@@ -601,6 +606,15 @@ def _purge_message_caches(message_id):
                 _post_send_timestamps.pop(_prefix + message_id, None)
     except NameError:
         pass
+    # Audit 08/05 fix #6 : 4 tables DB persistantes (best-effort, ne pas
+    # bloquer l'event utilisateur sur un échec DB).
+    try:
+        _db.purge_mail_summary(message_id)
+        _db.purge_mail_classement(message_id)
+        _db.purge_mail_pj_classement(message_id)
+        _db.purge_mail_echeance(message_id)
+    except Exception as _e:
+        logger.debug(f"[purge-msg-caches] DB purge err {message_id[:20]} : {_e}")
 
 
 # 29/04 PM audit constantes #29 — status caches en classe (rétro-compat
@@ -2952,15 +2966,10 @@ def _prewarm_unified_for_mail(mid, mail_data):
         # === Audit Fix A3 (02/05 fin) : skip mails automatiques ===
         # Parité avec _prewarm_classement_for_mail : noreply / mailer-daemon
         # / newsletters → Claude rendrait 'none' presque toujours, économie API.
-        _AUTO_PATTERNS = (
-            'noreply', 'no-reply', 'no_reply',
-            'donotreply', 'do-not-reply', 'do_not_reply',
-            'nepasrepondre', 'ne-pas-repondre', 'ne_pas_repondre',
-            'mailer-daemon', 'postmaster',
-            'notifications@', 'notification@',
-            'newsletter@', 'mailing@',
-        )
-        if contact_email and any(p in contact_email for p in _AUTO_PATTERNS):
+        # Audit 08/05 fix #2 : utilise _SPEC_NOREPLY_PATTERNS canonique
+        # (étendu pour couvrir donotreply / nepasrepondre / etc.) au lieu
+        # d'une liste locale dupliquée.
+        if contact_email and any(p in contact_email for p in _SPEC_NOREPLY_PATTERNS):
             _set_mail_preview(mid, 'classement', 'done', {
                 'suggestion': None, 'suggestions': [], 'source': 'none_auto_email'})
             _set_mail_preview(mid, 'pj_classement', 'done', {
@@ -3112,16 +3121,17 @@ def _prewarm_unified_for_mail(mid, mail_data):
         # === Remplir les 3 caches DB + RAM ===
 
         # 1. Échéance
-        ech = result.get('echeance')
-        if ech and ech.get('description'):
-            ech_for_cache = [{
-                'description': ech.get('description', ''),
-                'date_echeance': ech.get('date', ''),
-            }]
-        else:
-            ech_for_cache = []
+        # Audit 08/05 fix #4 : Spec V1 = échéances « sortantes only ». Sur les
+        # mails entrants (cas de cette fonction, appelée par webhook reception
+        # + clic user), la détection doit être désactivée — l'échéance est
+        # déclarée explicitement par l'user au moment de la rédaction de SA
+        # réponse. Avant : E extraite par Haiku unifié pour TOUS les mails →
+        # affichage potentiel d'une « échéance » sur un mail reçu, contraire
+        # à la spec slide 5 + memory user.
+        # Note : on conserve l'extraction Haiku (le prompt produit P/A/E/F/J
+        # en 1 call, retirer E ne réduit pas le coût) mais on stocke vide.
+        ech_for_cache = []
         try:
-            # save_mail_echeance(mid, echeances) — pas de param source
             _db.save_mail_echeance(mid, ech_for_cache)
         except Exception as _e:
             logger.debug(f"[unified] save echeance: {_e}")
@@ -4562,6 +4572,17 @@ def _handle_graph_webhook_notifications(message_ids):
             # Construire mail_data au format attendu par _run_prefetch
             from_obj = msg.get('from') or {}
             from_addr = from_obj.get('emailAddress') if isinstance(from_obj, dict) else {}
+            # Audit 08/05 fix #1 : extraire to/cc en list[dict] (format que
+            # _should_speculate filtre 6 sait parser via isinstance(list, ...)).
+            # Avant : ces champs absents → filtre 6 (CC vs TO) court-circuité
+            # → les CC d'un contact connu étaient traités comme VIP (cascade
+            # Sonnet inutile). Idem 'date' (filtre > 30 jours).
+            def _extract_recipients(field):
+                items = msg.get(field, []) or []
+                return [{
+                    'email': (r.get('emailAddress', {}).get('address', '') or '').lower(),
+                    'name': r.get('emailAddress', {}).get('name', ''),
+                } for r in items if isinstance(r, dict)]
             # I-DATA-13 : prioriser internet_message_id (RFC 2822) sur l'OData id
             # Graph (cohérence avec le reste du pipeline qui clé sur IMID).
             mail_data = {
@@ -4574,6 +4595,9 @@ def _handle_graph_webhook_notifications(message_ids):
                 'conversation_id': msg.get('conversationId', ''),
                 'has_attachments': msg.get('hasAttachments', False),
                 'received_at': msg.get('receivedDateTime', ''),
+                'date': msg.get('receivedDateTime', ''),
+                'to': _extract_recipients('toRecipients'),
+                'cc': _extract_recipients('ccRecipients'),
             }
             logger.info(
                 f"[graph webhook] pré-génération déclenchée pour "
@@ -5752,8 +5776,17 @@ def _is_contact_known(email):
 # =============================================================================
 
 _SPEC_NOREPLY_PATTERNS = (
-    'no-reply', 'noreply', 'newsletter', 'notification',
+    # Substrings classiques (matchent quel que soit le séparateur autour)
+    'no-reply', 'noreply', 'no_reply',
+    'donotreply', 'do-not-reply', 'do_not_reply',
+    'nepasrepondre', 'ne-pas-repondre', 'ne_pas_repondre',
+    'newsletter', 'notification',
     'mailer-daemon', 'postmaster',
+    # Audit 08/05 fix #2 : extension pour cohérence avec _AUTO_PATTERNS local
+    # de _prewarm_unified_for_mail. Avant : 6 patterns → un mail
+    # `donotreply@x.com` n'était PAS écarté par _is_discarded (Sonnet lancé
+    # inutilement) mais l'était par le commis Haiku → draft sans plats =
+    # gaspillage. Maintenant superset.
 )
 
 # Filtre #5 : compteur d'ouvertures par mail (RAM). Incrémenté à chaque fois
@@ -5831,7 +5864,11 @@ def _should_speculate(mail_data):
         return False, 'expéditeur automatique'
 
     # Filtre 4 : body < 10 chars sans "?"
-    body_stripped = _HTML_TAG_RE.sub('',body).strip()
+    # Audit 08/05 fix #3 : harmonisation avec _is_discarded (sub par espace,
+    # pas par rien). Avant : _HTML_TAG_RE.sub('', body) collait <b>x</b><b>y</b>
+    # en 'xy' (2 chars) tandis que _is_discarded faisait 'x y' (3 chars) →
+    # divergence rare mais cassait l'invariant subset strict.
+    body_stripped = _HTML_TAG_RE.sub(' ', body).strip()
     if len(body_stripped) < 10 and '?' not in body_stripped:
         return False, 'body < 10 chars sans question'
 
@@ -6244,6 +6281,16 @@ def _start_speculative(mail_data):
         logger.warning(f"Spéculation échouée pour {message_id[:20]}: {e}")
         with _reply_lock:
             _reply_cache.pop(message_id, None)
+        # Audit 08/05 fix #5 : si Sonnet rate (rate limit, timeout, parse
+        # error), au moins préparer le commis Haiku unifié pour le mail.
+        # Avant : aucun fallback → cache miss au clic Quick Classify.
+        # Mitigé pour les webhooks (parallèle ligne 4592) mais critique pour
+        # les appels via _run_preemptive_bg (warmup) et cycle continuous-spec.
+        try:
+            _spawn_bg(_prewarm_mail_preview, args=(mail_data,),
+                      name='preview-sonnet-fallback')
+        except Exception as _fb_e:
+            logger.debug(f"[speculative-fallback] preview spawn err : {_fb_e}")
 
 
 def _run_preemptive_bg(inbox_mails):
@@ -7513,7 +7560,14 @@ def api_suggest_folder(message_id):
 # qui "termine" un mail côté user.
 
 def _event_purge_mail(message_id, action, reason):
-    """Helper commun pour les hooks delete/archive/reply-external : purge complète."""
+    """Helper commun pour les hooks delete/archive/reply-external : purge complète.
+
+    Audit 08/05 fix #7 : appelle aussi _purge_message_caches pour couvrir
+    _mail_preview_cache + _post_send_cache + 4 tables DB. Avant : asymétrie
+    avec api_classify_email/api_send_reply (qui passaient par
+    _purge_message_caches), donc un mail supprimé via Outlook gardait son
+    preview/résumé/classement DB → suggestions stale possibles.
+    """
     if not message_id:
         return
     try:
@@ -7533,6 +7587,12 @@ def _event_purge_mail(message_id, action, reason):
         _db.purge_email_cache_for(message_id)
     except Exception as e:
         logger.debug(f"[event-purge] purge_email_cache_for échec msg={message_id[:20]} : {e}")
+    # Audit 08/05 fix #7 : étendre à _mail_preview_cache + _post_send_cache
+    # + 4 tables DB. _purge_message_caches est idempotent et best-effort.
+    try:
+        _purge_message_caches(message_id)
+    except Exception as e:
+        logger.debug(f"[event-purge] _purge_message_caches échec : {e}")
     # Fix 23/04 (nettoyage cohérent 2 sources) : persister le disque dès qu'une
     # entrée du cache est purgée, peu importe son type. Avant : persist seulement
     # si user_edit → les bg_speculation purgées restaient sur disque jusqu'au
