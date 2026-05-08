@@ -45,6 +45,91 @@ _RE_TU_MARKERS_SHORT = re.compile(
 _RE_VOUS_MARKERS_SHORT = re.compile(
     r'\b(vous |votre |vos |svp\b|pourriez-vous)')
 
+# Phase 1.1 audit remediation 08/05/2026 — anonymisation PII dans le prompt.
+# Pourquoi : SaaS multi-user, les body_snippets de l'historique d'autres
+# clients (Blocs A/B/C) passaient avec PII tierce (SIRET, IBAN, tel, NIR,
+# adresse postale, emails tiers) vers Anthropic. RGPD obligatoire dès 1er
+# client EU. Voir audit/rapports/2026-05-08_audit_remediation_PLAN.md Fix 1.1.
+# NE PAS appliquer au mail courant ni au bloc G (PJ courantes).
+_RE_PII_IBAN_FR = re.compile(
+    r'\bFR\d{2}(?:\s?[\dA-Z]{4}){5}\s?[\dA-Z]{3}\b', re.IGNORECASE)
+_RE_PII_NIR = re.compile(
+    r'\b[12]\s?\d{2}\s?\d{2}\s?\d{2,3}\s?\d{2,3}\s?\d{3}\s?\d{2}\b')
+_RE_PII_SIRET = re.compile(
+    r'\b\d{3}[\s\.]?\d{3}[\s\.]?\d{3}[\s\.]?\d{5}\b')
+_RE_PII_PHONE_FR = re.compile(
+    r'(?<!\d)(?:\+33\s?[1-9]|0[1-9])(?:[\s\.\-]?\d{2}){4}(?!\d)')
+_RE_PII_EMAIL = re.compile(
+    r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b')
+_RE_PII_ADDRESS_FR = re.compile(
+    r'\b\d{1,4}\s*(?:bis|ter)?\s*'
+    r'(?:rue|avenue|av\.|boulevard|bd|bd\.|impasse|all[ée]e|chemin|place|pl\.|cours|quai|route|rte)'
+    r'\s+[\wÀ-ÿ\-\' ]{3,60}',
+    re.IGNORECASE,
+)
+_RE_PII_ZIP_CITY = re.compile(
+    r'\b\d{5}\s+[A-ZÀ-ÝÉÈÊËÎÏÔÖÙÛÜÇ][\wÀ-ÿ\-\' ]{2,40}\b')
+
+
+def _hash_email_partial(email):
+    """Hash partiel d'un email pour log/prompt : garde la partie avant @
+    tronquée à 3 chars + le domaine. Ex: 'manon.rabiller@airbee-conseil.fr'
+    → 'man***@airbee-conseil.fr'. Cohérent avec l'helper homonyme dans
+    V2/app_plugin.py:4153 (dupliqué ici pour éviter import cyclique)."""
+    if not isinstance(email, str) or '@' not in email:
+        return '<email>'
+    local, _, domain = email.partition('@')
+    if not local:
+        return f"***@{domain}"
+    return f"{local[:3]}***@{domain}"
+
+
+def _redact_pii_in_text(text, *, correspondent_email=None, counter=None):
+    """Anonymise les PII tierces dans un body_snippet avant injection prompt.
+
+    Patterns détectés : SIRET (14 chiffres groupés), IBAN FR, NIR, téléphone
+    FR, adresse postale (rue + ville/CP), emails. L'email du correspondent
+    courant (s'il est passé) reste lisible — c'est l'interlocuteur du mail.
+
+    Args:
+        text: body_snippet à nettoyer
+        correspondent_email: email du correspondant courant à épargner
+        counter: dict optionnel pour comptabiliser les redactions
+
+    Returns:
+        Texte anonymisé. Si text falsy ou non-str, retourne tel quel.
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    if counter is None:
+        counter = {}
+
+    def _bump(label):
+        counter[label] = counter.get(label, 0) + 1
+
+    # Ordre important : IBAN avant SIRET (un IBAN contient des séquences de 14 chiffres),
+    # téléphone après SIRET (séquences plus courtes), email en dernier.
+    out = _RE_PII_IBAN_FR.sub(lambda m: (_bump('iban'), '<IBAN>')[1], text)
+    out = _RE_PII_NIR.sub(lambda m: (_bump('nir'), '<NIR>')[1], out)
+    out = _RE_PII_SIRET.sub(lambda m: (_bump('siret'), '<SIRET>')[1], out)
+    out = _RE_PII_PHONE_FR.sub(lambda m: (_bump('phone'), '<phone>')[1], out)
+    out = _RE_PII_ADDRESS_FR.sub(lambda m: (_bump('address'), '<address>')[1], out)
+    out = _RE_PII_ZIP_CITY.sub(lambda m: (_bump('zip_city'), '<address>')[1], out)
+
+    correspondent_norm = (correspondent_email or '').strip().lower()
+
+    def _email_sub(m):
+        addr = m.group(0)
+        if correspondent_norm and addr.lower() == correspondent_norm:
+            return addr
+        _bump('email')
+        return _hash_email_partial(addr)
+
+    out = _RE_PII_EMAIL.sub(_email_sub, out)
+    return out
+
+
 # Niveau redactionnel (mis a jour par reload_style)
 _writing_level = None
 
@@ -337,6 +422,14 @@ class ClaudeAssistant:
         # D en premier (synthese relationnelle), B ensuite (exemples concrets a imiter)
         blocks = []
 
+        # Phase 1.1 audit remediation 08/05/2026 — anonymisation PII tierce
+        # dans les blocs A/B/C. Le correspondent courant est épargné (lisible).
+        _pii_counter = {}
+        _correspondent_for_redaction = (
+            (to_email or '').strip()
+            or ((incoming_email or {}).get('from', '') or '').strip()
+        )
+
         # -- D : Profil du correspondant (PREMIER — prime Claude sur la relation) --
         _SERVICE_PREFIXES = {'noreply', 'no-reply', 'info', 'contact', 'admin', 'support', 'hello', 'sales', 'billing', 'notification', 'notifications', 'service', 'mailer-daemon', 'postmaster'}
         _raw_local = to_email.split('@')[0].lower().replace('.', ' ').replace('-', ' ') if to_email else ''
@@ -568,8 +661,16 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
             received_lines = []
             for m in sender_history:
                 body = m.get('body_snippet', '')
+                # Phase 1.1 audit remediation — anonymisation PII tierce.
+                body_redacted = _redact_pii_in_text(
+                    body,
+                    correspondent_email=_correspondent_for_redaction,
+                    counter=_pii_counter,
+                )
                 if m['direction'] == 'sent':
                     # Scorer par similarité de type avec le mail entrant
+                    # (similarity calculée sur le body brut pour ne pas
+                    # impacter le scoring par les tokens redactés).
                     mail_text = ((m.get('subject', '') or '') + ' ' + (body or '')).lower()
                     similarity = 0
                     for mtype, kw_score in incoming_types.items():
@@ -577,9 +678,9 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
                         match = sum(1 for kw in keywords if kw in mail_text)
                         if match > 0:
                             similarity += match * kw_score  # boost si même type
-                    sent_mails.append((m, body, similarity))
+                    sent_mails.append((m, body_redacted, similarity))
                 else:
-                    line = f"[{m['date']}] De: {m.get('from_name','')} — Objet: {m.get('subject','')}\n{body}" if body else f"[{m['date']}] De: {m.get('from_name','')} — Objet: {m.get('subject','')}"
+                    line = f"[{m['date']}] De: {m.get('from_name','')} — Objet: {m.get('subject','')}\n{body_redacted}" if body_redacted else f"[{m['date']}] De: {m.get('from_name','')} — Objet: {m.get('subject','')}"
                     received_lines.append(line)
 
             # Trier les envoyés : le plus similaire en premier
@@ -614,6 +715,12 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
             lines = []
             for m in conversation_history:
                 body = m.get('body_snippet', '')
+                # Phase 1.1 audit remediation — anonymisation PII tierce.
+                body = _redact_pii_in_text(
+                    body,
+                    correspondent_email=_correspondent_for_redaction,
+                    counter=_pii_counter,
+                )
                 line = f"[{m['date']}] {m['from_name']} ({'envoye' if m['direction']=='sent' else 'recu'}) :"
                 if body:
                     line += f"\n{body}"
@@ -627,6 +734,12 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
             lines = []
             for m in keyword_context:
                 body = m.get('body_snippet', '')
+                # Phase 1.1 audit remediation — anonymisation PII tierce.
+                body = _redact_pii_in_text(
+                    body,
+                    correspondent_email=_correspondent_for_redaction,
+                    counter=_pii_counter,
+                )
                 line = f"[{m['date']}] {m['from_name']} — Objet: {m.get('subject','')} ({m['direction']}) :"
                 if body:
                     line += f"\n{body}"
@@ -687,6 +800,15 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
         )
 
         context = _SECURITY_GUARD + "\n\n" + "\n\n".join(blocks)
+
+        # Phase 1.1 audit remediation — observabilité redaction PII (Phase 6).
+        if _pii_counter:
+            _pii_total = sum(_pii_counter.values())
+            _pii_patterns = ','.join(sorted(_pii_counter.keys()))
+            logger.info(
+                "[pii-redacted] count=%d patterns=%s",
+                _pii_total, _pii_patterns,
+            )
 
         if is_first_mail:
             # Separation PJ du brief
