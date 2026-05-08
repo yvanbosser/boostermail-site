@@ -55,8 +55,15 @@ _RE_PII_IBAN_FR = re.compile(
     r'\bFR\d{2}(?:\s?[\dA-Z]{4}){5}\s?[\dA-Z]{3}\b', re.IGNORECASE)
 _RE_PII_NIR = re.compile(
     r'\b[12]\s?\d{2}\s?\d{2}\s?\d{2,3}\s?\d{2,3}\s?\d{3}\s?\d{2}\b')
+# Audit complémentaire P1-Red-A1 (08/05/2026) — séparateurs étendus pour
+# couvrir SIRET copié-collés depuis des PDF (qui produisent souvent `-` ou
+# point milieu unicode `·`) ou des espaces non-sécables (\xa0,  ).
 _RE_PII_SIRET = re.compile(
-    r'\b\d{3}[\s\.]?\d{3}[\s\.]?\d{3}[\s\.]?\d{5}\b')
+    r'\b\d{3}[\s\.\-  ·]?'
+    r'\d{3}[\s\.\-  ·]?'
+    r'\d{3}[\s\.\-  ·]?'
+    r'\d{5}\b'
+)
 _RE_PII_PHONE_FR = re.compile(
     r'(?<!\d)(?:\+33\s?[1-9]|0[1-9])(?:[\s\.\-]?\d{2}){4}(?!\d)')
 # Audit fix P1-A6 (08/05/2026) — couvrir téléphones internationaux UE/UK/US.
@@ -675,6 +682,16 @@ class ClaudeAssistant:
         recent_corrections = _only_dicts(recent_corrections)
         # learning_priorities = list[str], pas filtrée
 
+        # Audit complémentaire P3-Data-A2 (08/05/2026) — défense input-shape
+        # `incoming_email` doit être dict ou None pour les `(... or {}).get(...)`.
+        # Si caller passe une string truthy → AttributeError plus loin. Coerce.
+        if incoming_email is not None and not isinstance(incoming_email, dict):
+            logger.warning(
+                "[input-shape] incoming_email non-dict (type=%s) → coerce to {}",
+                type(incoming_email).__name__,
+            )
+            incoming_email = {}
+
         # -- Construction des blocs de contexte — ordre : D -> B -> A -> C -> D2 -> E --
         # D en premier (synthese relationnelle), B ensuite (exemples concrets a imiter)
         blocks = []
@@ -715,6 +732,22 @@ class ClaudeAssistant:
         cp = None  # Initialisé ici pour éviter UnboundLocalError
         if contact_profile and contact_profile.get('profile_text'):
             cp = contact_profile
+            # Audit complémentaire P3-Data-A1 (08/05/2026) — défense
+            # `confidence` doit être numérique. Si DB corrompue stocke une
+            # string ou autre, `int(raw_confidence * 100)` plante. Coerce safe.
+            _raw_conf_value = cp.get('confidence', 0)
+            try:
+                _raw_conf_float = float(_raw_conf_value)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "[input-shape] confidence non-float (type=%s val=%r) → coerce to 0",
+                    type(_raw_conf_value).__name__, _raw_conf_value,
+                )
+                _raw_conf_float = 0.0
+            # Borner à [0, 1] au cas où DB stocke un %, un négatif, etc.
+            _raw_conf_float = max(0.0, min(1.0, _raw_conf_float))
+            cp = dict(cp)  # ne pas muter le dict original (cache RAM)
+            cp['confidence'] = _raw_conf_float
             # Confidence avec decay temporel (perd 10% tous les 90 jours sans re-analyse)
             # Phase 4.3 audit remediation 08/05/2026 — decay intelligent : pas
             # de baisse si interaction effective dans les 30 derniers jours.
@@ -731,6 +764,10 @@ class ClaudeAssistant:
                     _updated = datetime.fromisoformat(updated_at.replace('Z', '+00:00')) if 'T' in updated_at else datetime.strptime(updated_at, '%Y-%m-%d %H:%M:%S')
                     _days_since = (datetime.now() - _updated.replace(tzinfo=None)).days
                     # Détecter interaction récente (≤ 30 jours) dans sender_history.
+                    # Audit complémentaire P4-UX-A3 (08/05/2026) — anti-gaming :
+                    # exiger un body non-vide (au moins 20 chars significatifs)
+                    # pour qualifier une interaction. Sinon un mail vide/auto
+                    # peut frauduleusement préserver la confiance.
                     _has_recent_interaction = False
                     if sender_history:
                         _now = datetime.now()
@@ -738,6 +775,9 @@ class ClaudeAssistant:
                             _d = (_m.get('date', '') or '').strip()
                             if not _d:
                                 continue
+                            _body_check = (_m.get('body_snippet', '') or _m.get('body', '') or '').strip()
+                            if len(_body_check) < 20:
+                                continue  # mail trop court → ne compte pas
                             try:
                                 if 'T' in _d:
                                     _md = datetime.fromisoformat(_d.replace('Z', '+00:00'))
