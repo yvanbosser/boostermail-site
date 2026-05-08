@@ -328,6 +328,23 @@ _RE_BRIEF_OVERRIDE_PHRASE = re.compile(
     r')'
 )
 
+# Phase 6.1 audit remediation — détection subjects piégés.
+# Patterns suspects qu'un attaquant pourrait mettre dans le sujet d'un mail
+# pour tenter de prompt-inject. Pure observabilité (warning log) :
+# `_SECURITY_GUARD` instruit déjà Claude d'ignorer ces patterns dans subject.
+_RE_SUBJECT_TRAP = re.compile(
+    r'(?i)('
+    r'\[\s*directive\s*[:.\]]'
+    r'|\[\s*system\s*[:.\]]'
+    r'|\[\s*admin\s*[:.\]]'
+    r'|\[\s*override\s*[:.\]]'
+    r'|\bignore\s+(?:les\s+)?(?:consignes|instructions)'
+    r'|\bnouveau\s+r[oô]le\b'
+    r'|<\s*system\s*>'
+    r'|<\s*override\s*>'
+    r')'
+)
+
 
 def _sanitize_user_brief(brief):
     """Strip patterns d'injection dans le brief utilisateur + log warning.
@@ -669,6 +686,16 @@ class ClaudeAssistant:
             (to_email or '').strip()
             or ((incoming_email or {}).get('from', '') or '').strip()
         )
+
+        # Phase 6.1 audit remediation — détection subject piégé.
+        # Pure observabilité : SECURITY_GUARD instruit déjà Claude d'ignorer.
+        # Permet de mesurer le taux d'attaques tentées par subject.
+        _incoming_subject = ((incoming_email or {}).get('subject', '') or '').strip()
+        if _incoming_subject and _RE_SUBJECT_TRAP.search(_incoming_subject):
+            logger.warning(
+                "[security-block] vector=subject pattern_detected subject=%r",
+                _incoming_subject[:80],
+            )
 
         # -- D : Profil du correspondant (PREMIER — prime Claude sur la relation) --
         _SERVICE_PREFIXES = {'noreply', 'no-reply', 'info', 'contact', 'admin', 'support', 'hello', 'sales', 'billing', 'notification', 'notifications', 'service', 'mailer-daemon', 'postmaster'}
@@ -1401,13 +1428,59 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
             logger.debug(f"[prompt-conflict] détection échouée : {_e}")
 
         # Phase 1.1 audit remediation — observabilité redaction PII (Phase 6).
+        # Audit fix P6-A4 (08/05/2026) — détail count par pattern pour
+        # mesurer la distribution (ex: 'siret:2,phone:1,email:3').
         if _pii_counter:
             _pii_total = sum(_pii_counter.values())
-            _pii_patterns = ','.join(sorted(_pii_counter.keys()))
+            _pii_breakdown = ','.join(
+                f"{k}:{_pii_counter[k]}" for k in sorted(_pii_counter.keys())
+            )
             logger.info(
                 "[pii-redacted] count=%d patterns=%s",
-                _pii_total, _pii_patterns,
+                _pii_total, _pii_breakdown,
             )
+
+        # Phase 6.1 audit remediation — observabilité taille prompt avec
+        # breakdown par bloc. Permet de mesurer le coût Anthropic réel et
+        # d'identifier les blocs hors-norme (alerte si > 50K tokens). Estime
+        # tokens à ~4 chars/token (FR moyen).
+        try:
+            _block_sizes = {}
+            for _b in blocks:
+                if _b.startswith('## D2'):
+                    _block_sizes['D2'] = _block_sizes.get('D2', 0) + len(_b)
+                elif _b.startswith('## D'):
+                    _block_sizes['D'] = _block_sizes.get('D', 0) + len(_b)
+                elif _b.startswith('## B'):
+                    _block_sizes['B'] = _block_sizes.get('B', 0) + len(_b)
+                elif _b.startswith('## A'):
+                    _block_sizes['A'] = _block_sizes.get('A', 0) + len(_b)
+                elif _b.startswith('## C'):
+                    _block_sizes['C'] = _block_sizes.get('C', 0) + len(_b)
+                elif _b.startswith('## E'):
+                    _block_sizes['E'] = _block_sizes.get('E', 0) + len(_b)
+            _total_chars = (
+                len(_SECURITY_GUARD) + len(brief_block) + len(pj_block)
+                + sum(len(_b) + 4 for _b in blocks)  # +4 pour le séparateur \n\n
+                + len(_SECURITY_REMINDER)
+            )
+            _approx_tokens = _total_chars // 4
+            _breakdown = ' '.join(
+                f"{k}={_block_sizes[k]}" for k in ('D', 'B', 'A', 'C', 'D2', 'E')
+                if k in _block_sizes
+            )
+            logger.info(
+                "[prompt-size] tokens~%d chars=%d brief=%d G=%d %s",
+                _approx_tokens, _total_chars,
+                len(brief_block), len(pj_block), _breakdown,
+            )
+            if _approx_tokens > 50000:
+                logger.warning(
+                    "[prompt-size-alert] prompt > 50K tokens (~%d) → coût élevé",
+                    _approx_tokens,
+                )
+        except Exception as _e:
+            logger.debug(f"[prompt-size] log échoué : {_e}")
 
         if is_first_mail:
             project_line = f"\nProjet/Dossier : #{project}" if project else ""

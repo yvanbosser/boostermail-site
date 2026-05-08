@@ -1017,6 +1017,42 @@ Branche conditionnelle de "rattrapage" qui ignore le filtre normal, mais sans :
 
 ---
 
+## Pattern #25 — Contradictions inter-blocs dans le prompt Claude
+
+**Historique** :
+- 08/05/2026 (audit remediation Phase 4.4) : audit du prompt complet a révélé que le profil contact (`D`) peut entrer en conflit avec d'autres blocs alimentés par d'autres sources :
+  - `D.register=vouvoiement` mais `B` (échanges récents avec ce contact) montre 5+ tutoiements → Claude a un signal contradictoire.
+  - `D.tone=chaleureux` mais `D2` (corrections récentes) contient « plus formel » → la règle D est obsolète vs feedback récent.
+  - `D.length=court` mais `D2` contient « plus long / plus détaillé » → idem.
+
+**Symptôme générique** :
+- Claude oscille entre les deux signaux et produit un draft incohérent (ex: tutoiement maladroit, ton trop formel pour le contexte).
+- Phase de re-rédaction utilisateur fréquente sur certains contacts.
+- Si l'utilisateur a juste changé de stratégie relationnelle (passage tutoiement→vouvoiement par exemple), le profil D est obsolète tant que `analyze_contact_profile` n'a pas tourné à nouveau.
+
+**Cause racine** :
+Le profil D est généré à intervalle (24-72 h) par `analyze_contact_profile` et figé jusqu'à la prochaine analyse. Pendant ce temps, B accumule de nouveaux mails et D2 enregistre les corrections. Sans détection automatique, les conflits restent silencieux jusqu'à observation utilisateur.
+
+**Fix canonique** :
+1. Au build du prompt, scanner les conflits via `_detect_prompt_conflicts(cp, sender_history, recent_corrections)` (V2/claude_ai.py).
+2. Logguer warning `[prompt-conflict] D=... B_detected=...` ou `D2_correction=...` pour mesurer le taux en production.
+3. Quand le taux dépasse 5 % / jour, planifier re-analyse via `_maybe_analyze_contact(email)` pour rafraîchir le profil.
+
+**Test de non-régression** :
+- `grep -c "_detect_prompt_conflicts" V2/claude_ai.py` ≥ 2 (1 helper + 1 site d'appel).
+- En prod, `journalctl -u boostermail --since '7d ago' | grep -c '\[prompt-conflict\]'` rapporté à `grep -c '\[prompt-size\]'` doit rester < 5 %.
+
+**Signaux d'alerte** :
+- User rapporte « le ton ne correspond plus » sur un contact avec qui il a changé de relation.
+- `[prompt-conflict]` warnings remontent sur le même `email` correspondent à chaque clic Répondre.
+- Le profil de ce contact a `updated_at` > 30 j ET `confidence < 70 %`.
+
+**Sources** :
+- Phase 4.4 audit remediation : `audit/rapports/2026-05-08_audit_remediation_PLAN.md`
+- Helper : `_detect_prompt_conflicts` dans V2/claude_ai.py
+
+---
+
 ## Patterns "rayés" (résolus définitivement)
 
 Aucun pour l'instant — tous les patterns ci-dessus sont "vivants" au sens où ils peuvent récidiver si on n'est pas vigilant.
