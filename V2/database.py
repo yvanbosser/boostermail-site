@@ -1911,6 +1911,25 @@ class Database:
         c.execute("SELECT COUNT(*) FROM threads WHERE correspondent = ? AND user_id = ?", (email, uid))
         return c.fetchone()[0]
 
+    def count_mails_by_direction(self, email):
+        """O1 (08/05) — retourne {'sent': N, 'received': M} pour ce contact.
+
+        Utilisé par le check de création de profil enrichi : créer le profil
+        si received >= 2 OU sent >= 1 (au lieu de mail_count >= 3 avant O1).
+        """
+        uid = self._uid()
+        c = self._conn().cursor()
+        c.execute(
+            "SELECT direction, COUNT(*) FROM threads "
+            "WHERE correspondent = ? AND user_id = ? GROUP BY direction",
+            (email, uid)
+        )
+        result = {'sent': 0, 'received': 0}
+        for direction, n in c.fetchall():
+            if direction in ('sent', 'received'):
+                result[direction] = n
+        return result
+
     def get_threads_with_contact(self, email, limit=20):
         uid = self._uid()
         c = self._conn().cursor()

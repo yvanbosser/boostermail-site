@@ -2292,7 +2292,11 @@ if _UserScopedDict is not None:
 else:
     _mail_preview_cache = {}
 _mail_preview_lock = threading.Lock()
-_MAIL_PREVIEW_TTL = 3600  # 1h
+# O4 (08/05) — TTL frigos courts en RAM porté à 24h (au lieu d'1h).
+# Réduit les hits DB redondants pendant une journée de travail : le user
+# revient sur les mêmes mails plusieurs fois → cache RAM toujours chaud.
+# Idempotence DB garantit zéro perte même si RAM vidée (restart serveur).
+_MAIL_PREVIEW_TTL = 86400  # 24h
 _MAIL_PREVIEW_MAX = 100
 
 # Cache partagé arborescence Outlook (évite les 429 quand 30+ threads prewarm
@@ -4893,6 +4897,17 @@ def _run_prefetch(mail_data):
         logger.debug(f"[prefetch] skip mail sans IMID canonique : "
                      f"subject={subject[:40]}")
         return
+    # O7 (08/05) — skip collecte blocs ABC pour les mails écartés (filtre 1
+    # de l'arbre décisionnel : no-reply, > 30 jours, déjà répondu, body
+    # trop court). Économise ~1 sec de Graph + RAM plan de travail (300
+    # mails max) + zéro spéculation Sonnet inutile en aval.
+    try:
+        if _is_discarded(mail_data):
+            logger.debug(f"[prefetch] skip écarté (filtre 1) : "
+                         f"subject={subject[:40]}")
+            return
+    except Exception:
+        pass  # fail-open : si le check plante, on continue (graceful degrade)
 
     # Clé de cache = IMID canonique (pas de fallback from+subject)
     cache_key = message_id
@@ -5795,6 +5810,58 @@ def _should_speculate(mail_data):
         pass
 
     return True, ''
+
+
+def _is_discarded(mail_data):
+    """O7 (08/05) — Filtre 1 « écarter » de l'arbre décisionnel cible.
+
+    Un mail écarté n'a aucun pré-traitement (ni chef Sonnet, ni commis Haiku,
+    ni collecte des blocs ABC). Le mail brut reste en email_cache pour
+    affichage liste, et les commandes user déclenchent une cuisson à la
+    commande en streaming.
+
+    Subset strict des filtres _should_speculate (les 4 premiers) :
+      - Expéditeur automatique (no-reply, newsletter, postmaster…)
+      - Mail > 30 jours
+      - Mail déjà répondu par l'utilisateur
+      - Body < 10 chars sans point d'interrogation
+
+    Les filtres 5 (5 ouvertures) et 6 (CC) NE font PAS écarter, ils servent
+    à distinguer VIP vs PARTIEL en aval (le PARTIEL passera quand même par
+    le commis Haiku unifié pour résumé + classement, sans Sonnet).
+    """
+    from_email = (mail_data.get('from_email', '') or '').lower()
+    body = mail_data.get('body', '') or ''
+    message_id = mail_data.get('message_id', '')
+
+    # 1. Expéditeur automatique
+    if any(p in from_email for p in _SPEC_NOREPLY_PATTERNS):
+        return True
+    # 2. Mail > 30 jours
+    mail_date = mail_data.get('date', '')
+    if mail_date:
+        try:
+            if 'T' in mail_date:
+                dt = datetime.fromisoformat(mail_date.replace('Z', '+00:00'))
+                dt_naive = dt.replace(tzinfo=None)
+            else:
+                dt_naive = datetime.strptime(mail_date, '%Y-%m-%d %H:%M:%S')
+            if (datetime.now() - dt_naive).days > 30:
+                return True
+        except Exception:
+            pass
+    # 3. Mail déjà répondu par l'utilisateur
+    try:
+        if message_id and _db.is_treated(message_id):
+            return True
+    except Exception:
+        pass
+    # 4. Body < 10 chars sans "?"
+    body_stripped = _HTML_TAG_RE.sub(' ', body).strip()
+    if len(body_stripped) < 10 and '?' not in body_stripped:
+        return True
+
+    return False
 
 
 def _start_speculative(mail_data):
@@ -7347,10 +7414,13 @@ def api_suggest_folder(message_id):
                       'folder_name': cross.get('folder_path', ''), 'confidence': 0.7,
                       'reason': f"Sujet similaire ({cross.get('contact_count','?')} contacts)"})
 
-        # Tier 5 : Momentum (dernier classement dans les 30 min)
+        # Tier 5 : Momentum (dernier classement dans les 2h — O2 08/05)
+        # Avant : 30 min. Étendu pour couvrir les sessions de tri matinales
+        # où l'utilisateur peut prendre une pause café (35-45 min) entre 2
+        # classements de même thématique.
         if len(_suggestions) < 3 and _classify_momentum:
             _mom = _classify_momentum
-            if _mom.get('folder_id') and (time.time() - _mom.get('ts', 0)) < 1800:
+            if _mom.get('folder_id') and (time.time() - _mom.get('ts', 0)) < 7200:
                 _add({'source': 'momentum', 'folder_id': _mom['folder_id'],
                       'folder_name': _mom.get('folder_name', ''), 'confidence': 0.5,
                       'reason': 'Dossier récent'})
@@ -12980,12 +13050,18 @@ def _maybe_analyze_contact(contact_email, bypass_cooldown=False):
         else:
             logger.info(f"[learning] Re-analyse de {_hash_email_partial(contact_email)} (mail #{mail_count})")
     else:
-        # Fix 24/04 : 1ère analyse d'un contact SANS profil ne bloque pas sur
-        # le schedule strict. Audit 03/05 fix RC2 (extension) : cooldown 24h
-        # pour les contacts sans profil dont l'analyse échoue silencieusement
-        # à chaque cycle (cas support@coaxis.com observé : 12 sent_mails mais
-        # profil jamais créé → 1 326 "Premiere analyse" en 24h).
-        if mail_count < 3 and not _should_analyze_contact(mail_count):
+        # O1 (08/05) — Création profil enrichi à 2 reçus OU 1 envoyé
+        # (au lieu de mail_count >= 3 avant). Un mail envoyé est un signal
+        # plus fort qu'un mail reçu (effort actif user) → suffit seul.
+        # 2 mails reçus filtre les démarcheurs ponctuels (1 mail isolé).
+        # Garde le _should_analyze_contact(mail_count) pour les seuils
+        # supérieurs du schedule (ré-analyses planifiées).
+        try:
+            counts = _db.count_mails_by_direction(contact_email)
+        except Exception:
+            counts = {'sent': 0, 'received': 0}
+        eligible_o1 = (counts.get('received', 0) >= 2 or counts.get('sent', 0) >= 1)
+        if not eligible_o1 and not _should_analyze_contact(mail_count):
             return
         if not bypass_cooldown:
             now_ts = time.time()
