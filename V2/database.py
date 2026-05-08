@@ -1930,6 +1930,44 @@ class Database:
                 result[direction] = n
         return result
 
+    def purge_inactive_contact_profiles(self, months=24):
+        """O6 (08/05) — Purge auto des profils contact inactifs depuis N mois.
+
+        Critère : aucun mail dans `threads` (envoyé OU reçu) avec ce contact
+        depuis `months` mois. Le squelette (juste l'email) n'a pas de profil
+        à purger ; cette méthode supprime uniquement les profils enrichis
+        (catégorie, registre, signature personnalisée, vocabulaire, etc.).
+
+        Garde-fou : NE PAS purger les profils marqués `manually_edited = 1`
+        (verrouillés par l'utilisateur, représentent un investissement
+        manuel à conserver indéfiniment).
+
+        L'historique de classifications (table `folder_classifications`)
+        reste intact même si le profil est purgé — au prochain mail du
+        contact purgé, les règles 1, 2, 3 du pipeline classement (basées
+        sur l'historique) restent fonctionnelles.
+
+        Retourne le nombre de profils supprimés.
+        """
+        conn = self._conn()
+        c = conn.cursor()
+        # SQLite : datetime('now', '-24 months') marche bien.
+        # On supprime les profils dont l'email N'A PAS de mail récent.
+        # Garde manually_edited=0 (ou NULL pour les profils anciens).
+        cutoff_clause = f"datetime('now', '-{int(months)} months')"
+        c.execute(f"""
+            DELETE FROM contact_profiles
+            WHERE COALESCE(manually_edited, 0) = 0
+              AND email NOT IN (
+                  SELECT DISTINCT correspondent FROM threads
+                  WHERE created_at >= {cutoff_clause}
+                    AND correspondent IS NOT NULL
+              )
+        """)
+        deleted = c.rowcount
+        conn.commit()
+        return deleted
+
     def get_threads_with_contact(self, email, limit=20):
         uid = self._uid()
         c = self._conn().cursor()

@@ -3478,6 +3478,32 @@ threading.Thread(target=_periodic_echeances_purge_loop, daemon=True,
                  name='echeances-purge').start()
 
 
+# 08/05/2026 — O6 : Purge auto des profils contact inactifs depuis 24 mois.
+# Critère : aucun mail (envoyé OU reçu) avec ce contact depuis 24 mois.
+# Garde manually_edited=1 (profils verrouillés par l'utilisateur conservés
+# indéfiniment). L'historique de classifications reste intact (utile au
+# pipeline classement même après purge du profil).
+def _periodic_contacts_purge_loop():
+    """Thread BG : purge profils contact inactifs 1× par 24h. Silencieux côté user."""
+    time.sleep(180)  # Décaler de 60s vs purge échéances pour étaler la charge
+    while True:
+        try:
+            n_purged = _db.purge_inactive_contact_profiles(months=24)
+            if n_purged > 0:
+                logger.info(
+                    f"[contacts-purge] {n_purged} profil(s) contact inactif(s) "
+                    f"depuis 24 mois purgé(s) (squelette + classifications "
+                    f"historiques conservés pour réutilisation future)"
+                )
+        except Exception as e:
+            logger.warning(f"[contacts-purge] erreur silencieuse : {e}")
+        time.sleep(86400)  # 24h
+
+
+threading.Thread(target=_periodic_contacts_purge_loop, daemon=True,
+                 name='contacts-purge').start()
+
+
 
 # Audit Pass 9 — sérialisation des écritures drafts_v2.json.
 # 7 sites appellent _persist_reply_cache() en thread daemon → 7 threads
