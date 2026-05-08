@@ -6214,6 +6214,10 @@ def _start_speculative(mail_data):
             'subject': subject,
             'body': raw_body + (('\n\n' + pj_text_context) if pj_text_context else ''),
             'body_preview': raw_body[:300],
+            # Phase 2.1 audit remediation 08/05/2026 — passe l'IMID du mail
+            # courant pour que _build_prompt puisse dédup le mail courant
+            # vs le bloc A (conversation_history).
+            'internet_message_id': message_id,
         }
 
         # Corrections récentes (DB)
@@ -11267,6 +11271,10 @@ def generate_reply():
         'subject': subject,
         'body': raw_body,
         'body_preview': raw_body[:300],
+        # Phase 2.1 audit remediation 08/05/2026 — passe l'IMID du mail
+        # courant pour que _build_prompt puisse dédup le mail courant
+        # vs le bloc A (conversation_history).
+        'internet_message_id': message_id,
     }
 
     # Récupérer le contexte si Mode Standard

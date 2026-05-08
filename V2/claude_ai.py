@@ -531,10 +531,33 @@ class ClaudeAssistant:
                     pass
             confidence_pct = int(raw_confidence * 100)
 
-            # Blocage si confiance trop faible → utiliser profil par défaut
-            if confidence_pct < 30:
-                logger.debug(f"[prompt] BLOCAGE PROFIL: confiance={confidence_pct}% < 30% pour {to_email} → profil par défaut")
+            # Phase 2.2 audit remediation 08/05/2026 — gradient de confiance
+            # 4 niveaux (au lieu du binaire 30% précédent) :
+            #   ≥ 70 % → 'full'    : profil complet (toutes les infos D)
+            #   50-70 % → 'medium' : greeting/closing + ton + registre,
+            #                        sans profile_text détaillé ni vocabulaire
+            #   30-50 % → 'light'  : greeting/closing + registre seulement
+            #   < 30 % → 'none'    : profil par défaut (cp = None)
+            if confidence_pct >= 70:
+                _confidence_tier = 'full'
+            elif confidence_pct >= 50:
+                _confidence_tier = 'medium'
+            elif confidence_pct >= 30:
+                _confidence_tier = 'light'
+            else:
+                _confidence_tier = 'none'
+
+            if _confidence_tier == 'none':
+                logger.debug(
+                    f"[prompt] PROFIL tier=none confidence={confidence_pct}% < 30%% "
+                    f"pour {to_email} → profil par défaut"
+                )
                 cp = None
+            else:
+                logger.debug(
+                    f"[prompt] PROFIL tier={_confidence_tier} confidence={confidence_pct}%% "
+                    f"pour {to_email}"
+                )
 
         if cp:
             # Extraire vocabulaire et sujets
@@ -557,15 +580,22 @@ class ClaudeAssistant:
             topics = pj.get('recurring_topics', [])
             vocab = pj.get('specific_vocabulary', [])
 
+            # Phase 2.2 — extras (topics + vocabulaire) UNIQUEMENT en tier 'full'.
+            # En 'medium'/'light', on garde le profil essentiel (greeting/closing/
+            # ton/registre) sans les détails du profil enrichi.
             extras = ""
-            if topics:
-                extras += f"\n- Sujets recurrents : {', '.join(topics)}"
-            if vocab:
-                extras += f"\n- Vocabulaire specifique : {', '.join(vocab)}"
+            if _confidence_tier == 'full':
+                if topics:
+                    extras += f"\n- Sujets recurrents : {', '.join(topics)}"
+                if vocab:
+                    extras += f"\n- Vocabulaire specifique : {', '.join(vocab)}"
 
             confidence_note = ""
-            if confidence_pct < 50:
-                confidence_note = f"\nConfiance faible ({confidence_pct}%) — l'historique B ci-dessous est plus fiable que ce profil."
+            if _confidence_tier in ('medium', 'light'):
+                confidence_note = (
+                    f"\nConfiance {confidence_pct}% (tier={_confidence_tier}) — "
+                    "l'historique B ci-dessous est plus fiable que les détails de ce profil."
+                )
 
             _greeting = cp.get('greeting', '') or 'Bonjour,'
             _closing = cp.get('closing', '') or 'Cordialement,'
@@ -650,18 +680,39 @@ class ClaudeAssistant:
             if _closing_fix:
                 _closing = 'Cordialement,'
                 logger.debug(f"[prompt] GARDE closing: corrigé → '{_closing}'")
+            # Phase 2.2 — humour UNIQUEMENT en tier 'full'.
             _humor = cp.get('humor', 'non')
             _humor_block = ""
-            if _humor == 'oui':
+            if _confidence_tier == 'full' and _humor == 'oui':
                 _humor_examples = cp.get('humor_examples', [])
                 _humor_ex = f" (exemples : {', '.join(_humor_examples[:2])})" if _humor_examples else ""
                 _humor_block = f"\nHumour : **oui** — reproduire les traits d'humour du style de l'utilisateur avec ce correspondant{_humor_ex}. L'humour fait partie de la relation."
 
-            profile_block = f"""## D — Profil relationnel avec {cp.get('display_name', to_email)} ({cp.get('email', to_email)})
-Registre : **{_register}** | Ton : **{cp.get('tone', 'professionnel')}** | Longueur : **{cp.get('typical_length', 'moyen')}**
-Ouverture OBLIGATOIRE : "{_greeting}" | Cloture OBLIGATOIRE : "{_closing}"
-Dynamique : {cp.get('power_dynamic', '')} | Langue : {cp.get('language', 'fr')}
-Resume : {cp.get('profile_text', '')}{extras}{_humor_block}{confidence_note}
+            # Phase 2.2 — profile_text + dynamique + ton/longueur seulement en
+            # 'full' (riche) ou 'medium' (sans profile_text détaillé).
+            # En 'light', on ne garde que greeting/closing/register/langue.
+            if _confidence_tier == 'full':
+                _profile_text_line = f"\nResume : {cp.get('profile_text', '')}{extras}{_humor_block}"
+                _meta_line = (
+                    f"\nRegistre : **{_register}** | Ton : **{cp.get('tone', 'professionnel')}** | "
+                    f"Longueur : **{cp.get('typical_length', 'moyen')}**"
+                    f"\nDynamique : {cp.get('power_dynamic', '')} | Langue : {cp.get('language', 'fr')}"
+                )
+            elif _confidence_tier == 'medium':
+                _profile_text_line = ""  # pas de profile_text détaillé en medium
+                _meta_line = (
+                    f"\nRegistre : **{_register}** | Ton : **{cp.get('tone', 'professionnel')}**"
+                    f"\nLangue : {cp.get('language', 'fr')}"
+                )
+            else:  # 'light'
+                _profile_text_line = ""
+                _meta_line = (
+                    f"\nRegistre : **{_register}** (déduit du peu d'historique disponible)"
+                    f"\nLangue : {cp.get('language', 'fr')}"
+                )
+
+            profile_block = f"""## D — Profil relationnel avec {cp.get('display_name', to_email)} ({cp.get('email', to_email)}){_meta_line}
+Ouverture OBLIGATOIRE : "{_greeting}" | Cloture OBLIGATOIRE : "{_closing}"{_profile_text_line}{confidence_note}
 
 ⚠️ RÈGLE ABSOLUE : tu DOIS utiliser "{_greeting}" comme ouverture et "{_closing}" comme clôture pour ce correspondant. Ne PAS utiliser d'autres formules (Hello, Hi, Salut, etc.) sauf si le registre est "tutoiement" ET le ton "amical"."""
             blocks.append(profile_block)
@@ -779,6 +830,34 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
             blocks.append("## B — Echanges recents avec cet interlocuteur\n\n" + "\n\n".join(b_parts))
 
         # -- A : Fil de conversation en cours --
+        # Phase 2.1 audit remediation 08/05/2026 — dédup A vs Mail reçu :
+        # quand le caller injecte l'IMID/id du mail courant dans
+        # incoming_email, on retire l'item correspondant de conversation_history
+        # pour éviter de pousser 2 fois le même mail à Claude (économie tokens
+        # + clarification du flux).
+        _current_imid = ''
+        _current_id = ''
+        if incoming_email:
+            _current_imid = (incoming_email.get('internet_message_id') or '').strip()
+            _current_id = (incoming_email.get('id') or '').strip()
+        _dedup_filtered = False
+        if conversation_history and (_current_imid or _current_id):
+            _filtered_history = []
+            for m in conversation_history:
+                _m_imid = (m.get('internet_message_id') or '').strip()
+                _m_id = (m.get('id') or '').strip()
+                if (_current_imid and _m_imid and _m_imid == _current_imid) \
+                        or (_current_id and _m_id and _m_id == _current_id):
+                    _dedup_filtered = True
+                    continue
+                _filtered_history.append(m)
+            conversation_history = _filtered_history
+            if _dedup_filtered:
+                logger.debug(
+                    "[prompt-dedup] mail courant retiré du bloc A (imid=%s id=%s)",
+                    _current_imid[:30], _current_id[:30],
+                )
+
         if conversation_history:
             lines = []
             for m in conversation_history:
@@ -795,7 +874,14 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
                 else:
                     line += f"\n(Objet: {m.get('subject', '')})"
                 lines.append(line)
-            blocks.append("## A — Fil de conversation en cours :\n\n" + "\n\n---\n\n".join(lines))
+            _a_header = "## A — Fil de conversation en cours :"
+            if _dedup_filtered:
+                _a_header += (
+                    "\n(Le mail le plus récent du thread ci-dessous est celui "
+                    "auquel tu réponds ; il est rendu en détail dans `## Mail "
+                    "recu` plus bas.)"
+                )
+            blocks.append(_a_header + "\n\n" + "\n\n---\n\n".join(lines))
 
         # -- C : Contexte lie au sujet --
         if keyword_context:
@@ -815,16 +901,44 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
             blocks.append("## C — Contexte lie au sujet :\n\n" + "\n\n---\n\n".join(lines))
 
         # -- D2 : Corrections recentes — avec analyse Claude du diff --
+        # Phase 2.3 audit remediation 08/05/2026 — troncation 250 → 500 chars
+        # (préservation contexte) + date relative (« il y a N jours »).
         if recent_corrections:
+            _D2_TRUNCATE = 500
+            _now = datetime.now()
             corr_lines = []
             for i, c in enumerate(recent_corrections, 1):
                 analysis = c.get('analysis', '')
-                proposed_text = c['proposed'][:250] if c['proposed'] else ''
-                sent_text = c['sent'][:250] if c['sent'] else ''
+                proposed_text = (c['proposed'] or '')[:_D2_TRUNCATE]
+                sent_text = (c['sent'] or '')[:_D2_TRUNCATE]
+
+                # Date relative depuis le timestamp de la correction.
+                _rel_date = ''
+                _ts = c.get('timestamp') or c.get('created_at') or c.get('date') or ''
+                if _ts:
+                    try:
+                        if isinstance(_ts, (int, float)):
+                            _dt = datetime.fromtimestamp(float(_ts))
+                        elif 'T' in str(_ts):
+                            _dt = datetime.fromisoformat(str(_ts).replace('Z', '+00:00'))
+                            if _dt.tzinfo is not None:
+                                _dt = _dt.replace(tzinfo=None)
+                        else:
+                            _dt = datetime.strptime(str(_ts), '%Y-%m-%d %H:%M:%S')
+                        _days = (_now - _dt).days
+                        if _days <= 0:
+                            _rel_date = " (aujourd'hui)"
+                        elif _days == 1:
+                            _rel_date = " (hier)"
+                        else:
+                            _rel_date = f" (il y a {_days} jours)"
+                    except Exception:
+                        _rel_date = ''
+
                 if analysis:
                     # Analyse Claude disponible — plus utile que les catégories
                     corr_lines.append(
-                        f"Correction {i} — {analysis}\n"
+                        f"Correction {i}{_rel_date} — {analysis}\n"
                         f"  Avant : \"{proposed_text}\"\n"
                         f"  Apres : \"{sent_text}\""
                     )
@@ -833,7 +947,7 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
                     cats = c.get('categories', '')
                     cat_info = f" [{cats}]" if cats else ""
                     corr_lines.append(
-                        f"Correction {i}{cat_info} :\n"
+                        f"Correction {i}{_rel_date}{cat_info} :\n"
                         f"  Avant : \"{proposed_text}\"\n"
                         f"  Apres : \"{sent_text}\""
                     )
