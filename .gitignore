@@ -124,6 +124,9 @@ audit/rapports/demander*.txt
 inbox_graph_*.json
 # - Manifest copié à la racine (la version officielle est V2/manifest.xml)
 /manifest.xml
+/BoosterMail-manifest.xml
+# - Lock files Office (créés quand un fichier est ouvert dans PowerPoint/Word/Excel)
+~$*
 # - Config Netlify (déploiement blog Yvan, hors scope)
 netlify.toml
 
