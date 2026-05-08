@@ -3247,14 +3247,21 @@ def _prewarm_mail_preview(mail_data):
         logger.debug(f"[mail-preview] skip mail sans IMID canonique : "
                      f"subject={mail_data.get('subject', '')[:40]}")
         return
-    # Phase 2 — Filtre unifié : si non éligible, pas de preview BG
+    # O5 (08/05) — Filtre PARTIEL : on accepte tous les mails non-écartés.
+    # Avant : _should_speculate complet (6 filtres) rejetait les mails en
+    # CC ou ouverts 5+ fois → pas de pré-cuisson commis Haiku → cache miss
+    # systématique sur ces mails au clic Quick Classify.
+    # Après : _is_discarded uniquement (4 filtres : no-reply, > 30j, déjà
+    # répondu, body trop court) → le commis Haiku tourne pour TOUS les
+    # mails non-écartés, qu'ils soient VIP ou partiels (CC, ouverts 5+ ×).
+    # Le chef Sonnet (réponse) reste filtré par _should_speculate strict
+    # côté _start_speculative → seulement VIP, plus cher.
     try:
-        ok_spec, skip_reason = _should_speculate(mail_data)
+        if _is_discarded(mail_data):
+            logger.debug(f"[mail-preview] skip écarté mid={mid[:30]}")
+            return
     except Exception:
-        ok_spec, skip_reason = True, ''  # En cas d'erreur, on continue (fail-open)
-    if not ok_spec:
-        logger.debug(f"[mail-preview] skip filtré ({skip_reason}) mid={mid[:30]}")
-        return
+        pass  # fail-open : si check plante, on continue
     now = time.time()
     with _mail_preview_lock:
         entry = _mail_preview_cache.get(mid, {})
@@ -4573,6 +4580,18 @@ def _handle_graph_webhook_notifications(message_ids):
                 f"{mail_data['from_email']} / {mail_data['subject'][:40]}"
             )
             _run_prefetch(mail_data)
+            # O5 (08/05) — Mode PARTIEL : déclencher AUSSI le commis Haiku
+            # unifié pour TOUS les mails non-écartés (filtre 1). Couvre :
+            #   - VIP : cascade idempotente avec _start_speculative
+            #   - Partiel (CC, ouvert 5+×, contact inconnu) : seul moment
+            #     où le commis tourne avant que l'user ouvre le mail
+            # _prewarm_mail_preview filtre lui-même via _is_discarded
+            # (early-return). _prewarm_unified_for_mail est idempotent
+            # (cache DB check) → pas de doublon coûteux.
+            try:
+                _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-webhook')
+            except Exception as e:
+                logger.debug(f"[graph webhook] preview-webhook spawn err : {e}")
         except Exception as e:
             logger.warning(f"[graph webhooks handler] erreur traitement {mid[:20]}... : {e}")
 
