@@ -927,20 +927,10 @@ def _mark_warmup_done(value: bool = True) -> None:
 # malformé) → BG le saute, streaming à la commande.
 # Référence : audit/INVARIANTS.md I-DATA-11.
 
-# DEPRECATED 11/05/2026 — remplacé par _extract_imid_from_mail_data.
-# Conservé comme alias backward-compat temporaire pour éviter une refonte
-# massive de 25+ call sites en un seul commit. Sera supprimé après J3.
-def _canonical_mid(mail_data):
-    """[DEPRECATED] Alias vers _extract_imid_from_mail_data.
-
-    L'ancienne version retournait '' pour les mails sans IMID natif (forçant
-    le skip BG). La nouvelle version retourne un IMID synthétique stable
-    (`<synthetic:...@boostermail.local>`) pour respecter R3 « stockage brut
-    toujours fait ». Si un caller a besoin de l'ancien comportement (skip
-    sans IMID natif), il doit appeler explicitement `_canonicalize_message_id(
-    raw, allow_synthetic=False)` ou tester `imid.startswith('<synthetic:')`.
-    """
-    return _extract_imid_from_mail_data(mail_data)
+# Refonte N1 (11/05/2026) : ancien `_canonical_mid` SUPPRIMÉ.
+# Tous les call sites pointent maintenant directement vers
+# `_extract_imid_from_mail_data` (défini plus bas dans le bloc « Refonte
+# Niveau 1 »). Pas d'alias deprecated, pas de couche d'indirection.
 
 
 # Phase 1.5 (25/04 soir) — Garde-fou anti-pollution drafts.
@@ -1090,7 +1080,7 @@ def _execute_warmup(graph):
                 'subject': msg.get('subject', ''),
                 'body': msg.get('body') or msg.get('body_preview', ''),
                 'message_id': _imid or msg.get('message_id') or msg.get('id', ''),
-                'internet_message_id': _imid,  # Canonique pour _canonical_mid()
+                'internet_message_id': _imid,  # Canonique pour _extract_imid_from_mail_data()
                 'conversation_id': msg.get('conversation_id', ''),
                 'to': msg.get('to', ''),
                 'cc': msg.get('cc', ''),
@@ -1122,7 +1112,7 @@ def _execute_warmup(graph):
         for i, msg in enumerate(mails):
             # Phase 1 (25/04 soir) — Étiquetage canonique strict : IMID seul.
             # Si absent → mail malformé/anonyme → skip BG (streaming au clic).
-            mid = _canonical_mid(msg)
+            mid = _extract_imid_from_mail_data(msg)
             if not mid:
                 logger.debug(f"[warmup] skip mail sans IMID canonique : "
                              f"subject={msg.get('subject', '')[:40]}")
@@ -1163,7 +1153,7 @@ def _execute_warmup(graph):
                 'subject': msg.get('subject', ''),
                 'body': msg.get('body') or msg.get('body_preview', ''),
                 'message_id': _imid or msg.get('message_id') or msg.get('id', ''),
-                'internet_message_id': _imid,  # Canonique pour _canonical_mid()
+                'internet_message_id': _imid,  # Canonique pour _extract_imid_from_mail_data()
                 'conversation_id': msg.get('conversation_id', ''),
                 # Plan 2 Phase 2.B — propager to/cc/date pour les filtres Smart Speculative
                 'to': msg.get('to', ''),
@@ -1204,7 +1194,7 @@ def _execute_warmup(graph):
         # interne IMID → Entry ID pour les appels Graph.
         for _m in mails:
             if _m.get('has_attachments'):
-                _imid_pj = _canonical_mid(_m)
+                _imid_pj = _extract_imid_from_mail_data(_m)
                 if _imid_pj:
                     try:
                         _start_pj_pre_extract_v2(_imid_pj)
@@ -1248,7 +1238,7 @@ def _execute_warmup(graph):
                 _with_draft = []
                 with _reply_lock:
                     for _m in mails:
-                        _mid = _canonical_mid(_m)
+                        _mid = _extract_imid_from_mail_data(_m)
                         if not _mid:
                             continue
                         _e = _reply_cache.get(_mid, {})
@@ -1433,9 +1423,7 @@ def _preload_neighbors(message_id):
                 'subject': target.get('subject', ''),
                 'body': target.get('body') or target.get('body_preview', ''),
                 'message_id': target_id,
-                # Fix I-CODE-05 (27/04 PM) — _canonical_mid lit uniquement
-                # internet_message_id. Sans ce champ, _run_prefetch ligne 2911
-                # retourne '' et skip le mail silencieusement.
+                # I-CANON-01 : internet_message_id requis pour _extract_imid_from_mail_data.
                 'internet_message_id': target_id,
                 'conversation_id': target.get('conversation_id', ''),
             }
@@ -1492,13 +1480,7 @@ def _parallel_prefetch_batch(mails, max_workers=8, tag='batch', check_pause=True
             'subject': m.get('subject', ''),
             'body': m.get('body') or m.get('body_preview', ''),
             'message_id': mid,
-            # Fix 26/04 — `_canonical_mid` (Phase 1 strict 25/04) lit
-            # uniquement `internet_message_id`. Sans ce champ dans le
-            # submission, `_run_prefetch` ligne 2911 retourne '' → skip
-            # silencieux ligne 2913 → mail jamais spéculé. Symptôme :
-            # cont-spec sélectionne CANDIDATE mais `_should_speculate`
-            # n'est jamais appelée → 0 draft. Cause de tous les MISS
-            # cliqués Ombeline/Vincent Hubert/Stéphane Dufau du 26/04.
+            # I-CANON-01 : internet_message_id requis pour la canonicalisation.
             'internet_message_id': mid,
             'conversation_id': m.get('conversation_id', ''),
             'to': m.get('to', ''),
@@ -1593,11 +1575,11 @@ def _continuous_speculation_loop():
             _skip_noncanon = _skip_treated = _skip_done = 0
 
             # Candidats : mails sans entrée _reply_cache done/running
-            # Phase 1 (25/04 soir) — Étiquetage canonique strict via _canonical_mid.
-            # Plus de fallback. Les mails sans IMID canonique sont skippés (skip_noncanon).
+            # I-CANON-01 : canonicalisation via _extract_imid_from_mail_data
+            # (IMID natif ou synthétique stable pour mails sans Message-Id).
             candidates = []
             for m in tier1 + tier2:
-                mid = _canonical_mid(m)
+                mid = _extract_imid_from_mail_data(m)
                 if not mid:
                     _skip_noncanon += 1
                     continue
@@ -1668,7 +1650,7 @@ def _continuous_speculation_loop():
                 _with_draft = []
                 with _reply_lock:
                     for _m in mails:
-                        _mid = _canonical_mid(_m)
+                        _mid = _extract_imid_from_mail_data(_m)
                         if not _mid:
                             continue
                         _e = _reply_cache.get(_mid, {})
@@ -1720,7 +1702,7 @@ def _background_preload_loop():
         _skipped_no_imid = 0
         with _warmup_lock:
             for _m in mails:
-                _mid = _canonical_mid(_m)
+                _mid = _extract_imid_from_mail_data(_m)
                 if not _mid:
                     _skipped_no_imid += 1
                     continue
@@ -1742,7 +1724,7 @@ def _background_preload_loop():
             logger.info(f"[preload-ctx] Terminé : {submitted}/{len(mails)} mails "
                         f"soumis en {_elapsed:.1f}s")
             # Phase 1 (25/04 soir) — IMID canonique seul.
-            inbox_ids = {_canonical_mid(m) for m in mails if _canonical_mid(m)}
+            inbox_ids = {_extract_imid_from_mail_data(m) for m in mails if _extract_imid_from_mail_data(m)}
             try:
                 _save_prefetch_cache(inbox_ids=inbox_ids)
             except Exception as _e:
@@ -3549,7 +3531,7 @@ def _prewarm_mail_preview(mail_data):
     remplit les 3 caches en une fois. En cas d'erreur, fallback auto sur
     les 3 sub-prewarms originaux (préservation couverture audit).
     """
-    mid = _canonical_mid(mail_data)
+    mid = _extract_imid_from_mail_data(mail_data)
     if not mid:
         logger.debug(f"[mail-preview] skip mail sans IMID canonique : "
                      f"subject={mail_data.get('subject', '')[:40]}")
@@ -4249,7 +4231,7 @@ def _poll_companion_loop():
                             'from_email': msg.get('from_email', ''),
                             'from_name': msg.get('from_name', ''),
                             'message_id': _imid_canon or msg.get('id', ''),
-                            'internet_message_id': _imid_canon,  # Canonique pour _canonical_mid()
+                            'internet_message_id': _imid_canon,  # Canonique pour _extract_imid_from_mail_data()
                             'conversation_id': msg.get('conversation_id', ''),
                             'has_attachments': msg.get('has_attachments', False),
                             'attachments': msg.get('attachments', []),
@@ -4591,12 +4573,8 @@ def api_event_message_read():
         'from_email': data.get('from_email', ''),
         'from_name': data.get('from_name', ''),
         'message_id': data.get('message_id', ''),
-        # Fix I-CODE-05 (27/04 PM) — message_read est appele a chaque ouverture
-        # mail Office.js. new_data est passe a _run_prefetch ligne 2690 puis a
-        # _preload_neighbors ligne 2697. Sans internet_message_id explicite,
-        # _canonical_mid retourne '' et tout le pipeline BG est skip silencieux.
-        # Frontend autorunshared.js envoie deja message_id = internetMessageId
-        # (cf ligne 282), on copie donc juste explicite ici.
+        # I-CANON-01 : internet_message_id explicite pour la canonicalisation
+        # (le middleware Flask l'a déjà canonicalisé en amont).
         'internet_message_id': data.get('message_id', ''),
         'conversation_id': data.get('conversation_id', ''),
         'has_attachments': data.get('has_attachments', False),
@@ -5265,15 +5243,15 @@ def summarize_mails_to_db(mails, chunk_size=10):
         return (0, 0)
 
     # Filtre idempotence
-    # Phase 1 (25/04 soir) — Étiquetage canonique strict via _canonical_mid.
-    # Phase 2 (25/04 soir) — Filtre Smart Speculative unifié : si filtré,
-    # pas de résumé BG (sera généré à la commande au clic).
+    # I-CANON-01 : canonicalisation via _extract_imid_from_mail_data.
+    # Filtre Smart Speculative unifié : si filtré, pas de résumé BG
+    # (sera généré à la commande au clic).
     to_scan = []
     skipped = 0
     skipped_short_body = 0
     skipped_filtered = 0
     for m in mails:
-        msg_id = _canonical_mid(m)
+        msg_id = _extract_imid_from_mail_data(m)
         if not msg_id:
             continue
         try:
@@ -5380,7 +5358,7 @@ def _run_prefetch(mail_data):
     subject = mail_data.get('subject', '')
     # Phase 1 (25/04 soir) — Étiquetage canonique strict : IMID seul.
     # Si absent → mail anonyme → skip BG (streaming au clic).
-    message_id = _canonical_mid(mail_data)
+    message_id = _extract_imid_from_mail_data(mail_data)
     if not message_id:
         logger.debug(f"[prefetch] skip mail sans IMID canonique : "
                      f"subject={subject[:40]}")
@@ -6368,7 +6346,7 @@ def _start_speculative(mail_data):
     Le cache est nettoyé automatiquement après envoi / suppression / classement.
     """
     # Phase 1 (25/04 soir) — Étiquetage canonique strict : IMID seul.
-    message_id = _canonical_mid(mail_data)
+    message_id = _extract_imid_from_mail_data(mail_data)
     if not message_id:
         return
 
@@ -6764,7 +6742,7 @@ def _run_preemptive_bg(inbox_mails):
     # Phase 1 (25/04 soir) — IMID canonique seul.
     candidates = []
     for mail in inbox_mails[:50]:  # Scan étendu (10 → 50)
-        msg_id = _canonical_mid(mail)
+        msg_id = _extract_imid_from_mail_data(mail)
         from_email = mail.get('from_email', '')
         if not msg_id or not from_email:
             continue
@@ -6797,7 +6775,7 @@ def _run_preemptive_bg(inbox_mails):
                 'subject': mail.get('subject', ''),
                 'body': mail.get('body') or mail.get('body_preview', ''),
                 'message_id': _imid or mail.get('message_id') or mail.get('id', ''),
-                'internet_message_id': _imid,  # Canonique pour _canonical_mid()
+                'internet_message_id': _imid,  # Canonique pour _extract_imid_from_mail_data()
                 'conversation_id': mail.get('conversation_id', ''),
                 # Plan 2 Phase 2.B : propager to/cc/date pour les filtres Smart Speculative
                 'to': mail.get('to', ''),
@@ -9217,44 +9195,35 @@ def _fetch_single_preview_plate(message_id, plate):
         logger.debug(f"[preview-{plate}] check DB : {e}")
 
     # 3) Total miss : trigger BG generation, return 'miss' (frontend pollera)
-    # Fix 11/05/2026 — fallback Graph quand cache miss : un message_id en
-    # format Outlook (AAMkAD...) ne match pas email_cache.entry_id (stocké
-    # en IMID `<...@...>`). Sans fallback Graph, _prewarm_mail_preview n'est
-    # jamais lancé → polling éternel sur 'miss' (cas mail Maryam 11/05).
+    # Refonte N1 (11/05/2026) — Le middleware Flask `_canonicalize_message_id_middleware`
+    # canonicalise message_id en amont, donc on cherche directement par IMID
+    # canonique. Si cache miss = mail jamais ingéré (sélection user d'un
+    # ancien mail antérieur à l'install BG) OU IMID synthétique (mail
+    # interne Outlook sans Message-Id natif). On tente un fallback Graph
+    # uniquement pour les IMIDs réels (pas synthétiques).
     try:
         cached = _db.get_cached_email(message_id)
-        if not cached:
-            # Tentative Graph pour récupérer le mail et l'ajouter au cache
+        if not cached and message_id.startswith('<') and not message_id.startswith('<synthetic:'):
             graph = get_graph()
             if graph:
                 try:
-                    if message_id.startswith('<'):
-                        _fetched = graph.get_email_by_internet_id(message_id)
-                    else:
-                        _fetched = graph.get_email_by_id(message_id)
+                    _fetched = graph.get_email_by_internet_id(message_id)
                     if _fetched:
-                        # Sauve en cache sous l'IMID si dispo (sinon message_id reçu).
-                        _imid = _fetched.get('internet_message_id') or message_id
+                        # Stockage brut systématique (R3) sous l'IMID canonique.
                         try:
-                            _db.save_email_cache(_imid, _fetched)
+                            _db.save_email_cache(message_id, _fetched)
                         except Exception as _se:
                             logger.debug(f"[preview-{plate}] save_cache : {_se}")
                         cached = _fetched
-                        # Fix 11/05/2026 — enregistre l'alias outlook_id → imid
-                        # pour que les futurs polls du frontend trouvent le résultat.
-                        # Et bascule message_id sur l'IMID pour le reste du flow.
-                        if _imid and _imid != message_id:
-                            _register_msg_id_alias(message_id, _imid)
-                            message_id = _imid
                         logger.info(
-                            f"[preview-{plate}] cache miss compensé par fallback "
-                            f"Graph → imid={_imid[:40]}, alias enregistré"
+                            f"[preview-{plate}] fetch Graph fallback (mail jamais "
+                            f"ingéré) pour {message_id[:40]}"
                         )
                 except Exception as _ge:
                     logger.debug(f"[preview-{plate}] fallback Graph : {_ge}")
         if cached:
             mail_data = {
-                'internet_message_id': cached.get('internet_message_id') or message_id,
+                'internet_message_id': message_id,
                 'from_email': cached.get('from_email', ''),
                 'from_name': cached.get('from_name', ''),
                 'subject': cached.get('subject', ''),
