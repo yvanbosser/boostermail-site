@@ -9115,10 +9115,10 @@ def _fetch_single_preview_plate(message_id, plate):
     if plate not in ('echeance', 'classement', 'pj_classement'):
         return {'status': 'error', 'data': None, 'error': 'plate invalide'}
 
-    # Fix 11/05/2026 — résout outlook_id → imid si alias enregistré.
-    # Permet au polling frontend (qui utilise l'outlook_id) de retrouver
-    # les résultats stockés par le BG worker sous l'IMID canonique.
-    message_id = _resolve_msg_id(message_id)
+    # Refonte N1 (11/05/2026) — message_id arrive déjà canonicalisé via le
+    # middleware Flask `_canonicalize_message_id_middleware`. Defense in depth :
+    # on re-canonicalise au cas où l'appelant est en interne (pas Flask).
+    message_id = _canonicalize_message_id(message_id)
 
     # 1) Check RAM cache
     with _mail_preview_lock:
