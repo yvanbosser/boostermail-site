@@ -850,12 +850,33 @@ class ClaudeAssistant:
             else:
                 _confidence_tier = 'none'
 
+            # Patch 11/05/2026 — préserver register/greeting/closing même si tier=none.
+            # Avant : tier=none (< 30 %) → cp=None → fallback "Nouveau correspondant"
+            # qui force vouvoiement + "Bonjour Monsieur/Madame [Nom]" → inadapté pour
+            # un contact familier (cas mail Alain Bosser : confidence 5 % mais
+            # register=tutoiement + tone=amical clairement présents). Les gardes
+            # anti-self-name et anti-pollution greeting/closing s'appliquent quand
+            # même via la branche `if cp:` plus bas, donc safe.
             if _confidence_tier == 'none':
-                logger.debug(
-                    f"[prompt] PROFIL tier=none confidence={confidence_pct}% < 30%% "
-                    f"pour {to_email} → profil par défaut"
+                _has_useful_signals = bool(
+                    (cp or {}).get('register')
+                    or (cp or {}).get('greeting')
+                    or (cp or {}).get('closing')
                 )
-                cp = None
+                if _has_useful_signals:
+                    # Promote 'none' → 'light' : profil ultra-minimal mais signals
+                    # utiles préservés (register, greeting, closing) avec gardes.
+                    _confidence_tier = 'light'
+                    logger.debug(
+                        f"[prompt] PROFIL tier=none→light confidence={confidence_pct}%% "
+                        f"— signals utiles (register/greeting/closing) préservés pour {to_email}"
+                    )
+                else:
+                    logger.debug(
+                        f"[prompt] PROFIL tier=none confidence={confidence_pct}% < 30%% "
+                        f"+ aucun signal utile pour {to_email} → profil par défaut"
+                    )
+                    cp = None
             else:
                 logger.debug(
                     f"[prompt] PROFIL tier={_confidence_tier} confidence={confidence_pct}%% "
