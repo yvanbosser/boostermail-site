@@ -2208,6 +2208,67 @@ class Database:
         conn.commit()
         print(f"[db] Purge learning [{uid}]: threads, corrections, contacts supprimés", flush=True)
 
+    def purge_old_emails(self, days=730):
+        """Refonte N2 (11/05/2026) — TTL purge des emails > N jours.
+
+        Garde-fou contre la croissance illimitée d'email_cache (R7 dit
+        « tant que le mail existe dans l'inbox », mais en pratique des
+        entrées orphelines peuvent s'accumuler — webhook deletion raté,
+        mails très anciens jamais consultés, etc.).
+
+        Critère : `cached_at < now - N jours`. Sémantique = « mail jamais
+        consulté ni re-cacheé par BoosterMail depuis N jours ». Un mail
+        ancien mais re-fetch récemment a un cached_at récent → conservé.
+
+        Cascade : pour chaque mail purgé, on purge AUSSI les 4 frigos
+        cuisinés associés (mail_summaries, mail_classement_cache,
+        mail_pj_classement_cache, mail_echeance_cache) pour éviter les
+        données orphelines.
+
+        Transaction unique (BEGIN IMMEDIATE) — tout ou rien. Idempotent
+        (no-op si 0 ligne éligible). Multi-tenant safe : purge tous les
+        users d'un coup (pas de filtrage par user_id, le TTL s'applique
+        globalement).
+
+        Args:
+            days: TTL en jours (default 730 = 2 ans)
+
+        Returns:
+            int: nombre de mails purgés (0 si rien à purger)
+        """
+        if days <= 0:
+            return 0
+        conn = self._conn()
+        cursor = conn.cursor()
+        # Identifie les entry_id eligibles (multi-tenant : on ne filtre pas
+        # user_id, le TTL s'applique a tous).
+        cursor.execute(
+            "SELECT entry_id FROM email_cache WHERE cached_at < datetime('now', ?, 'localtime')",
+            (f'-{int(days)} days',)
+        )
+        eligible_ids = [row[0] for row in cursor.fetchall()]
+        if not eligible_ids:
+            return 0
+
+        # Purge transactionnelle : email_cache + 4 frigos cuisinés en cascade.
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            for mid in eligible_ids:
+                # email_cache (PK entry_id, peut etre IMID natif ou synthetique)
+                conn.execute("DELETE FROM email_cache WHERE entry_id = ?", (mid,))
+                # Les 4 frigos cuisines (PK message_id = IMID identique a entry_id)
+                conn.execute("DELETE FROM mail_summaries WHERE message_id = ?", (mid,))
+                conn.execute("DELETE FROM mail_classement_cache WHERE message_id = ?", (mid,))
+                conn.execute("DELETE FROM mail_pj_classement_cache WHERE message_id = ?", (mid,))
+                conn.execute("DELETE FROM mail_echeance_cache WHERE message_id = ?", (mid,))
+            conn.commit()
+            logger.info(f"[ttl-purge] {len(eligible_ids)} mail(s) > {days}j purges (email_cache + 4 frigos cuisines)")
+            return len(eligible_ids)
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"[ttl-purge] ROLLBACK : {e}")
+            return 0
+
     # --- MÉTRIQUES ---------------------------------------------------------
 
     def save_metric(self, email_id, action, importance=2, duration_ms=0,

@@ -4111,6 +4111,53 @@ def _reply_cache_safety_net_loop():
 _load_reply_cache()
 atexit.register(_persist_reply_cache)
 threading.Thread(target=_reply_cache_safety_net_loop, daemon=True, name='reply-cache-sn').start()
+
+
+# =============================================================================
+# Refonte N2 (11/05/2026) — TTL purge email_cache (> 2 ans)
+# =============================================================================
+# Garde-fou contre la croissance illimitée de la table email_cache. Spec V2
+# R7 dit « tant que le mail existe dans l'inbox », mais en pratique des
+# entrées orphelines peuvent s'accumuler (webhook deletion raté, mails
+# anciens jamais consultés). Job BG qui purge tous les emails dont le
+# cached_at est plus ancien que TTL_DAYS, avec cascade sur les 4 frigos
+# cuisinés associés (mail_summaries, mail_classement_cache, etc.).
+#
+# Cible : 2 ans = 730 jours. Tournée quotidienne (24h).
+# Idempotent : no-op si aucune ligne éligible.
+
+_EMAIL_CACHE_TTL_DAYS = 730  # 2 ans
+_EMAIL_CACHE_TTL_LOOP_INTERVAL_SEC = 24 * 3600  # 24h
+
+
+def _email_cache_ttl_purge_loop():
+    """Thread BG qui purge les emails > _EMAIL_CACHE_TTL_DAYS jours.
+
+    Tournée toutes les 24h. Premier passage au démarrage après 60s
+    (laisse l'app warmup). Idempotent : appelle `_db.purge_old_emails`
+    qui no-op si rien à purger.
+    """
+    # Délai initial pour laisser l'app warmup
+    time.sleep(60)
+    while not _shutdown_event.is_set():
+        try:
+            n = _db.purge_old_emails(days=_EMAIL_CACHE_TTL_DAYS)
+            if n > 0:
+                logger.info(
+                    f"[ttl-purge-loop] {n} mail(s) purgés (> {_EMAIL_CACHE_TTL_DAYS}j)"
+                )
+            else:
+                logger.debug(f"[ttl-purge-loop] no-op (0 mail > {_EMAIL_CACHE_TTL_DAYS}j)")
+        except Exception as e:
+            logger.warning(f"[ttl-purge-loop] erreur : {e}")
+        # Sleep 24h avec check shutdown toutes les 60s pour permettre arrêt propre
+        for _ in range(_EMAIL_CACHE_TTL_LOOP_INTERVAL_SEC // 60):
+            if _shutdown_event.is_set():
+                break
+            time.sleep(60)
+
+
+threading.Thread(target=_email_cache_ttl_purge_loop, daemon=True, name='ttl-purge').start()
 threading.Thread(target=_reply_cache_metrics_report_loop, daemon=True, name='reply-cache-metrics').start()
 
 
