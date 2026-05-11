@@ -2306,6 +2306,36 @@ if _UserScopedDict is not None:
 else:
     _mail_preview_cache = {}
 _mail_preview_lock = threading.Lock()
+
+# Fix 11/05/2026 — alias map outlook_id → IMID.
+# Office.js retourne les Outlook IDs en base64 standard (avec `/`) tandis que
+# le backend stocke les caches/DB sous l'IMID (`<...@...>`). Sans alias, le
+# polling frontend (qui utilise l'outlook_id) ne retrouve jamais les résultats
+# du worker BG (qui stocke sous l'IMID). Cas mail Maryam ALI GADZAMA.
+# L'alias est alimenté par le fallback Graph dans _fetch_single_preview_plate.
+_msg_id_alias = {}  # outlook_id → imid
+_msg_id_alias_lock = threading.Lock()
+_MSG_ID_ALIAS_MAX = 500
+
+def _resolve_msg_id(mid):
+    """Si mid est un Outlook ID enregistré, retourne l'IMID associé. Sinon mid."""
+    if not mid or mid.startswith('<'):
+        return mid
+    with _msg_id_alias_lock:
+        return _msg_id_alias.get(mid, mid)
+
+def _register_msg_id_alias(outlook_id, imid):
+    """Enregistre outlook_id → imid pour les futurs lookups."""
+    if not outlook_id or not imid or outlook_id == imid:
+        return
+    with _msg_id_alias_lock:
+        # Trim si > MAX (FIFO simple)
+        if len(_msg_id_alias) >= _MSG_ID_ALIAS_MAX:
+            # Drop 50 plus anciens (dict py 3.7+ garde ordre insertion)
+            for k in list(_msg_id_alias.keys())[:50]:
+                _msg_id_alias.pop(k, None)
+        _msg_id_alias[outlook_id] = imid
+
 # O4 (08/05) — TTL frigos courts en RAM porté à 24h (au lieu d'1h).
 # Réduit les hits DB redondants pendant une journée de travail : le user
 # revient sur les mêmes mails plusieurs fois → cache RAM toujours chaud.
@@ -8765,6 +8795,11 @@ def _fetch_single_preview_plate(message_id, plate):
     if plate not in ('echeance', 'classement', 'pj_classement'):
         return {'status': 'error', 'data': None, 'error': 'plate invalide'}
 
+    # Fix 11/05/2026 — résout outlook_id → imid si alias enregistré.
+    # Permet au polling frontend (qui utilise l'outlook_id) de retrouver
+    # les résultats stockés par le BG worker sous l'IMID canonique.
+    message_id = _resolve_msg_id(message_id)
+
     # 1) Check RAM cache
     with _mail_preview_lock:
         entry = _mail_preview_cache.get(message_id, {})
@@ -8863,9 +8898,15 @@ def _fetch_single_preview_plate(message_id, plate):
                         except Exception as _se:
                             logger.debug(f"[preview-{plate}] save_cache : {_se}")
                         cached = _fetched
+                        # Fix 11/05/2026 — enregistre l'alias outlook_id → imid
+                        # pour que les futurs polls du frontend trouvent le résultat.
+                        # Et bascule message_id sur l'IMID pour le reste du flow.
+                        if _imid and _imid != message_id:
+                            _register_msg_id_alias(message_id, _imid)
+                            message_id = _imid
                         logger.info(
                             f"[preview-{plate}] cache miss compensé par fallback "
-                            f"Graph pour {message_id[:30]} → imid={_imid[:40]}"
+                            f"Graph → imid={_imid[:40]}, alias enregistré"
                         )
                 except Exception as _ge:
                     logger.debug(f"[preview-{plate}] fallback Graph : {_ge}")
