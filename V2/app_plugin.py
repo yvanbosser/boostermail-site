@@ -175,6 +175,66 @@ def _perf_start_timer():
         pass
 
 
+@app.before_request
+def _canonicalize_message_id_middleware():
+    """Refonte Niveau 1 (11/05/2026) — Middleware de canonicalisation des message_id.
+
+    Tout `messageId` / `message_id` reçu via query string ou view_args est
+    canonicalisé en IMID RFC 2822 AVANT que la route ne soit appelée. Garantit
+    que toute route accède aux caches/DB avec la clé canonique unique, peu
+    importe le format envoyé par le frontend (Office.js peut envoyer Outlook ID
+    base64 standard avec `/`, URL-safe avec `-`, ou directement l'IMID).
+
+    Stratégie : on **réécrit** request.args et view_args en remplaçant la valeur
+    brute par sa version canonique. Le code des routes en aval n'a rien à modifier.
+
+    Invariant I-CANON-01 : après ce middleware, toute valeur de message_id /
+    messageId accessible dans une route Flask est un IMID canonique.
+
+    Cas d'usage couvert :
+    - `GET /api/classement_mail/<path:message_id>` → view_args['message_id']
+    - `GET /api/email_body?messageId=AAMk...` → request.args['messageId']
+    - `POST /generate_reply` body JSON → laissé au handler (le middleware ne
+      touche pas au body JSON pour ne pas surprendre les routes qui font
+      `request.get_json()`)
+    """
+    try:
+        # Query args : messageId / message_id
+        if request.args:
+            new_args = {}
+            mutated = False
+            for k, v in request.args.items(multi=True):
+                if k in ('messageId', 'message_id') and v:
+                    canon = _canonicalize_message_id(v)
+                    if canon and canon != v:
+                        new_args.setdefault(k, []).append(canon)
+                        mutated = True
+                        continue
+                new_args.setdefault(k, []).append(v)
+            if mutated:
+                from werkzeug.datastructures import ImmutableMultiDict
+                pairs = []
+                for k, vs in new_args.items():
+                    for v in vs:
+                        pairs.append((k, v))
+                request.args = ImmutableMultiDict(pairs)
+
+        # View args (path params) : /<path:message_id>
+        if request.view_args:
+            for k in ('message_id', 'messageId'):
+                v = request.view_args.get(k)
+                if v and isinstance(v, str):
+                    canon = _canonicalize_message_id(v)
+                    if canon and canon != v:
+                        request.view_args[k] = canon
+    except Exception as _e:
+        # Best-effort : si la canonicalisation échoue, on laisse passer la
+        # requête avec la valeur d'origine plutôt que de retourner une 500.
+        # Les routes en aval continuent à fonctionner (fallback comportement
+        # legacy via _canonicalize_message_id appelé manuellement).
+        logger.debug(f"[canonicalize-middleware] erreur ignorée : {_e}")
+
+
 # =============================================================================
 # Étape 7 multi-tenant — Middleware @require_user global ABANDONNÉ 29/04 PM tardif
 # =============================================================================
@@ -848,24 +908,20 @@ def _mark_warmup_done(value: bool = True) -> None:
 # malformé) → BG le saute, streaming à la commande.
 # Référence : audit/INVARIANTS.md I-DATA-11.
 
+# DEPRECATED 11/05/2026 — remplacé par _extract_imid_from_mail_data.
+# Conservé comme alias backward-compat temporaire pour éviter une refonte
+# massive de 25+ call sites en un seul commit. Sera supprimé après J3.
 def _canonical_mid(mail_data):
-    """Retourne l'internet_message_id canonique d'un mail, ou '' si absent/invalide.
+    """[DEPRECATED] Alias vers _extract_imid_from_mail_data.
 
-    Règle stricte : seule clé acceptée = `mail_data['internet_message_id']` au format
-    RFC 2822 (`<...@domain>`). Pas de fallback sur Graph entry id, message_id legacy, etc.
-
-    Si retourne '' → l'appelant doit logger l'anomalie et skipper le mail (pas
-    de cache à clé non-canonique → évite les pollutions de cache et les MISS au lookup).
+    L'ancienne version retournait '' pour les mails sans IMID natif (forçant
+    le skip BG). La nouvelle version retourne un IMID synthétique stable
+    (`<synthetic:...@boostermail.local>`) pour respecter R3 « stockage brut
+    toujours fait ». Si un caller a besoin de l'ancien comportement (skip
+    sans IMID natif), il doit appeler explicitement `_canonicalize_message_id(
+    raw, allow_synthetic=False)` ou tester `imid.startswith('<synthetic:')`.
     """
-    if not isinstance(mail_data, dict):
-        return ''
-    mid = mail_data.get('internet_message_id', '') or ''
-    if not isinstance(mid, str):
-        return ''
-    mid = mid.strip()
-    if not (mid.startswith('<') and '@' in mid and mid.endswith('>')):
-        return ''
-    return mid
+    return _extract_imid_from_mail_data(mail_data)
 
 
 # Phase 1.5 (25/04 soir) — Garde-fou anti-pollution drafts.
@@ -2307,34 +2363,183 @@ else:
     _mail_preview_cache = {}
 _mail_preview_lock = threading.Lock()
 
-# Fix 11/05/2026 — alias map outlook_id → IMID.
-# Office.js retourne les Outlook IDs en base64 standard (avec `/`) tandis que
-# le backend stocke les caches/DB sous l'IMID (`<...@...>`). Sans alias, le
-# polling frontend (qui utilise l'outlook_id) ne retrouve jamais les résultats
-# du worker BG (qui stocke sous l'IMID). Cas mail Maryam ALI GADZAMA.
-# L'alias est alimenté par le fallback Graph dans _fetch_single_preview_plate.
-_msg_id_alias = {}  # outlook_id → imid
-_msg_id_alias_lock = threading.Lock()
-_MSG_ID_ALIAS_MAX = 500
+# =============================================================================
+# Refonte Niveau 1 (11/05/2026) — Canonicalisation unique des message_id
+# =============================================================================
+# Tout mail entrant dans BoosterMail doit être identifié par UNE seule clé :
+# l'IMID canonique RFC 2822 (`<...@domain>`). Office.js renvoie parfois des
+# Outlook IDs en base64 standard (`/`, `+`, `=`) tandis que Graph stocke en
+# URL-safe (`-`, `_`). Pour éviter le bug Maryam (mismatch de clé entre
+# polling frontend et stockage backend), TOUS les message_id sont canonicalisés
+# à l'entrée du backend, avant tout lookup cache/DB.
+#
+# Fonction unique : `_canonicalize_message_id(raw)` — string in → IMID out.
+# Helper dict : `_extract_imid_from_mail_data(mail_data)` — dict in → IMID out.
+# Si pas d'IMID natif disponible (mail Outlook interne sans Message-Id RFC 2822),
+# génération d'un IMID synthétique stable hashé sur l'Outlook ID URL-safe.
+# Invariant I-CANON-01 : email_cache.entry_id, mail_*_cache.message_id, etc.
+# sont TOUJOURS un IMID canonique (jamais un Outlook ID).
 
-def _resolve_msg_id(mid):
-    """Si mid est un Outlook ID enregistré, retourne l'IMID associé. Sinon mid."""
-    if not mid or mid.startswith('<'):
-        return mid
-    with _msg_id_alias_lock:
-        return _msg_id_alias.get(mid, mid)
+# Cache de résolution Outlook ID → IMID en RAM (évite N lookups DB pour le même mail
+# dans une seule session). Alimenté par _canonicalize_message_id quand il résout
+# un Outlook ID via email_cache.
+_canonicalize_cache = {}  # raw → imid (raw peut être Outlook ID std ou URL-safe)
+_canonicalize_lock = threading.Lock()
+_CANONICALIZE_CACHE_MAX = 1000
 
-def _register_msg_id_alias(outlook_id, imid):
-    """Enregistre outlook_id → imid pour les futurs lookups."""
-    if not outlook_id or not imid or outlook_id == imid:
+
+def _is_canonical_imid_strict(mid):
+    """Check IMID strict : `<local@domain.tld>` avec au moins 1 char avant `@` et un `.` après.
+
+    Plus strict que l'ancien `startswith('<') and '@' in mid and endswith('>')` qui
+    acceptait `<@>` ou `<sans-tld>`. Empêche les pollutions de cache par des IDs
+    mal formés.
+    """
+    if not isinstance(mid, str) or len(mid) < 5:
+        return False
+    if not (mid.startswith('<') and mid.endswith('>')):
+        return False
+    inner = mid[1:-1]
+    if '@' not in inner:
+        return False
+    local, _, domain = inner.partition('@')
+    if not local or not domain or '.' not in domain:
+        return False
+    return True
+
+
+def _synthesize_imid(outlook_id_urlsafe):
+    """Génère un IMID synthétique stable à partir d'un Outlook ID URL-safe.
+
+    Pour les mails Outlook internes (calendrier, Teams, EDI) qui n'ont pas
+    d'`internetMessageId` RFC 2822. Garantit que tout mail aboutit à une clé
+    canonique, donc à un stockage brut systématique (règle R3 de l'arbre V2
+    « Stockage brut TOUJOURS fait »).
+
+    Stable : même Outlook ID → même IMID synthétique (idempotent).
+    """
+    import hashlib
+    h = hashlib.sha256(outlook_id_urlsafe.encode('utf-8', errors='replace')).hexdigest()[:24]
+    return f"<synthetic:{h}@boostermail.local>"
+
+
+def _canonicalize_message_id(raw, db=None, allow_synthetic=True):
+    """Convertit un message_id quelconque (IMID, Outlook ID base64 std/URL-safe)
+    en IMID canonique RFC 2822 unique.
+
+    Ordre de résolution :
+      1. Déjà IMID canonique (`<...@...>`) → retourné tel quel
+      2. Outlook ID base64 (standard ou URL-safe) :
+         a. Normalise en URL-safe (`/`→`-`, `+`→`_`)
+         b. Consulte email_cache.email_json.internet_message_id pour trouver l'IMID associé
+         c. Si trouvé → retourne l'IMID (et cache la résolution)
+         d. Si pas trouvé et allow_synthetic → génère un IMID synthétique stable
+         e. Si pas trouvé et pas synthétique → retourne '' (mail anonyme)
+      3. Vide ou invalide → retourne ''
+
+    Args:
+        raw: le message_id brut (str)
+        db: instance database (injection pour testabilité). Si None, utilise _db global.
+        allow_synthetic: si True, fallback IMID synthétique pour les mails sans
+                         IMID natif. Si False, retourne '' (à utiliser dans les
+                         flows où on veut savoir que l'IMID est manquant).
+
+    Returns:
+        str: IMID canonique (`<...@...>`) ou '' si impossible et synthetic interdit.
+    """
+    if not isinstance(raw, str):
+        return ''
+    raw = raw.strip()
+    if not raw:
+        return ''
+
+    # Étape 1 : déjà canonique
+    if _is_canonical_imid_strict(raw):
+        return raw
+
+    # Étape 2 : Outlook ID (base64 standard ou URL-safe)
+    # Cache RAM check
+    with _canonicalize_lock:
+        cached = _canonicalize_cache.get(raw)
+        if cached is not None:
+            return cached
+
+    # Normalisation base64 standard → URL-safe (translittération charset).
+    # Indispensable car les 2 variantes du même Outlook ID auraient sinon
+    # 2 IMIDs synthétiques différents.
+    outlook_urlsafe = raw.replace('/', '-').replace('+', '_')
+
+    # Lookup email_cache pour trouver l'IMID natif associé
+    target_db = db if db is not None else (_db if '_db' in globals() else None)
+    if target_db is not None:
+        try:
+            # On essaie 2 variantes : le raw d'origine ET la version URL-safe
+            # (les 2 ont pu être utilisées historiquement comme entry_id)
+            for lookup_key in (raw, outlook_urlsafe):
+                cached_email = target_db.get_cached_email(lookup_key)
+                if cached_email:
+                    imid = cached_email.get('internet_message_id', '')
+                    if _is_canonical_imid_strict(imid):
+                        _cache_canonicalization(raw, imid)
+                        return imid
+        except Exception as e:
+            logger.debug(f"[canonicalize] email_cache lookup error : {e}")
+
+    # Pas trouvé en email_cache → génération d'un IMID synthétique stable
+    # (ou retour '' si non autorisé). Garantit R3 : tout mail reçoit une clé.
+    if allow_synthetic:
+        synthetic = _synthesize_imid(outlook_urlsafe)
+        _cache_canonicalization(raw, synthetic)
+        return synthetic
+
+    return ''
+
+
+def _cache_canonicalization(raw, imid):
+    """Mémorise raw → imid dans le cache RAM avec trim FIFO si plein."""
+    if not raw or not imid:
         return
-    with _msg_id_alias_lock:
-        # Trim si > MAX (FIFO simple)
-        if len(_msg_id_alias) >= _MSG_ID_ALIAS_MAX:
-            # Drop 50 plus anciens (dict py 3.7+ garde ordre insertion)
-            for k in list(_msg_id_alias.keys())[:50]:
-                _msg_id_alias.pop(k, None)
-        _msg_id_alias[outlook_id] = imid
+    with _canonicalize_lock:
+        if len(_canonicalize_cache) >= _CANONICALIZE_CACHE_MAX:
+            for k in list(_canonicalize_cache.keys())[:100]:
+                _canonicalize_cache.pop(k, None)
+        _canonicalize_cache[raw] = imid
+
+
+def _extract_imid_from_mail_data(mail_data):
+    """Helper dict : extrait l'IMID canonique d'un mail_data dict.
+
+    Remplace l'ancien `_canonical_mid`. Cherche dans cet ordre :
+      1. mail_data['internet_message_id'] si canonique
+      2. mail_data['message_id'] s'il s'agit en fait d'un IMID
+      3. mail_data['id'] (Outlook entry_id) → canonicalize via _canonicalize_message_id
+      4. Si rien → IMID synthétique basé sur l'id Outlook ou '' si pas d'id du tout
+    """
+    if not isinstance(mail_data, dict):
+        return ''
+
+    # 1. internet_message_id direct
+    imid = (mail_data.get('internet_message_id') or '').strip()
+    if _is_canonical_imid_strict(imid):
+        return imid
+
+    # 2. message_id parfois rempli avec l'IMID
+    mid = (mail_data.get('message_id') or '').strip()
+    if _is_canonical_imid_strict(mid):
+        return mid
+
+    # 3. Outlook entry_id (id) → canonicalize
+    oid = (mail_data.get('id') or '').strip()
+    if oid:
+        return _canonicalize_message_id(oid, allow_synthetic=True)
+
+    # 4. Fallback final : si on a un message_id non-canonique (Outlook ID stocké comme message_id)
+    if mid:
+        return _canonicalize_message_id(mid, allow_synthetic=True)
+    if imid:
+        return _canonicalize_message_id(imid, allow_synthetic=True)
+
+    return ''
 
 # O4 (08/05) — TTL frigos courts en RAM porté à 24h (au lieu d'1h).
 # Réduit les hits DB redondants pendant une journée de travail : le user
