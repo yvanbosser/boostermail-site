@@ -2408,11 +2408,16 @@ _CANONICALIZE_CACHE_MAX = 1000
 
 
 def _is_canonical_imid_strict(mid):
-    """Check IMID strict : `<local@domain.tld>` avec au moins 1 char avant `@` et un `.` après.
+    """Check IMID strict : `<local@domain>` RFC 2822 minimal.
 
     Plus strict que l'ancien `startswith('<') and '@' in mid and endswith('>')` qui
-    acceptait `<@>` ou `<sans-tld>`. Empêche les pollutions de cache par des IDs
-    mal formés.
+    acceptait `<@>`. Maintenant : exige local non-vide ET domain non-vide.
+
+    NB 11/05/2026 — assouplissement après inspection OVH : on accepte les
+    IMIDs sans `.` dans le domain (ex: `<...@localhost>`, `<...@k8s-pod-name>`)
+    qui sont valides en pratique pour certains MTA internes (Exchange,
+    Kubernetes mailing services). Empêche `<@>`, `<a@>`, `<@b>` mais accepte
+    `<a@b>` et `<a@localhost>`.
     """
     if not isinstance(mid, str) or len(mid) < 5:
         return False
@@ -2422,7 +2427,7 @@ def _is_canonical_imid_strict(mid):
     if '@' not in inner:
         return False
     local, _, domain = inner.partition('@')
-    if not local or not domain or '.' not in domain:
+    if not local or not domain:
         return False
     return True
 

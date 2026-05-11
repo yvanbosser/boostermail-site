@@ -29,6 +29,8 @@ logger = _MockLogger()
 # === Copie des fonctions à tester ===
 
 def _is_canonical_imid_strict(mid):
+    """Assoupli 11/05 : on accepte les IMIDs sans `.` dans le domain
+    (ex: @localhost, @k8s-pod-name) pour ne pas exclure les MTA internes."""
     if not isinstance(mid, str) or len(mid) < 5:
         return False
     if not (mid.startswith('<') and mid.endswith('>')):
@@ -37,7 +39,7 @@ def _is_canonical_imid_strict(mid):
     if '@' not in inner:
         return False
     local, _, domain = inner.partition('@')
-    if not local or not domain or '.' not in domain:
+    if not local or not domain:
         return False
     return True
 
@@ -137,7 +139,8 @@ def run_tests():
         ("<@>", False, "vide rejeté"),
         ("<@a.b>", False, "local vide rejeté"),
         ("<a@>", False, "domain vide rejeté"),
-        ("<a@b>", False, "domain sans tld rejeté"),
+        ("<a@b>", True, "domain sans tld accepté (localhost, k8s pod, etc.)"),
+        ("<noreply@localhost>", True, "IMID localhost interne accepté"),
         ("<sans-arobase>", False, "pas de @ rejeté"),
         ("pas-de-chevrons@mail.com", False, "pas de < > rejeté"),
         ("", False, "vide rejeté"),
