@@ -35,7 +35,7 @@ function _debugLog(eventName, details) {
 
 // Marqueur de version : s'écrit dès le chargement du JS → permet de vérifier
 // en lisant addin_debug.log que Outlook a bien rechargé le nouveau fichier.
-var _ADDIN_VERSION = 'v27-classify-keep-runtime-07-05';
+var _ADDIN_VERSION = 'v28-classify-fast-autoclose-11-05';
 _debugLog('js_loaded', { version: _ADDIN_VERSION });
 
 // =============================================================================

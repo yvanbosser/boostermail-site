@@ -2190,9 +2190,13 @@ function _classifyDoMail() {
 }
 
 function _classifyShowMailUndo(path) {
+    // Fix UX 11/05/2026 — fermeture quasi-immédiate de la modal après classement
+    // (était 2s undo + 1.5s pause = 3.5s, ressenti trop lent par l'user).
+    // Nouveau : 1s d'undo court + 200ms transition = 1.2s total.
+    // Si PJ à traiter : pas de fermeture auto (l'user reste sur la section PJ).
     var undoEl = document.getElementById('cfMailUndo');
     var btnEl = document.getElementById('cfMailBtn');
-    var seconds = 2;
+    var seconds = 1;
     btnEl.style.display = 'none';
     undoEl.style.display = 'flex';
     undoEl.innerHTML = '<span>✓ Mail classé dans <strong>' + _escapeHtml(path) + '</strong> &nbsp;(<span id="cfMailUndoCnt">' + seconds + '</span>s)</span>'
@@ -2207,8 +2211,8 @@ function _classifyShowMailUndo(path) {
         if (cnt <= 0) {
             clearInterval(_cfMailUndoTimer); _cfMailUndoTimer = null;
             undoEl.innerHTML = '<span>✓ Mail classé dans <strong>' + _escapeHtml(path) + '</strong></span>';
-            // Auto-fermeture du dialog si pas de PJ ou PJ déjà traitée
-            if (!_cfHasAttachments) setTimeout(_classifyClose, 1500);
+            // Auto-fermeture rapide si pas de PJ ou PJ déjà traitée
+            if (!_cfHasAttachments) setTimeout(_classifyClose, 200);
         }
     }, 1000);
 }
