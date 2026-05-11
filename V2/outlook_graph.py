@@ -282,6 +282,19 @@ class GraphClient(EmailProvider):
         """POST + parse JSON."""
         return self._request('POST', url, json=data, **kwargs).json()
 
+    @staticmethod
+    def _q(val) -> str:
+        """URL-encode a path segment (slashes, +, =, etc.).
+
+        Fix 11/05/2026 — bug remonté sur mail Maryam ALI GADZAMA :
+        certains IDs Outlook (entry_id Outlook) contiennent des `/` qui
+        cassent l'URL Graph quand injectés tels quels dans une f-string.
+        Symptôme : Graph 400 "Resource not found for the segment 'XXX'".
+        Tous les endpoints qui prennent un message_id / draft_id /
+        attachment_id dans l'URL doivent passer par ce helper.
+        """
+        return quote(str(val), safe='')
+
     def _get_paginated(self, url: str, max_results: int = 200) -> list:
         """
         GET avec pagination automatique via @odata.nextLink.
@@ -457,7 +470,7 @@ class GraphClient(EmailProvider):
         """
         try:
             data = self._get(
-                f'/me/messages/{message_id}'
+                f'/me/messages/{self._q(message_id)}'
                 f'?$select={_FULL_SELECT}'
                 f'&$expand=attachments'
             )
@@ -662,7 +675,7 @@ class GraphClient(EmailProvider):
         Plus léger que get_email_by_id() quand on a déjà les métadonnées.
         """
         try:
-            data = self._get(f'/me/messages/{message_id}?$select=body')
+            data = self._get(f'/me/messages/{self._q(message_id)}?$select=body')
             body_obj = data.get('body', {})
             return body_obj.get('content', '')
         except Exception as e:
@@ -695,7 +708,7 @@ class GraphClient(EmailProvider):
                     # On doit passer par createReply pour modifier les CC
                     return self._send_via_draft('createReply', message_id, body, cc=cc)
 
-                self._request('POST', f'/me/messages/{message_id}/reply', json=payload)
+                self._request('POST', f'/me/messages/{self._q(message_id)}/reply', json=payload)
                 return {'success': True, 'error': ''}
             else:
                 # Envoi avec PJ via brouillon
@@ -721,7 +734,7 @@ class GraphClient(EmailProvider):
         """
         try:
             if not attachments and not cc:
-                self._request('POST', f'/me/messages/{message_id}/replyAll',
+                self._request('POST', f'/me/messages/{self._q(message_id)}/replyAll',
                               json={'comment': body})
                 return {'success': True, 'error': ''}
             else:
@@ -747,7 +760,7 @@ class GraphClient(EmailProvider):
                     'comment': body,
                     'toRecipients': [self._make_recipient(to_email)],
                 }
-                self._request('POST', f'/me/messages/{message_id}/forward', json=payload)
+                self._request('POST', f'/me/messages/{self._q(message_id)}/forward', json=payload)
                 return {'success': True, 'error': ''}
             else:
                 return self._send_via_draft(
@@ -817,7 +830,7 @@ class GraphClient(EmailProvider):
             attachments: Liste de dicts {'name': str, 'content': bytes}
         """
         # Étape 1 : Créer le brouillon
-        draft_data = self._post(f'/me/messages/{message_id}/{create_action}')
+        draft_data = self._post(f'/me/messages/{self._q(message_id)}/{create_action}')
         draft_id = draft_data.get('id')
         if not draft_id:
             raise RuntimeError(f"Échec {create_action}: pas d'ID de brouillon retourné")
@@ -838,7 +851,7 @@ class GraphClient(EmailProvider):
                 new_cc = self._parse_recipients_string(cc)
                 update['ccRecipients'] = existing_cc + new_cc
 
-            self._request('PATCH', f'/me/messages/{draft_id}', json=update)
+            self._request('PATCH', f'/me/messages/{self._q(draft_id)}', json=update)
 
             # Étape 2b : Attacher les PJ
             if attachments:
@@ -850,16 +863,16 @@ class GraphClient(EmailProvider):
                     }
                     if 'content_type' in att:
                         att_payload['contentType'] = att['content_type']
-                    self._request('POST', f'/me/messages/{draft_id}/attachments', json=att_payload)
+                    self._request('POST', f'/me/messages/{self._q(draft_id)}/attachments', json=att_payload)
 
             # Étape 3 : Envoyer
-            self._request('POST', f'/me/messages/{draft_id}/send')
+            self._request('POST', f'/me/messages/{self._q(draft_id)}/send')
             return {'success': True, 'error': ''}
 
         except Exception as e:
             # Nettoyer le brouillon en cas d'erreur
             try:
-                self._request('DELETE', f'/me/messages/{draft_id}')
+                self._request('DELETE', f'/me/messages/{self._q(draft_id)}')
                 logger.info(f"Brouillon {draft_id} nettoyé après erreur envoi")
             except Exception as del_err:
                 logger.warning(f"Impossible de supprimer le brouillon orphelin {draft_id}: {del_err}")
@@ -990,7 +1003,7 @@ class GraphClient(EmailProvider):
         """
         try:
             result = self._post(
-                f'/me/messages/{message_id}/move',
+                f'/me/messages/{self._q(message_id)}/move',
                 data={'destinationId': folder_id}
             )
             return {
@@ -1116,7 +1129,7 @@ class GraphClient(EmailProvider):
         """
         try:
             result = self._post(
-                f'/me/messages/{message_id}/copy',
+                f'/me/messages/{self._q(message_id)}/copy',
                 data={'destinationId': folder_id}
             )
             return {
@@ -1145,7 +1158,7 @@ class GraphClient(EmailProvider):
                 if not email or not email.get('id'):
                     return {'success': False, 'error': 'Mail introuvable'}
                 target_id = email['id']
-            self._request('DELETE', f'/me/messages/{target_id}')
+            self._request('DELETE', f'/me/messages/{self._q(target_id)}')
             return {'success': True}
         except GraphAuthError:
             raise
@@ -1191,7 +1204,7 @@ class GraphClient(EmailProvider):
                     logger.warning(f"get_attachments : IMID introuvable côté Graph : {message_id[:60]}")
                     return []
                 real_id = em['id']
-            data = self._get(f'/me/messages/{real_id}/attachments')
+            data = self._get(f'/me/messages/{self._q(real_id)}/attachments')
             result = []
             for att in data.get('value', []):
                 result.append({
@@ -1238,13 +1251,13 @@ class GraphClient(EmailProvider):
         try:
             resp = self._request(
                 'GET',
-                f'/me/messages/{real_id}/attachments/{attachment_id}/$value'
+                f'/me/messages/{self._q(real_id)}/attachments/{self._q(attachment_id)}/$value'
             )
             return resp.content
         except requests.HTTPError:
             # Fallback : récupérer via contentBytes (base64 dans le JSON)
             try:
-                data = self._get(f'/me/messages/{real_id}/attachments/{attachment_id}')
+                data = self._get(f'/me/messages/{self._q(real_id)}/attachments/{self._q(attachment_id)}')
                 content_b64 = data.get('contentBytes', '')
                 if content_b64:
                     return base64.b64decode(content_b64)
