@@ -2042,59 +2042,34 @@ class Database:
 
     def get_cached_email(self, entry_id):
         """
-        Récupère un email du cache DB.
+        Récupère un email du cache DB par sa clé canonique (IMID).
 
-        I-DATA-11 (Pattern #14) : lookup hybride pour absorber la mixité
-        historique (entry_id = Graph hex héritage / internet_message_id depuis
-        le fix 23/04). On essaie la PK d'abord (path rapide indexé), puis
-        l'index secondaire `internet_message_id` en fallback. Retourne dict
-        ou None.
+        Refonte N2 (11/05/2026) : depuis I-CANON-01 + garde `save_email_cache`,
+        `entry_id` est TOUJOURS un IMID canonique. Le lookup hybride PK + IMID
+        (Pattern #14) hérité de la mixité historique n'est plus nécessaire.
+        Lookup PK simple, path rapide indexé. Retourne dict ou None.
         """
-        uid = self._uid()
-        c = self._conn().cursor()
-        c.execute("SELECT email_json FROM email_cache WHERE entry_id = ? AND user_id = ?", (entry_id, uid))
-        row = c.fetchone()
-        if row:
-            return json.loads(row[0])
-        # Fallback : lookup par internet_message_id (cas où l'appelant passe
-        # un internet_id alors que la ligne est encore stockée par Graph ID)
-        c.execute(
-            "SELECT email_json FROM email_cache WHERE internet_message_id = ? AND user_id = ? "
-            "LIMIT 1", (entry_id, uid)
-        )
-        row = c.fetchone()
-        if row:
-            return json.loads(row[0])
-        return None
-
-    def get_email_by_internet_id(self, internet_message_id):
-        """
-        Lookup explicite par Internet Message-ID (clé canonique I-DATA-11).
-        Préfère l'index dédié ; fallback sur la PK pour les rares cas où
-        un entry_id contient lui-même un internet_id.
-        Retourne dict ou None.
-        """
-        if not internet_message_id:
+        if not entry_id:
             return None
         uid = self._uid()
         c = self._conn().cursor()
         c.execute(
-            "SELECT email_json FROM email_cache WHERE internet_message_id = ? AND user_id = ? "
-            "LIMIT 1", (internet_message_id, uid)
-        )
-        row = c.fetchone()
-        if row:
-            return json.loads(row[0])
-        # Fallback PK : certaines lignes (depuis le fix 23/04) sont déjà
-        # indexées par internet_id côté entry_id.
-        c.execute(
             "SELECT email_json FROM email_cache WHERE entry_id = ? AND user_id = ?",
-            (internet_message_id, uid)
+            (entry_id, uid)
         )
         row = c.fetchone()
-        if row:
-            return json.loads(row[0])
-        return None
+        return json.loads(row[0]) if row else None
+
+    def get_email_by_internet_id(self, internet_message_id):
+        """Refonte N2 (11/05/2026) : alias rétro-compat vers `get_cached_email`.
+
+        Historiquement séparé parce que les 2 colonnes (entry_id PK +
+        internet_message_id index) divergeaient (Pattern #14). Depuis
+        I-CANON-01, `entry_id` est TOUJOURS un IMID canonique → un seul
+        lookup suffit. Méthode conservée pour rétro-compat, sera supprimée
+        après migration progressive des call sites.
+        """
+        return self.get_cached_email(internet_message_id)
 
     def get_recent_email_cache(self, limit=10):
         """Retourne les N emails les plus récents du cache DB (pour pré-charger _warmup_cache au démarrage)."""
@@ -2154,24 +2129,30 @@ class Database:
         """
         Sauvegarde un email dans le cache DB.
 
-        I-DATA-11 : on populate aussi la colonne `internet_message_id` quand
-        connue (extraite du payload ou égale à `entry_id` s'il est lui-même
-        un Internet ID format <local@domain>). Permet le lookup croisé par
-        get_email_by_internet_id() sans cache miss.
+        Invariant I-CANON-01 (refonte N2 11/05/2026) : la clé `entry_id` DOIT
+        être un IMID canonique RFC 2822 (`<...@domain>`). Les callers passent
+        par `_canonicalize_message_id` ou `_extract_imid_from_mail_data` en
+        amont (middleware Flask + `_ingest_new_mail`). Cette garde DB-side
+        est un filet de sécurité : si un caller buggué passe un Outlook ID
+        ou une clé vide, on refuse silencieusement (log warning) plutôt que
+        de polluer la table avec une clé qui casse les lookups en aval.
+
+        Aligné sur les 4 méthodes `save_mail_*` qui ont la même garde
+        (commit `ebdc8c9` 02/05).
         """
-        conn = self._conn()
-        # Extraire l'internet_message_id depuis le payload, ou détecter
-        # automatiquement si entry_id ressemble à un Internet ID RFC 2822.
-        imid = None
-        if isinstance(email_data, dict):
-            imid = email_data.get('internet_message_id') or None
-        if not imid and isinstance(entry_id, str) and entry_id.startswith('<') and '@' in entry_id:
-            imid = entry_id
+        # Garde I-CANON-01 — refuse non-IMID.
+        if not _is_canonical_imid(entry_id):
+            logger.warning(f"[save_email_cache] clé non-canonique refusée : {entry_id!r}")
+            return
+        # internet_message_id = entry_id (garanti canonique par la garde).
+        # Si payload contient un autre IMID (rare), il sera dans le JSON mais
+        # la colonne indexée reflète la PK.
         uid = self._uid()
+        conn = self._conn()
         conn.execute("""
             INSERT OR REPLACE INTO email_cache (entry_id, email_json, internet_message_id, cached_at, user_id)
             VALUES (?, ?, ?, datetime('now', 'localtime'), ?)
-        """, (entry_id, json.dumps(email_data, ensure_ascii=False, default=str), imid, uid))
+        """, (entry_id, json.dumps(email_data, ensure_ascii=False, default=str), entry_id, uid))
         conn.commit()
 
     # --- CACHE DOSSIERS OUTLOOK ------------------------------------------------
@@ -2202,15 +2183,18 @@ class Database:
     def purge_email_cache_for(self, entry_id):
         """
         Supprime un email du cache (quand il est classé ou supprimé).
-        I-DATA-11 : purge sur les DEUX colonnes (entry_id PK + index
-        internet_message_id) pour absorber la mixité Graph ID / Internet ID.
+
+        Refonte N2 (11/05/2026) : depuis I-CANON-01, `entry_id` = IMID
+        canonique. Plus besoin du `OR internet_message_id` historique
+        (Pattern #14 résolu). DELETE simple par PK.
         """
+        if not entry_id:
+            return
         uid = self._uid()
         conn = self._conn()
         conn.execute(
-            "DELETE FROM email_cache "
-            "WHERE (entry_id = ? OR internet_message_id = ?) AND user_id = ?",
-            (entry_id, entry_id, uid)
+            "DELETE FROM email_cache WHERE entry_id = ? AND user_id = ?",
+            (entry_id, uid)
         )
         conn.commit()
 
