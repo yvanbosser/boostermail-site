@@ -227,6 +227,25 @@ def _canonicalize_message_id_middleware():
                     canon = _canonicalize_message_id(v)
                     if canon and canon != v:
                         request.view_args[k] = canon
+
+        # Body JSON : POST avec message_id / messageId dans le payload.
+        # On lit le JSON (cache=True force la mise en cache du parse), on
+        # mute le dict en place ; les call sites qui font `request.get_json()`
+        # ensuite recevront la version canonicalisée (mutation par référence
+        # via le _cached_json de werkzeug).
+        # NB : pas de touche au body si Content-Type ≠ JSON ou body invalide.
+        if request.method in ('POST', 'PUT', 'PATCH') and request.is_json:
+            try:
+                data = request.get_json(silent=True, cache=True)
+                if isinstance(data, dict):
+                    for k in ('message_id', 'messageId'):
+                        v = data.get(k)
+                        if v and isinstance(v, str):
+                            canon = _canonicalize_message_id(v)
+                            if canon and canon != v:
+                                data[k] = canon
+            except Exception as _je:
+                logger.debug(f"[canonicalize-middleware] body parse skipped : {_je}")
     except Exception as _e:
         # Best-effort : si la canonicalisation échoue, on laisse passer la
         # requête avec la valeur d'origine plutôt que de retourner une 500.
@@ -2506,6 +2525,50 @@ def _cache_canonicalization(raw, imid):
         _canonicalize_cache[raw] = imid
 
 
+# =============================================================================
+# Refonte Niveau 1 (11/05/2026) — Liste no-reply unique
+# =============================================================================
+# Avant : 3 listes parallèles (_AUTO_PATTERNS local dans _prewarm_unified_for_mail,
+# _SPEC_NOREPLY_PATTERNS module-level, _AUTO_EMAIL_PATTERNS module-level) avec
+# des contenus divergents. Conséquence : un mail `donotreply@x.com` filtré par
+# l'une mais pas l'autre → cascade incohérente (Sonnet lancé sans plats Haiku
+# ou inversement). Audit 8/05 anomalie #2.
+#
+# Maintenant : UNE seule constante module-level, déclarée tôt dans le fichier
+# pour être accessible par TOUS les sites (filtre 1, _prewarm_unified_for_mail,
+# _maybe_analyze_contact, etc.).
+_AUTO_EMAIL_PATTERNS = (
+    # Sub-strings classiques (matchent quel que soit le séparateur autour)
+    'noreply', 'no-reply', 'no_reply',
+    'donotreply', 'do-not-reply', 'do_not_reply',
+    'nepasrepondre', 'ne-pas-repondre', 'ne_pas_repondre',
+    'mailer-daemon', 'postmaster',
+    'newsletter', 'notification',
+    # Préfixes spécifiques (avec @ pour cibler la partie locale)
+    'notifications@', 'notification@',
+    'newsletter@', 'mailing@',
+    'automate.', 'automate@',
+    'quarantine@',
+    'edi@', 'dse@',
+    'e-statement@', 'estatement@',
+    'mssecurity-noreply', 'microsoftexchange',
+    'invitations@trustpilot',
+)
+
+
+def _is_auto_email(email):
+    """True si l'email correspond à un pattern automate (no-reply, newsletter, etc.).
+
+    Centralisation Niveau 1 (11/05/2026) : tous les sites du code qui veulent
+    détecter un mail automate appellent cette fonction (au lieu de comparer
+    contre 3 listes différentes). Garantit la cohérence des filtres.
+    """
+    if not email or not isinstance(email, str):
+        return False
+    e = email.lower().strip()
+    return any(p in e for p in _AUTO_EMAIL_PATTERNS)
+
+
 def _extract_imid_from_mail_data(mail_data):
     """Helper dict : extrait l'IMID canonique d'un mail_data dict.
 
@@ -2765,16 +2828,9 @@ def _prewarm_classement_for_mail(mid, mail_data):
         # Pour les expéditeurs noreply / donotreply / mailer-daemon / etc., Claude
         # rendra presque toujours none. On économise l'appel API et on stocke
         # directement la raison qui sera traduite côté UI en wording explicite.
-        # Patterns de detection (insensible a la casse, match dans la partie locale).
-        _AUTO_PATTERNS = (
-            'noreply', 'no-reply', 'no_reply',
-            'donotreply', 'do-not-reply', 'do_not_reply',
-            'nepasrepondre', 'ne-pas-repondre', 'ne_pas_repondre',
-            'mailer-daemon', 'postmaster',
-            'notifications@', 'notification@',
-            'newsletter@', 'mailing@',
-        )
-        if contact_email and any(p in contact_email for p in _AUTO_PATTERNS):
+        # Refonte N1 (11/05) : utilisation de la liste unique _AUTO_EMAIL_PATTERNS
+        # via le helper _is_auto_email (centralisation des 3 anciennes listes).
+        if contact_email and _is_auto_email(contact_email):
             try:
                 _db.save_mail_classement(mid, None, 'none_auto_email')
             except Exception as _e:
@@ -3204,7 +3260,8 @@ def _prewarm_unified_for_mail(mid, mail_data):
         # Audit 08/05 fix #2 : utilise _SPEC_NOREPLY_PATTERNS canonique
         # (étendu pour couvrir donotreply / nepasrepondre / etc.) au lieu
         # d'une liste locale dupliquée.
-        if contact_email and any(p in contact_email for p in _SPEC_NOREPLY_PATTERNS):
+        # Refonte N1 (11/05) : liste centralisée _AUTO_EMAIL_PATTERNS via _is_auto_email
+        if contact_email and _is_auto_email(contact_email):
             _set_mail_preview(mid, 'classement', 'done', {
                 'suggestion': None, 'suggestions': [], 'source': 'none_auto_email'})
             _set_mail_preview(mid, 'pj_classement', 'done', {
@@ -6049,19 +6106,9 @@ def _is_contact_known(email):
 # Règle : si UN filtre matche → pas de spéculation, mais le prefetch A/B/C reste.
 # =============================================================================
 
-_SPEC_NOREPLY_PATTERNS = (
-    # Substrings classiques (matchent quel que soit le séparateur autour)
-    'no-reply', 'noreply', 'no_reply',
-    'donotreply', 'do-not-reply', 'do_not_reply',
-    'nepasrepondre', 'ne-pas-repondre', 'ne_pas_repondre',
-    'newsletter', 'notification',
-    'mailer-daemon', 'postmaster',
-    # Audit 08/05 fix #2 : extension pour cohérence avec _AUTO_PATTERNS local
-    # de _prewarm_unified_for_mail. Avant : 6 patterns → un mail
-    # `donotreply@x.com` n'était PAS écarté par _is_discarded (Sonnet lancé
-    # inutilement) mais l'était par le commis Haiku → draft sans plats =
-    # gaspillage. Maintenant superset.
-)
+# Refonte N1 (11/05/2026) — _SPEC_NOREPLY_PATTERNS supprimé.
+# Liste unique centralisée _AUTO_EMAIL_PATTERNS (déclarée tôt dans le fichier).
+# Tous les sites passent par le helper _is_auto_email().
 
 # Filtre #5 : compteur d'ouvertures par mail (RAM). Incrémenté à chaque fois
 # que le mail devient `_current_mail_data` via le polling companion.
@@ -6134,7 +6181,8 @@ def _should_speculate(mail_data):
         logger.debug(f"[_db.is_treated] silent error message_id={message_id[:30]}... : {e}")
 
     # Filtre 3 : expéditeur automatique (no-reply / newsletter / postmaster / ...)
-    if any(p in from_email for p in _SPEC_NOREPLY_PATTERNS):
+    # Refonte N1 (11/05) : liste centralisée _AUTO_EMAIL_PATTERNS
+    if _is_auto_email(from_email):
         return False, 'expéditeur automatique'
 
     # Filtre 4 : body < 10 chars sans "?"
@@ -6191,7 +6239,8 @@ def _is_discarded(mail_data):
     message_id = mail_data.get('message_id', '')
 
     # 1. Expéditeur automatique
-    if any(p in from_email for p in _SPEC_NOREPLY_PATTERNS):
+    # Refonte N1 (11/05) : liste centralisée _AUTO_EMAIL_PATTERNS
+    if _is_auto_email(from_email):
         return True
     # 2. Mail > 30 jours
     mail_date = mail_data.get('date', '')
@@ -13665,23 +13714,9 @@ def _should_analyze_contact(mail_count, existing_sample_count=None):
     return False
 
 
-# Audit 03/05 fix RC1 : patterns automate (parité fix A3 du commis Haiku
-# unifié dans `_prewarm_unified_for_mail`). Aucun intérêt à analyser le
-# style relationnel d'une boîte vocale qui n'attend pas de réponse.
-_AUTO_EMAIL_PATTERNS = (
-    'noreply', 'no-reply', 'no_reply',
-    'donotreply', 'do-not-reply', 'do_not_reply',
-    'nepasrepondre', 'ne-pas-repondre', 'ne_pas_repondre',
-    'mailer-daemon', 'postmaster',
-    'notifications@', 'notification@',
-    'newsletter@', 'mailing@',
-    'automate.', 'automate@',
-    'quarantine@',
-    'edi@', 'dse@',
-    'e-statement@', 'estatement@',
-    'mssecurity-noreply', 'microsoftexchange',
-    'invitations@trustpilot',
-)
+# Refonte N1 (11/05/2026) — déclaration _AUTO_EMAIL_PATTERNS supprimée ici,
+# elle est maintenant module-level tôt dans le fichier (voir bloc « Refonte
+# Niveau 1 — Liste no-reply unique »). Évite les divergences entre 3 listes.
 
 # Audit 03/05 fix RC2 : cooldown anti-boucle pour la branche "sample_count=0
 # anormal, rattrapage". La branche bypasse le filtre schedule, donc sans
@@ -13709,12 +13744,8 @@ def _maybe_analyze_contact(contact_email, bypass_cooldown=False):
         return
 
     # Audit 03/05 fix RC1 : skip auto-emails (noreply, mailer-daemon, etc.)
-    # Aucun intérêt à analyser le style relationnel d'une boîte vocale.
-    # Avant ce fix : 31/33 profils sample_count=0 étaient des auto-emails
-    # qui faisaient le tour complet jusqu'à `if not sent_mails: return`
-    # ligne ~12595, soit ~33 480 logs/jour de bruit pur (CPU + DB load).
-    contact_lower = contact_email.lower()
-    if any(p in contact_lower for p in _AUTO_EMAIL_PATTERNS):
+    # Refonte N1 (11/05) : utilisation du helper centralisé _is_auto_email
+    if _is_auto_email(contact_email):
         return  # silencieux : pas de log, pas d'analyse, pas de save
 
     mail_count = _db.count_mails_with_contact(contact_email)
