@@ -63,7 +63,21 @@ check "I-SAAS-02" "API OVH répond HTTPS" "curl -sk --max-time 5 -o /dev/null -w
 echo
 echo "--- Catégorie 2 : Service Flask ---"
 check "I-SAAS-03" "Service systemd boostermail active" "ssh $OVH_HOST 'sudo systemctl is-active boostermail' 2>/dev/null | grep -q '^active$'"
-check "I-SAAS-04" "Warmup terminé (done:true)" "curl -sk --max-time 5 '$API_BASE/api/warmup_status' | grep -q '\"done\":true'"
+# I-SAAS-04 multi-tenant : depuis Étape 7, _warmup_progress est _UserScopedDict.
+# done:true seulement quand un user a triggered son warmup via /api/warmup_inbox/start.
+# Sur un serveur post-restart sans session user active, payload normal = {done:false,
+# current:0, total:0, step:""} → état idle, SKIP (pas un fail).
+WARMUP_PAYLOAD=$(curl -sk --max-time 5 "$API_BASE/api/warmup_status" 2>/dev/null)
+if echo "$WARMUP_PAYLOAD" | grep -q '"done":true'; then
+    PASS=$((PASS+1))
+    echo "  OK   [I-SAAS-04] Warmup terminé (done:true)"
+elif echo "$WARMUP_PAYLOAD" | grep -q '"total":0' && echo "$WARMUP_PAYLOAD" | grep -q '"done":false'; then
+    skip "I-SAAS-04" "Warmup idle (multi-tenant — aucun user n'a déclenché son warmup)"
+else
+    FAIL=$((FAIL+1))
+    FAILS+=("I-SAAS-04 : Warmup état inattendu ($WARMUP_PAYLOAD)")
+    echo "  FAIL [I-SAAS-04] Warmup état inattendu ($WARMUP_PAYLOAD)"
+fi
 
 # Catégorie 3 : Latence
 echo
