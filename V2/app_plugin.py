@@ -6090,47 +6090,43 @@ def _start_speculative(mail_data):
         importance_int = {'R': 1, 'S': 2, 'H': 3}[importance_letter]
         max_tokens = {'R': 600, 'S': 1000, 'H': 1500}[importance_letter]
 
-        # Vérifier template AVANT appel IA (< 100ms si match)
-        try:
-            template, template_name = detect_template(
-                email_body=raw_body,
-                subject=subject,
-                brief='',
-                is_first_mail=False,
-                reply_mode='reply',
-                importance_override=importance_int,
-            )
-            if template:
-                user_name = _get_user_name()
-                # PLUS_TARD_VF #3 (28/04) — signature personnalisée par contact :
-                # utiliser la signature résolue (contact_profile override sinon fallback global)
-                signature = _resolve_user_signature(contact_profile, user_name)
-                text = assemble_template(template, contact_profile, signature)
-                # Chunks pour streaming progressif : plain text (évite casser
-                # les balises HTML quand le dialog reçoit un chunk au milieu
-                # d'un <p> ou <br>)
-                words = text.split(' ')
-                chunks = [' '.join(words[i:i+3]) + ' ' for i in range(0, len(words), 3)]
-                # P0.5 (24/04) : stocker `text` en HTML pour affichage direct
-                # via instant_reply (zéro travail côté dialog).
-                text_html = _normalize_reply_to_html(text)
-                with _reply_lock:
-                    _reply_cache[message_id] = {
-                        'status': 'done',
-                        'text': text_html,
-                        'chunks': chunks,
-                        'timestamp': time.time(),
-                        'contact': from_email,
-                        'importance': importance_letter,
-                        'source': 'template',
-                    }
-                logger.debug(f"Template '{template_name}' preemptif pour {message_id[:20]}")
-                _broadcast_sse('speculative_ready', {'message_id': message_id, 'source': 'template'})
-                # Draft prêt → déclencher preview (échéance + classement + PJ) immédiatement (25/04)
-                _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-post-draft')
-                return  # Pas d'appel IA nécessaire
-        except Exception as e:
-            logger.warning(f"Erreur detect_template speculative: {e}")
+        # Templates désactivés 11/05/2026 — décision Yvan « Claude partout »
+        # étendue aux templates (cf bilan 8/05 + bug greeting profil mail Alain).
+        # Le préchauffage BG passe maintenant systématiquement par Claude.
+        # ----- DESACTIVE 11/05/2026 -----
+        # try:
+        #     template, template_name = detect_template(
+        #         email_body=raw_body,
+        #         subject=subject,
+        #         brief='',
+        #         is_first_mail=False,
+        #         reply_mode='reply',
+        #         importance_override=importance_int,
+        #     )
+        #     if template:
+        #         user_name = _get_user_name()
+        #         signature = _resolve_user_signature(contact_profile, user_name)
+        #         text = assemble_template(template, contact_profile, signature)
+        #         words = text.split(' ')
+        #         chunks = [' '.join(words[i:i+3]) + ' ' for i in range(0, len(words), 3)]
+        #         text_html = _normalize_reply_to_html(text)
+        #         with _reply_lock:
+        #             _reply_cache[message_id] = {
+        #                 'status': 'done',
+        #                 'text': text_html,
+        #                 'chunks': chunks,
+        #                 'timestamp': time.time(),
+        #                 'contact': from_email,
+        #                 'importance': importance_letter,
+        #                 'source': 'template',
+        #             }
+        #         logger.debug(f"Template '{template_name}' preemptif pour {message_id[:20]}")
+        #         _broadcast_sse('speculative_ready', {'message_id': message_id, 'source': 'template'})
+        #         _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-post-draft')
+        #         return  # Pas d'appel IA nécessaire
+        # except Exception as e:
+        #     logger.warning(f"Erreur detect_template speculative: {e}")
+        # ----- /DESACTIVE 11/05/2026 -----
 
         # P0.4 fix 24/04 : intégrer l'analyse des PJ dans la génération BG.
         # Avant : _start_speculative construisait le prompt sur le body seul
@@ -10210,54 +10206,55 @@ def api_instant_reply():
                 "timestamp": entry.get('timestamp', 0),
             })
 
-    # 3) TEMPLATE (fixe ou appris, confidence >= 0.75)
-    try:
-        learned = [lt for lt in _db.get_learned_templates()
-                   if lt.get('status') != 'demoted']
-    except Exception:
-        learned = []
-    try:
-        m = match_template_with_confidence(
-            email_body=email_body, subject=subject, brief=brief,
-            is_first_mail=(reply_mode == 'new'), reply_mode=reply_mode,
-            importance_override=importance_int, current_draft=current_draft,
-            learned_templates=learned,
-        )
-    except Exception as e:
-        logger.warning(f"[instant_reply] match_template erreur : {e}")
-        m = None
-
-    if m and m.get('confidence', 0) >= 0.75:
-        contact_profile = None
-        try:
-            if from_email:
-                contact_profile = _db.get_contact_profile(from_email)
-        except Exception:
-            pass
-        user_name = _get_user_name()
-        # PLUS_TARD_VF #3 (28/04) — signature résolue par contact
-        signature = _resolve_user_signature(contact_profile, user_name)
-        if m['source'] == 'fixed':
-            text = assemble_template(m['template_dict'], contact_profile, signature)
-            # PLUS_TARD_VF #2 (28/04) — track quel template fixe matche
-            _log_template_metric(f"template.fixed.{m.get('template_name', 'unknown')}", message_id)
-        else:
-            text = assemble_learned_template(m['learned'], contact_profile, signature)
-            _log_template_metric('template.learned', message_id)
-        logger.info(f"[instant_reply] HIT source=template conf={m.get('confidence'):.2f} "
-                    f"name={m.get('template_name')} msg={message_id[:30]}")
-        # P0.5 : normaliser en HTML pour affichage direct côté dialog
-        return jsonify({
-            "source": "template",
-            "text": _normalize_reply_to_html(text),
-            "html": True,
-            "badge": "Réponse apprise" if m['source'] == 'learned' else "Réponse rapide",
-            "confidence": m['confidence'],
-            "template_name": m['template_name'],
-            "template_id": m['template_id'] if m['source'] == 'fixed'
-                           else f"learned_{m['template_id']}",
-            "template_source": m['source'],
-        })
+    # 3) TEMPLATE — DESACTIVE 11/05/2026 (décision Yvan « Claude partout »
+    # étendue aux templates fixes ET appris). Bloc commenté pour réversibilité.
+    # Le code passe directement au step 4 (miss) → le frontend bascule sur
+    # le streaming Claude via /generate_reply.
+    # ----- DESACTIVE 11/05/2026 -----
+    # try:
+    #     learned = [lt for lt in _db.get_learned_templates()
+    #                if lt.get('status') != 'demoted']
+    # except Exception:
+    #     learned = []
+    # try:
+    #     m = match_template_with_confidence(
+    #         email_body=email_body, subject=subject, brief=brief,
+    #         is_first_mail=(reply_mode == 'new'), reply_mode=reply_mode,
+    #         importance_override=importance_int, current_draft=current_draft,
+    #         learned_templates=learned,
+    #     )
+    # except Exception as e:
+    #     logger.warning(f"[instant_reply] match_template erreur : {e}")
+    #     m = None
+    # if m and m.get('confidence', 0) >= 0.75:
+    #     contact_profile = None
+    #     try:
+    #         if from_email:
+    #             contact_profile = _db.get_contact_profile(from_email)
+    #     except Exception:
+    #         pass
+    #     user_name = _get_user_name()
+    #     signature = _resolve_user_signature(contact_profile, user_name)
+    #     if m['source'] == 'fixed':
+    #         text = assemble_template(m['template_dict'], contact_profile, signature)
+    #         _log_template_metric(f"template.fixed.{m.get('template_name', 'unknown')}", message_id)
+    #     else:
+    #         text = assemble_learned_template(m['learned'], contact_profile, signature)
+    #         _log_template_metric('template.learned', message_id)
+    #     logger.info(f"[instant_reply] HIT source=template conf={m.get('confidence'):.2f} "
+    #                 f"name={m.get('template_name')} msg={message_id[:30]}")
+    #     return jsonify({
+    #         "source": "template",
+    #         "text": _normalize_reply_to_html(text),
+    #         "html": True,
+    #         "badge": "Réponse apprise" if m['source'] == 'learned' else "Réponse rapide",
+    #         "confidence": m['confidence'],
+    #         "template_name": m['template_name'],
+    #         "template_id": m['template_id'] if m['source'] == 'fixed'
+    #                        else f"learned_{m['template_id']}",
+    #         "template_source": m['source'],
+    #     })
+    # ----- /DESACTIVE 11/05/2026 -----
 
     # 4) Rien — P3.2 (24/04) : logger la RAISON du MISS pour diagnostic.
     # Permet d'identifier les patterns récurrents (contact UNKNOWN, filtre
@@ -10315,91 +10312,71 @@ def api_instant_reply():
 def api_match_template():
     """
     Teste si un template (fixe ou appris) match le mail ouvert.
-    Permet au dialog.js d'afficher une réponse instantanée ($0, <100 ms)
-    AVANT de lancer la génération Claude.
 
-    Plan 2 Phase 1.A.3 — seuil confiance 0.75.
-
-    Body JSON : {
-        email_body, subject, brief, reply_mode, importance, current_draft,
-        from_email (pour contact_profile → register tu/vous)
-    }
-
-    Retour :
-    {
-        "match": true/false,
-        "template": "Bonjour,\\n\\n...\\n\\nCordialement,\\nYvan",
-        "template_id": 1 | "learned_42",
-        "template_name": "document_recu",
-        "source": "fixed" | "learned",
-        "confidence": 0.85,
-        "threshold_passed": true   // confidence >= 0.75
-    }
+    DESACTIVE 11/05/2026 — décision Yvan « Claude partout » étendue aux
+    templates. La route renvoie systématiquement {"match": False} pour
+    que le frontend bascule sur la génération Claude via /generate_reply.
+    Route conservée pour ne pas casser dialog.js (qui appelle cette URL
+    avant de lancer la génération). Logique d'origine commentée plus bas
+    pour réversibilité rapide (5 min).
     """
-    data = request.get_json() or {}
-    email_body = data.get('email_body', '') or ''
-    subject = data.get('subject', '') or ''
-    brief = data.get('brief', '') or ''
-    reply_mode = data.get('reply_mode', 'reply') or 'reply'
-    importance = data.get('importance', 0)
-    current_draft = data.get('current_draft', '') or ''
-    from_email = (data.get('from_email', '') or '').lower()
+    return jsonify({"match": False, "disabled": True})
 
-    try:
-        importance_int = int(importance) if importance else 0
-    except (ValueError, TypeError):
-        importance_int = 0
-
-    # Charger les templates appris promus + candidats (pas les démotés)
-    try:
-        learned = [lt for lt in _db.get_learned_templates()
-                   if lt.get('status') != 'demoted']
-    except Exception as e:
-        logger.warning(f"Erreur get_learned_templates: {e}")
-        learned = []
-
-    try:
-        result = match_template_with_confidence(
-            email_body=email_body, subject=subject, brief=brief,
-            is_first_mail=(reply_mode == 'new'), reply_mode=reply_mode,
-            importance_override=importance_int, current_draft=current_draft,
-            learned_templates=learned,
-        )
-    except Exception as e:
-        logger.warning(f"Erreur match_template: {e}")
-        return jsonify({"match": False, "error": str(e)})
-
-    if not result:
-        return jsonify({"match": False})
-
-    # Assembler le texte complet (greeting + corps + closing + signature)
-    contact_profile = None
-    try:
-        if from_email:
-            contact_profile = _db.get_contact_profile(from_email)
-    except Exception:
-        pass
-
-    user_name = _get_user_name()
-    # PLUS_TARD_VF #3 (28/04) — signature résolue par contact
-    signature = _resolve_user_signature(contact_profile, user_name)
-
-    if result['source'] == 'fixed':
-        text = assemble_template(result['template_dict'], contact_profile, signature)
-    else:
-        text = assemble_learned_template(result['learned'], contact_profile, signature)
-
-    confidence = result['confidence']
-    return jsonify({
-        "match": True,
-        "template": text,
-        "template_id": result['template_id'] if result['source'] == 'fixed'
-                       else f"learned_{result['template_id']}",
-        "template_name": result['template_name'],
-        "source": result['source'],
-        "confidence": confidence,
-        "threshold_passed": confidence >= 0.75,
-    })
+    # ----- DESACTIVE 11/05/2026 -----
+    # data = request.get_json() or {}
+    # email_body = data.get('email_body', '') or ''
+    # subject = data.get('subject', '') or ''
+    # brief = data.get('brief', '') or ''
+    # reply_mode = data.get('reply_mode', 'reply') or 'reply'
+    # importance = data.get('importance', 0)
+    # current_draft = data.get('current_draft', '') or ''
+    # from_email = (data.get('from_email', '') or '').lower()
+    # try:
+    #     importance_int = int(importance) if importance else 0
+    # except (ValueError, TypeError):
+    #     importance_int = 0
+    # try:
+    #     learned = [lt for lt in _db.get_learned_templates()
+    #                if lt.get('status') != 'demoted']
+    # except Exception as e:
+    #     logger.warning(f"Erreur get_learned_templates: {e}")
+    #     learned = []
+    # try:
+    #     result = match_template_with_confidence(
+    #         email_body=email_body, subject=subject, brief=brief,
+    #         is_first_mail=(reply_mode == 'new'), reply_mode=reply_mode,
+    #         importance_override=importance_int, current_draft=current_draft,
+    #         learned_templates=learned,
+    #     )
+    # except Exception as e:
+    #     logger.warning(f"Erreur match_template: {e}")
+    #     return jsonify({"match": False, "error": str(e)})
+    # if not result:
+    #     return jsonify({"match": False})
+    # contact_profile = None
+    # try:
+    #     if from_email:
+    #         contact_profile = _db.get_contact_profile(from_email)
+    # except Exception:
+    #     pass
+    # user_name = _get_user_name()
+    # signature = _resolve_user_signature(contact_profile, user_name)
+    # if result['source'] == 'fixed':
+    #     text = assemble_template(result['template_dict'], contact_profile, signature)
+    # else:
+    #     text = assemble_learned_template(result['learned'], contact_profile, signature)
+    # confidence = result['confidence']
+    # return jsonify({
+    #     "match": True,
+    #     "template": text,
+    #     "template_id": result['template_id'] if result['source'] == 'fixed'
+    #                    else f"learned_{result['template_id']}",
+    #     "template_name": result['template_name'],
+    #     "source": result['source'],
+    #     "confidence": confidence,
+    #     "threshold_passed": confidence >= 0.75,
+    # })
+    # ----- /DESACTIVE 11/05/2026 -----
 
 
 @app.route('/api/template_feedback', methods=['POST'])
@@ -11663,45 +11640,44 @@ INSTRUCTIONS ECHEANCES :
     # final ; `user_name` reste pour les gardes anti-self-greeting (patronyme).
     signature = _resolve_user_signature(contact_profile, user_name)
 
-    # Vérifier template AVANT appel IA (< 100ms si match)
-    try:
-        tpl, tpl_name = detect_template(
-            email_body=raw_body,  # déjà cappé à 10K plus haut
-            subject=subject,
-            brief=brief,
-            is_first_mail=(reply_mode == 'new'),
-            reply_mode=reply_mode,
-            importance_override=importance_int,
-        )
-        if tpl:
-            tpl_text = assemble_template(tpl, contact_profile, signature)
-            logger.info(f"Template '{tpl_name}' pour {message_id[:20] if message_id else '?'}")
-            # Annuler le thread spéculatif en cours s'il tourne encore (évite gaspillage)
-            # ANOMALIE #9 fix : flag 'cancelled' au lieu de pop (le thread vérifie ce flag
-            # et s'arrête proprement, sans remettre une entrée en cache après le pop)
-            if message_id:
-                with _reply_lock:
-                    entry = _reply_cache.get(message_id, {})
-                    if entry.get('status') == 'running':
-                        _reply_cache[message_id] = {'status': 'cancelled'}
-
-            def stream_template():
-                words = tpl_text.split(' ')
-                for i in range(0, len(words), 3):
-                    chunk = ' '.join(words[i:i+3]) + ' '
-                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
-                    time.sleep(0.02)
-                if message_id:
-                    _store_proposed(message_id, tpl_text)
-                yield f"data: {json.dumps({'done': True, 'importance_used': importance_letter})}\n\n"
-
-            return Response(
-                stream_with_context(stream_template()),
-                mimetype='text/event-stream',
-                headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
-            )
-    except Exception as e:
-        logger.warning(f"Erreur detect_template generate_reply: {e}")
+    # Templates désactivés 11/05/2026 — décision Yvan « Claude partout » étendue
+    # aux templates (cf bilan 8/05 + bug greeting profil sur mail Alain).
+    # Bloc conservé en commentaire pour réversibilité rapide (5 min).
+    # ----- DESACTIVE 11/05/2026 -----
+    # try:
+    #     tpl, tpl_name = detect_template(
+    #         email_body=raw_body,  # déjà cappé à 10K plus haut
+    #         subject=subject,
+    #         brief=brief,
+    #         is_first_mail=(reply_mode == 'new'),
+    #         reply_mode=reply_mode,
+    #         importance_override=importance_int,
+    #     )
+    #     if tpl:
+    #         tpl_text = assemble_template(tpl, contact_profile, signature)
+    #         logger.info(f"Template '{tpl_name}' pour {message_id[:20] if message_id else '?'}")
+    #         if message_id:
+    #             with _reply_lock:
+    #                 entry = _reply_cache.get(message_id, {})
+    #                 if entry.get('status') == 'running':
+    #                     _reply_cache[message_id] = {'status': 'cancelled'}
+    #         def stream_template():
+    #             words = tpl_text.split(' ')
+    #             for i in range(0, len(words), 3):
+    #                 chunk = ' '.join(words[i:i+3]) + ' '
+    #                 yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+    #                 time.sleep(0.02)
+    #             if message_id:
+    #                 _store_proposed(message_id, tpl_text)
+    #             yield f"data: {json.dumps({'done': True, 'importance_used': importance_letter})}\n\n"
+    #         return Response(
+    #             stream_with_context(stream_template()),
+    #             mimetype='text/event-stream',
+    #             headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    #         )
+    # except Exception as e:
+    #     logger.warning(f"Erreur detect_template generate_reply: {e}")
+    # ----- /DESACTIVE 11/05/2026 -----
 
     # max_tokens déjà calculé en haut selon importance_letter
 
