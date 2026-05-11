@@ -463,14 +463,33 @@ class GraphClient(EmailProvider):
     # 12d-3 : LECTURE EMAILS (à implémenter)
     # =========================================================================
 
+    @staticmethod
+    def _normalize_outlook_id(message_id: str) -> str:
+        """Normalise un Outlook ID en variante URL-safe base64.
+
+        Fix 11/05/2026 (suite) — bug mail Maryam : Office.js retourne
+        les Outlook IDs en base64 standard (avec `/` et `+`), mais Graph
+        stocke et accepte la variante URL-safe (avec `-` et `_`). L'URL
+        encoding seul (%2F) ne suffit pas — Graph répond toujours 400
+        « Resource not found for the segment '...' ». Solution : convertir
+        les caractères avant d'utiliser l'ID dans l'URL.
+
+        IMIDs (commençant par '<') laissés inchangés.
+        """
+        if not message_id or message_id.startswith('<'):
+            return message_id
+        return message_id.replace('/', '-').replace('+', '_')
+
     def get_email_by_id(self, message_id: str) -> dict | None:
         """
         GET /me/messages/{id}?$select=...&$expand=attachments
         Récupère un email complet (body HTML + PJ métadonnées).
         """
+        # Normalise base64 standard → URL-safe (cf _normalize_outlook_id).
+        norm_id = self._normalize_outlook_id(message_id)
         try:
             data = self._get(
-                f'/me/messages/{self._q(message_id)}'
+                f'/me/messages/{self._q(norm_id)}'
                 f'?$select={_FULL_SELECT}'
                 f'&$expand=attachments'
             )
@@ -675,7 +694,8 @@ class GraphClient(EmailProvider):
         Plus léger que get_email_by_id() quand on a déjà les métadonnées.
         """
         try:
-            data = self._get(f'/me/messages/{self._q(message_id)}?$select=body')
+            norm_id = self._normalize_outlook_id(message_id)
+            data = self._get(f'/me/messages/{self._q(norm_id)}?$select=body')
             body_obj = data.get('body', {})
             return body_obj.get('content', '')
         except Exception as e:

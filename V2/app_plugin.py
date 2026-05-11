@@ -8840,11 +8840,38 @@ def _fetch_single_preview_plate(message_id, plate):
         logger.debug(f"[preview-{plate}] check DB : {e}")
 
     # 3) Total miss : trigger BG generation, return 'miss' (frontend pollera)
+    # Fix 11/05/2026 — fallback Graph quand cache miss : un message_id en
+    # format Outlook (AAMkAD...) ne match pas email_cache.entry_id (stocké
+    # en IMID `<...@...>`). Sans fallback Graph, _prewarm_mail_preview n'est
+    # jamais lancé → polling éternel sur 'miss' (cas mail Maryam 11/05).
     try:
         cached = _db.get_cached_email(message_id)
+        if not cached:
+            # Tentative Graph pour récupérer le mail et l'ajouter au cache
+            graph = get_graph()
+            if graph:
+                try:
+                    if message_id.startswith('<'):
+                        _fetched = graph.get_email_by_internet_id(message_id)
+                    else:
+                        _fetched = graph.get_email_by_id(message_id)
+                    if _fetched:
+                        # Sauve en cache sous l'IMID si dispo (sinon message_id reçu).
+                        _imid = _fetched.get('internet_message_id') or message_id
+                        try:
+                            _db.save_email_cache(_imid, _fetched)
+                        except Exception as _se:
+                            logger.debug(f"[preview-{plate}] save_cache : {_se}")
+                        cached = _fetched
+                        logger.info(
+                            f"[preview-{plate}] cache miss compensé par fallback "
+                            f"Graph pour {message_id[:30]} → imid={_imid[:40]}"
+                        )
+                except Exception as _ge:
+                    logger.debug(f"[preview-{plate}] fallback Graph : {_ge}")
         if cached:
             mail_data = {
-                'internet_message_id': message_id,
+                'internet_message_id': cached.get('internet_message_id') or message_id,
                 'from_email': cached.get('from_email', ''),
                 'from_name': cached.get('from_name', ''),
                 'subject': cached.get('subject', ''),
