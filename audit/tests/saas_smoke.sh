@@ -23,7 +23,7 @@
 
 set -u
 
-OVH_HOST='ubuntu@51.178.162.208'
+OVH_HOST='ubuntu@152.228.209.252'
 API_BASE='https://api.boostermail.ai'
 
 # Compteurs
