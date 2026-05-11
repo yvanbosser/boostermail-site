@@ -4844,111 +4844,194 @@ def api_webhooks_graph():
     return jsonify({"status": "ok", "queued": len(valid_notifications)}), 200
 
 
+def _build_mail_data_from_graph_msg(msg):
+    """Refonte N1 (11/05/2026) — Construction canonique d'un mail_data.
+
+    UNE seule fonction qui produit un `mail_data` complet et canonique depuis
+    un message Graph (ou tout dict ressemblant à la sortie de
+    `graph.get_email_by_id`). Utilisée par TOUS les chemins d'entrée d'un mail :
+      - webhook Graph (`_handle_graph_webhook_notifications`)
+      - warmup initial (`warmup_inbox`)
+      - selected mail (clic user dans Outlook)
+      - compose handler
+
+    Garantie I-CANON-01 : `mail_data['internet_message_id']` est TOUJOURS un
+    IMID canonique RFC 2822 (ou un IMID synthétique stable si Microsoft ne
+    fournit pas d'IMID natif — cas mail interne Outlook/Teams).
+    """
+    if not isinstance(msg, dict):
+        return {}
+
+    # Recipients : tolère list[dict] Graph ou list[str] legacy
+    def _extract_recipients(field):
+        items = msg.get(field, []) or []
+        out = []
+        for r in items:
+            if isinstance(r, dict):
+                ea = r.get('emailAddress', {}) or {}
+                out.append({
+                    'email': (ea.get('address', '') or '').lower(),
+                    'name': ea.get('name', '') or '',
+                })
+            elif isinstance(r, str):
+                out.append({'email': r.lower(), 'name': ''})
+        return out
+
+    # From : Graph format `from.emailAddress.{address,name}`
+    from_obj = msg.get('from') or {}
+    from_addr = from_obj.get('emailAddress') if isinstance(from_obj, dict) else {}
+    from_email = (from_addr.get('address', '') if isinstance(from_addr, dict) else '').lower()
+    from_name = (from_addr.get('name', '') if isinstance(from_addr, dict) else '') or ''
+
+    # Body : Graph format `body.content` (HTML)
+    body_obj = msg.get('body')
+    body = body_obj.get('content', '') if isinstance(body_obj, dict) else (msg.get('body', '') if isinstance(msg.get('body'), str) else '')
+
+    # IMID canonique : extraction puis canonicalisation (synthétique si absent)
+    raw_imid = (msg.get('internetMessageId') or '').strip()
+    raw_oid = (msg.get('id') or '').strip()
+    # Priorité : IMID natif si canonique strict, sinon canonicalize via fallback DB/synthétique
+    if _is_canonical_imid_strict(raw_imid):
+        imid = raw_imid
+    else:
+        # Fallback : utiliser l'OData id pour générer un IMID synthétique stable
+        # (ou retrouver l'IMID natif via email_cache si disponible)
+        source_for_canon = raw_oid or raw_imid
+        imid = _canonicalize_message_id(source_for_canon, allow_synthetic=True) if source_for_canon else ''
+
+    mail_data = {
+        # I-CANON-01 : la clé canonique est toujours l'IMID
+        'internet_message_id': imid,
+        'message_id': imid,  # alias pour compat backward avec call sites legacy
+        # Identifiant Outlook conservé pour fetch/move/etc. via Graph
+        'id': raw_oid,
+        'subject': msg.get('subject', '') or '',
+        'from_email': from_email,
+        'from_name': from_name,
+        'body': body,
+        'conversation_id': msg.get('conversationId', '') or '',
+        'has_attachments': bool(msg.get('hasAttachments', False)),
+        'received_at': msg.get('receivedDateTime', '') or '',
+        'date': msg.get('receivedDateTime', '') or '',
+        'to': _extract_recipients('toRecipients'),
+        'cc': _extract_recipients('ccRecipients'),
+        # Conservé pour callers qui veulent enrichir (PJ, etc.)
+        'attachments': msg.get('attachments', []) or [],
+    }
+    return mail_data
+
+
+def _ingest_new_mail(msg):
+    """Refonte N1 (11/05/2026) — Pipeline d'ingestion d'un nouveau mail.
+
+    UNE seule fonction qui :
+      1. Construit le mail_data canonique
+      2. Effectue le STOCKAGE BRUT SYSTÉMATIQUE dans email_cache sous l'IMID
+         (Règle R3 de la slide V2 « Stockage brut TOUJOURS fait »)
+      3. Déclenche les étapes 2-5 en aval (_run_prefetch + _prewarm_mail_preview)
+
+    Appelée par le webhook handler ET les 3 chemins alternatifs (warmup,
+    selected mail, compose) pour garantir un comportement uniforme.
+
+    Args:
+        msg: message Graph (dict) ou mail_data déjà construit (le helper
+             tolère les 2 formats).
+
+    Returns:
+        str: IMID canonique du mail ingéré, ou '' si impossible.
+    """
+    # Si on reçoit déjà un mail_data construit (ex: warmup), on le recanonicalise
+    # pour garantir I-CANON-01. Sinon on le construit depuis le msg Graph.
+    if isinstance(msg, dict) and 'internet_message_id' in msg and 'from_email' in msg:
+        mail_data = dict(msg)  # copie pour ne pas muter l'original
+        imid = _extract_imid_from_mail_data(mail_data)
+        if imid:
+            mail_data['internet_message_id'] = imid
+            mail_data['message_id'] = imid
+    else:
+        mail_data = _build_mail_data_from_graph_msg(msg)
+        imid = mail_data.get('internet_message_id', '')
+
+    if not imid:
+        logger.warning(
+            f"[ingest] mail sans IMID canonisable : subject={mail_data.get('subject', '')[:40]}"
+        )
+        return ''
+
+    # R3 : STOCKAGE BRUT SYSTÉMATIQUE sous l'IMID canonique, AVANT tout filtre.
+    # Garantit que tout mail reste accessible côté UI même s'il est écarté
+    # par le filtre 1 en aval. Idempotent (INSERT OR REPLACE côté DB).
+    try:
+        _db.save_email_cache(imid, mail_data)
+    except Exception as e:
+        logger.warning(f"[ingest] save_email_cache failed pour {imid[:30]} : {e}")
+
+    # Déclenchement aval (Niveau 2+ de l'arbre).
+    try:
+        _run_prefetch(mail_data)
+    except Exception as e:
+        logger.warning(f"[ingest] _run_prefetch failed pour {imid[:30]} : {e}")
+    try:
+        _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-ingest')
+    except Exception as e:
+        logger.debug(f"[ingest] _prewarm_mail_preview spawn err : {e}")
+
+    return imid
+
+
 def _handle_graph_webhook_notifications(notifications):
     """Traite une liste de notifications webhook (created + deleted).
 
-    Audit 08/05 fix #8 : signature étendue — accepte une liste de tuples
-    ``(change_type, message_id)`` au lieu d'une liste plate de mids.
-
-    Pour chaque notif :
-      - 'created' : récupère le mail via Graph + lance _run_prefetch en BG
-      - 'deleted' : lookup IMID via email_cache, puis _event_purge_mail
+    Refonte N1 (11/05/2026) : délègue à `_ingest_new_mail` pour les created
+    (canonicalisation + stockage brut systématique + déclenchement aval) et à
+    `_event_purge_mail` pour les deleted (avec lookup IMID via email_cache).
 
     Best-effort : log les erreurs sans crash.
     """
     graph = get_graph()
-    # Audit 08/05 fix #8 : split par type de changement
     created_ids = [mid for ct, mid in notifications if ct == 'created']
     deleted_ids = [mid for ct, mid in notifications if ct == 'deleted']
 
-    # --- Branche DELETED (audit 08/05 fix #8) -------------------------------
-    # Le mail n'existe plus côté Graph → on ne peut pas faire get_email_by_id.
-    # On retrouve l'IMID canonique via email_cache (LIKE sur email_json) puis
-    # on appelle _event_purge_mail pour purger les caches RAM + 4 tables DB.
+    # --- Branche DELETED ---------------------------------------------------
     for odata_id in deleted_ids:
         try:
             imid = _db.find_entry_id_by_odata_id(odata_id)
             if not imid:
-                # Mail jamais caché localement (ex: arrivé pendant que V2 était
-                # down). Pas grave, rien à purger.
                 logger.debug(
-                    f"[graph webhook deleted] mail {odata_id[:20]}... non caché → skip"
+                    f"[webhook deleted] mail {odata_id[:20]}... non caché → skip"
                 )
                 continue
             _event_purge_mail(imid, 'deleted', 'graph_webhook')
             logger.info(
-                f"[graph webhook deleted] purgé mid={imid[:30]} (odata={odata_id[:20]}...)"
+                f"[webhook deleted] purgé mid={imid[:30]} (odata={odata_id[:20]}...)"
             )
         except Exception as e:
             logger.warning(
-                f"[graph webhook deleted] erreur purge {odata_id[:20]}... : {e}"
+                f"[webhook deleted] erreur purge {odata_id[:20]}... : {e}"
             )
 
-    # --- Branche CREATED (existant) ----------------------------------------
+    # --- Branche CREATED ---------------------------------------------------
     if not graph:
         if created_ids:
             logger.warning(
-                f"[graph webhooks handler] Graph indisponible, "
-                f"{len(created_ids)} mail(s) created non traité(s)"
+                f"[webhook created] Graph indisponible, "
+                f"{len(created_ids)} mail(s) non traité(s)"
             )
         return
-    for mid in created_ids:
+    for odata_id in created_ids:
         try:
-            # Récupérer le mail complet via Graph (le webhook ne donne que l'ID).
-            # Méthode correcte = get_email_by_id (et non get_message qui n'existe pas).
-            msg = graph.get_email_by_id(mid)
+            msg = graph.get_email_by_id(odata_id)
             if not msg:
-                logger.debug(f"[graph webhooks handler] mail {mid[:20]}... introuvable via Graph")
+                logger.debug(f"[webhook created] mail {odata_id[:20]}... introuvable via Graph")
                 continue
-            # Construire mail_data au format attendu par _run_prefetch
-            from_obj = msg.get('from') or {}
-            from_addr = from_obj.get('emailAddress') if isinstance(from_obj, dict) else {}
-            # Audit 08/05 fix #1 : extraire to/cc en list[dict] (format que
-            # _should_speculate filtre 6 sait parser via isinstance(list, ...)).
-            # Avant : ces champs absents → filtre 6 (CC vs TO) court-circuité
-            # → les CC d'un contact connu étaient traités comme VIP (cascade
-            # Sonnet inutile). Idem 'date' (filtre > 30 jours).
-            def _extract_recipients(field):
-                items = msg.get(field, []) or []
-                return [{
-                    'email': (r.get('emailAddress', {}).get('address', '') or '').lower(),
-                    'name': r.get('emailAddress', {}).get('name', ''),
-                } for r in items if isinstance(r, dict)]
-            # I-DATA-13 : prioriser internet_message_id (RFC 2822) sur l'OData id
-            # Graph (cohérence avec le reste du pipeline qui clé sur IMID).
-            mail_data = {
-                'message_id': msg.get('internetMessageId') or msg.get('id', ''),
-                'internet_message_id': msg.get('internetMessageId', ''),
-                'subject': msg.get('subject', ''),
-                'from_email': (from_addr.get('address', '') if isinstance(from_addr, dict) else '').lower(),
-                'from_name': (from_addr.get('name', '') if isinstance(from_addr, dict) else ''),
-                'body': msg.get('body', {}).get('content', '') if isinstance(msg.get('body'), dict) else '',
-                'conversation_id': msg.get('conversationId', ''),
-                'has_attachments': msg.get('hasAttachments', False),
-                'received_at': msg.get('receivedDateTime', ''),
-                'date': msg.get('receivedDateTime', ''),
-                'to': _extract_recipients('toRecipients'),
-                'cc': _extract_recipients('ccRecipients'),
-            }
-            logger.info(
-                f"[graph webhook] pré-génération déclenchée pour "
-                f"{mail_data['from_email']} / {mail_data['subject'][:40]}"
-            )
-            _run_prefetch(mail_data)
-            # O5 (08/05) — Mode PARTIEL : déclencher AUSSI le commis Haiku
-            # unifié pour TOUS les mails non-écartés (filtre 1). Couvre :
-            #   - VIP : cascade idempotente avec _start_speculative
-            #   - Partiel (CC, ouvert 5+×, contact inconnu) : seul moment
-            #     où le commis tourne avant que l'user ouvre le mail
-            # _prewarm_mail_preview filtre lui-même via _is_discarded
-            # (early-return). _prewarm_unified_for_mail est idempotent
-            # (cache DB check) → pas de doublon coûteux.
-            try:
-                _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-webhook')
-            except Exception as e:
-                logger.debug(f"[graph webhook] preview-webhook spawn err : {e}")
+            imid = _ingest_new_mail(msg)
+            if imid:
+                logger.info(
+                    f"[webhook created] ingéré pour {(msg.get('from') or {}).get('emailAddress', {}).get('address', '?')} "
+                    f"/ {(msg.get('subject') or '')[:40]} → {imid[:40]}"
+                )
         except Exception as e:
-            logger.warning(f"[graph webhooks handler] erreur traitement {mid[:20]}... : {e}")
+            logger.warning(f"[webhook created] erreur traitement {odata_id[:20]}... : {e}")
 
 
 @app.route('/api/admin/graph_subscription/setup', methods=['POST'])
