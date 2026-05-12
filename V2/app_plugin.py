@@ -2702,42 +2702,70 @@ def _is_user_treated(message_id):
         return False
 
 
+# Regex d'extraction d'adresse email — gère tous les formats vus en pratique :
+#   - `alice@x.com` (nu)
+#   - `Alice Dupont <alice@x.com>` (RFC 5322 avec display name)
+#   - `alice@x.com (Alice Dupont)` (commentaire RFC 5322)
+#   - séparateurs multiples (`;`, `,`, espace)
+# Pattern volontairement restrictif : exige `@` + TLD avec point (`.fr`,
+# `.com`...). Évite de matcher `<alice>` ou `Dupont`.
+_EMAIL_EXTRACT_RE = re.compile(r'[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}')
+
+
 def _extract_emails_from_field(field):
-    """Normalise un champ to/cc Graph en `set[str]` lowercase pour matching exact.
+    """Normalise un champ to/cc Graph en `set[str]` d'adresses email lowercase.
 
-    Graph (et ses normalizers internes) peuvent renvoyer ce champ sous 3 formes :
-      - `str` : "alice@x.com" ou "alice@x.com; bob@y.com"
-      - `list[dict]` : [{"email": "alice@x.com"}, {"address": "bob@y.com"}]
-        (clés "email" OU "address" selon le sérializer)
-      - `list[str]` : ["alice@x.com", "bob@y.com"]
+    Formats supportés (extraction par regex `_EMAIL_EXTRACT_RE`) :
+      - `str` :         "alice@x.com" | "alice@x.com; bob@y.com" |
+                        "Alice Dupont <alice@x.com>" (RFC 5322) |
+                        "alice@x.com (Alice Dupont)"
+      - `list[dict]` :  [{"email": "alice@x.com"}, {"address": "bob@y.com"}]
+                        (clés "email" OU "address" selon sérializer)
+      - `list[str]` :   ["alice@x.com", "Alice Dupont <alice@x.com>"]
+      - mix :           [{"email": "..."}, "alice@x.com"]
 
-    Refonte N5 (12/05/2026) — Retourne un `set` (avant : string concaténée).
-    Évite le bug substring matching : ancien `'bob@y.com' in 'bob@y.com.au'`
-    = True (faux positif Filtre 1 règle 5). Avec un set : `'bob@y.com' in
-    {'bob@y.com.au'}` = False (lookup exact).
+    Refonte N5 (12/05/2026) — Retourne un `set` (avant : string concaténée
+    qui causait du substring matching `'bob@y.com' in 'bob@y.com.au'` =
+    True). Regex d'extraction (avant : split brutal sur séparateurs qui
+    cassait les formats RFC 5322).
+
+    Fail-open : `set()` vide sur input invalide (None, int, type inconnu).
+    Les call sites font `my_email in result` → comportement sûr.
+
+    Limitation connue (acceptable au 12/05/2026, scope mono-user Yvan) :
+    la regex `_EMAIL_EXTRACT_RE` est ASCII-only. Les domaines IDN
+    (`alice@müller.de`, `yvan@société.fr`) ne sont pas extraits → ne seront
+    pas matchés. Sans impact pour Yvan/Michael (`@boostermail.ai`) mais
+    à revoir si SaaS multi-tenant international. Cf PLUS_TARD_VF.md #24.
 
     Returns
     -------
     set[str]
-        Adresses normalisées lowercase. Set vide si input invalide (fail-open).
+        Adresses email normalisées lowercase. Vide si rien d'extrait.
     """
+    out = set()
     if not field:
-        return set()
+        return out
+
+    def _add_from_str(s):
+        """Extrait toutes les adresses email d'une string (gère tous formats)."""
+        if not isinstance(s, str):
+            return
+        for match in _EMAIL_EXTRACT_RE.finditer(s):
+            out.add(match.group(0).lower())
+
     if isinstance(field, str):
-        # Split sur séparateurs courants (`;`, `,`, espace) — on garde robuste
-        return {e.strip().lower() for e in re.split(r'[;,\s]+', field) if e.strip()}
+        _add_from_str(field)
+        return out
     if isinstance(field, list):
-        out = set()
         for item in field:
             if isinstance(item, dict):
-                email = item.get('email', '') or item.get('address', '') or ''
-                if email:
-                    out.add(email.lower())
-            elif isinstance(item, str) and item.strip():
-                out.add(item.strip().lower())
+                _add_from_str(item.get('email') or item.get('address') or '')
+            elif isinstance(item, str):
+                _add_from_str(item)
             # silently skip autres types (None, int, etc.) — fail-open
         return out
-    return set()
+    return out
 
 
 def _extract_imid_from_mail_data(mail_data):
@@ -6309,6 +6337,22 @@ def _extract_prefetch_keywords(subject):
 #   - PARTIEL → commis Haiku seulement (résumé + classement Mail + classement PJ)
 
 
+def _safe_int(value, default=0):
+    """Conversion `int(...)` qui ne plante JAMAIS — fail-open sur DB corrompue.
+
+    Si la DB a stocké `sample_count='abc'` (V1 legacy, migration corrompue,
+    ou type inattendu venant d'un autre code path), `int(value)` lève
+    ValueError → on retourne `default`. Idem pour les types non-int-able
+    (dict, list, etc.). Élimine une fragilité du pipeline Filtre 2.
+    """
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
 def _filter_2_is_vip(email):
     """Filtre 2 de l'arbre décisionnel — VIP (= chef Sonnet activé) ou PARTIEL ?
 
@@ -6318,15 +6362,23 @@ def _filter_2_is_vip(email):
         (True, "")          → VIP, on peut lancer le chef Sonnet
         (False, "raison")   → PARTIEL, raison = pourquoi pas VIP (logs/metric)
 
-    Sémantique fail-open : si la DB plante ou si l'email est invalide,
-    retourne (False, "..."). Conséquence : le mail sera traité en PARTIEL
-    (commis Haiku quand même → résumé + classement). Mieux pré-cuire le
-    minimum que rater le mail entier.
+    Sémantique fail-open TOTAL : si N'IMPORTE QUEL chemin plante (DB, type
+    pourri, profil corrompu, conversion non-int), on retourne (False, raison)
+    sans jamais propager d'exception. Garantit que le caller ne crashe
+    jamais. La docstring tient sa promesse de bout en bout.
 
-    NB : la re-analyse en arrière-plan d'un contact à fiche vide
-    (sample_count=0) N'EST PAS déclenchée ici. C'est `_continuous_speculation_loop`
-    qui s'en charge (ligne ~1647) avec son propre cooldown 24h. Ce filtre
-    reste **pur** (pas de side-effect) — refonte N5 décision 12/05/2026.
+    Raisons possibles :
+      - 'email_invalide'   : email vide ou non-str
+      - 'db_fail'          : exception DB (locked, schéma migration…)
+      - 'pas_de_fiche'     : profil inexistant en base
+      - 'profile_corrupt'  : profil DB en type inattendu (pas un dict)
+      - 'fiche_vide'       : profil existant mais sample_count=0 ET pas
+                             manually_edited (cas Claude planté à l'analyse)
+
+    NB : la re-analyse en arrière-plan d'un contact à fiche vide N'EST PAS
+    déclenchée ici. C'est `_continuous_speculation_loop` (ligne ~1647) qui
+    s'en charge avec cooldown 24h. Ce filtre reste **pur** (pas de
+    side-effect) — refonte N5 décision Yvan 12/05/2026.
     """
     if not email or not isinstance(email, str):
         return False, 'email_invalide'
@@ -6337,14 +6389,23 @@ def _filter_2_is_vip(email):
         return False, 'db_fail'
     if profile is None:
         return False, 'pas_de_fiche'
-    # Fiche bien remplie = analysée par Claude (sample_count>=1)
-    # OU éditée manuellement par l'user (cas Q1 N5 corrigé : un user peut
-    # créer/peaufiner un profil à la main avec sample_count=0).
-    if int(profile.get('sample_count', 0) or 0) >= 1:
+    if not isinstance(profile, dict):
+        # Profil DB corrompu (type inattendu) — fail-open au lieu de crash
+        logger.debug(
+            f"[filter2] profil non-dict pour {email[:30]} : "
+            f"type={type(profile).__name__}"
+        )
+        return False, 'profile_corrupt'
+    # Conversions safe : si DB a stocké des valeurs non-int (V1 legacy ou
+    # corruption), on traite comme 0 plutôt que crasher.
+    sample_count = _safe_int(profile.get('sample_count'))
+    manually_edited = _safe_int(profile.get('manually_edited'))
+    # Fiche bien remplie = analysée par Claude (sample_count>=1) OU éditée
+    # manuellement par l'user (cas Q1 N5 : un user peut créer/peaufiner un
+    # profil à la main avec sample_count=0).
+    if sample_count >= 1 or manually_edited == 1:
         return True, ''
-    if int(profile.get('manually_edited', 0) or 0) == 1:
-        return True, ''
-    return False, 'fiche_vide'  # profil créé en erreur (Claude planté) — sera repris par cont-spec
+    return False, 'fiche_vide'  # profil créé en erreur — sera repris par cont-spec
 
 
 # =============================================================================
@@ -6712,41 +6773,8 @@ def _start_speculative(mail_data):
 
         # Templates désactivés 11/05/2026 — décision Yvan « Claude partout »
         # étendue aux templates (cf bilan 8/05 + bug greeting profil mail Alain).
-        # Le préchauffage BG passe maintenant systématiquement par Claude.
-        # ----- DESACTIVE 11/05/2026 -----
-        # try:
-        #     template, template_name = detect_template(
-        #         email_body=raw_body,
-        #         subject=subject,
-        #         brief='',
-        #         is_first_mail=False,
-        #         reply_mode='reply',
-        #         importance_override=importance_int,
-        #     )
-        #     if template:
-        #         user_name = _get_user_name()
-        #         signature = _resolve_user_signature(contact_profile, user_name)
-        #         text = assemble_template(template, contact_profile, signature)
-        #         words = text.split(' ')
-        #         chunks = [' '.join(words[i:i+3]) + ' ' for i in range(0, len(words), 3)]
-        #         text_html = _normalize_reply_to_html(text)
-        #         with _reply_lock:
-        #             _reply_cache[message_id] = {
-        #                 'status': 'done',
-        #                 'text': text_html,
-        #                 'chunks': chunks,
-        #                 'timestamp': time.time(),
-        #                 'contact': from_email,
-        #                 'importance': importance_letter,
-        #                 'source': 'template',
-        #             }
-        #         logger.debug(f"Template '{template_name}' preemptif pour {message_id[:20]}")
-        #         _broadcast_sse('speculative_ready', {'message_id': message_id, 'source': 'template'})
-        #         _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-post-draft')
-        #         return  # Pas d'appel IA nécessaire
-        # except Exception as e:
-        #     logger.warning(f"Erreur detect_template speculative: {e}")
-        # ----- /DESACTIVE 11/05/2026 -----
+        # Le préchauffage BG passe systématiquement par Claude maintenant.
+        # Code original supprimé 12/05/2026 (refonte N5) — historique git si réactivation.
 
         # P0.4 fix 24/04 : intégrer l'analyse des PJ dans la génération BG.
         # Avant : _start_speculative construisait le prompt sur le body seul
@@ -10600,12 +10628,26 @@ def api_get_draft():
 
 _MISS_REASON_CODE = {
     'inconnu': 'unknown',
-    'contact PARTIEL (pas de profil)': 'no_profile',           # N5 — wording corrigé
-    'contact PARTIEL (fiche vide)':    'profile_empty',        # N5 — sample_count=0
-    'contact UNKNOWN (pas de profil)': 'no_contact_profile',   # rétrocompat avec stats historiques
+    'contact PARTIEL (pas de profil)':    'no_profile',           # N5 — wording corrigé
+    'contact PARTIEL (fiche vide)':       'profile_empty',        # N5 — sample_count=0
+    'contact PARTIEL (DB indisponible)':  'profile_db_fail',      # N5 — fail-open DB
+    'contact PARTIEL (email invalide)':   'profile_email_inv',    # N5 — input pourri
+    'contact PARTIEL (profil corrompu)':  'profile_corrupt',      # N5 — type DB inattendu
+    'contact UNKNOWN (pas de profil)':    'no_contact_profile',   # rétrocompat stats historiques
     'BG non scanné (mail hors top 50 ou récent)': 'bg_not_scanned',
     'spéculation cancelled': 'speculation_cancelled',
     'scan Claude erreur': 'claude_error',
+}
+
+# Refonte N5 (12/05/2026) — Mapping raison Filtre 2 (technique) → wording
+# miss_reason (user/logs). Centralisé pour éviter la duplication de logique
+# VIP dans `api_instant_reply`. Une raison non listée → format par défaut.
+_MISS_REASON_FROM_F2 = {
+    'pas_de_fiche':    'contact PARTIEL (pas de profil)',
+    'fiche_vide':      'contact PARTIEL (fiche vide)',
+    'db_fail':         'contact PARTIEL (DB indisponible)',
+    'email_invalide':  'contact PARTIEL (email invalide)',
+    'profile_corrupt': 'contact PARTIEL (profil corrompu)',
 }
 
 
@@ -10648,12 +10690,11 @@ def _log_template_metric(action, message_id=''):
 @app.route('/api/instant_reply', methods=['POST'])
 def api_instant_reply():
     """
-    Plan 2 Phase 5 — Pipeline de réponse instantanée unifié.
-    Ordre de priorité :
+    Pipeline de réponse instantanée unifié.
+    Ordre de priorité (refonte N5 12/05/2026 — step 3 templates supprimé) :
       1. Brouillon user (source='draft')        → 100% match, rien au-dessus
       2. Cache préemptif (source='preemptive')  → réponse BG déjà calculée
-      3. Template fixe ou appris (source='template') → confidence >= 0.75
-      4. Aucun hit (source='none')              → le dialog doit lancer Claude
+      3. Aucun hit (source='none')              → le dialog doit lancer Claude
 
     Body JSON : {
         message_id, email_body, subject, brief, reply_mode, importance,
@@ -10662,10 +10703,10 @@ def api_instant_reply():
 
     Réponse :
     {
-        "source": "draft"|"preemptive"|"template"|"none",
+        "source": "draft"|"preemptive"|"none",
         "text": str | None,
         "badge": str | None,
-        "confidence"?, "template_name"?, "timestamp"?
+        "timestamp"?
     }
     """
     data = request.get_json() or {}
@@ -10864,55 +10905,11 @@ def api_instant_reply():
                 "timestamp": entry.get('timestamp', 0),
             })
 
-    # 3) TEMPLATE — DESACTIVE 11/05/2026 (décision Yvan « Claude partout »
-    # étendue aux templates fixes ET appris). Bloc commenté pour réversibilité.
-    # Le code passe directement au step 4 (miss) → le frontend bascule sur
-    # le streaming Claude via /generate_reply.
-    # ----- DESACTIVE 11/05/2026 -----
-    # try:
-    #     learned = [lt for lt in _db.get_learned_templates()
-    #                if lt.get('status') != 'demoted']
-    # except Exception:
-    #     learned = []
-    # try:
-    #     m = match_template_with_confidence(
-    #         email_body=email_body, subject=subject, brief=brief,
-    #         is_first_mail=(reply_mode == 'new'), reply_mode=reply_mode,
-    #         importance_override=importance_int, current_draft=current_draft,
-    #         learned_templates=learned,
-    #     )
-    # except Exception as e:
-    #     logger.warning(f"[instant_reply] match_template erreur : {e}")
-    #     m = None
-    # if m and m.get('confidence', 0) >= 0.75:
-    #     contact_profile = None
-    #     try:
-    #         if from_email:
-    #             contact_profile = _db.get_contact_profile(from_email)
-    #     except Exception:
-    #         pass
-    #     user_name = _get_user_name()
-    #     signature = _resolve_user_signature(contact_profile, user_name)
-    #     if m['source'] == 'fixed':
-    #         text = assemble_template(m['template_dict'], contact_profile, signature)
-    #         _log_template_metric(f"template.fixed.{m.get('template_name', 'unknown')}", message_id)
-    #     else:
-    #         text = assemble_learned_template(m['learned'], contact_profile, signature)
-    #         _log_template_metric('template.learned', message_id)
-    #     logger.info(f"[instant_reply] HIT source=template conf={m.get('confidence'):.2f} "
-    #                 f"name={m.get('template_name')} msg={message_id[:30]}")
-    #     return jsonify({
-    #         "source": "template",
-    #         "text": _normalize_reply_to_html(text),
-    #         "html": True,
-    #         "badge": "Réponse apprise" if m['source'] == 'learned' else "Réponse rapide",
-    #         "confidence": m['confidence'],
-    #         "template_name": m['template_name'],
-    #         "template_id": m['template_id'] if m['source'] == 'fixed'
-    #                        else f"learned_{m['template_id']}",
-    #         "template_source": m['source'],
-    #     })
-    # ----- /DESACTIVE 11/05/2026 -----
+    # Step 3 « templates fixes/appris » : supprimé 12/05/2026 (cohérent avec
+    # la décision « Claude partout » du 11/05). L'historique git conserve
+    # le code original (commit `77a9904` et antérieurs) si réactivation un
+    # jour. Le pipeline passe directement step 2 (HIT pré-généré) → step 4
+    # (MISS = streaming Claude via /generate_reply).
 
     # 4) Rien — P3.2 (24/04) : logger la RAISON du MISS pour diagnostic.
     # Permet d'identifier les patterns récurrents (contact UNKNOWN, filtre
@@ -10922,15 +10919,15 @@ def api_instant_reply():
     miss_reason = 'inconnu'
     if message_id:
         try:
-            # Refonte N5 (12/05) — distinction PARTIEL "pas de profil" vs
-            # PARTIEL "fiche vide" (sample_count=0). Avant : wording mensonger
-            # "contact UNKNOWN" pour tous les non-VIP.
+            # Refonte N5 (12/05) — diagnostic miss_reason via le helper UNIQUE
+            # `_filter_2_is_vip` (pas de duplication de la logique VIP). Mapping
+            # raison technique → wording user lisible.
             if from_email:
-                _cp = _db.get_contact_profile(from_email)
-                if not _cp:
-                    miss_reason = 'contact PARTIEL (pas de profil)'
-                elif int(_cp.get('sample_count', 0) or 0) == 0 and int(_cp.get('manually_edited', 0) or 0) == 0:
-                    miss_reason = 'contact PARTIEL (fiche vide)'
+                is_vip, vip_reason = _filter_2_is_vip(from_email)
+                if not is_vip:
+                    miss_reason = _MISS_REASON_FROM_F2.get(
+                        vip_reason, f'contact PARTIEL ({vip_reason})'
+                    )
             # BG pas encore exécuté ?
             with _reply_lock:
                 entry = _reply_cache.get(message_id, {})

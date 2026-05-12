@@ -9,16 +9,32 @@
   4. Body < 10 caractères sans point d'interrogation
   5. Utilisateur en CC (pas destinataire principal en TO)
 
-Couverture (24 critères) :
-  - 5 règles atomiques × 2-4 cas chacune = 16 tests unitaires
-  - `_is_discarded` global : 5 cas écartés (un par règle) + 1 non-écarté = 6 tests
-  - `_should_speculate` thin wrapper : équivalence avec `not _is_discarded` = 1 test
-  - Invariant I-FILTRE-01 mécanique : exactement 5 helpers `_rule_*` = 1 test
-
-Plus 3 tests d'invariants supplémentaires (code mort post-refonte) :
-  - Aucune référence à `_mail_open_counter` / `_increment_open_counter` (Chantier 3)
-  - Aucun `_db.is_treated(` direct hors `_is_user_treated` et tests (Chantier 2)
-  - Aucune définition locale parallèle de `_SERVICE_PREFIXES` hors top module (Chantier 4)
+Couverture exacte (79 tests, vérifiée 12/05/2026 après refonte N5) :
+  - critere_rule_auto_sender              : 7 cas (no-reply, newsletter,
+                                                   postmaster, MAILER-DAEMON caps,
+                                                   humain, vide, absent)
+  - critere_rule_too_old                  : 7 cas (40j, 31j, 29j, 5j, absent,
+                                                   pourri, format SQLite legacy)
+  - critere_rule_body_too_short           : 11 cas (Ok, Vu, "Quand ?", body long,
+                                                    vide, absent, HTML court, HTML
+                                                    long, + 3 fallback body_preview)
+  - critere_rule_user_in_cc               : 11 cas (TO/CC variations + list[dict],
+                                                    list[str], format 'address',
+                                                    fallback my_email vide,
+                                                    + 2 cas sous-domaine fix N5)
+  - critere_rule_already_treated          : 3 cas (mid treated/untreated/absent)
+  - critere_is_user_treated_robustness    : 6 cas (None, '', int, float, list, dict)
+  - critere_extract_emails_helper         : 14 cas (str, list[str], list[dict],
+                                                    Graph 'email'/'address',
+                                                    mixte, clé inconnue, int,
+                                                    + 5 cas RFC 5322 fix N5)
+  - critere_is_discarded_global           : 8 cas (5 raisons + OK + None + str)
+  - critere_should_speculate_after_n5     : 6 cas (combinateur F1+F2)
+  - invariant_i_filtre_01                 : 3 (5 _rule_* exactement)
+  - invariant_no_open_counter             : 1 (compteur 5 ouvertures supprimé)
+  - invariant_is_treated_via_helper       : 1 (0 _db.is_treated direct)
+  - invariant_service_prefixes_centralized: 1 (1 seule définition _SERVICE_PREFIXES)
+Total : 7+7+11+11+3+6+14+8+6+3+1+1+1 = 79.
 
 Lancement standalone : `python tests/test_n4_filtre_1.py`
 """
@@ -209,6 +225,12 @@ def critere_extract_emails_helper():
         ("list mixte",             [{"email": "a@x.com"}, "b@y.com"],          'a@x.com'),
         ("list[dict] avec clé inconnue",[{"name": "Alice"}],                   ''),  # silently skip
         ("int (input pourri)",     42,                                          ''),
+        # Refonte N5 (12/05/2026) — formats RFC 5322 désormais supportés
+        ("RFC 5322 str <email>",   "Alice Dupont <alice@x.com>",               'alice@x.com'),
+        ("RFC 5322 commentaire",   "alice@x.com (Alice Dupont)",               'alice@x.com'),
+        ("RFC 5322 multi",         "Alice <alice@x.com>; Bob <bob@y.com>",     'bob@y.com'),
+        ("RFC 5322 list[str]",     ["Alice <alice@x.com>"],                    'alice@x.com'),
+        ("RFC 5322 list[dict]",    [{"email": "Alice <alice@x.com>"}],         'alice@x.com'),
     ]
     ok_count = 0
     for desc, inp, expected_sub in cases:

@@ -958,6 +958,25 @@ Décision Yvan 07/05 : pas de différé du PJ — l'utilisateur attend une actio
 
 ---
 
+### 24. Limitation IDN (domaines unicode) dans `_extract_emails_from_field` — N5 12/05/2026
+
+**Origine** : Refonte Niveau 5 (« Filtre 2 VIP/Partiel ») 12/05/2026. La regex `_EMAIL_EXTRACT_RE` qui parse les emails depuis les champs to/cc Graph est en ASCII strict (`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`).
+
+**Limitation** : les adresses email avec domaines IDN (Internationalized Domain Names) ne sont **pas extraites**. Exemples qui passent au travers :
+- `alice@müller.de` (caractère unicode dans le domaine)
+- `yvan@société.fr`
+- `info@académie.com`
+
+**Conséquence** : si l'utilisateur a une adresse email IDN, la règle 5 du Filtre 1 (CC) peut le rater (jamais détecté comme étant en CC). En pratique : si Yvan utilise `yvan@boostermail.ai` et que tous ses contacts sont ASCII → **aucun impact aujourd'hui**.
+
+**À régler quand** : SaaS multi-tenant international (clients européens avec domaines IDN comme `.müller`, `.société`, etc.).
+
+**Effort** : ~5 min — changer la regex en utilisant `\w` avec flag `re.UNICODE` ou regex unicode-aware. Ajouter 1-2 cas de test IDN.
+
+**Priorité** : ⚪ basse — pas de bug actuel (scope mono-user Yvan).
+
+---
+
 ### 23. ⚠️ Pattern d'itération sur caches `_UserScopedDict` au merge `feat/michael/multi-user` — N5 12/05/2026
 
 **Origine** : Refonte Niveau 5 (« Filtre 2 VIP/Partiel ») 12/05/2026. Pendant l'implémentation, un sub-agent regard frais a flagué un bug latent multi-tenant qui aurait pu rester silencieux longtemps.

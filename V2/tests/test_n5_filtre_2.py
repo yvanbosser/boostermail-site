@@ -11,18 +11,28 @@ Règle :
 
 (Le critère "TO" de l'arbre est géré en amont au Filtre 1 N4 — décision Yvan)
 
-Couverture (38 tests) :
-  - 7 cas `_filter_2_is_vip` (profil enrichi, sample_count=0, manually_edited,
-    pas de profil, email vide, non-str, DB qui plante)
-  - 4 cas `_mark_filtered_in_cache` (écriture standard, protection drafts user,
-    protection drafts bg_speculation, atomicité lock)
-  - 3 cas `_invalidate_filtered_cache_after_profile_enrichment` (entries
-    filtered F2 invalidées, drafts protégés non touchés, entrées non-F2 préservées)
-  - Invariant I-FILTRE-2-01 : exactement 1 fonction `_filter_2_is_vip`
-  - Invariant : 0 référence à `_is_contact_known` en code (sauf commentaires)
-  - Invariant : `_should_speculate` combine bien F1 ET F2 (test équivalence)
-  - Test mécanique : 0 wrapper try/except redondant autour de `_should_speculate`
-    aux call sites (leçon N4 — fail-open par contrat du helper)
+Décision Yvan 12/05/2026 (post-audit) : pas de mécanisme de réveil des
+vieux mails au passage fiche vide → remplie. On garde en PARTIEL pour
+cette fois, VIP la prochaine fois.
+
+Couverture exacte (28 tests) :
+  - critere_filter_2_is_vip          : 14 cas (profil enrichi, sample_count=0,
+                                               manually_edited, legacy string,
+                                               pas de profil, email vide/None/int,
+                                               DB plante, + 5 cas DB corrompue :
+                                               sample_count='abc', None, type
+                                               pourri, profil non-dict str/list)
+  - critere_mark_filtered_in_cache   : 5 cas (écriture standard, protections
+                                              user_edit/bg_speculation, replace
+                                              filtered précédent, input pourri)
+  - invariant_no_reveille_mechanism  : 1 (aucune fonction `_invalidate_filtered_*`)
+  - invariant_i_filtre_2_01          : 3 (1 def _filter_2_is_vip, 0 def
+                                          _is_contact_known, 0 appel
+                                          _is_contact_known en code)
+  - invariant_no_redundant_wrappers  : 1 (aucun try/except redondant)
+  - invariant_prewarm_echeance_clean : 1 (bloc CODE INACTIF supprimé)
+  - invariant_template_removed_from_cache_lists : 1 ('template' retiré)
+  - invariant_preemptive_constants_named : 2 (50 et 20 nommés)
 
 Lancement : `python tests/test_n5_filtre_2.py`
 """
@@ -44,11 +54,11 @@ def log_test(name, ok, details=""):
 
 
 # ---------------------------------------------------------------------------
-# Tests `_filter_2_is_vip` — 7 cas couvrant tous les chemins
+# Tests `_filter_2_is_vip` — 14 cas couvrant tous les chemins (fail-open total)
 # ---------------------------------------------------------------------------
 
 def critere_filter_2_is_vip():
-    """`_filter_2_is_vip(email)` : 7 cas exhaustifs."""
+    """`_filter_2_is_vip(email)` : 14 cas exhaustifs (dont 5 cas DB corrompue)."""
     print("\n=== _filter_2_is_vip (7 cas) ===")
     # Mock _db.get_contact_profile pour rendre le test déterministe
     _orig_get = ap._db.get_contact_profile
@@ -58,10 +68,18 @@ def critere_filter_2_is_vip():
         'sample_count_0@x.com': {'sample_count': 0, 'manually_edited': 0},
         'manuel@x.com':     {'sample_count': 0, 'manually_edited': 1},
         'sample_count_str@x.com': {'sample_count': '3', 'manually_edited': 0},  # cas DB type string
+        # Refonte N5 (12/05/2026) — cas DB corrompue : doit fail-open, pas crasher
+        'sample_count_abc@x.com': {'sample_count': 'abc', 'manually_edited': 0},  # int('abc') → ValueError
+        'sample_count_none@x.com': {'sample_count': None, 'manually_edited': 0},  # None → safe int
+        'manually_edited_str@x.com': {'sample_count': 0, 'manually_edited': 'true'},  # type pourri
     }
     def _mock_get(email):
         if email == 'db_plante@x.com':
             raise RuntimeError('DB locked simulation')
+        if email == 'profile_corrupt@x.com':
+            return "not a dict"  # type inattendu (V1 legacy ou bug DB)
+        if email == 'profile_list@x.com':
+            return ['liste', 'absurde']  # encore plus pourri
         return profiles.get(email)
     ap._db.get_contact_profile = _mock_get
     try:
@@ -76,6 +94,12 @@ def critere_filter_2_is_vip():
             ("email non-str (None)",             None,                   False, 'email_invalide'),
             ("email non-str (int)",              42,                     False, 'email_invalide'),
             ("DB qui plante (fail-open)",        'db_plante@x.com',      False, 'db_fail'),
+            # Cas limite DB corrompue — fail-open total (sans plantage)
+            ("sample_count='abc' (corruption DB)", 'sample_count_abc@x.com', False, 'fiche_vide'),
+            ("sample_count=None (legacy DB)",     'sample_count_none@x.com', False, 'fiche_vide'),
+            ("manually_edited='true' (type pourri)", 'manually_edited_str@x.com', False, 'fiche_vide'),
+            ("profil non-dict (str)",            'profile_corrupt@x.com', False, 'profile_corrupt'),
+            ("profil non-dict (list)",           'profile_list@x.com',    False, 'profile_corrupt'),
         ]
         ok_count = 0
         for desc, email, expected_vip, expected_reason in cases:
