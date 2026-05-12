@@ -366,6 +366,18 @@ except ImportError:
 _db = Database(os.path.join(PLUGIN_DIR, 'boostermail.db'))
 _db.init()
 
+# Refonte N3 (12/05/2026) — Pré-populer le cache class-level du prénom user
+# pour la garde anti-inversion DB-side (I-CONTACT-01). Évite toute requête
+# SQL pendant save_contact_profile. Si user_name change (route /api/save_setting
+# key='user_name'), le cache est re-set côté handler (cf api_save_setting).
+try:
+    _initial_user_name = _db.get_setting('user_name', '') or ''
+    Database.set_user_first_name(_initial_user_name)
+    if _initial_user_name:
+        logger.info(f"[contact_profile] cache prénom user initialisé : '{Database._USER_FIRST_NAME_CACHE}' (garde anti-inversion active)")
+except Exception as _e_boot_uname:
+    logger.warning(f"[contact_profile] init cache prénom user échec : {_e_boot_uname}")
+
 # Initialisation auth (lazy, pour ne pas crasher si config.json incomplet)
 _auth_provider = None
 _auth_init_failed = False  # Sentinel : si True, ne pas retenter
@@ -7663,6 +7675,14 @@ def api_save_setting():
         _db.save_setting(key, value)
         if key == 'pj_root_folder':
             _windows_folders_cache.pop('folders', None)
+    # Refonte N3 — re-set le cache class-level du prénom user (garde anti-inversion)
+    # quand user_name change (peut être sauvé via la branche per-user OU globale).
+    if key == 'user_name':
+        try:
+            Database.set_user_first_name(value or '')
+            logger.info(f"[contact_profile] cache prénom user MAJ : '{Database._USER_FIRST_NAME_CACHE}'")
+        except Exception as _e_uname:
+            logger.warning(f"[contact_profile] MAJ cache prénom user échec : {_e_uname}")
     return jsonify({"status": "ok"})
 
 
@@ -13843,6 +13863,34 @@ _force_analysis_attempts = {}  # email -> last_attempt_ts
 _FORCE_ANALYSIS_COOLDOWN_SEC = 24 * 3600  # 24h
 
 
+def _check_analysis_cooldown(contact_email, bypass_cooldown=False):
+    """Refonte N3 (12/05/2026) — Helper unique pour le cooldown anti-boucle.
+
+    Factorisation des 2 blocs dupliqués qui existaient dans
+    _maybe_analyze_contact (cas profil existant sample_count=0 et cas
+    nouveau profil).
+
+    Args:
+        contact_email: email du contact
+        bypass_cooldown: si True, ignore le cooldown (action user explicite)
+
+    Returns:
+        bool: True si on peut procéder à l'analyse, False si le cooldown
+              est encore actif (caller doit return).
+
+    Side effect : si return True (cooldown expiré OU bypass), enregistre
+    le timestamp du nouveau passage dans `_force_analysis_attempts`.
+    """
+    if bypass_cooldown:
+        return True
+    now_ts = time.time()
+    last_attempt = _force_analysis_attempts.get(contact_email, 0)
+    if now_ts - last_attempt < _FORCE_ANALYSIS_COOLDOWN_SEC:
+        return False  # cooldown actif
+    _force_analysis_attempts[contact_email] = now_ts
+    return True
+
+
 def _maybe_analyze_contact(contact_email, bypass_cooldown=False):
     """Vérifie si un profil de contact doit être (re)analysé et le fait si nécessaire.
 
@@ -13879,12 +13927,8 @@ def _maybe_analyze_contact(contact_email, bypass_cooldown=False):
         # dans 80s. bypass_cooldown=True quand l'utilisateur force lui-même
         # via api_recalibrate / api_analyze_contact / post_send_learning.
         if existing.get('sample_count', 0) == 0:
-            if not bypass_cooldown:
-                now_ts = time.time()
-                last_attempt = _force_analysis_attempts.get(contact_email, 0)
-                if now_ts - last_attempt < _FORCE_ANALYSIS_COOLDOWN_SEC:
-                    return  # silencieux : cooldown actif
-                _force_analysis_attempts[contact_email] = now_ts
+            if not _check_analysis_cooldown(contact_email, bypass_cooldown):
+                return  # silencieux : cooldown actif
             logger.info(f"[learning] Re-analyse forcee de {_hash_email_partial(contact_email)} (sample_count=0 anormal, rattrapage)")
         elif not _should_analyze_contact(mail_count, existing.get('sample_count')):
             return
@@ -13904,12 +13948,8 @@ def _maybe_analyze_contact(contact_email, bypass_cooldown=False):
         eligible_o1 = (counts.get('received', 0) >= 2 or counts.get('sent', 0) >= 1)
         if not eligible_o1 and not _should_analyze_contact(mail_count):
             return
-        if not bypass_cooldown:
-            now_ts = time.time()
-            last_attempt = _force_analysis_attempts.get(contact_email, 0)
-            if now_ts - last_attempt < _FORCE_ANALYSIS_COOLDOWN_SEC:
-                return  # silencieux : cooldown actif (Premiere analyse sans profil)
-            _force_analysis_attempts[contact_email] = now_ts
+        if not _check_analysis_cooldown(contact_email, bypass_cooldown):
+            return  # silencieux : cooldown actif (Premiere analyse sans profil)
         logger.info(f"[learning] Premiere analyse de {_hash_email_partial(contact_email)} (mail #{mail_count})")
 
     # Fix 30/04 PM (signal Yvan) : limit 25 → 50. Le sub-agent a montré que

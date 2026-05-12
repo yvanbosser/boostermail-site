@@ -112,15 +112,28 @@ def _get_user_id_from_db() -> str:
     if _db_user_id_cache and now - _db_user_id_cache_ts < _DB_USER_ID_CACHE_TTL:
         return _db_user_id_cache
     try:
-        # Import lazy de Database (évite cycle d'imports au load du module)
-        from database import Database
+        # ⚠️ NE PAS instancier Database() ici : Database._all_conns est keyé
+        # par TID seul. Si on est appelé depuis un thread où une autre
+        # Database() instance détient déjà la conn de ce TID (ex : depuis
+        # `save_contact_profile` qui appelle `self._uid()`), la nouvelle
+        # instance enregistrerait sa conn sous le même TID et CLOSE la conn
+        # de l'instance d'origine → ProgrammingError "Cannot operate on a
+        # closed database" downstream. Bug latent identifié 12/05/2026.
+        # Solution : raw sqlite3.connect() one-shot, isolé du tracker.
+        import sqlite3
         db_path = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), 'boostermail.db'
         )
         if not os.path.exists(db_path):
             return ''
-        db = Database(db_path)
-        user_id = (db.get_setting('auth_user_id') or '').strip()
+        _raw_conn = sqlite3.connect(db_path)
+        try:
+            _row = _raw_conn.execute(
+                "SELECT value FROM settings WHERE key = ?", ('auth_user_id',)
+            ).fetchone()
+            user_id = ((_row[0] if _row else '') or '').strip()
+        finally:
+            _raw_conn.close()
         _db_user_id_cache = user_id
         _db_user_id_cache_ts = now
         return user_id

@@ -9,6 +9,51 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
+# Refonte N3 (12/05/2026) — Garde anti-inversion greeting (bug Alain).
+# Version de la heuristique d'audit. Incrémenter quand la règle évolue
+# pour permettre un re-audit des profils existants (script audit_pollution.py).
+_POLLUTION_CHECK_VERSION = 'v1'
+
+
+def _check_greeting_inversion(greeting, user_first_name):
+    """Détecte si le greeting contient le prénom user en mot entier (inversion).
+
+    Cas bug Alain : profil de papa avec greeting `coucou Yvan,` (= ce qu'Alain
+    écrit à Yvan, donc inversé). La heuristique cherche le prénom user
+    en *mot entier* dans le greeting.
+
+    Restriction au greeting uniquement (pas au closing) : un closing
+    `Bises Alain Bosser` contient le nom de famille user (BOSSER) mais
+    c'est légitime côté contact homonyme (cas Alain Bosser / Yvan Bosser).
+    Le vrai signal d'inversion = prénom en position d'adresse au début.
+
+    Args:
+        greeting: str ou None — la formule d'ouverture stockée
+        user_first_name: str — le prénom de l'user (ex: "Yvan")
+
+    Returns:
+        bool: True si inversion suspectée, False sinon.
+
+    Cas couverts :
+        - None / vide → False (pas de garde, profil incomplet)
+        - prénom user en mot entier dans greeting → True
+        - prénom user en sous-chaîne uniquement (ex: "Donyvan") → False
+        - greeting sans prénom user → False
+    """
+    if not greeting or not user_first_name:
+        return False
+    if not isinstance(greeting, str) or not isinstance(user_first_name, str):
+        return False
+    user_first = user_first_name.strip().lower()
+    if len(user_first) < 2:
+        return False  # prénom trop court (faux positifs probables)
+    # Mot entier : entouré de séparateurs (espace, ponctuation, début/fin)
+    # Pas regex unicode car les prénoms peuvent contenir des accents mais
+    # le check basique \b suffit pour la majorité des cas.
+    pattern = r'\b' + re.escape(user_first) + r'\b'
+    return bool(re.search(pattern, greeting, re.IGNORECASE))
+
+
 def _is_canonical_imid(message_id):
     """Vérifie qu'un message_id est un IMID RFC 2822 canonique strict
     (`<...@domain>`). Aligné sur `_canonical_mid()` de V2/app_plugin.py:772.
@@ -57,6 +102,26 @@ class Database:
         self._local = threading.local()
         # Tracker keyed par thread_id pour cleanup runtime des conn
         # zombies. Cf commentaire class-level ci-dessus + bilan 30/04 PM.
+
+    # Refonte N3 (12/05/2026) — Cache CLASS-LEVEL du prénom user pour la garde
+    # anti-inversion. Pas de SQL pendant save_contact_profile : le cache est
+    # populé une seule fois au démarrage de l'app (app_plugin.py) ou par les
+    # tests via set_user_first_name(). Class-level pour partage entre toutes
+    # les instances Database() (multi-user via _uid() reste isolé par instance).
+    _USER_FIRST_NAME_CACHE = None
+
+    @classmethod
+    def set_user_first_name(cls, name: str):
+        """Set le cache class-level du prénom user pour la garde anti-inversion.
+
+        À appeler une fois au démarrage de l'app (app_plugin.py boot) après
+        lecture de settings.user_name. Re-appelée si le user_name change
+        (route /api/save_setting key='user_name').
+        """
+        if name and isinstance(name, str):
+            cls._USER_FIRST_NAME_CACHE = name.strip().split()[0]
+        else:
+            cls._USER_FIRST_NAME_CACHE = None
 
     def _uid(self) -> str:
         """Retourne le user_id courant depuis le contexte Flask (ou 'default').
@@ -517,6 +582,29 @@ class Database:
         # côté app_plugin.py). Idempotent : ALTER ignoré si déjà présent.
         try:
             c.execute("ALTER TABLE contact_profiles ADD COLUMN user_signature_for_contact TEXT")
+            conn.commit()
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
+
+        # Migration N3 refonte (12/05/2026) — invariant I-CONTACT-01.
+        # `polluted` : flag mis à 1 par la garde anti-inversion de
+        # `save_contact_profile` quand le greeting contient le prénom user
+        # en mot entier (signal d'apprentissage à l'envers — bug Alain).
+        # L'info apprise est conservée (pas reset), le profil est juste
+        # marqué pour révision. Le bloc D du prompt N9 lira ce flag et
+        # fallback aux valeurs safe si polluted=1.
+        # `last_audited_version` : version de la heuristique d'audit qui
+        # a checked ce profil. Permet de re-auditer si l'heuristique évolue
+        # (script audit_pollution.py).
+        try:
+            c.execute("ALTER TABLE contact_profiles ADD COLUMN polluted INTEGER DEFAULT 0")
+            conn.commit()
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
+        try:
+            c.execute("ALTER TABLE contact_profiles ADD COLUMN last_audited_version TEXT")
             conn.commit()
         except sqlite3.OperationalError as e:
             if "duplicate column" not in str(e).lower():
@@ -1805,8 +1893,36 @@ class Database:
         email = (email or '').strip().lower()
         if not email:
             return  # silently no-op si email vide (rétrocompatible)
-        conn = self._conn()
         now = datetime.now().isoformat()
+
+        # Refonte N3 (12/05/2026) — Garde anti-inversion I-CONTACT-01.
+        # Détecte si le greeting contient le prénom user en mot entier
+        # (signal d'apprentissage à l'envers — bug Alain). Si oui :
+        # - on FLAG le profil polluted=1 (au lieu de reset, pour ne pas
+        #   détruire l'apprentissage en cas de faux positif type homonyme)
+        # - on log warning
+        # - on save quand même : l'info est conservée pour révision UI.
+        # Le bloc D du prompt N9 lira polluted=1 et fallback aux valeurs safe.
+        # Garde DB-side : couvre TOUS les chemins d'écriture (analyse Claude,
+        # /api/update_contact UI, recalibrate batch, scripts admin).
+        # NB : utilise _get_user_first_name_cached pour ne pas faire de SQL
+        # cursor pendant save_contact_profile (éviterait interférence avec
+        # la transaction BEGIN IMMEDIATE en aval).
+        polluted_flag = profile_data.get('polluted', 0)
+        try:
+            _user_first = Database._USER_FIRST_NAME_CACHE
+            if _user_first:  # garde inactive si cache vide (app pas init / test sans setup)
+                _greeting_to_check = profile_data.get('greeting', '') or ''
+                if _check_greeting_inversion(_greeting_to_check, _user_first):
+                    polluted_flag = 1
+                    logger.warning(
+                        f"[contact_profile] inversion détectée greeting={_greeting_to_check!r} "
+                        f"contient le prénom user '{_user_first}' → flag polluted=1 "
+                        f"(email={email[:30]}...)"
+                    )
+        except Exception as _e:
+            logger.debug(f"[contact_profile] check inversion err : {_e}")
+
         # Fusionner les entry_ids existants avec les nouveaux
         entry_ids = profile_data.get('entry_ids', [])
         if isinstance(entry_ids, str):
@@ -1814,13 +1930,20 @@ class Database:
                 entry_ids = json.loads(entry_ids)
             except Exception:
                 entry_ids = []
+        # Récupération de l'uid AVANT _conn() : self._uid() peut, hors Flask
+        # context, déclencher un fallback _get_user_id_from_db() qui instancie
+        # une autre Database() dans le MEME TID et CLOSE notre conn courante
+        # via le _all_conns[tid] tracker (latent bug 12/05/2026 — fix post N3).
+        # En faisant l'_uid() AVANT _conn(), on garantit que la conn obtenue
+        # juste après est encore vivante pour la suite de la transaction.
+        uid = self._uid()
+        conn = self._conn()
         # BEGIN IMMEDIATE pour éviter lost update sur entry_ids (read-modify-write atomique)
         conn.execute("BEGIN IMMEDIATE")
         try:
             # Recuperer les IDs existants pour fusion
             c = conn.cursor()
-            _uid_pre = self._uid()
-            c.execute("SELECT entry_ids FROM contact_profiles WHERE email = ? AND user_id = ?", (email, _uid_pre))
+            c.execute("SELECT entry_ids FROM contact_profiles WHERE email = ? AND user_id = ?", (email, uid))
             row = c.fetchone()
             if row and row[0]:
                 try:
@@ -1835,15 +1958,16 @@ class Database:
             raise
 
         try:
-            uid = self._uid()
+            # uid déjà résolu plus haut, AVANT BEGIN IMMEDIATE (cf commentaire ligne 1933)
             conn.execute("""
             INSERT INTO contact_profiles (
                 email, display_name, organization, category, domain,
                 register, tone, greeting, closing, typical_length,
                 power_dynamic, language, profile_text, profile_json,
                 sample_count, confidence, last_analysis, entry_ids, manually_edited,
-                user_signature_for_contact, created_at, updated_at, user_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                user_signature_for_contact, polluted, last_audited_version,
+                created_at, updated_at, user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(email) DO UPDATE SET
                 display_name=excluded.display_name,
                 organization=excluded.organization,
@@ -1864,6 +1988,8 @@ class Database:
                 entry_ids=excluded.entry_ids,
                 manually_edited=excluded.manually_edited,
                 user_signature_for_contact=excluded.user_signature_for_contact,
+                polluted=excluded.polluted,
+                last_audited_version=excluded.last_audited_version,
                 updated_at=excluded.updated_at
         """, (
             email,
@@ -1886,6 +2012,8 @@ class Database:
             json.dumps(entry_ids, ensure_ascii=False),
             profile_data.get('manually_edited', 0),
             profile_data.get('user_signature_for_contact'),
+            polluted_flag,
+            _POLLUTION_CHECK_VERSION,
             now, now, uid
         ))
             conn.commit()

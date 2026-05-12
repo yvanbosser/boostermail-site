@@ -458,6 +458,25 @@ Toute détection d'expéditeur automatique (no-reply, newsletter, postmaster, et
 - **Pourquoi** : Audit 8/05 anomalie #2 — 3 listes coexistantes avec contenus divergents → un mail `donotreply@x.com` filtré par l'une mais pas l'autre → cascade incohérente
 - **Historique** : refonte 11/05/2026 (N1 commit 13bd896)
 
+### I-CONTACT-01 : Garde anti-inversion DB-side sur contact_profiles (refonte N3 12/05/2026)
+Tout `save_contact_profile()` (peu importe le chemin : analyse Claude, route `/api/update_contact`, recalibrate batch, script admin) doit passer par la garde anti-inversion : si le greeting contient le prénom user en mot entier → `polluted=1` (flag, pas reset).
+- **Helper unique** : `_check_greeting_inversion(greeting, user_first_name)` dans `database.py` — match `\b{prenom}\b` (mot entier, casse insensible, autorise tirets/ponctuation contiguës)
+- **Cache** : `Database._USER_FIRST_NAME_CACHE` (class-level, populé au boot `app_plugin.py` + re-set quand route `/api/save_setting` modifie `user_name`)
+- **Colonnes DB** : `contact_profiles.polluted` (0|1) + `contact_profiles.last_audited_version` (TEXT, valeur actuelle `v1`)
+- **Conservation** : l'info apprise est CONSERVÉE (greeting, closing, register…). Le flag `polluted=1` signale juste que le bloc D du prompt N9 doit fallback aux valeurs safe.
+- **Faux positif accepté** : cas homonyme (user Yvan + contact Yvan avec greeting légitime "Bonjour Yvan,") → flag posé, l'user peut éditer manuellement (`manually_edited=1` est respecté).
+- **Test** : `tests/test_n3_carnet_contacts.py` (25/25 dont régression bug Alain "coucou Yvan" + helper 11 cas)
+- **Pourquoi** : bug Alain — Claude a appris à l'envers (10 mails reçus 0 envoyé) et produit "coucou Yvan" comme greeting du contact. Sans garde, le profil enseigne au prompt de répondre "Yvan" à Alain.
+- **Historique** : refonte 12/05/2026 N3 (branche `feat/yvan/refonte-N3-carnet-contacts`)
+
+### I-DB-CONN-01 : Une seule Database() instance par db_path par TID (latent fix 12/05/2026)
+Le tracker class-level `Database._all_conns[tid] = conn` est keyé par thread_id seul. **Ne JAMAIS instancier plusieurs `Database(db_path)` simultanément dans le même thread** : la seconde instance, via `_conn()`, kicke et ferme la conn de la première (assumée zombie), provoquant `ProgrammingError: Cannot operate on a closed database` downstream.
+- **Règle pour helpers utility (BG threads, atexit, scripts CLI)** : si on a besoin d'une SELECT one-shot sans contexte Flask, utiliser `sqlite3.connect(db_path)` raw + close — pas `Database()`.
+- **Site connu corrigé** : `user_context._get_user_id_from_db()` (12/05/2026) — instanciait `Database()` puis appelait `get_setting('auth_user_id')`, kickant la conn de l'instance qui faisait `save_contact_profile`.
+- **Test** : `grep -n "Database(" V2/user_context.py` → 0 hits hors docstring
+- **Pourquoi** : `_all_conns` est partagé entre instances pour permettre le GC zombie de tous les threads. Le check `if old_conn is not conn: old_conn.close()` était conçu contre les TID réutilisés, mais backfire quand deux instances coexistent dans le même TID.
+- **Historique** : 12/05/2026 — bug découvert pendant refonte N3 (test critère 7 `save_contact_profile` qui appelait `self._uid()` → fallback `_get_user_id_from_db()` hors Flask context)
+
 ---
 
 ---
