@@ -100,6 +100,10 @@ def critere_rule_body_too_short():
         ("absent",               {},                            True),   # idem
         ("<b>x</b><b>y</b>",     {"body": "<b>x</b><b>y</b>"},  True),   # strip → 'x  y' = 4 < 10
         ("HTML long",            {"body": "<p>Bonjour, comment allez-vous aujourd'hui ?</p>"}, False),
+        # Fix correctif N4 (12/05) — body vide mais body_preview rempli (mail en cours warmup)
+        ("body vide + body_preview long", {"body": "", "body_preview": "Bonjour Yvan, ceci est un long preview généré côté Graph."}, False),
+        ("body absent + body_preview long", {"body_preview": "Bonjour Yvan, long preview."}, False),
+        ("body absent + body_preview court 'Ok'", {"body_preview": "Ok"}, True),
     ]
     ok_count = 0
     for desc, md, expected in cases:
@@ -122,6 +126,9 @@ def critere_rule_user_in_cc():
             ("aucun → garder",                {"to": "", "cc": ""},                                False),
             ("to=list[dict] cc=list[dict]",   {"to": [{"email": "alice@x.com"}], "cc": [{"email": "yvan@boostermail.ai"}]}, True),
             ("Graph format 'address' au lieu de 'email'", {"to": [{"address": "alice@x.com"}], "cc": [{"address": "yvan@boostermail.ai"}]}, True),
+            # Fix correctif N4 (12/05) — list[str] désormais supporté via _extract_emails_from_field
+            ("to=list[str] cc=list[str]",     {"to": ["alice@x.com"], "cc": ["yvan@boostermail.ai"]}, True),
+            ("list mixte dict+str",           {"to": [{"email": "alice@x.com"}, "bob@y.com"], "cc": ["yvan@boostermail.ai"]}, True),
         ]
         ok_count = 0
         for desc, md, expected in cases:
@@ -159,6 +166,55 @@ def critere_rule_already_treated():
         return ok_count, len(cases)
     finally:
         ap._is_user_treated = _orig
+
+
+def critere_is_user_treated_robustness():
+    """Fix correctif N4 — `_is_user_treated` fail-open sur input non-str."""
+    print("\n=== Helper : _is_user_treated robustesse (non-str) ===")
+    # Sans patcher _db.is_treated : on teste juste le guard d'entrée.
+    cases = [
+        ("None",        None,        False),
+        ("''",          '',          False),
+        ("int 12345",   12345,       False),
+        ("float 1.5",   1.5,         False),
+        ("list",        ['<mid@x>'], False),
+        ("dict",        {'id': 1},   False),
+    ]
+    ok_count = 0
+    for desc, mid, expected in cases:
+        try:
+            result = ap._is_user_treated(mid)
+            ok_count += log_test(f"input {desc} → {result}", result == expected)
+        except Exception as e:
+            log_test(f"input {desc} → LEVÉ ({type(e).__name__}) — fail-open trahi", False)
+    return ok_count, len(cases)
+
+
+def critere_extract_emails_helper():
+    """Fix correctif N4 — `_extract_emails_from_field` (str | list[str] | list[dict])."""
+    print("\n=== Helper : _extract_emails_from_field (normalisation Graph) ===")
+    cases = [
+        # (description, input, expected_contains_substring_for_email_check)
+        ("None",                   None,                                       ''),
+        ("''",                     '',                                         ''),
+        ("str simple",             "Alice@X.com",                              'alice@x.com'),
+        ("list[str]",              ["Alice@X.com", "bob@y.com"],               'alice@x.com'),
+        ("list[dict] avec 'email'",[{"email": "Alice@X.com"}],                 'alice@x.com'),
+        ("list[dict] avec 'address'",[{"address": "Alice@X.com"}],             'alice@x.com'),
+        ("list mixte",             [{"email": "a@x.com"}, "b@y.com"],          'a@x.com'),
+        ("list[dict] avec clé inconnue",[{"name": "Alice"}],                   ''),  # silently skip
+        ("int (input pourri)",     42,                                          ''),
+    ]
+    ok_count = 0
+    for desc, inp, expected_sub in cases:
+        result = ap._extract_emails_from_field(inp)
+        if expected_sub:
+            ok = expected_sub in result
+            ok_count += log_test(f"{desc} → {result!r} (contient {expected_sub!r})", ok)
+        else:
+            ok = result == ''
+            ok_count += log_test(f"{desc} → {result!r} (vide attendu)", ok)
+    return ok_count, len(cases)
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +456,8 @@ def main():
         critere_rule_body_too_short,
         critere_rule_user_in_cc,
         critere_rule_already_treated,
+        critere_is_user_treated_robustness,
+        critere_extract_emails_helper,
         critere_is_discarded_global,
         critere_should_speculate_thin,
         invariant_i_filtre_01,

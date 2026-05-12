@@ -2665,13 +2665,48 @@ def _is_user_treated(message_id):
     -------
     bool
     """
-    if not message_id:
+    # Fix correctif N4 (12/05) — garde input non-str AVANT toute opération
+    # (sinon `message_id[:30]` dans le log d'erreur peut lever TypeError
+    # secondaire et casser le contrat fail-open).
+    if not isinstance(message_id, str) or not message_id:
         return False
     try:
         return bool(_db.is_treated(message_id))
     except Exception as _e:
         logger.debug(f"[filter1] _is_user_treated({message_id[:30]}...) DB fail : {_e}")
         return False
+
+
+def _extract_emails_from_field(field):
+    """Normalise un champ to/cc Graph en string flat lowercase pour `in` matching.
+
+    Graph (et ses normalizers internes) peuvent renvoyer ce champ sous 3 formes :
+      - `str` : "alice@x.com" ou "alice@x.com; bob@y.com"
+      - `list[dict]` : [{"email": "alice@x.com"}, {"address": "bob@y.com"}]
+        (clés "email" OU "address" selon le sérializer)
+      - `list[str]` : ["alice@x.com", "bob@y.com"]
+
+    Returns
+    -------
+    str
+        Concatenation lowercase séparée par espaces. Chaîne vide si input
+        invalide (fail-open). Garantit que `email in result` fonctionne pour
+        tester la présence d'une adresse.
+    """
+    if not field:
+        return ''
+    if isinstance(field, str):
+        return field.lower()
+    if isinstance(field, list):
+        parts = []
+        for item in field:
+            if isinstance(item, dict):
+                parts.append(item.get('email', '') or item.get('address', '') or '')
+            elif isinstance(item, str):
+                parts.append(item)
+            # silently skip autres types (None, int, etc.) — fail-open
+        return ' '.join(parts).lower()
+    return ''
 
 
 def _extract_imid_from_mail_data(mail_data):
@@ -3654,19 +3689,13 @@ def _prewarm_mail_preview(mail_data):
         logger.debug(f"[mail-preview] skip mail sans IMID canonique : "
                      f"subject={mail_data.get('subject', '')[:40]}")
         return
-    # Refonte N4 (12/05/2026) — Filtre 1 unifié : 5 règles atomiques via
-    # `_is_discarded` qui retourne (bool, raison). Signature compatible avec
-    # le précédent comportement O5 (08/05) qui appelait juste `_is_discarded`,
-    # mais désormais inclut le critère CC (règle 5 — décision Yvan 12/05).
-    # Si écarté → aucun plat préparé (ni commis Haiku ni chef Sonnet) →
-    # cuisson à la commande au clic user (streaming, $0 à la réception).
-    try:
-        _discarded, _reason = _is_discarded(mail_data)
-        if _discarded:
-            logger.debug(f"[mail-preview] skip écarté ({_reason}) mid={mid[:30]}")
-            return
-    except Exception:
-        pass  # fail-open : si check plante, on continue
+    # Refonte N4 (12/05/2026) — Filtre 1 unifié : `_is_discarded` est
+    # fail-open par contrat (try/except autour de chaque règle interne).
+    # PAS de wrapper try/except ici : ce serait un patch sur le patch.
+    _discarded, _reason = _is_discarded(mail_data)
+    if _discarded:
+        logger.debug(f"[mail-preview] skip écarté ({_reason}) mid={mid[:30]}")
+        return
     now = time.time()
     with _mail_preview_lock:
         entry = _mail_preview_cache.get(mid, {})
@@ -5435,11 +5464,9 @@ def summarize_mails_to_db(mails, chunk_size=10):
             # est ré-summarisé à chaque cycle BG (coût Claude répété).
             # Maintenant : log debug pour traçabilité sans casser le flow.
             logger.debug(f"[summary] has_mail_summary({msg_id[:30]}) DB fail : {_e_dup}")
-        # Phase 2 — Filtre unifié
-        try:
-            ok_spec, _reason = _should_speculate(m)
-        except Exception:
-            ok_spec = True  # fail-open
+        # Refonte N4 (12/05/2026) — `_should_speculate` est thin wrapper sur
+        # `_is_discarded` qui est déjà fail-open par contrat. Pas de wrapper.
+        ok_spec, _reason = _should_speculate(m)
         if not ok_spec:
             skipped_filtered += 1
             continue
@@ -5534,18 +5561,13 @@ def _run_prefetch(mail_data):
         logger.debug(f"[prefetch] skip mail sans IMID canonique : "
                      f"subject={subject[:40]}")
         return
-    # Refonte N4 (12/05/2026) — Filtre 1 unifié : skip collecte blocs ABC
-    # pour les mails écartés (5 règles désormais : no-reply, > 30j, déjà
-    # répondu, body trop court, user en CC). Économise ~1 sec de Graph +
-    # RAM plan de travail (300 mails max) + zéro spéculation inutile en aval.
-    try:
-        _discarded, _reason = _is_discarded(mail_data)
-        if _discarded:
-            logger.debug(f"[prefetch] skip écarté ({_reason}) : "
-                         f"subject={subject[:40]}")
-            return
-    except Exception:
-        pass  # fail-open : si le check plante, on continue (graceful degrade)
+    # Refonte N4 (12/05/2026) — Filtre 1 unifié : `_is_discarded` est
+    # fail-open par contrat. PAS de wrapper try/except (cf I-FILTRE-01).
+    _discarded, _reason = _is_discarded(mail_data)
+    if _discarded:
+        logger.debug(f"[prefetch] skip écarté ({_reason}) : "
+                     f"subject={subject[:40]}")
+        return
 
     # Clé de cache = IMID canonique (pas de fallback from+subject)
     cache_key = message_id
@@ -6415,8 +6437,15 @@ def _rule_body_too_short(mail_data):
     une vraie question → NE PAS écarter.
 
     Longueur mesurée APRÈS strip HTML, en codepoints Unicode.
+
+    Fix correctif N4 (12/05) — lit `body or body_preview` (au lieu de juste
+    `body`) pour les mails en cours de warmup où le body complet n'est pas
+    encore récupéré côté Graph (le `body_preview` 255 chars suffit pour le
+    check de longueur). Cohérent avec les call sites qui construisent
+    mail_data avec cette même fallback.
     """
-    body_clean = _clean_body_text(mail_data.get('body', ''))
+    raw_body = mail_data.get('body') or mail_data.get('body_preview') or ''
+    body_clean = _clean_body_text(raw_body)
     return len(body_clean) < _FILTER_1_MIN_BODY_LEN and '?' not in body_clean
 
 
@@ -6430,38 +6459,35 @@ def _rule_user_in_cc(mail_data):
     Convention : on ne retourne True QUE si on a la certitude que l'user est
     en CC ET PAS en TO. Si on ne peut pas le déterminer (my_email vide,
     parsing impossible), fail-open : on retourne False (= ne pas écarter).
+
+    Fix correctif N4 (12/05) — parsing to/cc factorisé dans
+    `_extract_emails_from_field` qui gère str | list[str] | list[dict]
+    (avant : list[str] plantait silencieusement, masqué par fail-open).
     """
     my_email = (_get_my_email() or '').lower().strip()
     if not my_email:
         return False  # impossible de juger → ne pas écarter
-    # Graph peut retourner to/cc comme list[dict] (normalize_email) ou comme str
-    _to_raw = mail_data.get('to', '') or ''
-    if isinstance(_to_raw, list):
-        to_field = ' '.join((r.get('email', '') or r.get('address', ''))
-                            for r in _to_raw).lower()
-    else:
-        to_field = str(_to_raw).lower()
-    _cc_raw = mail_data.get('cc', '') or ''
-    if isinstance(_cc_raw, list):
-        cc_field = ' '.join((r.get('email', '') or r.get('address', ''))
-                            for r in _cc_raw).lower()
-    else:
-        cc_field = str(_cc_raw).lower()
+    to_field = _extract_emails_from_field(mail_data.get('to'))
+    cc_field = _extract_emails_from_field(mail_data.get('cc'))
     # Écarter uniquement si en CC ET pas en TO
-    if my_email in cc_field and my_email not in to_field:
-        return True
-    return False
+    return my_email in cc_field and my_email not in to_field
 
 
 # Liste ordonnée des règles (ordre = priorité de court-circuit). L'ordre est
-# choisi pour minimiser le coût moyen : règle 1 (regex pure) en premier, règle
-# 3 (DB) avant règle 5 (parse to/cc). Test I-FILTRE-01 vérifie qu'il y en a 5.
+# choisi pour minimiser le coût moyen sur un mail qui PASSE le filtre
+# (cas majoritaire) — où toutes les règles s'exécutent jusqu'à False :
+#   1. auto_sender  → regex pure ~1µs    (presque gratuit)
+#   2. too_old      → parse date ~10µs   (peu coûteux)
+#   3. user_in_cc   → 2 dict lookups ~1µs (cache _get_my_email)
+#   4. body_too_short → regex HTML ~50µs (body peut atteindre 10 KB)
+#   5. already_treated → SELECT SQLite ~100-200µs (le plus cher)
+# Test I-FILTRE-01 vérifie qu'il y en a exactement 5.
 _FILTER_1_RULES = (
     ('expéditeur automatique', _rule_auto_sender),
     ('mail > 30 jours',         _rule_too_old),
-    ('mail déjà traité',        _rule_already_treated),
-    ('body trop court',         _rule_body_too_short),
     ('utilisateur en CC',       _rule_user_in_cc),
+    ('body trop court',         _rule_body_too_short),
+    ('mail déjà traité',        _rule_already_treated),
 )
 
 
