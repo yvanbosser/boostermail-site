@@ -493,6 +493,26 @@ Le Filtre 1 de l'arbre décisionnel V2 (« un mail est-il à écarter ? ») est 
 - **Pourquoi** : avant N4, 2 fonctions (`_is_discarded` + `_should_speculate`) dupliquaient les 4 critères de l'arbre avec un patch d'harmonisation (08/05 fix #3) qui réparait une divergence rare. Plus 2 critères annexes hors arbre (5 ouvertures = workaround Outlook obsolète ; CC = devait être en Filtre 2 PARTIEL mais simplifié en écartage par décision Yvan).
 - **Historique** : refonte 12/05/2026 N4 (branche `feat/yvan/refonte-N4-filtre-1`)
 
+### I-FILTRE-2-01 : Filtre 2 « VIP vs PARTIEL » = profil enrichi OU manuellement édité (refonte N5 12/05/2026)
+Le Filtre 2 de l'arbre décisionnel V2 (« VIP ou PARTIEL ? ») est implémenté par `_filter_2_is_vip(email) -> Tuple[bool, str]` dans `V2/app_plugin.py` qui retourne `(True, "")` ssi le contact a une **fiche bien remplie** : `sample_count >= 1` OU `manually_edited == 1`.
+- **Critère "TO" géré en amont** : le test "destinataire principal" de l'arbre est désormais géré au Filtre 1 (N4) où le CC est écarté direct (décision Yvan 12/05/2026 simplification produit). Donc tous les mails qui atteignent N5 sont en TO.
+- **Pas de "réveil" des vieux mails** : quand un contact passe de fiche vide → fiche remplie, les vieux mails déjà classés PARTIEL **restent en PARTIEL**. Décision Yvan 12/05/2026 : « on garde en PARTIEL pour cette fois, VIP la prochaine fois ». Simplicité > exhaustivité. Plus de mécanisme `_invalidate_filtered_cache_*`.
+- **Wrapper rétrocompat** : `_should_speculate(mail_data)` combine désormais Filtre 1 ET Filtre 2 VIP. C'était promis dans sa docstring depuis 08/05 (« quand N5 sera fait, `_should_speculate` deviendra `Filtre 1 ET Filtre 2 VIP` »). Promesse tenue.
+- **Helper anti-resubmission factorisé** : `_mark_filtered_in_cache(message_id, reason)` remplace 2 doublons historiques (Fix C / FIX P14 / Fix C bis du 25/04) entre branches "done" et "fresh" de `_run_prefetch`. Protection drafts user / bg_speculation / preemptive avec lock unique.
+- **Optimisation N5 fix #6** : check `_filter_2_is_vip` est fait AVANT le batch Graph dans `_run_prefetch` (économie ~1 sec Graph + 3 KB par mail PARTIEL filtré, soit ~10-30 sec au boot pour un carnet typique).
+- **Constantes nommées** : `_PREEMPTIVE_TIER1_SCAN_DEPTH = 50` + `_PREEMPTIVE_TIER1_MAX_CANDIDATES = 20` (avant : magic numbers hardcodés). Documentées dans le code avec règle d'ajustement basée sur hit rate `/api/draft_stats`.
+- **Helper `_extract_emails_from_field(field) -> set[str]`** : normalise to/cc Graph (str | list[str] | list[dict]). Retourne set (avant N5 : string concaténée → bug substring matching `'bob@y.com' in 'bob@y.com.au'` = True). Lookup exact désormais.
+- **Tests mécaniques** (`tests/test_n5_filtre_2.py`, 23/23 + N4 74/74 dont 2 cas sous-domaine) :
+  - exactement 1 définition `def _filter_2_is_vip(`
+  - 0 définition `def _is_contact_known(` (helper N3 supprimé en N5)
+  - 0 appel `_is_contact_known(...)` en code
+  - 0 fonction `_invalidate_filtered_*` (décision Yvan : pas de réveil)
+  - 0 wrapper `try/except: pass` autour de `_is_discarded`/`_should_speculate` (fail-open par contrat)
+  - bloc « CODE INACTIF » supprimé dans `_prewarm_echeance_for_mail`
+  - `'template'` retirée de `_FILTERED_PROTECTED_SOURCES`
+- **Pourquoi** : avant N5, la décision VIP/PARTIEL était dispersée sur 4 sites (`_is_contact_known` appelé en 4 endroits + 2 doublons des 3 patchs Fix C/Fix P14/Fix C bis). Plus `_should_speculate` un thin wrapper menteur (sa docstring promettait Filtre 1 + Filtre 2 mais ne faisait que Filtre 1). Plus des constantes magic + un parsing emails buggé sur sous-domaines.
+- **Historique** : refonte 12/05/2026 N5 (branche `feat/yvan/frontend`, commits à venir).
+
 ### I-DB-CONN-01 : Une seule Database() instance par db_path par TID (latent fix 12/05/2026)
 Le tracker class-level `Database._all_conns[tid] = conn` est keyé par thread_id seul. **Ne JAMAIS instancier plusieurs `Database(db_path)` simultanément dans le même thread** : la seconde instance, via `_conn()`, kicke et ferme la conn de la première (assumée zombie), provoquant `ProgrammingError: Cannot operate on a closed database` downstream.
 - **Règle pour helpers utility (BG threads, atexit, scripts CLI)** : si on a besoin d'une SELECT one-shot sans contexte Flask, utiliser `sqlite3.connect(db_path)` raw + close — pas `Database()`.

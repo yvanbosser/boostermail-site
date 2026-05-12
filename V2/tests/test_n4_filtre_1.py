@@ -129,6 +129,11 @@ def critere_rule_user_in_cc():
             # Fix correctif N4 (12/05) — list[str] désormais supporté via _extract_emails_from_field
             ("to=list[str] cc=list[str]",     {"to": ["alice@x.com"], "cc": ["yvan@boostermail.ai"]}, True),
             ("list mixte dict+str",           {"to": [{"email": "alice@x.com"}, "bob@y.com"], "cc": ["yvan@boostermail.ai"]}, True),
+            # Fix correctif N5 (12/05) — substring matching éliminé : ancien bug
+            # `'yvan@boostermail.ai' in 'yvan@boostermail.ai.au'` = True (faux positif).
+            # Avec set lookup : matching exact. yvan@boostermail.ai.au ≠ yvan@boostermail.ai.
+            ("piège sous-domaine : cc=ai.au",  {"to": "alice@x.com", "cc": "yvan@boostermail.ai.au"}, False),
+            ("piège sous-domaine : cc=ai prefix",{"to": "alice@x.com", "cc": "yvan@boostermail.aix.com"}, False),
         ]
         ok_count = 0
         for desc, md, expected in cases:
@@ -208,11 +213,14 @@ def critere_extract_emails_helper():
     ok_count = 0
     for desc, inp, expected_sub in cases:
         result = ap._extract_emails_from_field(inp)
+        # Refonte N5 (12/05) — helper retourne set au lieu de str (fix substring matching).
+        # Tests compatibles avec les 2 sémantiques : `expected in result` marche pour
+        # set comme pour str ; `not result` marche pour set() comme pour ''.
         if expected_sub:
             ok = expected_sub in result
             ok_count += log_test(f"{desc} → {result!r} (contient {expected_sub!r})", ok)
         else:
-            ok = result == ''
+            ok = not result
             ok_count += log_test(f"{desc} → {result!r} (vide attendu)", ok)
     return ok_count, len(cases)
 
@@ -264,28 +272,61 @@ def critere_is_discarded_global():
 # Test `_should_speculate` thin wrapper (équivalence avec not _is_discarded)
 # ---------------------------------------------------------------------------
 
-def critere_should_speculate_thin():
-    """`_should_speculate` doit être strictement équivalent à `not _is_discarded`."""
-    print("\n=== _should_speculate (thin wrapper) ===")
+def critere_should_speculate_after_n5():
+    """`_should_speculate` doit valider Filtre 1 ET Filtre 2 VIP (refonte N5 12/05).
+
+    Avant N5 : `_should_speculate = not _is_discarded` (thin wrapper).
+    Après N5 : `_should_speculate = (not Filtre 1) AND Filtre 2 VIP`.
+
+    Cas testés :
+      - Mail écarté par Filtre 1 → spec False, raison = règle Filtre 1
+      - Mail OK Filtre 1 mais Filtre 2 PARTIEL → spec False, raison Filtre 2
+      - Input pourri → spec False, raison fail-open
+    """
+    print("\n=== _should_speculate (combinateur Filtre 1 ET Filtre 2 VIP, post-N5) ===")
     now = datetime.datetime.now()
     recent = (now - datetime.timedelta(days=5)).isoformat()
-    test_mds = [
-        {"from_email": "papa@x.com",    "body": "Bonjour, long body normal pour test.", "date": recent},
-        {"from_email": "noreply@x.com", "body": "Bonjour, long body normal pour test.", "date": recent},
-        {"from_email": "papa@x.com",    "body": "Ok", "date": recent},
-        None,
-        "pas un dict",
-    ]
-    ok_count = 0
-    for md in test_mds:
-        d, dr = ap._is_discarded(md)
-        s, sr = ap._should_speculate(md)
-        ok = (s == (not d)) and (sr == dr)
-        ok_count += log_test(
-            f"md={type(md).__name__} disc=({d},{dr!r}) spec=({s},{sr!r})",
-            ok
-        )
-    return ok_count, len(test_mds)
+    # Mock _filter_2_is_vip pour rendre le test déterministe sans setup DB
+    _orig_f2 = ap._filter_2_is_vip
+    ap._filter_2_is_vip = lambda email: (True, '') if email == 'vip@x.com' else (False, 'pas_de_fiche')
+    try:
+        cases = [
+            # (description, mail_data, expected_spec, expected_reason_substring)
+            ("mail VIP légitime",
+             {"from_email": "vip@x.com", "body": "Bonjour, long body normal.", "date": recent},
+             True, ''),
+            ("mail PARTIEL (contact pas en base)",
+             {"from_email": "inconnu@x.com", "body": "Bonjour, long body normal.", "date": recent},
+             False, 'pas_de_fiche'),
+            ("mail écarté Filtre 1 (no-reply)",
+             {"from_email": "noreply@x.com", "body": "Bonjour, long body normal.", "date": recent},
+             False, 'expéditeur automatique'),
+            ("mail écarté Filtre 1 (body court)",
+             {"from_email": "vip@x.com", "body": "Ok", "date": recent},
+             False, 'body trop court'),
+            # Inputs pourris : on vérifie juste que ça ne plante pas + spec=False
+            # (la raison exacte dépend du mock _filter_2_is_vip, peu importe pour la robustesse)
+            ("input None → fail-open spec=False",
+             None, False, ''),
+            ("input str pourri → fail-open spec=False",
+             "pas un dict", False, ''),
+        ]
+        ok_count = 0
+        for desc, md, expected_spec, expected_reason in cases:
+            s, sr = ap._should_speculate(md)
+            # Si expected_reason vide : on accepte n'importe quelle raison (cas
+            # inputs pourris où la raison exacte importe peu)
+            if expected_reason:
+                ok = (s == expected_spec) and (expected_reason in sr)
+            else:
+                ok = (s == expected_spec)
+            ok_count += log_test(
+                f"{desc} → spec=({s}, {sr!r})",
+                ok
+            )
+        return ok_count, len(cases)
+    finally:
+        ap._filter_2_is_vip = _orig_f2
 
 
 # ---------------------------------------------------------------------------
@@ -459,7 +500,7 @@ def main():
         critere_is_user_treated_robustness,
         critere_extract_emails_helper,
         critere_is_discarded_global,
-        critere_should_speculate_thin,
+        critere_should_speculate_after_n5,
         invariant_i_filtre_01,
         invariant_no_open_counter,
         invariant_is_treated_via_helper,

@@ -1570,13 +1570,18 @@ def _continuous_speculation_loop():
                 time.sleep(CYCLE_INTERVAL)
                 continue
 
-            # Priorité 1 (6.4) : TIER 1 contacts connus, puis TIER 2 (autres)
+            # Priorité 1 (6.4) : TIER 1 = VIP (Filtre 2), TIER 2 = PARTIEL
+            # Refonte N5 (12/05) — utilise `_filter_2_is_vip` (fiche bien remplie)
+            # au lieu de `_is_contact_known` (présence DB seule, incluait fiches
+            # vides à tort). Conséquence : un contact à profil sample_count=0
+            # passe désormais en tier2, ce qui force cont-spec à le re-analyser
+            # via _maybe_analyze_contact pour combler la fiche (cf ligne ~1647).
             tier1, tier2 = [], []
             for m in mails:
                 fe = m.get('from_email', '')
                 if not fe:
                     continue
-                if _is_contact_known(fe):
+                if _filter_2_is_vip(fe)[0]:
                     tier1.append(m)
                 else:
                     tier2.append(m)
@@ -2588,6 +2593,26 @@ def _is_auto_email(email):
 _FILTER_1_MAX_AGE_DAYS = 30
 _FILTER_1_MIN_BODY_LEN = 10  # appliqué APRÈS strip HTML, en codepoints Unicode
 
+# =============================================================================
+# Refonte N5 (12/05/2026) — Préemptive TIER 1 : constantes documentées
+# =============================================================================
+# Avant : valeurs magiques 50 et 20 hardcodées dans `_run_preemptive_bg`.
+# Choix empiriques 21/04/2026 (passage 5 → 20 pour boost couverture sans
+# saturer Anthropic). À ajuster avec métriques prod : la vraie mesure est
+# le **hit rate du cache préemptif** = ratio (mails ouverts dont draft prêt)
+# / (mails ouverts TIER 1). Exposable via `/api/draft_stats` (clés `hits` /
+# `by_source.bg_speculation`).
+#
+# Règle d'ajustement :
+#   - Hit rate >= 95 % → 20 est bon, ne pas toucher
+#   - Hit rate 80-95 % → augmenter à 30 puis re-mesurer
+#   - Hit rate < 80 %  → investiguer (problème ailleurs probablement)
+#
+# Coût d'une spéculation : ~$0.005 (Sonnet) + délai ~10 sec pour 20 candidats
+# (avec sémaphore 4 // + stagger 500 ms entre lancements).
+_PREEMPTIVE_TIER1_SCAN_DEPTH = 50      # nb de mails inbox scannés au démarrage
+_PREEMPTIVE_TIER1_MAX_CANDIDATES = 20  # nb max de spéculations Sonnet lancées
+
 
 def _parse_mail_date(mail_data):
     """Parse le champ 'date' d'un mail_data dict en datetime naïf, fail-open.
@@ -2678,7 +2703,7 @@ def _is_user_treated(message_id):
 
 
 def _extract_emails_from_field(field):
-    """Normalise un champ to/cc Graph en string flat lowercase pour `in` matching.
+    """Normalise un champ to/cc Graph en `set[str]` lowercase pour matching exact.
 
     Graph (et ses normalizers internes) peuvent renvoyer ce champ sous 3 formes :
       - `str` : "alice@x.com" ou "alice@x.com; bob@y.com"
@@ -2686,27 +2711,33 @@ def _extract_emails_from_field(field):
         (clés "email" OU "address" selon le sérializer)
       - `list[str]` : ["alice@x.com", "bob@y.com"]
 
+    Refonte N5 (12/05/2026) — Retourne un `set` (avant : string concaténée).
+    Évite le bug substring matching : ancien `'bob@y.com' in 'bob@y.com.au'`
+    = True (faux positif Filtre 1 règle 5). Avec un set : `'bob@y.com' in
+    {'bob@y.com.au'}` = False (lookup exact).
+
     Returns
     -------
-    str
-        Concatenation lowercase séparée par espaces. Chaîne vide si input
-        invalide (fail-open). Garantit que `email in result` fonctionne pour
-        tester la présence d'une adresse.
+    set[str]
+        Adresses normalisées lowercase. Set vide si input invalide (fail-open).
     """
     if not field:
-        return ''
+        return set()
     if isinstance(field, str):
-        return field.lower()
+        # Split sur séparateurs courants (`;`, `,`, espace) — on garde robuste
+        return {e.strip().lower() for e in re.split(r'[;,\s]+', field) if e.strip()}
     if isinstance(field, list):
-        parts = []
+        out = set()
         for item in field:
             if isinstance(item, dict):
-                parts.append(item.get('email', '') or item.get('address', '') or '')
-            elif isinstance(item, str):
-                parts.append(item)
+                email = item.get('email', '') or item.get('address', '') or ''
+                if email:
+                    out.add(email.lower())
+            elif isinstance(item, str) and item.strip():
+                out.add(item.strip().lower())
             # silently skip autres types (None, int, etc.) — fail-open
-        return ' '.join(parts).lower()
-    return ''
+        return out
+    return set()
 
 
 def _extract_imid_from_mail_data(mail_data):
@@ -2800,79 +2831,21 @@ def _set_mail_preview(mid, kind, status, data):
 
 
 def _prewarm_echeance_for_mail(mid, mail_data):
-    """[Scope V1 07/05] Coupure douce sur les mails reçus.
+    """[Scope V1 07/05] Échéances mails reçus = no-op (scope V1 = sortants only).
 
-    Spec : SPEC_ECHEANCES_BOOSTERMAIL.md §2 — scope V1 = sortants uniquement.
-    Cette fonction est appelée en BG sur les mails *reçus* (warmup, ouverture
-    mail) → hors scope. On retourne [] sans appeler Claude pour économiser
-    les appels IA (~30% du volume échéance) et éviter de polluer la DB.
+    Spec : SPEC_ECHEANCES_BOOSTERMAIL.md §2 — la pré-cuisson d'échéances pour
+    les mails entrants est désactivée (économie 30% appels Claude, pas de
+    pollution DB). Cette fonction marque juste le cache preview comme "done
+    avec liste vide" pour que le frontend ne reste pas en état "loading".
 
-    Code de scan conservé en commentaire pour réactivation simple si scope
-    élargi un jour. Le pipeline sortant passe par api_echeances_post_send
-    (direction='sent') qui reste actif et crée les vraies entrées DB.
+    Le pipeline sortant `api_echeances_post_send` (direction='sent') reste
+    actif et crée les vraies entrées DB.
+
+    Refonte N5 (12/05/2026) — l'ancien bloc « CODE INACTIF » de ~60 lignes
+    commentées (scan Claude pour réactivation future) a été supprimé. Si on
+    réactive un jour, on réécrira propre depuis l'historique git.
     """
     _set_mail_preview(mid, 'echeance', 'done', [])
-    return
-
-    # ═══════════════════════════════════════════════════════════════════
-    # CODE INACTIF (réactivation : retirer le return ci-dessus)
-    # ═══════════════════════════════════════════════════════════════════
-    try:
-        # [1] Cache DB : check idempotent (comme has_mail_summary)
-        try:
-            cached = _db.get_mail_echeance(mid)
-            if cached is not None:
-                ech = cached.get('echeances', [])
-                _set_mail_preview(mid, 'echeance', 'done', ech)
-                logger.debug(f"[prewarm-ech] cache DB HIT pour {mid[:30]} "
-                             f"({len(ech)} échéance(s))")
-                return
-        except Exception as _e:
-            logger.debug(f"[prewarm-ech] check DB erreur : {_e}")
-
-        # [2] Pré-filtre heuristique (0 API)
-        body = (mail_data.get('body') or mail_data.get('body_preview') or '')[:4000]
-        subject = mail_data.get('subject', '')
-        body_plain = _HTML_TAG_RE.sub(' ',body)
-        body_plain = re.sub(r'\s+', ' ', body_plain).strip()
-        if not body_plain or not _has_echeance_pattern(subject + ' ' + body_plain):
-            # Pas de pattern → [] = néant. Persister pour ne plus re-scanner.
-            try:
-                _db.save_mail_echeance(mid, [])
-            except Exception as _e:
-                logger.debug(f"[prewarm-ech] save DB [] : {_e}")
-            _set_mail_preview(mid, 'echeance', 'done', [])
-            return
-
-        # [3] Scan Claude
-        builder = _get_prompt_builder()
-        if not builder:
-            _set_mail_preview(mid, 'echeance', 'done', [])
-            return
-        mails_batch = [{
-            'subject': subject,
-            'body': body_plain[:2000],
-            'from': mail_data.get('from_email', ''),
-            'direction': 'received',
-        }]
-        try:
-            echeances = builder.scan_echeances_batch(mails_batch) or []
-        except Exception as e:
-            logger.debug(f"[prewarm-ech] scan Claude erreur : {e}")
-            echeances = []
-
-        # [4] Persister en DB + RAM
-        try:
-            _db.save_mail_echeance(mid, echeances)
-        except Exception as _e:
-            logger.debug(f"[prewarm-ech] save DB : {_e}")
-        _set_mail_preview(mid, 'echeance', 'done', echeances)
-        if echeances:
-            logger.info(f"[prewarm-ech] {len(echeances)} échéance(s) pré-détectée(s) "
-                        f"pour {mid[:30]}")
-    except Exception as e:
-        logger.debug(f"[prewarm-ech] {e}")
-        _set_mail_preview(mid, 'echeance', 'error', None)
 
 
 def _get_outlook_folders_cached() -> list:
@@ -5569,6 +5542,20 @@ def _run_prefetch(mail_data):
                      f"subject={subject[:40]}")
         return
 
+    # Refonte N5 (12/05/2026) — Filtre 2 (VIP ?) AVANT le batch Graph lourd.
+    # `_run_prefetch` charge les contextes A/B/C uniquement utiles au chef
+    # Sonnet (réponse VIP). Si le mail est PARTIEL, ces contextes ne servent
+    # à rien → on évite ~1 sec de Graph + 3 KB par mail filtré (gain boot
+    # 10-30 sec selon le carnet). Le commis Haiku (résumé + classement) est
+    # appelé séparément via `_prewarm_unified_for_mail` (chemin indépendant
+    # de `_run_prefetch`), donc le PARTIEL aura quand même ses 3 plats.
+    _is_vip, _vip_reason = _filter_2_is_vip(from_email)
+    if not _is_vip:
+        logger.debug(f"[prefetch] skip PARTIEL ({_vip_reason}) : "
+                     f"subject={subject[:40]} — Graph batch évité")
+        _mark_filtered_in_cache(message_id, _vip_reason)
+        return
+
     # Clé de cache = IMID canonique (pas de fallback from+subject)
     cache_key = message_id
     # Lecture du statut existant SOUS lock (court), décision prise HORS lock
@@ -5595,10 +5582,12 @@ def _run_prefetch(mail_data):
         _ev_done['bodies_enriched'].set()
         _ev_done['c_context_ready'].set()
         # Fix root-cause I-CX-01 (24/04 P5) : prefetch 'done' ≠ draft généré.
-        # La boucle BG envoie ces mails ici car _reply_cache ne les a pas,
-        # mais le `return` précédent skippait _start_speculative → 0 drafts.
-        # On déclenche la spéculation directement sans refaire le prefetch.
-        if message_id and from_email and _is_contact_known(from_email):
+        # La boucle BG envoie ces mails ici car _reply_cache ne les a pas.
+        # Refonte N5 (12/05) : `_should_speculate` combine Filtre 1 + Filtre 2 VIP
+        # ET gère le cas from_email vide (retourne 'email_invalide'). Le helper
+        # `_mark_filtered_in_cache` factorise l'anti-resubmission (avant : 3
+        # patchs Fix C / FIX P14 / Fix C bis dupliqués entre 2 branches).
+        if message_id:
             ok_spec, skip_reason = _should_speculate(mail_data)
             if ok_spec:
                 def _speculate_ws_done(md):
@@ -5612,33 +5601,7 @@ def _run_prefetch(mail_data):
                 _spawn_bg(_speculate_ws_done, args=(mail_data,))
             else:
                 logger.debug(f"[spec-done] Skip ({skip_reason}) {message_id[:20]}")
-                # Fix C (25/04) — Marquer 'filtered' pour éviter resoumission ∞.
-                # Sans ça : _reply_cache vide → candidat à chaque cycle 45s.
-                # FIX P14 (25/04 soir) : NE PAS écraser un draft valide existant.
-                with _reply_lock:
-                    _existing = _reply_cache.get(message_id, {})
-                    if not (_existing.get('status') == 'done'
-                            and _existing.get('source') in ('bg_speculation', 'template', 'user_edit', 'preemptive')
-                            and _existing.get('text')):
-                        _reply_cache[message_id] = {
-                            'status': 'done', 'source': 'filtered',
-                            'reason': skip_reason, 'timestamp': time.time(),
-                        }
-        elif message_id:
-            # Fix C bis (25/04) — Tier2 (contact inconnu) : prefetch déjà done
-            # mais speculation jamais lancée (guard _is_contact_known). Sans entrée
-            # _reply_cache, le mail est candidat à chaque cycle → resoumission ∞.
-            # FIX P14 (25/04 soir) : NE PAS écraser un draft valide existant.
-            logger.debug(f"[spec-done] Skip contact_unknown {message_id[:20]}")
-            with _reply_lock:
-                _existing = _reply_cache.get(message_id, {})
-                if not (_existing.get('status') == 'done'
-                        and _existing.get('source') in ('bg_speculation', 'template', 'user_edit', 'preemptive')
-                        and _existing.get('text')):
-                    _reply_cache[message_id] = {
-                        'status': 'done', 'source': 'filtered',
-                        'reason': 'contact_unknown', 'timestamp': time.time(),
-                    }
+                _mark_filtered_in_cache(message_id, skip_reason)
         return
     if existing_status == 'running':
         return
@@ -5808,9 +5771,11 @@ def _run_prefetch(mail_data):
 
         _broadcast_sse('prefetch_progress', {'status': 'done', 'a': len(context_a), 'b': len(context_b), 'c': len(context_c)})
 
-        # Lancer la spéculation si contact connu (spéculation hybride)
-        # + 6 filtres Smart Speculative (Plan 2 Phase 2.B, Plan 3 §9.2)
-        if message_id and from_email and _is_contact_known(from_email):
+        # Refonte N5 (12/05) — Lancer la spéculation Sonnet si Filtre 1 OK ET
+        # Filtre 2 VIP. `_should_speculate` combine les deux (cf docstring).
+        # Le helper `_mark_filtered_in_cache` factorise l'anti-resubmission
+        # (avant : 3 patchs Fix C / FIX P14 / Fix C bis dupliqués ici + branche done).
+        if message_id:
             ok_spec, skip_reason = _should_speculate(mail_data)
             if ok_spec:
                 # Option A (24/04) — Sémaphore LLM : max 4 spéculations
@@ -5835,32 +5800,7 @@ def _run_prefetch(mail_data):
                 ).start()
             else:
                 logger.debug(f"[speculative] Skip ({skip_reason}) pour {message_id[:20]}")
-                # Fix C (25/04) — Marquer 'filtered' pour éviter resoumission ∞.
-                # FIX P14 (25/04 soir) : NE PAS écraser un draft valide existant.
-                with _reply_lock:
-                    _existing = _reply_cache.get(message_id, {})
-                    if not (_existing.get('status') == 'done'
-                            and _existing.get('source') in ('bg_speculation', 'template', 'user_edit', 'preemptive')
-                            and _existing.get('text')):
-                        _reply_cache[message_id] = {
-                            'status': 'done', 'source': 'filtered',
-                            'reason': skip_reason, 'timestamp': time.time(),
-                        }
-        elif message_id:
-            # Fix C bis (25/04) — Tier2 (contact inconnu) : prefetch frais terminé
-            # mais speculation jamais lancée (guard _is_contact_known). Sans entrée
-            # _reply_cache, le mail est candidat à chaque cycle → resoumission ∞.
-            # FIX P14 (25/04 soir) : NE PAS écraser un draft valide existant.
-            logger.debug(f"[speculative] Skip contact_unknown {message_id[:20]}")
-            with _reply_lock:
-                _existing = _reply_cache.get(message_id, {})
-                if not (_existing.get('status') == 'done'
-                        and _existing.get('source') in ('bg_speculation', 'template', 'user_edit', 'preemptive')
-                        and _existing.get('text')):
-                    _reply_cache[message_id] = {
-                        'status': 'done', 'source': 'filtered',
-                        'reason': 'contact_unknown', 'timestamp': time.time(),
-                    }
+                _mark_filtered_in_cache(message_id, skip_reason)
 
     except Exception as e:
         logger.error(f"Prefetch error: {e}")
@@ -6349,14 +6289,78 @@ def _extract_prefetch_keywords(subject):
     return clean[:100]  # Fix #18 : borner — sujet externe → potentiel vecteur DASL
 
 
-def _is_contact_known(email):
-    """Retourne True si le contact a un profil dans la DB (contact connu = TIER 1/2)."""
-    if not email:
-        return False
+# =============================================================================
+# Refonte N5 (12/05/2026) — Filtre 2 « VIP ou Partiel ? » de l'arbre décisionnel
+# =============================================================================
+# Source de vérité : `docs/architecture/BoosterMail_Arbre_Decisionnel_v2.pptx`
+# (slide 3, validée 08/05/2026).
+#
+# Le critère "destinataire principal TO" est géré en amont au Filtre 1 (N4) où
+# le CC est écarté direct (décision Yvan 12/05). Donc tous les mails qui
+# arrivent au Filtre 2 sont en TO → la décision se simplifie à :
+#
+#   VIP si le contact a une « fiche bien remplie » dans le carnet :
+#     - sample_count >= 1 (profil enrichi par l'analyse Claude), OU
+#     - manually_edited == 1 (profil édité à la main par l'utilisateur)
+#   Sinon → PARTIEL
+#
+# Conséquences :
+#   - VIP    → chef Sonnet activé (réponse pré-générée) + commis Haiku
+#   - PARTIEL → commis Haiku seulement (résumé + classement Mail + classement PJ)
+
+
+def _filter_2_is_vip(email):
+    """Filtre 2 de l'arbre décisionnel — VIP (= chef Sonnet activé) ou PARTIEL ?
+
+    Returns
+    -------
+    Tuple[bool, str]
+        (True, "")          → VIP, on peut lancer le chef Sonnet
+        (False, "raison")   → PARTIEL, raison = pourquoi pas VIP (logs/metric)
+
+    Sémantique fail-open : si la DB plante ou si l'email est invalide,
+    retourne (False, "..."). Conséquence : le mail sera traité en PARTIEL
+    (commis Haiku quand même → résumé + classement). Mieux pré-cuire le
+    minimum que rater le mail entier.
+
+    NB : la re-analyse en arrière-plan d'un contact à fiche vide
+    (sample_count=0) N'EST PAS déclenchée ici. C'est `_continuous_speculation_loop`
+    qui s'en charge (ligne ~1647) avec son propre cooldown 24h. Ce filtre
+    reste **pur** (pas de side-effect) — refonte N5 décision 12/05/2026.
+    """
+    if not email or not isinstance(email, str):
+        return False, 'email_invalide'
     try:
-        return _db.get_contact_profile(email) is not None
-    except Exception:
-        return False
+        profile = _db.get_contact_profile(email)
+    except Exception as _e:
+        logger.debug(f"[filter2] DB fail pour {email[:30]} : {_e}")
+        return False, 'db_fail'
+    if profile is None:
+        return False, 'pas_de_fiche'
+    # Fiche bien remplie = analysée par Claude (sample_count>=1)
+    # OU éditée manuellement par l'user (cas Q1 N5 corrigé : un user peut
+    # créer/peaufiner un profil à la main avec sample_count=0).
+    if int(profile.get('sample_count', 0) or 0) >= 1:
+        return True, ''
+    if int(profile.get('manually_edited', 0) or 0) == 1:
+        return True, ''
+    return False, 'fiche_vide'  # profil créé en erreur (Claude planté) — sera repris par cont-spec
+
+
+# =============================================================================
+# Refonte N5 (12/05/2026) — Décision Yvan : pas de « réveil » des vieux mails
+# =============================================================================
+# Quand un contact passe de fiche vide → fiche remplie (analyse Claude réussie
+# OU édition manuelle via UI), on POURRAIT réveiller les vieux mails de ce
+# contact déjà classés PARTIEL pour les repasser en VIP. Décision produit Yvan
+# 12/05/2026 : « on garde en PARTIEL pour cette fois, il sera géré en VIP la
+# prochaine fois ». Comportement plus simple, plus prévisible, plus économe
+# (pas d'écrasement de cache ni de complexité multi-tenant à gérer).
+#
+# Conséquence : le mail de Pierre reçu hier (fiche vide → PARTIEL) reste en
+# PARTIEL à vie. Si Pierre envoie un mail demain (fiche maintenant remplie),
+# CE mail-là sera VIP. Le user perçoit une amélioration progressive sans
+# discontinuité de cache.
 
 
 # =============================================================================
@@ -6522,30 +6526,83 @@ def _is_discarded(mail_data):
     return False, ''
 
 
-def _should_speculate(mail_data):
-    """Thin wrapper rétrocompat sur `_is_discarded`.
+# Sources protégées contre l'écrasement par `_mark_filtered_in_cache`.
+# Un draft d'une de ces sources avec status='done' + text non vide ne doit
+# JAMAIS être remplacé par un marqueur 'filtered' (sinon on perd un travail
+# user ou un draft auto déjà généré).
+# Refonte N4 — `'template'` retirée (source jamais créée depuis 11/05).
+# Refonte N5 — `'preemptive'` conservée pour rétrocompat avec drafts_v2.json
+# historique (pas de garantie 0 entrée disque). Suppression conditionnelle
+# planifiée dans un commit séparé après audit disque (cf PLUS_TARD_VF.md).
+_FILTERED_PROTECTED_SOURCES = ('bg_speculation', 'user_edit', 'preemptive')
 
-    Conserve la signature `(bool, str)` historique attendue par les 4 call
-    sites (5337, 5476, 5688, 10752) qui destructurent un tuple ET la
-    métrique production `template.miss.*` (cf `_log_template_metric` ligne
-    ~10760 qui logge la raison agrégée).
 
-    Sémantique :
-      (True, '')       → on peut spéculer (mail non écarté)
-      (False, "raison") → skip spéculation, raison = règle Filtre 1 fired
+def _mark_filtered_in_cache(message_id, reason):
+    """Marque un mail comme 'filtered' dans `_reply_cache` (anti-resubmission infinie).
 
-    NB : avant N4, `_should_speculate` avait 6 critères (les 4 du Filtre 1
-    + "ouvert 5+ fois" + "user en CC"). Les 2 supplémentaires ont été soit
-    supprimés (5 ouv = workaround Outlook obsolète) soit intégrés dans
-    `_is_discarded` (CC = règle 5). `_should_speculate` est désormais
-    strictement équivalent à `not _is_discarded`.
+    Sans cette marque, un mail légitimement skippé par Filtre 1 (écarté) ou
+    Filtre 2 (PARTIEL) n'a aucune entrée dans `_reply_cache` → reste candidat
+    à chaque cycle BG (45s) → resoumission infinie inutile (Fix C, FIX P14,
+    Fix C bis avant N5 — 3 patchs dupliqués entre 2 branches, factorisés ici).
 
-    Suppression future possible : quand N5 (Filtre 2 VIP) sera fait,
-    `_should_speculate` deviendra `Filtre 1 ET Filtre 2 VIP`. À ce moment
-    elle reprendra sa propre logique. Pour l'instant, thin wrapper.
+    Protection des drafts valides existants : si une entrée existe avec
+    status='done' + source dans `_FILTERED_PROTECTED_SOURCES` + text non
+    vide → on n'écrase PAS. Évite de détruire un brouillon user ou un
+    draft Sonnet déjà généré.
+
+    Atomicité : le check ET l'écriture se font SOUS LE MÊME LOCK
+    (`_reply_lock`) pour éliminer la race TOCTOU (un draft valide pourrait
+    arriver entre le check et l'écriture sans lock unique).
+
+    Refonte N5 (12/05/2026) — helper unique remplaçant les 2 doublons
+    (branche "done" lignes ~5615-5641, branche "fresh" lignes ~5838-5863).
     """
+    if not message_id or not isinstance(message_id, str):
+        return
+    with _reply_lock:
+        existing = _reply_cache.get(message_id, {})
+        if (existing.get('status') == 'done'
+                and existing.get('source') in _FILTERED_PROTECTED_SOURCES
+                and existing.get('text')):
+            return  # protection : on n'écrase pas un draft valide
+        _reply_cache[message_id] = {
+            'status': 'done',
+            'source': 'filtered',
+            'reason': reason,
+            'timestamp': time.time(),
+        }
+
+
+def _should_speculate(mail_data):
+    """Décision « doit-on lancer le chef Sonnet pour ce mail ? » = Filtre 1 ET Filtre 2 VIP.
+
+    Returns
+    -------
+    Tuple[bool, str]
+        (True, '')        → mail légitime ET VIP, on peut spéculer Sonnet
+        (False, 'raison') → skip spéculation, raison = (a) règle Filtre 1
+                            qui a écarté le mail OU (b) raison Filtre 2 PARTIEL
+
+    Refonte N5 (12/05/2026) — La promesse de la docstring précédente est
+    tenue : `_should_speculate` combine désormais Filtre 1 (écartage) ET
+    Filtre 2 (VIP). Avant N5 c'était un thin wrapper qui ne reflétait que
+    le Filtre 1.
+
+    La métrique production `template.miss.*` (`_log_template_metric` ~10878)
+    continue de fonctionner : la raison agrégée distinguera désormais les
+    règles Filtre 1 (`expéditeur automatique`, `mail > 30 jours`, etc.) ET
+    les raisons Filtre 2 (`pas_de_fiche`, `fiche_vide`, `db_fail`, etc.).
+    """
+    # Étape 1 : Filtre 1 (écarté ?). Si écarté → on ne spécule pas, raison Filtre 1.
     discarded, reason = _is_discarded(mail_data)
-    return (not discarded), reason
+    if discarded:
+        return False, reason
+    # Étape 2 : Filtre 2 (VIP ?). Si non-VIP → PARTIEL, raison Filtre 2.
+    from_email = (mail_data.get('from_email', '') or '').lower() if isinstance(mail_data, dict) else ''
+    is_vip, vip_reason = _filter_2_is_vip(from_email)
+    if not is_vip:
+        return False, vip_reason
+    return True, ''
 
 
 def _start_speculative(mail_data):
@@ -6555,7 +6612,7 @@ def _start_speculative(mail_data):
     Attend (polling) que le prefetch de CE mail soit terminé, puis génère avec stream=False
     et stocke le résultat dans _reply_cache[message_id].
 
-    Appelé uniquement si _is_contact_known() → True (TIER 1/2).
+    Appelé uniquement si `_filter_2_is_vip()` → True (= VIP, fiche bien remplie).
     Le cache est nettoyé automatiquement après envoi / suppression / classement.
     """
     # Phase 1 (25/04 soir) — Étiquetage canonique strict : IMID seul.
@@ -6939,22 +6996,22 @@ def _start_speculative(mail_data):
 
 def _run_preemptive_bg(inbox_mails):
     """
-    Thread de warmup : identifie les TIER 1 (contacts connus) et lance la
-    spéculation préemptive pour chacun.
+    Thread de warmup : identifie les TIER 1 (= VIP au sens Filtre 2) et
+    lance la spéculation Sonnet préemptive pour chacun.
 
-    Boost couverture 21/04 : scan 50 mails au lieu de 20, plafond 20 candidats
-    au lieu de 5. Objectif : que TOUS les mails récents de contacts connus
-    soient pré-spéculés (réponse instant au click BM).
+    Constantes (cf top du fichier, refonte N5 12/05/2026) :
+    - `_PREEMPTIVE_TIER1_SCAN_DEPTH` : nb mails inbox scannés (50)
+    - `_PREEMPTIVE_TIER1_MAX_CANDIDATES` : nb max spéculations lancées (20)
 
     Appelé après le warmup de l'inbox.
     """
     if not inbox_mails:
         return
 
-    # Identifier les candidats TIER 1
+    # Identifier les candidats TIER 1 (= VIP au sens Filtre 2)
     # Phase 1 (25/04 soir) — IMID canonique seul.
     candidates = []
-    for mail in inbox_mails[:50]:  # Scan étendu (10 → 50)
+    for mail in inbox_mails[:_PREEMPTIVE_TIER1_SCAN_DEPTH]:
         msg_id = _extract_imid_from_mail_data(mail)
         from_email = mail.get('from_email', '')
         if not msg_id or not from_email:
@@ -6963,9 +7020,11 @@ def _run_preemptive_bg(inbox_mails):
         with _reply_lock:
             if msg_id in _reply_cache:
                 continue
-        if _is_contact_known(from_email):
+        # Refonte N5 (12/05) — `_filter_2_is_vip` au lieu de `_is_contact_known`
+        # (rejet fiches vides sample_count=0 — Q1 N5 décision Yvan)
+        if _filter_2_is_vip(from_email)[0]:
             candidates.append(mail)
-        if len(candidates) >= 20:   # 5 → 20 : couverture max pour contacts connus
+        if len(candidates) >= _PREEMPTIVE_TIER1_MAX_CANDIDATES:
             break
 
     if not candidates:
@@ -10541,7 +10600,9 @@ def api_get_draft():
 
 _MISS_REASON_CODE = {
     'inconnu': 'unknown',
-    'contact UNKNOWN (pas de profil)': 'no_contact_profile',
+    'contact PARTIEL (pas de profil)': 'no_profile',           # N5 — wording corrigé
+    'contact PARTIEL (fiche vide)':    'profile_empty',        # N5 — sample_count=0
+    'contact UNKNOWN (pas de profil)': 'no_contact_profile',   # rétrocompat avec stats historiques
     'BG non scanné (mail hors top 50 ou récent)': 'bg_not_scanned',
     'spéculation cancelled': 'speculation_cancelled',
     'scan Claude erreur': 'claude_error',
@@ -10653,12 +10714,10 @@ def api_instant_reply():
         # (le bg_speculation + le generateReply frontend).
         # Max 1,5 s d'attente (15 × 100 ms) — au-delà on fallback sur
         # template/none pour ne pas faire attendre l'utilisateur.
-        # P0.3 fix 24/04 : élargir aux 'template' aussi. Si le BG loop a
-        # stocké un template préemptif (source='template'), on doit le
-        # renvoyer ici sans recompute step 3. Avant : step 2 filtrait strict
-        # 'bg_speculation' → step 3 recomputait un template identique.
-        if (entry.get('source') in ('bg_speculation', 'template')
-                and entry.get('status') == 'running'):
+        # Refonte N5 (12/05) — `'template'` retiré de l'accept-list : aucune
+        # source `'template'` n'est plus créée dans le code (désactivé 11/05
+        # « Claude partout »). Garder uniquement `'bg_speculation'` actif.
+        if entry.get('source') == 'bg_speculation' and entry.get('status') == 'running':
             # Polling backoff exponentiel (29/04 PM audit perf — Hotspot #1)
             # Avant : 15 × time.sleep(0.1) + 15 × _reply_lock acquisitions = 1.5s
             # de polling avec lock contention élevée si _reply_lock est utilisé
@@ -10672,7 +10731,7 @@ def api_instant_reply():
                     entry = _reply_cache.get(message_id, {})
                 if entry.get('status') in CacheStatus.TERMINAL:
                     break
-        if (entry.get('source') in ('bg_speculation', 'template')
+        if (entry.get('source') == 'bg_speculation'
                 and entry.get('status') == 'done'
                 and entry.get('text')):
             _reply_metric_inc('hits')
@@ -10863,11 +10922,15 @@ def api_instant_reply():
     miss_reason = 'inconnu'
     if message_id:
         try:
-            # Contact UNKNOWN ?
+            # Refonte N5 (12/05) — distinction PARTIEL "pas de profil" vs
+            # PARTIEL "fiche vide" (sample_count=0). Avant : wording mensonger
+            # "contact UNKNOWN" pour tous les non-VIP.
             if from_email:
                 _cp = _db.get_contact_profile(from_email)
                 if not _cp:
-                    miss_reason = 'contact UNKNOWN (pas de profil)'
+                    miss_reason = 'contact PARTIEL (pas de profil)'
+                elif int(_cp.get('sample_count', 0) or 0) == 0 and int(_cp.get('manually_edited', 0) or 0) == 0:
+                    miss_reason = 'contact PARTIEL (fiche vide)'
             # BG pas encore exécuté ?
             with _reply_lock:
                 entry = _reply_cache.get(message_id, {})
@@ -14152,6 +14215,10 @@ def _maybe_analyze_contact(contact_email, bypass_cooldown=False):
         profile['email'] = contact_email
         _db.save_contact_profile(contact_email, profile)
         logger.info(f"[learning] Profil sauvegarde: {_hash_email_partial(contact_email)} — {profile.get('category','?')}, {profile.get('register','?')}")
+
+        # Refonte N5 (12/05) — Pas de réveil des vieux mails PARTIEL (décision
+        # Yvan : « on garde en PARTIEL pour cette fois, VIP la prochaine fois »).
+        # Cf bloc commentaire au-dessus de `_filter_2_is_vip`.
 
         if is_new:
             global _new_profile_toast

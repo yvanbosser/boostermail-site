@@ -1,5 +1,21 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
+> **🆕 12/05/2026 (session conception feature « audit boîte mail »)** :
+>
+> Cadrage en cours d'une nouvelle feature **audit de boîte mail** accessible depuis le dashboard utilisateur (que Michael bâtit sur `feat/michael/multi-user`). Scope MVP arrêté à 6 catégories de "bruit" identifiables avec faible faux positif (doublons niveaux 1+2, spams confirmés, mails techniques périmés, invitations calendrier passées, newsletters/pubs, notifications réseaux sociaux). Principe directeur : « moins supprimer que trop » → action par défaut = déplacement vers dossier dédié `_BoosterMail_Audit/<catégorie>`, jamais suppression directe. Deux types d'audit distingués : **ponctuel** (grand ménage sur stock existant) et **permanent** (surveillance des nouveaux entrants). **Arborescence optimisée = différé** (chantier à part entière, trop complexe pour ce MVP).
+>
+> **3 points à reprendre à la mise en chantier de la feature** :
+>
+> - **🟡 Péremption des invitations calendrier répondues vs non répondues** : décision Yvan 12/05 — mail technique ouvert/cliqué = **périmé à 30j** quoi qu'il arrive (l'action a été faite ou jamais faite, dans les deux cas plus utile). Reste en suspens : invitation calendrier **répondue** (accepté/refusé) périmer à J+90 après la date de réunion est sans risque ; invitation **jamais répondue** = plus délicat (peut-être que l'user n'a jamais vu et que ça lui sert de rappel d'une réunion ratée). À trancher à la mise en chantier.
+>
+> - **🟢 Décision 12/05 — réutiliser le moteur `_is_discarded`** : le concept "mail écarté" déjà implémenté dans `V2/app_plugin.py:5860` (pas de pré-cuisinage de réponse) recouvre largement la liste des catégories de l'audit réactif (newsletter, spam, doublon, mail technique = tous des mails « pour lesquels on ne génère pas de réponse »). À la mise en chantier : enrichir `_is_discarded` avec les nouvelles catégories de l'audit plutôt que créer un moteur parallèle. Un seul filtre, deux usages : interne (pas de pré-cuisinage) + externe (flag ou déplacement visible pour l'user).
+>
+> - **🟡 Backend SaaS indispensable pour le mode "audit permanent"** : la surveillance des nouveaux mails entrants ne peut pas tourner uniquement côté client Outlook (user qui ferme Outlook le vendredi soir et reçoit 200 mails le week-end = Inbox bordélique le lundi). Solution : webhook Microsoft Graph côté backend SaaS, analyse côté serveur, application de l'action (flag ou déplacement) via API Graph. **Point à noter pour Michael** lors du cadrage : le backend SaaS, qui était optionnel pour le mode ponctuel (stock de 10 000 mails depuis le client), devient **indispensable** pour le mode permanent. Implique aussi un balayage périodique côté serveur (cron quotidien/hebdo) pour les catégories à péremption temporelle (mails techniques J+7, invitations J+90 post-réunion).
+>
+> - **🟡 Apprentissage continu sur les faux positifs** : en mode permanent, quand l'user sort un mail du dossier `_BoosterMail_Audit/Newsletters` (parce qu'il juge cette newsletter utile), il faut **mémoriser ce signal** pour ne pas re-flagger les prochains envois du **même expéditeur**. Même logique pour toutes les catégories. Persistance côté backend SaaS (suit l'user entre machines), mécanisme par catégorie × expéditeur. À designer plus précisément à la mise en chantier — c'est cette logique qui transforme l'audit en outil qui s'améliore au fil du temps plutôt qu'en moteur statique.
+>
+> ---
+>
 > **🆕 06/05/2026** :
 > - **🟡 Trombone intelligent (smart_paperclip) — différé** : la suggestion automatique de dossier de classement basée sur destinataire+sujet existe en backend (`/api/smart_paperclip` + `_db.get_pj_folder_suggestion` matching keywords) et la popup `popupSmartPaperclip` existe en HTML. Comportement actuel mode new (décision Yvan 06/05) = bouton 📎 ouvre directement le dossier racine PJ via companion local (`/open_folder` sur 5052). Réactiver le smart paperclip avec preview popup quand on aura plus de feedback users beta. Code à restaurer : ancien `smartPaperclip()` dans `dialog.js` (commits `40f5135` et antérieurs sur branche dev).
 >
@@ -933,6 +949,27 @@ Décision Yvan 07/05 : pas de différé du PJ — l'utilisateur attend une actio
 **Effort estimé** : 2-3 sessions dédiées (backend signature CRUD + frontend Settings + intégration envoi).
 
 **Priorité** : 🟡 Post-beta. Pas bloquant pour l'expérience actuelle, mais nice-to-have pour le pitch corporate B2B.
+
+---
+
+### 23. ⚠️ Pattern d'itération sur caches `_UserScopedDict` au merge `feat/michael/multi-user` — N5 12/05/2026
+
+**Origine** : Refonte Niveau 5 (« Filtre 2 VIP/Partiel ») 12/05/2026. Pendant l'implémentation, un sub-agent regard frais a flagué un bug latent multi-tenant qui aurait pu rester silencieux longtemps.
+
+**Le piège** : les caches `_UserScopedDict` (`_reply_cache`, `_warmup_cache`, etc.) ont une méthode `.items()` qui **ne retourne QUE les entrées de l'utilisateur courant** (résolu via `get_current_user_id()` ou fallback `'default'`). Donc dans un thread BG sans contexte Flask, `cache.items()` retourne uniquement le sub-cache `'default'`, **pas tous les utilisateurs**.
+
+**Conséquence** : si un BG thread doit itérer sur les entrées de **tous** les users (cleanup global, broadcast event, invalidation cache), il faut utiliser `iter_user_caches()` qui retourne `(user_id, sub_cache)` pour chaque user. Sinon **bug silencieux** : on touche le mauvais sub-cache, ou aucun.
+
+**État du code aujourd'hui** : 5+ sites font `_reply_cache.items()` (3980, 4208, 6905, etc.). Tous semblent corrects côté logique (appelés en contexte Flask qui résoud le bon user_id), mais c'est **fragile**. Un futur dev qui ajoute un cleanup BG ou un broadcast peut tomber dans le piège.
+
+**Action pour Michael au merge `feat/michael/multi-user` ↔ `feat/yvan/frontend`** :
+1. Auditer tous les sites `_reply_cache.items()` (et autres `_UserScopedDict.items()`) — sont-ils tous en contexte Flask ?
+2. Pour les sites BG : remplacer par `iter_user_caches('reply')` qui retourne `(uid, sub)` explicitement.
+3. Si nécessaire, ajouter un linter / test grep mécanique : `cache.items()` dans un fichier BG = anomalie.
+
+**Précédent** : refonte N5 a évité ce piège en supprimant le mécanisme de réveil des mails (Chantier 6 supprimé sur décision Yvan 12/05 : "on garde en PARTIEL pour cette fois, VIP la prochaine fois"). Sans cette décision, j'aurais introduit un bug silencieux en prod multi-tenant.
+
+**Priorité** : 🟡 moyenne — pas de bug actuel (les 5 sites existants sont en contexte Flask). À auditer AVANT activation 2e tenant en prod pour ne pas tomber dans le piège.
 
 ---
 
