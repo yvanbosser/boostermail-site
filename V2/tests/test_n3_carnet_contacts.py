@@ -204,33 +204,127 @@ def critere_check_greeting_inversion_helper(db):
 
 
 def critere_5_cooldown(db):
-    """Critère 5 : helper _check_analysis_cooldown."""
-    print("\n=== Critère 5 : _check_analysis_cooldown ===")
-    # NB : helper dans app_plugin.py, donc test via reproduction de la logique
-    # ou test live. Ici, test par simulation du dict global.
+    """Critère 5 : VRAI test du helper `_check_analysis_cooldown` (pas recopie).
 
-    # On reproduit la logique pour validation (helper inline)
-    _attempts = {}
-    cooldown_sec = 60  # 60s pour le test (au lieu de 24h)
+    Refonte 12/05/2026 : avant ce fix, le test reproduisait la logique
+    localement → faux test (si le vrai helper change d'API, le test passe
+    quand même). Maintenant on importe le SYMBOLE depuis app_plugin et on
+    patche `_FORCE_ANALYSIS_COOLDOWN_SEC` à 60s pour le test.
+    """
+    print("\n=== Critère 5 : _check_analysis_cooldown (vrai helper depuis app_plugin) ===")
+    try:
+        import app_plugin
+    except Exception as e:
+        log_test(f"import app_plugin impossible : {type(e).__name__} {e}", False)
+        return 0, 4
 
-    def _check(email, bypass=False):
-        if bypass:
-            return True
-        now = time.time()
-        if now - _attempts.get(email, 0) < cooldown_sec:
-            return False
-        _attempts[email] = now
-        return True
+    # Sanity : le symbole existe et a la bonne signature
+    if not hasattr(app_plugin, '_check_analysis_cooldown'):
+        log_test("Symbole _check_analysis_cooldown absent de app_plugin", False)
+        return 0, 4
+    if not hasattr(app_plugin, '_force_analysis_attempts'):
+        log_test("Dict _force_analysis_attempts absent de app_plugin", False)
+        return 0, 4
+    if not hasattr(app_plugin, '_FORCE_ANALYSIS_COOLDOWN_SEC'):
+        log_test("Constante _FORCE_ANALYSIS_COOLDOWN_SEC absente de app_plugin", False)
+        return 0, 4
 
-    # 1er appel : passe
-    ok1 = log_test("1er appel passe", _check("a@b.c"))
-    # 2e appel immédiat : bloqué
-    ok2 = log_test("2e appel immédiat bloqué", not _check("a@b.c"))
-    # 3e avec bypass : passe
-    ok3 = log_test("3e avec bypass passe", _check("a@b.c", bypass=True))
-    # Autre email : passe
-    ok4 = log_test("Autre email passe", _check("x@y.z"))
+    # Patch cooldown à 60s pour le test + reset dict global
+    _orig_cd = app_plugin._FORCE_ANALYSIS_COOLDOWN_SEC
+    app_plugin._FORCE_ANALYSIS_COOLDOWN_SEC = 60
+    app_plugin._force_analysis_attempts.clear()
+    try:
+        # 1er appel : passe (cooldown vide)
+        ok1 = log_test("1er appel passe", app_plugin._check_analysis_cooldown("a@b.c"))
+        # 2e appel immédiat sur même email : bloqué
+        ok2 = log_test("2e appel immédiat bloqué", not app_plugin._check_analysis_cooldown("a@b.c"))
+        # 3e avec bypass=True : passe malgré cooldown actif
+        ok3 = log_test(
+            "3e avec bypass_cooldown=True passe",
+            app_plugin._check_analysis_cooldown("a@b.c", bypass_cooldown=True)
+        )
+        # 4e sur autre email : passe (cooldown par-email)
+        ok4 = log_test("Autre email passe (cooldown par-email)", app_plugin._check_analysis_cooldown("x@y.z"))
+    finally:
+        app_plugin._FORCE_ANALYSIS_COOLDOWN_SEC = _orig_cd
+        app_plugin._force_analysis_attempts.clear()
     return sum([ok1, ok2, ok3, ok4]), 4
+
+
+def critere_invariant_db_conn_01(db):
+    """Invariant I-DB-CONN-01 : aucun helper utility ne doit instancier
+    `Database(db_path)` en dehors de l'init unique d'`app_plugin.py`.
+
+    Refonte 12/05/2026 : bug latent découvert pendant N3 — créer une 2e
+    `Database()` dans le même TID kicke et ferme la conn de la 1re via
+    `_all_conns[tid]`. Si quelqu'un rajoute un `Database(...)` ailleurs,
+    le bug réapparaît silencieusement. Ce test scanne le repo et casse
+    si de nouveaux call sites apparaissent.
+
+    Whitelist :
+      - V2/app_plugin.py : 1 occurrence unique (singleton de boot)
+      - V2/database.py : self-references dans docstrings/commentaires
+    """
+    print("\n=== Invariant I-DB-CONN-01 : 0 Database() hors whitelist ===")
+    repo_v2 = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Regex : `Database(` non précédé d'un mot (évite e.g. MyDatabase(),
+    # _SomeDatabase()) — on veut bien `Database(` en début de token.
+    pattern = re.compile(r'(?<![A-Za-z0-9_])Database\(')
+    # Whitelist d'occurrences attendues : (chemin relatif, nb max d'occurrences code)
+    whitelist = {
+        os.path.join(repo_v2, 'app_plugin.py'): 1,  # singleton boot
+        os.path.join(repo_v2, 'database.py'): 0,    # self-ref (mais on
+        # n'attend pas `Database(` en code dans database.py lui-même,
+        # juste dans des docstrings → on les exclut ci-dessous)
+    }
+    violations = []
+    for root, _, files in os.walk(repo_v2):
+        # Skip __pycache__, .git, tests, audit, docs
+        if any(skip in root for skip in ('__pycache__', '.git', 'audit', 'docs', 'tests')):
+            continue
+        for fname in files:
+            if not fname.endswith('.py'):
+                continue
+            fpath = os.path.join(root, fname)
+            try:
+                with open(fpath, 'r', encoding='utf-8') as f:
+                    src = f.read()
+            except Exception:
+                continue
+            # Compter les occurrences en code (pas dans strings/comments triviaux).
+            # On fait du best-effort : line-by-line, skip lignes commençant par # ou
+            # contenues dans triple-quoted strings simples.
+            in_docstring = False
+            count = 0
+            for line in src.splitlines():
+                stripped = line.strip()
+                # Toggle docstring (best-effort : ne gère pas tous les cas mais
+                # suffit pour notre usage — on ne veut pas de Database( en code).
+                if stripped.startswith('"""') or stripped.startswith("'''"):
+                    # Toggle ou single-line docstring
+                    triple_count = stripped.count('"""') + stripped.count("'''")
+                    if triple_count >= 2:
+                        # Single-line docstring, skip cette ligne
+                        continue
+                    in_docstring = not in_docstring
+                    continue
+                if in_docstring:
+                    continue
+                # Skip commentaires purs
+                if stripped.startswith('#'):
+                    continue
+                if pattern.search(line):
+                    count += 1
+            expected = whitelist.get(fpath, 0)
+            if count > expected:
+                violations.append((fpath, count, expected))
+
+    if not violations:
+        return (1 if log_test(f"Aucun `Database(` hors whitelist (scan {repo_v2})", True) else 0), 1
+    else:
+        for fpath, count, expected in violations:
+            log_test(f"VIOLATION : {os.path.basename(fpath)} a {count} occurrences (attendu ≤ {expected})", False)
+        return 0, 1
 
 
 def critere_6_R6_manually_edited(db):
@@ -267,6 +361,7 @@ def main():
         critere_9_cas_homonyme,
         critere_5_cooldown,
         critere_6_R6_manually_edited,
+        critere_invariant_db_conn_01,
     ):
         # Force fresh conn entre tests (workaround pour le test runner)
         try:
