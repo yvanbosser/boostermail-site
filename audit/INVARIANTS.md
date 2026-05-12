@@ -434,6 +434,30 @@ Après 10 min d'uptime V2, les 3 tables Phase 1+2 doivent couvrir au moins 70% d
 - **Pourquoi** : détecte un BG loop qui tourne mais ne traite qu'un sous-ensemble de l'inbox (bug de filtre, throttle trop bas, etc.). Cible 70% = seuil bas.
 - **Historique** : 24/04/2026 — audit 3 de connexions + P4.4.
 
+### I-CANON-01 : Clé canonique IMID dans tous les caches (refonte N1+N2 11/05/2026)
+Tout `entry_id` / `message_id` stocké dans les 5 tables liées au mail doit être un IMID canonique RFC 2822 (`<local@domain>` strict).
+- **Tables couvertes** : `email_cache.entry_id`, `mail_summaries.message_id`,
+  `mail_classement_cache.message_id`, `mail_pj_classement_cache.message_id`,
+  `mail_echeance_cache.message_id`
+- **Test** : `SELECT COUNT(*) FROM email_cache WHERE NOT (entry_id LIKE '<%@%>')` = 0
+- **Enforcement** : 5 niveaux
+  1. Middleware Flask `_canonicalize_message_id_middleware` (canonicalise toutes les routes query/view/body)
+  2. Helper `_canonicalize_message_id` côté code Python (caller)
+  3. Pipeline `_ingest_new_mail` (webhook + chemins alternatifs)
+  4. Garde `save_email_cache` (refus log warning si non-IMID)
+  5. Gardes `save_mail_*` (4 frigos cuisinés)
+- **Pourquoi** : Pattern #14 « mixité historique entry_id / IMID » causait le bug Maryam (polling sous Outlook ID, stockage sous IMID → cache miss éternel)
+- **Historique** : refonte 11/05/2026 (N1 commits e41ab1a..9d5f312 + N2 commits 023d381, 30a46fd)
+
+### I-NOREPLY-01 : Liste no-reply unique (refonte N1 11/05/2026)
+Toute détection d'expéditeur automatique (no-reply, newsletter, postmaster, etc.) passe par UNE seule liste centralisée + helper.
+- **Liste unique** : `_AUTO_EMAIL_PATTERNS` (module-level dans `app_plugin.py`)
+- **Helper unique** : `_is_auto_email(email)` retourne True si match
+- **Sites utilisateurs** : `_should_speculate` filtre 3, `_is_discarded`, `_prewarm_unified_for_mail`, `_maybe_analyze_contact`
+- **Test** : `grep -nE "_AUTO_PATTERNS\b|_SPEC_NOREPLY_PATTERNS\b" V2/app_plugin.py` = 0 (zéro listes parallèles)
+- **Pourquoi** : Audit 8/05 anomalie #2 — 3 listes coexistantes avec contenus divergents → un mail `donotreply@x.com` filtré par l'une mais pas l'autre → cascade incohérente
+- **Historique** : refonte 11/05/2026 (N1 commit 13bd896)
+
 ---
 
 ---

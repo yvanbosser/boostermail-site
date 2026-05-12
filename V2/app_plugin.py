@@ -4139,10 +4139,19 @@ def _email_cache_ttl_purge_loop():
     """
     # Délai initial pour laisser l'app warmup
     time.sleep(60)
+    # Premier passage : log info systématique (preuve d'exécution dans
+    # journalctl, même si 0 mail purgé — confirme que le thread est vivant).
+    first_pass = True
     while not _shutdown_event.is_set():
         try:
             n = _db.purge_old_emails(days=_EMAIL_CACHE_TTL_DAYS)
-            if n > 0:
+            if first_pass:
+                logger.info(
+                    f"[ttl-purge-loop] démarré — passe initiale : "
+                    f"{n} mail(s) purgés (TTL {_EMAIL_CACHE_TTL_DAYS}j)"
+                )
+                first_pass = False
+            elif n > 0:
                 logger.info(
                     f"[ttl-purge-loop] {n} mail(s) purgés (> {_EMAIL_CACHE_TTL_DAYS}j)"
                 )

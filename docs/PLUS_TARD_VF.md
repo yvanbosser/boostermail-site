@@ -936,6 +936,33 @@ Décision Yvan 07/05 : pas de différé du PJ — l'utilisateur attend une actio
 
 ---
 
+### 18. Tables MAPI hex legacy (folder_classifications, metrics, contact_profiles.entry_ids) — décision 11-12/05/2026
+
+**Origine** : Refonte Niveau 2 (« Stockage brut ») 11/05/2026. L'inspection DB OVH a révélé que 3 tables contiennent encore des IDs au format MAPI hex du proto V1 (`00000000FC53AE6995D7334387CA89C255EEB603...`), non-canonisables en IMID RFC 2822 :
+
+| Table | Lignes hex legacy | Total |
+|---|---|---|
+| `folder_classifications.entry_id` | 85 | 85 (100 %) |
+| `metrics.email_id` | 41 | 231 |
+| `contact_profiles.entry_ids` (JSON array) | 624 IDs | 624 IDs sur 102 profils |
+
+**Décision 11/05** : on **laisse en l'état**. Justifications :
+1. Ces tables ne sont **pas consultées par message_id** dans le code actif (lookups par `contact_email` + `subject` uniquement)
+2. Pas d'impact fonctionnel : suggestions de classement et stats marchent
+3. Migration impossible : pas de mapping MAPI hex → IMID (les mails proto V1 n'ont pas d'entrée correspondante en email_cache V2)
+4. Coût mémoire négligeable (~50 KB total)
+
+**À envisager plus tard si** :
+- Multi-tenant ne supporte plus ces IDs (peu probable, ils sont par-user)
+- Audit RGPD demande purge totale (rare, ces IDs n'ont pas de PII)
+- L'utilisateur reset son profil → faire un script de purge ciblée
+
+**Effort si décide de migrer** : ~2h (script SQL DELETE + revue des 3 tables + tests).
+
+**Priorité** : ⚪ Aucune action requise. Si pertinent, sera traité dans une session dédiée.
+
+---
+
 ### 17. Dashboard d'observabilité audit remediation (différé Phase 6.3, 08/05/2026)
 
 **Origine** : Phase 6 du plan `audit/rapports/2026-05-08_audit_remediation_PLAN.md`. La Phase 6.1 a livré 22 entrées de logs structurées + un fichier d'alertes documentées (`docs/saas/OBSERVABILITY_AUDIT_REMEDIATION_20260508.md`). La Phase 6.3 prévoyait un dashboard agrégé.
