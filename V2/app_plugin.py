@@ -1474,11 +1474,10 @@ def _parallel_prefetch_batch(mails, max_workers=8, tag='batch', check_pause=True
         from_email = m.get('from_email', '')
         if not from_email:
             continue
-        try:
-            if _db.is_treated(mid):
-                continue
-        except Exception as e:
-            logger.debug(f"[_db.is_treated] silent error mid={mid[:30]}... : {e}")
+        # Refonte N4 (12/05/2026) — helper unique `_is_user_treated` (factorise
+        # 3 sites historiques : ici + continuous loop + règle 3 du Filtre 1).
+        if _is_user_treated(mid):
+            continue
         with _prefetch_lock:
             pf_status = _prefetch_cache.get(mid, {}).get('status')
         # Fix I-CX-01 (24/04 P6) : ne skiper que 'running' (en cours).
@@ -1595,12 +1594,10 @@ def _continuous_speculation_loop():
                 if not mid:
                     _skip_noncanon += 1
                     continue
-                try:
-                    if _db.is_treated(mid):
-                        _skip_treated += 1
-                        continue  # Purge événementielle (6.5)
-                except Exception as e:
-                    logger.debug(f"[_db.is_treated] silent error mid={mid[:30]}... : {e}")
+                # Refonte N4 (12/05/2026) — helper unique `_is_user_treated`
+                if _is_user_treated(mid):
+                    _skip_treated += 1
+                    continue  # Purge événementielle (6.5)
                 with _reply_lock:
                     entry = _reply_cache.get(mid, {})
                 if entry.get('status') in ('running', 'done'):
@@ -2566,6 +2563,115 @@ def _is_auto_email(email):
         return False
     e = email.lower().strip()
     return any(p in e for p in _AUTO_EMAIL_PATTERNS)
+
+
+# =============================================================================
+# Refonte Niveau 4 (12/05/2026) — Filtre 1 « écarter ? » de l'arbre décisionnel
+# =============================================================================
+# Source de vérité : `docs/architecture/BoosterMail_Arbre_Decisionnel_v2.pptx`
+# (slide 3, validée 08/05/2026) + décision 12/05/2026 d'Yvan d'ajouter le
+# critère CC en règle 5 (simplification produit assumée vs arbre original).
+#
+# Un mail est ÉCARTÉ si AU MOINS UNE de ces 5 règles est vraie :
+#   1. Expéditeur automatique (no-reply, newsletter, postmaster, mailer-daemon)
+#   2. Mail de plus de _FILTER_1_MAX_AGE_DAYS jours
+#   3. Mail déjà traité (répondu/classé) par l'utilisateur via BoosterMail
+#   4. Body de moins de _FILTER_1_MIN_BODY_LEN caractères et sans point
+#      d'interrogation
+#   5. Utilisateur en CC uniquement (pas destinataire principal en TO)
+#
+# Conséquence d'un écartage : aucun plat préparé à l'avance (ni Sonnet ni
+# Haiku). Si l'user clique « Répondre/Classer/Voir résumé », cuisson à la
+# commande en streaming (cf slide 9 de l'arbre V2). Coût $0 à la réception.
+
+# Seuils — UNIQUE source de vérité (avant N4 : valeurs hardcodées 4 endroits).
+_FILTER_1_MAX_AGE_DAYS = 30
+_FILTER_1_MIN_BODY_LEN = 10  # appliqué APRÈS strip HTML, en codepoints Unicode
+
+
+def _parse_mail_date(mail_data):
+    """Parse le champ 'date' d'un mail_data dict en datetime naïf, fail-open.
+
+    Tolère deux formats vus en pratique :
+      - ISO 8601 avec timezone (ex: "2026-05-12T07:30:00+00:00" ou "...Z")
+      - Format SQLite legacy (ex: "2026-05-12 07:30:00")
+
+    Returns
+    -------
+    Optional[datetime]
+        datetime naïf (sans tzinfo) si parsing OK, None sinon (date vide,
+        format inattendu, erreur). Le caller décide quoi faire de None
+        — la convention Filtre 1 est fail-open : un mail sans date n'est
+        pas écarté par la règle « > 30 jours » (mieux préparer pour rien
+        que rater un mail légitime).
+    """
+    if not mail_data:
+        return None
+    raw = mail_data.get('date', '') if isinstance(mail_data, dict) else ''
+    if not raw or not isinstance(raw, str):
+        return None
+    try:
+        if 'T' in raw:
+            dt = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+            return dt.replace(tzinfo=None)
+        return datetime.strptime(raw, '%Y-%m-%d %H:%M:%S')
+    except Exception as _e:
+        logger.debug(f"[filter1] parse date échec ({raw[:30]}...) : {_e}")
+        return None
+
+
+def _clean_body_text(body):
+    """Strip HTML + whitespace d'un body mail, pour analyse longueur/contenu.
+
+    Convention adoptée 08/05/2026 (audit fix #3) : on remplace les balises
+    HTML par UN ESPACE (pas par rien), pour éviter qu'un body type
+    `<b>x</b><b>y</b>` ne se retrouve collé en `xy` (2 chars) au lieu de
+    `x y` (3 chars). Sinon divergence rare entre deux helpers historiques.
+
+    NB : NE décode PAS les entités HTML (`&nbsp;`, `&amp;`, etc.) — dette
+    consciente, cf PLUS_TARD_VF.md. Cas marginal en pratique.
+
+    Returns
+    -------
+    str
+        Texte stripé, garanti non-None (chaîne vide si body invalide).
+    """
+    if not body or not isinstance(body, str):
+        return ''
+    return _HTML_TAG_RE.sub(' ', body).strip()
+
+
+def _is_user_treated(message_id):
+    """True si l'utilisateur a déjà traité ce mail via BoosterMail (replied/classified).
+
+    Wrapper unique pour `_db.is_treated()` qui factorise 3 sites historiques
+    (`_parallel_prefetch_batch`, `_continuous_speculation_loop`, et règle 3
+    du Filtre 1 dans `_is_discarded`).
+
+    Fail-open : si la DB plante (locked, schéma migration, etc.) → retourne
+    False. Mieux pré-cuire pour rien que rater un mail légitime. Log debug
+    pour traçabilité (audit Pattern #3 : ne JAMAIS `except: pass` silencieux).
+
+    NB : un mail répondu DEPUIS HORS BoosterMail (mobile, OWA, autre client)
+    ne sera PAS détecté → faux négatif assumé, dette documentée (cf
+    PLUS_TARD_VF.md). La détection via Graph API coûterait 1 appel/check.
+
+    Parameters
+    ----------
+    message_id : str
+        IMID canonique du mail (clé de la table `treated_emails`).
+
+    Returns
+    -------
+    bool
+    """
+    if not message_id:
+        return False
+    try:
+        return bool(_db.is_treated(message_id))
+    except Exception as _e:
+        logger.debug(f"[filter1] _is_user_treated({message_id[:30]}...) DB fail : {_e}")
+        return False
 
 
 def _extract_imid_from_mail_data(mail_data):
@@ -3548,18 +3654,16 @@ def _prewarm_mail_preview(mail_data):
         logger.debug(f"[mail-preview] skip mail sans IMID canonique : "
                      f"subject={mail_data.get('subject', '')[:40]}")
         return
-    # O5 (08/05) — Filtre PARTIEL : on accepte tous les mails non-écartés.
-    # Avant : _should_speculate complet (6 filtres) rejetait les mails en
-    # CC ou ouverts 5+ fois → pas de pré-cuisson commis Haiku → cache miss
-    # systématique sur ces mails au clic Quick Classify.
-    # Après : _is_discarded uniquement (4 filtres : no-reply, > 30j, déjà
-    # répondu, body trop court) → le commis Haiku tourne pour TOUS les
-    # mails non-écartés, qu'ils soient VIP ou partiels (CC, ouverts 5+ ×).
-    # Le chef Sonnet (réponse) reste filtré par _should_speculate strict
-    # côté _start_speculative → seulement VIP, plus cher.
+    # Refonte N4 (12/05/2026) — Filtre 1 unifié : 5 règles atomiques via
+    # `_is_discarded` qui retourne (bool, raison). Signature compatible avec
+    # le précédent comportement O5 (08/05) qui appelait juste `_is_discarded`,
+    # mais désormais inclut le critère CC (règle 5 — décision Yvan 12/05).
+    # Si écarté → aucun plat préparé (ni commis Haiku ni chef Sonnet) →
+    # cuisson à la commande au clic user (streaming, $0 à la réception).
     try:
-        if _is_discarded(mail_data):
-            logger.debug(f"[mail-preview] skip écarté mid={mid[:30]}")
+        _discarded, _reason = _is_discarded(mail_data)
+        if _discarded:
+            logger.debug(f"[mail-preview] skip écarté ({_reason}) mid={mid[:30]}")
             return
     except Exception:
         pass  # fail-open : si check plante, on continue
@@ -4380,8 +4484,9 @@ def _poll_companion_loop():
                     _sse_data = {k: v for k, v in new_data.items() if k != 'body'}
                     _broadcast_sse('mail_changed', _sse_data)
                     logger.info(f"Mail changé → {_hash_email_partial(from_email)} / {subject[:40]}")
-                    # Filtre #5 Smart Speculative : incrémenter le compteur d'ouvertures
-                    _increment_open_counter(new_data.get('message_id', ''))
+                    # Refonte N4 (12/05/2026) — Suppression du filtre #5 « 5 ouvertures »
+                    # (workaround Outlook ThreeColumns obsolète après canonicalisation
+                    # IMID N1). L'arbre V2 validé ne prévoit pas ce critère.
                     # Lancer le prefetch
                     if from_email:
                         _spawn_bg(_run_prefetch, args=(_current_mail_data,))
@@ -4679,10 +4784,8 @@ def api_event_message_read():
     _sse_data = {k: v for k, v in new_data.items() if k != 'body'}
     _broadcast_sse('mail_changed', _sse_data)
 
-    # Filtre #5 Smart Speculative : incrémenter le compteur d'ouvertures
-    # (skip si dédup : éviterait de déclencher filtre 5 prématurément)
-    if not _skip_prefetch:
-        _increment_open_counter(new_data.get('message_id', ''))
+    # Refonte N4 (12/05/2026) — Suppression du filtre #5 « 5 ouvertures »
+    # (cf supra). Plus de compteur à incrémenter ici.
 
     # (O8) Auto-prefetch — skip si dédup (déjà lancé il y a <3s)
     if new_data.get('from_email') and not _skip_prefetch:
@@ -5431,13 +5534,14 @@ def _run_prefetch(mail_data):
         logger.debug(f"[prefetch] skip mail sans IMID canonique : "
                      f"subject={subject[:40]}")
         return
-    # O7 (08/05) — skip collecte blocs ABC pour les mails écartés (filtre 1
-    # de l'arbre décisionnel : no-reply, > 30 jours, déjà répondu, body
-    # trop court). Économise ~1 sec de Graph + RAM plan de travail (300
-    # mails max) + zéro spéculation Sonnet inutile en aval.
+    # Refonte N4 (12/05/2026) — Filtre 1 unifié : skip collecte blocs ABC
+    # pour les mails écartés (5 règles désormais : no-reply, > 30j, déjà
+    # répondu, body trop court, user en CC). Économise ~1 sec de Graph +
+    # RAM plan de travail (300 mails max) + zéro spéculation inutile en aval.
     try:
-        if _is_discarded(mail_data):
-            logger.debug(f"[prefetch] skip écarté (filtre 1) : "
+        _discarded, _reason = _is_discarded(mail_data)
+        if _discarded:
+            logger.debug(f"[prefetch] skip écarté ({_reason}) : "
                          f"subject={subject[:40]}")
             return
     except Exception:
@@ -6244,163 +6348,178 @@ def _is_contact_known(email):
 # Liste unique centralisée _AUTO_EMAIL_PATTERNS (déclarée tôt dans le fichier).
 # Tous les sites passent par le helper _is_auto_email().
 
-# Filtre #5 : compteur d'ouvertures par mail (RAM). Incrémenté à chaque fois
-# que le mail devient `_current_mail_data` via le polling companion.
-# Étape 7 multi-tenant — _mail_open_counter via UserScopedDict (Smart Speculative).
-if _UserScopedDict is not None:
-    _mail_open_counter = _UserScopedDict('mail_open_counter')
-else:
-    _mail_open_counter = {}
-_mail_open_counter_lock = threading.Lock()
+# Refonte N4 (12/05/2026) — Suppression complète du « Filtre #5 Smart
+# Speculative » (compteur d'ouvertures, lock, helper d'incrémentation, sites
+# d'appel, exposition API stats, mention invariant I-MT-01). Ce filtre était
+# un workaround pour New Outlook ThreeColumns qui faisait fire `item_changed`
+# sur les survols/previews — le compteur explosait à tort. Depuis la
+# canonicalisation IMID (N1), le besoin n'est plus avéré et l'arbre V2 validé
+# (08/05) ne prévoit pas ce critère. Si le bug réapparaît, à régler à la
+# source (filtrer les `item_changed` non-ouvertures) plutôt qu'en filtre.
 
 
-def _increment_open_counter(message_id):
-    """Incrémente le compteur d'ouvertures (filtre #5 Smart Speculative)."""
-    if not message_id:
-        return
-    with _mail_open_counter_lock:
-        _mail_open_counter[message_id] = _mail_open_counter.get(message_id, 0) + 1
-        # Trim mémoire : si > 200 entrées, purger les plus anciennes en conservant 100
-        if len(_mail_open_counter) > 200:
-            # On n'a pas le timestamp : on jette 100 arbitrairement (non critique)
-            keys = list(_mail_open_counter.keys())[:100]
-            for k in keys:
-                _mail_open_counter.pop(k, None)
+# =============================================================================
+# Refonte Niveau 4 (12/05/2026) — Filtre 1 « écarter ? » — 5 règles atomiques
+# =============================================================================
+# Conformité arbre V2 (slide 3, validé 08/05) + extension règle 5 (CC) décidée
+# par Yvan le 12/05/2026 (simplification produit : un mail CC = écarté plutôt
+# que basculé en PARTIEL — réponse/résumé/classement cuits en streaming au
+# clic, coût $0 à la réception).
+#
+# Architecture : 5 mini-helpers atomiques `_rule_*(mail_data) -> bool`, chacun
+# PUR (pas de try/except interne). Le wrapper `_is_discarded` orchestre avec
+# court-circuit (OR) ET fail-open (try/except autour de chaque appel → si une
+# règle plante, on considère qu'elle ne s'applique pas, mieux pré-cuire pour
+# rien que rater un mail légitime).
+#
+# Test mécanique I-FILTRE-01 : exactement 5 helpers `_rule_*` dans le module,
+# tous appelés par `_is_discarded` et NULLE PART AILLEURS (sauf tests).
 
 
-def _should_speculate(mail_data):
+def _rule_auto_sender(mail_data):
+    """Règle 1 : expéditeur automatique (no-reply, newsletter, postmaster…).
+
+    Délègue au helper centralisé `_is_auto_email` (invariant I-NOREPLY-01).
     """
-    Applique les 6 filtres Smart Speculative. Retourne (bool, reason).
-    (True, '')  → on peut spéculer.
-    (False, X)  → skip spéculation, X = raison (pour logs). Le prefetch A/B/C reste.
+    from_email = (mail_data.get('from_email', '') or '').lower()
+    return _is_auto_email(from_email)
+
+
+def _rule_too_old(mail_data):
+    """Règle 2 : mail de plus de `_FILTER_1_MAX_AGE_DAYS` jours.
+
+    Fail-open implicite : si la date est absente/invalide, `_parse_mail_date`
+    retourne None → règle inactive → mail NON écarté par cette règle.
+    """
+    dt = _parse_mail_date(mail_data)
+    if dt is None:
+        return False
+    return (datetime.now() - dt).days > _FILTER_1_MAX_AGE_DAYS
+
+
+def _rule_already_treated(mail_data):
+    """Règle 3 : mail déjà traité (répondu/classé) par l'utilisateur via BM.
+
+    NB : détecte uniquement les actions FAITES VIA BoosterMail (table
+    `treated_emails`). Une réponse depuis OWA/mobile ne sera pas détectée
+    (faux négatif assumé, dette documentée PLUS_TARD_VF.md #Q3-N4).
     """
     message_id = mail_data.get('message_id', '')
-    from_email = (mail_data.get('from_email', '') or '').lower()
-    body = mail_data.get('body', '') or ''
-    # Fix 24/04 (P8) : Graph retourne 'to'/'cc' comme list[dict] (normalize_email),
-    # pas comme str. Appeler .lower() sur une liste → AttributeError → crash silencieux
-    # dans Prefetch error → 0 spéculations BG. Fix : extraire les adresses email.
+    return _is_user_treated(message_id)
+
+
+def _rule_body_too_short(mail_data):
+    """Règle 4 : body de moins de `_FILTER_1_MIN_BODY_LEN` chars ET sans "?".
+
+    Conjonction stricte : un body court mais avec un `?` (ex: "Quand ?") est
+    une vraie question → NE PAS écarter.
+
+    Longueur mesurée APRÈS strip HTML, en codepoints Unicode.
+    """
+    body_clean = _clean_body_text(mail_data.get('body', ''))
+    return len(body_clean) < _FILTER_1_MIN_BODY_LEN and '?' not in body_clean
+
+
+def _rule_user_in_cc(mail_data):
+    """Règle 5 : utilisateur en CC uniquement (pas destinataire principal en TO).
+
+    Décision Yvan 12/05/2026 : on écarte les mails CC (simplification produit
+    assumée vs arbre V2 qui les basculait en PARTIEL). Si l'user veut agir
+    dessus, cuisson à la commande en streaming.
+
+    Convention : on ne retourne True QUE si on a la certitude que l'user est
+    en CC ET PAS en TO. Si on ne peut pas le déterminer (my_email vide,
+    parsing impossible), fail-open : on retourne False (= ne pas écarter).
+    """
+    my_email = (_get_my_email() or '').lower().strip()
+    if not my_email:
+        return False  # impossible de juger → ne pas écarter
+    # Graph peut retourner to/cc comme list[dict] (normalize_email) ou comme str
     _to_raw = mail_data.get('to', '') or ''
     if isinstance(_to_raw, list):
         to_field = ' '.join((r.get('email', '') or r.get('address', ''))
                             for r in _to_raw).lower()
     else:
-        to_field = _to_raw.lower()
+        to_field = str(_to_raw).lower()
     _cc_raw = mail_data.get('cc', '') or ''
     if isinstance(_cc_raw, list):
         cc_field = ' '.join((r.get('email', '') or r.get('address', ''))
                             for r in _cc_raw).lower()
     else:
-        cc_field = _cc_raw.lower()
+        cc_field = str(_cc_raw).lower()
+    # Écarter uniquement si en CC ET pas en TO
+    if my_email in cc_field and my_email not in to_field:
+        return True
+    return False
 
-    # Filtre 1 : mail > 30 jours (modifié 25/04 — seuil 7j trop strict en phase de tests)
-    mail_date = mail_data.get('date', '')
-    if mail_date:
-        try:
-            if 'T' in mail_date:
-                dt = datetime.fromisoformat(mail_date.replace('Z', '+00:00'))
-                dt_naive = dt.replace(tzinfo=None)
-            else:
-                dt_naive = datetime.strptime(mail_date, '%Y-%m-%d %H:%M:%S')
-            if (datetime.now() - dt_naive).days > 30:
-                return False, 'mail > 30 jours'
-        except Exception:
-            pass
 
-    # Filtre 2 : mail déjà traité
-    try:
-        if message_id and _db.is_treated(message_id):
-            return False, 'mail déjà traité'
-    except Exception as e:
-        logger.debug(f"[_db.is_treated] silent error message_id={message_id[:30]}... : {e}")
-
-    # Filtre 3 : expéditeur automatique (no-reply / newsletter / postmaster / ...)
-    # Refonte N1 (11/05) : liste centralisée _AUTO_EMAIL_PATTERNS
-    if _is_auto_email(from_email):
-        return False, 'expéditeur automatique'
-
-    # Filtre 4 : body < 10 chars sans "?"
-    # Audit 08/05 fix #3 : harmonisation avec _is_discarded (sub par espace,
-    # pas par rien). Avant : _HTML_TAG_RE.sub('', body) collait <b>x</b><b>y</b>
-    # en 'xy' (2 chars) tandis que _is_discarded faisait 'x y' (3 chars) →
-    # divergence rare mais cassait l'invariant subset strict.
-    body_stripped = _HTML_TAG_RE.sub(' ', body).strip()
-    if len(body_stripped) < 10 and '?' not in body_stripped:
-        return False, 'body < 10 chars sans question'
-
-    # Filtre 5 : mail ouvert 5+ fois sans réponse (compteur mémoire V2)
-    # Seuil 2→5 (21/04) : en New Outlook ThreeColumns, item_changed fire aussi
-    # en preview/survol — le compteur monte vite sans que l'user "ouvre"
-    # vraiment le mail. Seuil 5× = user qui voit le mail plusieurs fois sans
-    # jamais vouloir répondre → là on skip.
-    with _mail_open_counter_lock:
-        opens = _mail_open_counter.get(message_id, 0)
-    if opens >= 5:
-        return False, f'mail ouvert {opens}× sans réponse'
-
-    # Filtre 6 : user en CC (pas en TO)
-    try:
-        my_email = (_get_my_email() or '').lower()
-        if my_email and to_field and my_email not in to_field:
-            if my_email in cc_field:
-                return False, 'utilisateur en CC'
-    except Exception:
-        pass
-
-    return True, ''
+# Liste ordonnée des règles (ordre = priorité de court-circuit). L'ordre est
+# choisi pour minimiser le coût moyen : règle 1 (regex pure) en premier, règle
+# 3 (DB) avant règle 5 (parse to/cc). Test I-FILTRE-01 vérifie qu'il y en a 5.
+_FILTER_1_RULES = (
+    ('expéditeur automatique', _rule_auto_sender),
+    ('mail > 30 jours',         _rule_too_old),
+    ('mail déjà traité',        _rule_already_treated),
+    ('body trop court',         _rule_body_too_short),
+    ('utilisateur en CC',       _rule_user_in_cc),
+)
 
 
 def _is_discarded(mail_data):
-    """O7 (08/05) — Filtre 1 « écarter » de l'arbre décisionnel cible.
+    """Filtre 1 de l'arbre décisionnel — un seul videur, 5 règles.
 
-    Un mail écarté n'a aucun pré-traitement (ni chef Sonnet, ni commis Haiku,
-    ni collecte des blocs ABC). Le mail brut reste en email_cache pour
-    affichage liste, et les commandes user déclenchent une cuisson à la
-    commande en streaming.
+    Returns
+    -------
+    Tuple[bool, str]
+        (True, "raison")   → mail ÉCARTÉ, raison = nom de la 1re règle qui a
+                              fired (court-circuit)
+        (False, "")        → mail GARDÉ, passe au Filtre 2 (N5 — VIP/partiel)
 
-    Subset strict des filtres _should_speculate (les 4 premiers) :
-      - Expéditeur automatique (no-reply, newsletter, postmaster…)
-      - Mail > 30 jours
-      - Mail déjà répondu par l'utilisateur
-      - Body < 10 chars sans point d'interrogation
+    Sémantique fail-open : chaque règle est appelée dans un try/except. Si
+    une règle plante (DB locked, type pourri…), on considère qu'elle ne
+    s'applique pas → on passe à la suivante. Mieux pré-cuire pour rien que
+    perdre un mail légitime.
 
-    Les filtres 5 (5 ouvertures) et 6 (CC) NE font PAS écarter, ils servent
-    à distinguer VIP vs PARTIEL en aval (le PARTIEL passera quand même par
-    le commis Haiku unifié pour résumé + classement, sans Sonnet).
+    Refonte N4 (12/05/2026) — remplace la version « subset strict » du
+    08/05 qui dupliquait les 4 critères avec `_should_speculate`.
     """
-    from_email = (mail_data.get('from_email', '') or '').lower()
-    body = mail_data.get('body', '') or ''
-    message_id = mail_data.get('message_id', '')
-
-    # 1. Expéditeur automatique
-    # Refonte N1 (11/05) : liste centralisée _AUTO_EMAIL_PATTERNS
-    if _is_auto_email(from_email):
-        return True
-    # 2. Mail > 30 jours
-    mail_date = mail_data.get('date', '')
-    if mail_date:
+    if not isinstance(mail_data, dict):
+        return False, ''  # input pourri → fail-open
+    for reason_label, rule_fn in _FILTER_1_RULES:
         try:
-            if 'T' in mail_date:
-                dt = datetime.fromisoformat(mail_date.replace('Z', '+00:00'))
-                dt_naive = dt.replace(tzinfo=None)
-            else:
-                dt_naive = datetime.strptime(mail_date, '%Y-%m-%d %H:%M:%S')
-            if (datetime.now() - dt_naive).days > 30:
-                return True
-        except Exception:
-            pass
-    # 3. Mail déjà répondu par l'utilisateur
-    try:
-        if message_id and _db.is_treated(message_id):
-            return True
-    except Exception:
-        pass
-    # 4. Body < 10 chars sans "?"
-    body_stripped = _HTML_TAG_RE.sub(' ', body).strip()
-    if len(body_stripped) < 10 and '?' not in body_stripped:
-        return True
+            if rule_fn(mail_data):
+                return True, reason_label
+        except Exception as _e:
+            logger.debug(f"[filter1] règle '{reason_label}' a planté → "
+                         f"considérée inactive : {_e}")
+            continue
+    return False, ''
 
-    return False
+
+def _should_speculate(mail_data):
+    """Thin wrapper rétrocompat sur `_is_discarded`.
+
+    Conserve la signature `(bool, str)` historique attendue par les 4 call
+    sites (5337, 5476, 5688, 10752) qui destructurent un tuple ET la
+    métrique production `template.miss.*` (cf `_log_template_metric` ligne
+    ~10760 qui logge la raison agrégée).
+
+    Sémantique :
+      (True, '')       → on peut spéculer (mail non écarté)
+      (False, "raison") → skip spéculation, raison = règle Filtre 1 fired
+
+    NB : avant N4, `_should_speculate` avait 6 critères (les 4 du Filtre 1
+    + "ouvert 5+ fois" + "user en CC"). Les 2 supplémentaires ont été soit
+    supprimés (5 ouv = workaround Outlook obsolète) soit intégrés dans
+    `_is_discarded` (CC = règle 5). `_should_speculate` est désormais
+    strictement équivalent à `not _is_discarded`.
+
+    Suppression future possible : quand N5 (Filtre 2 VIP) sera fait,
+    `_should_speculate` deviendra `Filtre 1 ET Filtre 2 VIP`. À ce moment
+    elle reprendra sa propre logique. Pour l'instant, thin wrapper.
+    """
+    discarded, reason = _is_discarded(mail_data)
+    return (not discarded), reason
 
 
 def _start_speculative(mail_data):
@@ -10304,9 +10423,8 @@ def api_cache_metrics():
             "max": _C_KEYWORD_CACHE_MAX,
             "ttl_seconds": _C_KEYWORD_CACHE_TTL,
         },
-        "open_counter": {
-            "tracked_mails": len(_mail_open_counter),
-        },
+        # Refonte N4 (12/05/2026) — clé `open_counter` retirée (compteur supprimé,
+        # cf bloc supra). Aucun consommateur frontend identifié (grep .js/.html = 0).
     })
 
 

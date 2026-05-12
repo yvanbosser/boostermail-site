@@ -469,6 +469,30 @@ Tout `save_contact_profile()` (peu importe le chemin : analyse Claude, route `/a
 - **Pourquoi** : bug Alain — Claude a appris à l'envers (10 mails reçus 0 envoyé) et produit "coucou Yvan" comme greeting du contact. Sans garde, le profil enseigne au prompt de répondre "Yvan" à Alain.
 - **Historique** : refonte 12/05/2026 N3 (branche `feat/yvan/refonte-N3-carnet-contacts`)
 
+### I-FILTRE-01 : Filtre 1 « écarter ? » = OR strict de 5 règles atomiques (refonte N4 12/05/2026)
+Le Filtre 1 de l'arbre décisionnel V2 (« un mail est-il à écarter ? ») est implémenté par `_is_discarded(mail_data) -> Tuple[bool, str]` dans `V2/app_plugin.py` qui retourne `(True, "raison")` ssi AU MOINS UNE des 5 règles atomiques retourne True.
+- **Les 5 règles** (signature pure `_rule_*(mail_data) -> bool`, pas de try/except interne) :
+  - `_rule_auto_sender` — expéditeur automatique (délègue `_is_auto_email`, cf I-NOREPLY-01)
+  - `_rule_too_old` — mail > `_FILTER_1_MAX_AGE_DAYS` (30) jours
+  - `_rule_already_treated` — déjà répondu/classé (via `_is_user_treated` unique)
+  - `_rule_body_too_short` — body < `_FILTER_1_MIN_BODY_LEN` (10) chars ET sans `?`
+  - `_rule_user_in_cc` — user en CC uniquement (pas en TO) — décision Yvan 12/05/2026
+- **Constantes uniques** : `_FILTER_1_MAX_AGE_DAYS = 30`, `_FILTER_1_MIN_BODY_LEN = 10` (avant N4 : valeurs hardcodées 4 endroits)
+- **Wrapper rétrocompat** : `_should_speculate` est désormais un thin wrapper `(not _is_discarded[0], _is_discarded[1])` pour préserver les 4 call sites historiques + la métrique production `template.miss.*` qui agrège les raisons de skip
+- **Helpers utilitaires uniques** :
+  - `_parse_mail_date(mail_data)` — parse date avec fail-open (retourne `Optional[datetime]`)
+  - `_clean_body_text(body)` — strip HTML avec espace + strip whitespace
+  - `_is_user_treated(message_id)` — wrap `_db.is_treated` avec fail-open + debug log
+- **Sémantique fail-open** : chaque appel de règle dans `_is_discarded` est wrappé en try/except → si une règle plante, elle est considérée inactive (mieux pré-cuire pour rien que perdre un mail légitime)
+- **Tests mécaniques** (`tests/test_n4_filtre_1.py`, 51/51) :
+  - `grep "^def _rule_" V2/app_plugin.py` = exactement 5
+  - `_FILTER_1_RULES` contient exactement 5 entrées
+  - 0 référence à `_mail_open_counter` ou `_increment_open_counter` en code (Chantier 3)
+  - 0 `_db.is_treated(` direct hors `_is_user_treated` (sauf tests)
+  - `_SERVICE_PREFIXES` défini exactement 1 fois dans tout V2 (top de `claude_ai.py`)
+- **Pourquoi** : avant N4, 2 fonctions (`_is_discarded` + `_should_speculate`) dupliquaient les 4 critères de l'arbre avec un patch d'harmonisation (08/05 fix #3) qui réparait une divergence rare. Plus 2 critères annexes hors arbre (5 ouvertures = workaround Outlook obsolète ; CC = devait être en Filtre 2 PARTIEL mais simplifié en écartage par décision Yvan).
+- **Historique** : refonte 12/05/2026 N4 (branche `feat/yvan/refonte-N4-filtre-1`)
+
 ### I-DB-CONN-01 : Une seule Database() instance par db_path par TID (latent fix 12/05/2026)
 Le tracker class-level `Database._all_conns[tid] = conn` est keyé par thread_id seul. **Ne JAMAIS instancier plusieurs `Database(db_path)` simultanément dans le même thread** : la seconde instance, via `_conn()`, kicke et ferme la conn de la première (assumée zombie), provoquant `ProgrammingError: Cannot operate on a closed database` downstream.
 - **Règle pour helpers utility (BG threads, atexit, scripts CLI)** : si on a besoin d'une SELECT one-shot sans contexte Flask, utiliser `sqlite3.connect(db_path)` raw + close — pas `Database()`.
@@ -595,9 +619,9 @@ plutôt qu'un dict global ``{}``.
     format v2 imbriqué ``{format_version: 2, entries_per_user: {uid: {mid: entry}}}``
     avec migration legacy v1→v2 transparente au load + migration
     ``'default' → user_id réel`` quand la DB connaît un user actif.
-- **Caches migrés** (22/22 = **100%** au 29/04 PM tardif, voir HISTORIQUE_DECISIONS) :
+- **Caches migrés** (21/21 = **100%** après refonte N4 12/05/2026 ; était 22/22 avant suppression `_mail_open_counter`) :
   ``_my_email_cache``, ``_reply_cache``, ``_warmup_cache``, ``_prefetch_cache``,
-  ``_mail_preview_cache``, ``_c_keyword_cache``, ``_mail_open_counter``,
+  ``_mail_preview_cache``, ``_c_keyword_cache``,
   ``_last_generate_times``, ``_echeance_pre_scan_cache``, ``_pj_text_cache``,
   ``_last_proposed``, ``_classify_momentum``, ``_learning_priorities_cache``,
   ``_contacts_recalib_progress``, ``_current_mail_data``,

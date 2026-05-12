@@ -28,6 +28,30 @@ MODEL = "claude-sonnet-4-6"                        # Génération réponse (defa
 MODEL_CLASSIFY = "claude-sonnet-4-6"               # Sonnet pour qualité classement — migré 29/04 PM
 MODEL_ANALYSIS = "claude-sonnet-4-6"               # Analyses profil contact — migré 29/04 PM
 MODEL_HAIKU_FAST = "claude-haiku-4-5"              # Summarize batch + score interests (déjà à jour)
+
+
+# Refonte N4 (12/05/2026) — Centralisation `_SERVICE_PREFIXES` (avant : défini
+# en SCOPE LOCAL dans le bloc D, donc recréé à chaque appel du prompt builder).
+#
+# ⚠️ Cette liste n'est PAS le doublon de `app_plugin._AUTO_EMAIL_PATTERNS`.
+# Usages DIFFÉRENTS :
+#   - `_AUTO_EMAIL_PATTERNS` (app_plugin.py) → décide d'ÉCARTER un mail
+#     (Filtre 1 N4 : no-reply, newsletter, etc. → aucune cuisson).
+#   - `_SERVICE_PREFIXES` (ce fichier) → décide d'afficher "correspondant"
+#     comme display_name au lieu de parser le prénom depuis la partie locale
+#     de l'email (cas où la boîte est générique : info@, contact@, sales@).
+#
+# Les listes se chevauchent partiellement (no-reply, mailer-daemon,
+# postmaster, notification) mais ont aussi des éléments propres
+# (`newsletter` dans la 1re ; `info`, `contact`, `support`, `sales` dans
+# la 2nde). NE PAS fusionner — sémantiques distinctes.
+_SERVICE_PREFIXES = frozenset({
+    'noreply', 'no-reply',
+    'info', 'contact', 'admin', 'support',
+    'hello', 'sales', 'billing',
+    'notification', 'notifications', 'service',
+    'mailer-daemon', 'postmaster',
+})
 MAX_TOKENS = 1200
 
 # 29/04 PM audit perf — patterns regex précompilés pour détection registre
@@ -744,7 +768,8 @@ class ClaudeAssistant:
             )
 
         # -- D : Profil du correspondant (PREMIER — prime Claude sur la relation) --
-        _SERVICE_PREFIXES = {'noreply', 'no-reply', 'info', 'contact', 'admin', 'support', 'hello', 'sales', 'billing', 'notification', 'notifications', 'service', 'mailer-daemon', 'postmaster'}
+        # Refonte N4 (12/05/2026) : `_SERVICE_PREFIXES` est désormais constante
+        # module-level (top du fichier). Plus de recréation à chaque appel.
         _raw_local = to_email.split('@')[0].lower().replace('.', ' ').replace('-', ' ') if to_email else ''
         # Utiliser le display_name du profil contact s'il existe, sinon parser l'email
         if contact_profile and contact_profile.get('display_name'):

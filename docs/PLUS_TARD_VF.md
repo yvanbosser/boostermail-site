@@ -936,6 +936,51 @@ Décision Yvan 07/05 : pas de différé du PJ — l'utilisateur attend une actio
 
 ---
 
+### 22. Règle 5 CC dépend de `_get_my_email()` — vérifier isolation multi-user au merge Michael — N4 12/05/2026
+
+**Origine** : Refonte Niveau 4 (« Filtre 1 ») 12/05/2026. La règle 5 `_rule_user_in_cc` appelle `_get_my_email()` pour déterminer si l'user est destinataire principal (TO) ou en copie (CC).
+
+**Risque silencieux au merge `feat/michael/multi-user`** : si `_get_my_email()` reste mono-user après le merge (un seul cache global pour tous les tenants), alors deux users connectés simultanément peuvent voir la mauvaise valeur. Conséquence : règle 5 flag à tort (écarter un mail TO légitime parce que le cache contient l'email d'un autre user) OU laisse passer à tort (CC non détecté).
+
+**À vérifier au merge** :
+1. `grep -n "_get_my_email\|_my_email_cache" V2/app_plugin.py` après merge — le cache `_my_email_cache` est listé dans I-MT-01 (donc devrait être UserScopedDict après refonte Michael). À confirmer.
+2. Si OK → rien à faire, l'isolation est assurée par la branche multi-user.
+3. Si KO → forcer un appel `_get_my_email()` per-request dans `_rule_user_in_cc` (pas de cache).
+
+**Priorité** : 🟡 moyenne — pas un bug actuellement (mono-user), mais à vérifier explicitement au moment du merge avant activation 2e tenant prod.
+
+---
+
+### 20. Statut `C:\EasyMail\claude_ai.py` (hors V2) — à confirmer mort ou vivant — N4 12/05/2026
+
+**Origine** : Refonte Niveau 4 (« Filtre 1 ») 12/05/2026. Lors de la centralisation de `_SERVICE_PREFIXES` dans `V2/claude_ai.py`, j'ai constaté qu'il existe **deux fichiers `claude_ai.py`** :
+
+- `C:\EasyMail\V2\claude_ai.py` ← actif en V2 (refactor N4 appliqué)
+- `C:\EasyMail\claude_ai.py` ← statut inconnu (ligne 283 contient encore la définition locale identique de `_SERVICE_PREFIXES`)
+
+**Hypothèse** : c'est un vestige du proto V1 (cf mémo Yvan « Racine = `C:\EasyMail\` depuis 12/04 mais `OneDrive\Desktop\EasyMail\` = vestige obsolète »). Le fichier hors V2 n'est probablement importé par personne en V2.
+
+**Vérification à faire** (5 min) :
+1. `grep -rn "from claude_ai" --exclude-dir=V2 C:\EasyMail\` — qui importe le fichier hors V2 ?
+2. Si **0 importeur** → SUPPRIMER `C:\EasyMail\claude_ai.py` (death by neglect)
+3. Si importeur trouvé → soit migrer l'importeur vers V2, soit aligner le fichier hors V2 sur la centralisation N4.
+
+**Priorité** : ⚪ basse — pas de bug actuellement (les 2 fichiers fonctionnent à l'identique). Mais source potentielle de confusion future si quelqu'un édite le mauvais fichier.
+
+---
+
+### 21. Décodage entités HTML (`&nbsp;`, `&amp;`) dans `_clean_body_text` — N4 12/05/2026
+
+**Origine** : Refonte Niveau 4 (« Filtre 1 ») 12/05/2026. Le helper `_clean_body_text` (app_plugin.py) strip les **balises HTML** (`<b>`, `<p>`, etc.) mais ne **décode pas** les entités HTML (`&nbsp;`, `&amp;`, `&#39;`).
+
+**Conséquence** : un body composé uniquement d'entités HTML (ex: `&nbsp;&nbsp;&nbsp;` = en pratique 3 espaces insécables) sera vu comme du contenu non-vide (18 chars) et **non écarté par la règle 4** (body < 10 chars). Cas marginal mais possible avec certains expéditeurs qui mettent un body décoratif.
+
+**Effort si on corrige** : ~10 min — ajouter `html.unescape(body)` avant le strip dans `_clean_body_text`, puis re-strip whitespace.
+
+**Priorité** : ⚪ basse — cas rare, impact = quelques cuissons inutiles. Pas un bug ressenti.
+
+---
+
 ### 19. ⚠️ Cache `Database._USER_FIRST_NAME_CACHE` mono-user (à traiter au merge `feat/michael/multi-user`) — N3 12/05/2026
 
 **Origine** : Refonte Niveau 3 (« Carnet d'adresses ») 12/05/2026. La garde anti-inversion (invariant `I-CONTACT-01`) utilise un cache class-level `Database._USER_FIRST_NAME_CACHE` qui contient **UN SEUL** prénom partagé entre tous les users du process.
