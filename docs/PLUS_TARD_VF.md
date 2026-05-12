@@ -958,6 +958,51 @@ Décision Yvan 07/05 : pas de différé du PJ — l'utilisateur attend une actio
 
 ---
 
+### 25. 🚨 GROS POST-IT MICHAEL — Tables `mail_*` PRIMARY KEY sans `user_id` (multi-tenant) — N6.1 12/05/2026
+
+═══════════════════════════════════════════════════════════════════════════
+**ATTENTION CRITIQUE pour la branche `feat/michael/multi-user`** : les 4 tables
+de plats préparés du commis Haiku (refonte N6.1) ont leur PRIMARY KEY sur
+`message_id` SEUL, **pas** `(user_id, message_id)`. Si User A et User B
+reçoivent le même mail (forwarding, mailing-list, alias), `INSERT OR REPLACE`
+**écrase mutuellement leurs plats préparés**.
+═══════════════════════════════════════════════════════════════════════════
+
+**Tables concernées** (`database.py:413, 430, 443, 457`) :
+- `mail_summaries` — Frigo Résumé
+- `mail_classement_cache` — Frigo Classement Mail
+- `mail_pj_classement_cache` — Frigo Classement PJ
+- `mail_echeance_cache` — Frigo Échéance
+
+**Aggravation N6.1** : avant N6.1, seul `mail_summaries` était massivement écrit
+(via `summarize_mails_batch` qui ne tournait que pour les VIP). Avec N6.1 le
+commis tourne pour TOUS les non-écartés (Q5 Yvan validé) et **écrit dans les 4
+tables**. Le bug d'écrasement cross-user est désormais quadruplé.
+
+**Scénario concret** :
+1. User A reçoit mail X (mailing-list pro). Son commis Haiku écrit les 4 plats avec ses propres folders Outlook/Windows.
+2. User B reçoit le même mail X (même mailing-list, même IMID). Son commis écrase tout — User A perd ses suggestions de classement personnalisées.
+3. User A clique sur le mail → frontend lit `mail_classement_cache.WHERE message_id=X` → reçoit les suggestions de User B. Cross-user data leak.
+
+**Action pour Michael au merge** :
+1. **Migrer les 4 tables** en `PRIMARY KEY (message_id, user_id)` avec script
+   transactionnel + idempotent. Préserver les données existantes (ajouter la
+   colonne user_id si manquante avec fallback `'default'` pour rétrocompat).
+2. **Vérifier toutes les requêtes `WHERE message_id = ?`** : elles doivent
+   inclure `AND user_id = ?`. Le helper `get_all_dishes_for_mail` (database.py:2693)
+   le fait déjà via `_uid()` côté Python — vérifier que toutes les méthodes
+   `get_mail_*` et `save_mail_*` filtrent bien sur user_id.
+3. **Tester** : un mail X reçu par 2 users de test → leurs 4 plats distincts
+   persistent simultanément sans s'écraser.
+
+**Effort estimé** : ~1h (migration DB + tests).
+
+**Priorité** : 🔴 **AVANT activation 2e tenant en prod**. Sinon les premiers
+betatesters auront leurs classements écrasés par les autres dès qu'ils
+partageront un mail (newsletter commune, mailing-list, alias générique).
+
+---
+
 ### 24. Limitation IDN (domaines unicode) dans `_extract_emails_from_field` — N5 12/05/2026
 
 **Origine** : Refonte Niveau 5 (« Filtre 2 VIP/Partiel ») 12/05/2026. La regex `_EMAIL_EXTRACT_RE` qui parse les emails depuis les champs to/cc Graph est en ASCII strict (`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`).

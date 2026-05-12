@@ -292,21 +292,26 @@ def invariant_no_redundant_wrappers():
 
 
 # ---------------------------------------------------------------------------
-# Invariant : cleanup `_prewarm_echeance_for_mail` (code inactif supprimé)
+# Invariant : `_prewarm_echeance_for_mail` supprimée (refonte N6.1 12/05/2026)
 # ---------------------------------------------------------------------------
 
 def invariant_prewarm_echeance_clean():
-    """`_prewarm_echeance_for_mail` ne contient plus le bloc « CODE INACTIF »."""
-    print("\n=== Invariant : _prewarm_echeance_for_mail nettoyé ===")
+    """`_prewarm_echeance_for_mail` n'existe plus du tout (renforcement N6.1).
+
+    Avant N6.1 : la fonction était une no-op gardée comme fallback. Refonte
+    N6.1 a supprimé le fallback du commis (Q4 Yvan) → fonction sans appelant
+    → suppression complète. Invariant désormais : fonction définitivement absente.
+    """
+    print("\n=== Invariant : _prewarm_echeance_for_mail supprimée ===")
     repo_v2 = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     app_path = os.path.join(repo_v2, 'app_plugin.py')
     with open(app_path, 'r', encoding='utf-8') as f:
         src = f.read()
-    # Le bloc « CODE INACTIF » des ~60 lignes commentées doit avoir disparu
-    has_dead_block = 'CODE INACTIF' in src and 'réactivation : retirer le return' in src
+    # La fonction ne doit plus exister
+    has_def = re.search(r'^def _prewarm_echeance_for_mail\(', src, re.MULTILINE) is not None
     ok = log_test(
-        f"bloc « CODE INACTIF » supprimé ({'présent' if has_dead_block else 'absent'})",
-        not has_dead_block
+        f"def _prewarm_echeance_for_mail supprimée ({'encore présent' if has_def else 'absent'})",
+        not has_def
     )
     return (1 if ok else 0), 1
 

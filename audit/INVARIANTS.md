@@ -513,6 +513,26 @@ Le Filtre 2 de l'arbre décisionnel V2 (« VIP ou PARTIEL ? ») est implémenté
 - **Pourquoi** : avant N5, la décision VIP/PARTIEL était dispersée sur 4 sites (`_is_contact_known` appelé en 4 endroits + 2 doublons des 3 patchs Fix C/Fix P14/Fix C bis). Plus `_should_speculate` un thin wrapper menteur (sa docstring promettait Filtre 1 + Filtre 2 mais ne faisait que Filtre 1). Plus des constantes magic + un parsing emails buggé sur sous-domaines.
 - **Historique** : refonte 12/05/2026 N5 (branche `feat/yvan/frontend`, commits à venir).
 
+### I-COMMIS-01 : Commis Haiku unifié = 1 call par cycle BG par mail (refonte N6.1 12/05/2026)
+Le commis Haiku (`_prewarm_unified_for_mail`) produit P/A/F/J en 1 seul appel `analyze_one_mail_stream` qui alimente les 4 frigos DB (`mail_summaries`, `mail_classement_cache`, `mail_pj_classement_cache`, `mail_echeance_cache`). Idempotence garantie via le helper unifié `_db.get_all_dishes_for_mail(mid)` qui retourne dict 4 clés `(summary, classement, pj_classement, echeance)`. Si les 4 caches sont remplis → skip commis.
+- **Pas de fallback 3 sub-prewarms** (suppression refonte N6.1) : si commis rate → retry au cycle BG suivant (45 s) jusqu'à `_COMMIS_MAX_RETRIES = 3`, puis abandon avec marquage `'error'`.
+- **Retry policy fonctionnelle** : `_commis_retry_count` (multi-tenant `_UserScopedDict('commis_retry')`) checké en tête de fonction AVANT le check idempotence → court-circuit si max atteint, économise les 4 DB queries. Reset sur succès.
+- **Body length filter** : skip Haiku si body stripped < `_COMMIS_MIN_BODY_LEN = 100` chars (notification courte). Les règles DB (Tier 1-5 classement Mail/PJ) restent calculées et persistées.
+- **3 slots RAM seulement** dans `_mail_preview_cache` (`echeance`, `classement`, `pj_classement`). Pas de slot `'summary'` RAM : le frontend lit `mail_summaries` DB directement via `/api/mail_summary`.
+- **Pas de bulk batch dans pipeline BG** : `summarize_mails_to_db` supprimé du warmup fast path + warmup standard + cycle BG. Conservé en piggyback aux 4 sites au clic user (mails ÉCARTÉS, mails très récents pas encore traités par commis BG).
+- **`_mark_mail_skipped` sauve les 4 caches** (self / auto_email) — y compris `mail_summaries` avec model distinguable (`'self'` / `'none_auto_email'`), sinon check idempotence à 4 caches jamais satisfait → boucle BG infinie.
+- **Tests** (`tests/test_n6_1_commis_haiku.py`, 24/24) :
+  - 4 constantes + helpers existence
+  - `_db.get_all_dishes_for_mail` retourne dict 4 clés
+  - 0 `def _prewarm_echeance_for_mail` (fonction supprimée)
+  - ≤ 5 références `summarize_mails_to_db` en code (1 def + ≤4 piggybacks)
+  - Helper unifié `get_all_dishes_for_mail` utilisé dans le commis
+  - Pas de `_set_mail_preview(mid, 'summary', ...)` (slot RAM supprimé)
+  - Body length filter présent
+  - Retry policy lue ET incrémentée
+- **Pourquoi** : avant N6.1, ~25 patches accumulés depuis 02/05 (vision Cuisinier+Commis), 4 caches DB séparés sans helper unifié, fallback 3 sub-prewarms en cascade (3× coût Haiku en panne), résumé P+A produit puis jeté (doublonné par `summarize_mails_batch`), commentaire d'ordre des règles mensonger.
+- **Historique** : refonte 12/05/2026 N6.1 (branche `feat/yvan/frontend`).
+
 ### I-DB-CONN-01 : Une seule Database() instance par db_path par TID (latent fix 12/05/2026)
 Le tracker class-level `Database._all_conns[tid] = conn` est keyé par thread_id seul. **Ne JAMAIS instancier plusieurs `Database(db_path)` simultanément dans le même thread** : la seconde instance, via `_conn()`, kicke et ferme la conn de la première (assumée zombie), provoquant `ProgrammingError: Cannot operate on a closed database` downstream.
 - **Règle pour helpers utility (BG threads, atexit, scripts CLI)** : si on a besoin d'une SELECT one-shot sans contexte Flask, utiliser `sqlite3.connect(db_path)` raw + close — pas `Database()`.

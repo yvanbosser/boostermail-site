@@ -1054,23 +1054,11 @@ def _execute_warmup(graph):
             # Relancer la spéculation TIER 1 en arrière-plan (cache peut avoir des gaps)
             _spawn_bg(_background_preload_loop)
 
-            # Fix audit 22/04 (Phase 1.A.1) : bulk résumés MEME en fast path.
-            # Avant : le bulk summaries était APRÈS ce return → jamais exécuté
-            # aux boots suivants (cas courant) → DB mail_summaries toujours vide
-            # → dialog fetch /api/mail_summary = miss → retry JS 4x (9.5s cumulés).
-            # Maintenant : on lance le bulk sur les mails déjà en mémoire
-            # (_warmup_cache), idempotent via has_mail_summary.
-            def _fastpath_bulk_summaries():
-                try:
-                    with _warmup_lock:
-                        cached_mails = list(_warmup_cache.values())[:50]
-                    gen, skipped = summarize_mails_to_db(cached_mails, chunk_size=10)
-                    if gen or skipped:
-                        logger.info(f"[warmup FAST PATH] résumés IA : +{gen} généré(s), "
-                                    f"{skipped} déjà en DB")
-                except Exception as e:
-                    logger.warning(f"[warmup FAST PATH] résumés IA erreur : {e}")
-            _spawn_bg(_fastpath_bulk_summaries, name='summaries-fastpath')
+            # Refonte N6.1 (12/05/2026) — suppression du bulk résumés batch
+            # ici. Le commis Haiku unifié (`_prewarm_unified_for_mail` appelé
+            # via `_prewarm_mail_preview` lancé par `_background_preload_loop`
+            # juste au-dessus) persiste désormais lui-même P+A dans
+            # `mail_summaries` (Q1 N6.1). Plus de double appel Haiku.
             return
 
         # Plan 2 Phase 3.1 — Parallélisation : lancer immédiatement le prefetch
@@ -1109,9 +1097,13 @@ def _execute_warmup(graph):
         # Boost couverture cache (21/04) : 10 → 50 mails pour que les contacts
         # connus hors top-10 soient aussi pré-spéculés. Coût API Graph nul
         # (même appel, juste limit différent), RAM négligeable.
-        # Fix 23/04 (T3) : include_body=True pour que summarize_mails_to_db
-        # puisse générer les résumés (sinon body_preview 255 chars = skip)
-        # et que _start_speculative ait le body complet pour Claude.
+        # include_body=True : nécessaire pour `_prewarm_unified_for_mail`
+        # (commis Haiku — sinon body trop court déclencherait le filter
+        # `_COMMIS_MIN_BODY_LEN`) et pour `_start_speculative` (chef Sonnet
+        # — body complet requis pour bloc B+C). Historique : ce flag a été
+        # ajouté le 23/04 pour permettre `summarize_mails_to_db` de générer
+        # les résumés en batch (le batch a été supprimé du pipeline BG en
+        # N6.1 mais le flag reste utile pour les 2 callers ci-dessus).
         # Fix 29/04 PM tardif (audit BG/cache Yvan) : 50 → 200 — Yvan a 64
         # mails inbox, 14 plus anciens que le top 50 étaient INVISIBLES au
         # BG _continuous_speculation_loop (qui itère sur _warmup_cache).
@@ -1261,20 +1253,17 @@ def _execute_warmup(graph):
                 logger.debug(f"[warmup] mail_preview prewarm : {e}")
         _spawn_bg(_bulk_prewarm_mail_previews, name='mail-preview-warmup')
 
-        # 3bis. Résumés IA (21/04) — Claude Haiku batch, pattern calqué sur
-        #    échéances. Génère 3-5 points + actions attendues par mail, stocke
-        #    en DB (table mail_summaries). Affiché dans le panneau gauche du
-        #    dialog (sections "Points principaux" / "Actions attendues").
-        #    Idempotent : ne re-scan pas les mails déjà résumés en DB.
-        def _bulk_summaries_warmup():
-            try:
-                gen, skipped = summarize_mails_to_db(mails[:50], chunk_size=10)
-                if gen or skipped:
-                    logger.info(f"[warmup] résumés IA : +{gen} généré(s), "
-                                f"{skipped} déjà en DB")
-            except Exception as e:
-                logger.warning(f"[warmup] résumés IA erreur : {e}")
-        _spawn_bg(_bulk_summaries_warmup, name='summaries-warmup')
+        # Refonte N6.1 (12/05/2026) — bulk résumés batch supprimé du pipeline
+        # BG. Les résumés sont désormais persistés par le commis Haiku unifié
+        # (`_prewarm_unified_for_mail`) lancé en BG via le mail-preview-warmup
+        # juste au-dessus. Le double call Haiku P/A (commis + batch) est
+        # éliminé pour le pipeline BG. NB : les 4 piggybacks restants
+        # (ouverture mail, dialog_init, /api/email_body) peuvent encore
+        # déclencher `summarize_mails_to_db` au clic user — utile pour les
+        # cas où le commis BG n'a pas encore tourné (mail très récent,
+        # mail ÉCARTÉ sans commis BG). Économie effective : 100% sur les
+        # mails ingérés > 45 sec avant clic ; 0% sur les mails ouverts
+        # avant fin commis BG (rare).
 
         # 4. Pré-charger learned_templates (évite un DB hit au 1er /api/instant_reply)
         def _preload_learned_tpl():
@@ -1624,13 +1613,14 @@ def _continuous_speculation_loop():
                     f"noncanon={_skip_noncanon}"
                 )
 
-            # Fix audit 22/04 (Phase 1.A.2) : bulk résumés sur les mails du
-            # cycle qui ont un body. Rattrape les nouveaux mails arrivés depuis
-            # le dernier warmup. Idempotent via has_mail_summary.
-            try:
-                summarize_mails_to_db(mails, chunk_size=10)
-            except Exception as e:
-                logger.debug(f"[cont-spec] résumés : {e}")
+            # Refonte N6.1 (12/05/2026) — bulk résumés batch supprimé du cycle BG.
+            # Les résumés sont désormais persistés par le commis Haiku unifié
+            # (`_prewarm_unified_for_mail`) lancé via le mail-preview-warmup
+            # (cf `_prewarm_mail_preview` plus bas dans ce cycle). Cohérence
+            # avec décision Yvan Q1 N6.1. Économie effective sur le pipeline
+            # BG : 100% (avant : commis + batch = 2 calls Haiku ; après :
+            # commis seul = 1 call). Les piggybacks au clic user gardés actifs
+            # (cf section header `RÉSUMÉS DE MAILS` plus bas dans le fichier).
 
             # P0.2 fix 24/04 : apprentissage contact à la RÉCEPTION.
             # Avant : _maybe_analyze_contact() n'était appelé que dans
@@ -2365,11 +2355,15 @@ _POST_SEND_CACHE_TTL = 5 * 60  # 5 min (constante conservee, peut etre utilisee 
 # Clé canonique : internet_message_id (I-DATA-11)
 # TTL : 1h. Max : 100 entrées (trim oldest au-delà).
 #
-# Structure d'une entrée :
+# Structure d'une entrée (refonte N6.1 12/05/2026 — 3 slots, pas 4) :
 #   _mail_preview_cache[<mid>] = {
-#     'echeance':   {'status': 'running'|'done'|'error', 'data': list|None, 'ts': float},
-#     'classement': {'status': ..., 'data': {suggestion, source}|None, 'ts': float},
+#     'echeance':     {'status': 'running'|'done'|'error', 'data': list|None,           'ts': float},
+#     'classement':   {'status': ...,                      'data': {suggestion,source}, 'ts': float},
+#     'pj_classement':{'status': ...,                      'data': {suggestion,source}, 'ts': float},
 #   }
+# NB N6.1 : pas de slot 'summary' en RAM. Le frontend lit `mail_summaries`
+# directement via /api/mail_summary (DB), pas le RAM cache. Slot RAM serait
+# write-only (code mort) — cf audit pré-commit N6.1.
 # Étape 7 multi-tenant — _mail_preview_cache via UserScopedDict (BG cont-spec
 # écrit, routes Flask lisent ; bridge DB user_id assure cohérence en mono-user).
 if _UserScopedDict is not None:
@@ -2858,22 +2852,13 @@ def _set_mail_preview(mid, kind, status, data):
         }
 
 
-def _prewarm_echeance_for_mail(mid, mail_data):
-    """[Scope V1 07/05] Échéances mails reçus = no-op (scope V1 = sortants only).
-
-    Spec : SPEC_ECHEANCES_BOOSTERMAIL.md §2 — la pré-cuisson d'échéances pour
-    les mails entrants est désactivée (économie 30% appels Claude, pas de
-    pollution DB). Cette fonction marque juste le cache preview comme "done
-    avec liste vide" pour que le frontend ne reste pas en état "loading".
-
-    Le pipeline sortant `api_echeances_post_send` (direction='sent') reste
-    actif et crée les vraies entrées DB.
-
-    Refonte N5 (12/05/2026) — l'ancien bloc « CODE INACTIF » de ~60 lignes
-    commentées (scan Claude pour réactivation future) a été supprimé. Si on
-    réactive un jour, on réécrira propre depuis l'historique git.
-    """
-    _set_mail_preview(mid, 'echeance', 'done', [])
+# Refonte N6.1 (12/05/2026) — `_prewarm_echeance_for_mail` supprimée.
+# Cette fonction no-op (scope V1 entrants = pas d'échéance) servait uniquement
+# de fallback dans `_prewarm_unified_for_mail`. Avec la suppression du fallback
+# (refonte N6.1, décision Yvan Q4), elle n'a plus aucun appelant en code actif.
+# Le marquage `mail_echeance_cache = []` côté entrants est désormais fait
+# directement dans `_persist_commis_results`. Pipeline sortant
+# `api_echeances_post_send` (direction='sent') reste actif et indépendant.
 
 
 def _get_outlook_folders_cached() -> list:
@@ -3317,35 +3302,225 @@ def _get_pj_text_for_unified_analyze(message_id):
         return ''
 
 
+# =============================================================================
+# Refonte Niveau 6.1 (12/05/2026) — Commis Haiku unifié + 4 frigos
+# =============================================================================
+# Constantes du commis (avant N6.1 : magic numbers / valeurs hardcodées
+# éparpillées). Centralisées pour ajustement facile.
+_COMMIS_MIN_BODY_LEN = 100   # body < 100 chars → skip Haiku (notification ultra-courte)
+_COMMIS_MAX_RETRIES = 3      # max retries du commis avant abandon (évite boucle infinie)
+
+# Compteur retry par message_id, in-memory, multi-tenant (UserScopedDict).
+# Cross-restart reset (acceptable — au pire on retente 3× au prochain boot
+# pour un mail qui plante systématiquement, coût ~3 calls Haiku, négligeable).
+# Pas de lock : la BG thread cont-spec itère séquentiellement les mids du
+# cycle, et `_prewarm_unified_for_mail` n'est pas appelé en parallèle pour
+# le même mid.
+if _UserScopedDict is not None:
+    _commis_retry_count = _UserScopedDict('commis_retry')
+else:
+    _commis_retry_count = {}
+
+
+def _mark_mail_skipped(mid, source):
+    """Marque un mail comme « commis non applicable » dans les 4 frigos.
+
+    Cas : mail à soi-même, mail automatique (no-reply), body trop court (mais
+    pour body trop court → `_persist_commis_results` avec listes vides est
+    préféré pour conserver les classements DB rule-based déjà calculés).
+
+    Idempotent (INSERT OR REPLACE côté DB, dict reset côté RAM).
+    """
+    # Refonte N6.1 fix — 3 slots RAM (pas 4 : pas de slot 'summary' RAM car
+    # le frontend lit `mail_summaries` directement via /api/mail_summary).
+    _set_mail_preview(mid, 'classement', 'done', {
+        'suggestion': None, 'suggestions': [], 'source': source})
+    _set_mail_preview(mid, 'pj_classement', 'done', {
+        'suggestion': None, 'suggestions': [], 'source': source})
+    _set_mail_preview(mid, 'echeance', 'done', [])
+    # 4 saves DB séparés (1 try chacun) — si la 1re plante, les autres
+    # tentent quand même. Préserve l'idempotence à 4 caches même en cas
+    # d'erreur DB partielle.
+    try:
+        _db.save_mail_classement(mid, None, source)
+    except Exception as _e:
+        logger.debug(f"[unified] save classement mark_skipped({source}): {_e}")
+    try:
+        _db.save_mail_pj_classement(mid, None, source)
+    except Exception as _e:
+        logger.debug(f"[unified] save pj_classement mark_skipped({source}): {_e}")
+    try:
+        _db.save_mail_echeance(mid, [])
+    except Exception as _e:
+        logger.debug(f"[unified] save echeance mark_skipped({source}): {_e}")
+    # Refonte N6.1 fix important #3 — save_mail_summary DOIT être appelé ici
+    # sinon le check idempotence à 4 caches dans `_prewarm_unified_for_mail`
+    # ne sera jamais satisfait pour ces mails skipped (self / auto_email)
+    # → re-execute boucle infinie à chaque cycle BG (45s).
+    try:
+        _db.save_mail_summary({
+            'message_id': mid,
+            'subject': '',
+            'from_email': '',
+            'points': [],
+            'actions': [],
+            'model': source,  # 'self' ou 'none_auto_email' — distinguable du commis
+        })
+    except Exception as _e:
+        logger.debug(f"[unified] save summary mark_skipped({source}): {_e}")
+
+
+def _persist_commis_results(*, mid, mail_data, points, actions, mail_suggestions,
+                             pj_suggestions, has_pj, model):
+    """Persiste les 4 frigos après production commis (ou skip body court).
+
+    Refonte N6.1 — helper centralisé qui supprime la duplication de logique de
+    persistence entre les 2 chemins (commis OK / skip body court). Format
+    `_db.save_mail_summary` aligné sur `database.py:2618` (data dict).
+
+    Args:
+        mid: IMID canonique du mail
+        mail_data: dict mail original (subject, from_email…)
+        points: liste P du résumé (peut être vide si skip body court)
+        actions: liste A du résumé (peut être vide)
+        mail_suggestions: Top 3 classement Mail (tiers DB + éventuellement commis)
+        pj_suggestions: Top 3 classement PJ
+        has_pj: bool présence pièces jointes
+        model: identifiant modèle utilisé (`'commis-n6.1'` ou `'skip-short-body'`)
+    """
+    # 1. Résumé — refonte N6.1, P+A produits par le commis désormais persistés
+    try:
+        _db.save_mail_summary({
+            'message_id': mid,
+            'subject': mail_data.get('subject', '') or '',
+            'from_email': mail_data.get('from_email', '') or '',
+            'points': points,
+            'actions': actions,
+            'model': model,
+        })
+    except Exception as _e:
+        logger.debug(f"[unified] save summary: {_e}")
+    # Refonte N6.1 fix important #4 — pas de slot RAM 'summary' :
+    # le frontend lit `mail_summaries` DB directement via /api/mail_summary.
+    # Pas de cohérence à maintenir en RAM (vs les 3 slots echeance/classement/
+    # pj_classement qui sont lus par le frontend via _mail_preview_cache).
+
+    # 2. Échéance — V1 scope : entrants désactivés, on stocke [] (frontend
+    # affiche "pas d'échéance" sur lecture). Le prompt commis demande encore
+    # E pour ne pas casser /api/post_generation_analyze (mails compose),
+    # mais le résultat E est ignoré côté entrants (cf docstring fonction).
+    try:
+        _db.save_mail_echeance(mid, [])
+    except Exception as _e:
+        logger.debug(f"[unified] save echeance: {_e}")
+    _set_mail_preview(mid, 'echeance', 'done', [])
+
+    # 3. Classement Mail — top 3 (#1 principale + #2/#3 boulettes alternatives)
+    if mail_suggestions:
+        primary = mail_suggestions[0]
+        primary_with_alts = dict(primary)
+        primary_with_alts['_suggestions'] = mail_suggestions
+        cls_data = {
+            'suggestion': primary,
+            'suggestions': mail_suggestions,
+            'source': primary.get('source', 'unified'),
+        }
+        try:
+            _db.save_mail_classement(mid, primary_with_alts,
+                                     primary.get('source', 'unified'))
+        except Exception as _e:
+            logger.debug(f"[unified] save classement: {_e}")
+    else:
+        cls_data = {'suggestion': None, 'suggestions': [], 'source': 'unified_none'}
+        try:
+            _db.save_mail_classement(mid, None, 'unified_none')
+        except Exception as _e:
+            logger.debug(f"[unified] save classement unified_none: {_e}")
+    _set_mail_preview(mid, 'classement', 'done', cls_data)
+
+    # 4. Classement PJ — top 3
+    if not has_pj:
+        pj_data = {'suggestion': None, 'suggestions': [], 'source': 'no_pj'}
+        try:
+            _db.save_mail_pj_classement(mid, None, 'no_pj')
+        except Exception as _e:
+            logger.debug(f"[unified] save pj_classement no_pj: {_e}")
+    elif pj_suggestions:
+        pj_primary = pj_suggestions[0]
+        pj_primary_with_alts = dict(pj_primary)
+        pj_primary_with_alts['_suggestions'] = pj_suggestions
+        pj_data = {
+            'suggestion': pj_primary,
+            'suggestions': pj_suggestions,
+            'source': pj_primary.get('source', 'unified'),
+        }
+        try:
+            _db.save_mail_pj_classement(mid, pj_primary_with_alts,
+                                        pj_primary.get('source', 'unified'))
+        except Exception as _e:
+            logger.debug(f"[unified] save pj classement: {_e}")
+    else:
+        pj_data = {'suggestion': None, 'suggestions': [], 'source': 'unified_none'}
+        try:
+            _db.save_mail_pj_classement(mid, None, 'unified_none')
+        except Exception as _e:
+            logger.debug(f"[unified] save pj_classement unified_none: {_e}")
+    _set_mail_preview(mid, 'pj_classement', 'done', pj_data)
+
+
 def _prewarm_unified_for_mail(mid, mail_data):
-    """Étape 2+3 (02/05 PM tardif, vision Yvan « Cuisinier + Commis ») —
-    appel commis Haiku unifié qui produit P/A/E/F/J en 1 appel, puis
-    remplit les 3 caches DB + RAM (mail_classement_cache,
-    mail_pj_classement_cache, mail_echeance_cache).
+    """Commis Haiku unifié — produit P/A/E/F/J en 1 appel et alimente les 4 frigos.
 
-    Si l'appel échoue (timeout, parsing error, etc.) → fallback automatique
-    sur les 3 sub-prewarms originaux (Audit recommandation : préserver la
-    couverture pour les mails non-cliqués).
+    Refonte N6.1 (12/05/2026) — consolidation des patches accumulés (02/05
+    « Cuisinier + Commis », Audit Fix A2/A3/A14, 08/05 fix #2+#4, Refonte N1
+    11/05). Décisions Yvan validées : persister le résumé (Q1), garder 4 tables
+    (Q2), conserver E dans prompt mais ignorer côté entrants (Q3 modulé),
+    pas de fallback (Q4 : retry au cycle BG suivant), commis pour TOUS les
+    non-écartés PARTIEL+VIP (Q5).
 
-    Bénéfices vs 4 appels Haiku séparés (summarize + scan_echeances +
-    suggest_folder + suggest_pj_folder) :
-    - ~75 % d'économie sur les appels Haiku (4 → 1)
-    - Le commis voit le contenu PJ extrait → résolution Devoteam
-    - Cohérence : Claude a tous les signaux en même temps
+    Pipeline :
+      1. Idempotence : skip si les 4 frigos (résumé + classement Mail + classement
+         PJ + échéance) sont déjà remplis pour ce mid → restaure RAM cache et return.
+      2. Skip mails à soi-même, mails automatiques (no-reply) — invariant I-NOREPLY-01.
+      3. Récupération contexte (folders Outlook + Windows, contact_profile, recent_*).
+      4. Extraction texte PJ (résolution Devoteam, factures…) si has_attachments.
+      5. Pré-calcul Top 3 classement Mail/PJ via règles DB (tiers).
+      6. Body length filter : si body < _COMMIS_MIN_BODY_LEN → skip Haiku, persister
+         résumé vide + règles DB déjà calculées.
+      7. Appel commis Haiku unifié → P/A/E/F/J.
+      8. Compléter Top 3 avec sortie commis si pas plein.
+      9. Persister les 4 frigos via `_persist_commis_results`.
+     10. En cas d'erreur : incrémenter retry_count, si max atteint → marquer
+         'error' permanent ; sinon → laisser le cycle BG suivant retenter.
+
+    Note design : pas de side-effect autre que les écritures DB + RAM cache.
+    Multi-tenant safe via `_db._uid()` et `_set_mail_preview` (UserScopedDict).
     """
     try:
+        # === 0. Garde retry (refonte N6.1 fix bloquant) ===
+        # Si on a déjà épuisé les retries pour ce mid → return early sans
+        # tenter à nouveau. Évite la boucle infinie de retry au cycle BG.
+        # Reset du compteur sur succès en bas de fonction.
+        if _commis_retry_count.get(mid, 0) >= _COMMIS_MAX_RETRIES:
+            return
+
         builder = _get_prompt_builder()
         if not builder or not hasattr(builder, 'analyze_one_mail_stream'):
             raise Exception('analyze_one_mail_stream non disponible')
 
-        # === Audit Fix A2 (02/05 fin) : idempotence DB cache ===
-        # Si les 3 caches DB sont déjà remplis pour ce mid, restaure la RAM
-        # et skip le commis (économie ~75 appels Haiku par restart).
+        # === 1. Idempotence : 4 frigos (refonte N6.1) ===
+        # Utilise le helper unifié `get_all_dishes_for_mail` (1 dict avec
+        # 4 entrées) au lieu de 4 appels séparés — DRY (refonte N6.1).
         try:
-            _cls_cached = _db.get_mail_classement(mid)
-            _pj_cached = _db.get_mail_pj_classement(mid)
-            _ech_cached = _db.get_mail_echeance(mid)
-            if _cls_cached is not None and _pj_cached is not None and _ech_cached is not None:
+            _dishes = _db.get_all_dishes_for_mail(mid)
+            _summary_cached = _dishes['summary']
+            _cls_cached = _dishes['classement']
+            _pj_cached = _dishes['pj_classement']
+            _ech_cached = _dishes['echeance']
+            if (_summary_cached is not None
+                    and _cls_cached is not None
+                    and _pj_cached is not None
+                    and _ech_cached is not None):
                 # Reconstruction RAM cache à partir DB
                 _cs = _cls_cached.get('suggestion')
                 _cls_list = (_cs.get('_suggestions', [_cs])
@@ -3370,60 +3545,39 @@ def _prewarm_unified_for_mail(mid, mail_data):
                 })
                 _set_mail_preview(mid, 'echeance', 'done',
                                   _ech_cached.get('echeances', []))
+                # Refonte N6.1 fix important #4 — pas de slot RAM 'summary'
+                # (le frontend lit `mail_summaries` DB directement, cf
+                # _persist_commis_results commentaire). On a juste à confirmer
+                # ici que le summary DB est présent (déjà vérifié par
+                # `_summary_cached is not None` dans la condition).
                 logger.debug(f"[unified] cache DB HIT pour {mid[:30]} → skip commis")
                 return
         except Exception as _e:
             logger.debug(f"[unified] check DB idempotent: {_e}")
 
-        # Skip mail à soi-même (cohérent avec _prewarm_classement_for_mail)
+        # === 2. Skip mail à soi-même ===
         contact_email = (mail_data.get('from_email', '') or '').lower()
         try:
             _user_email = _normalize_email(_db.get_setting('auth_user_email'))
         except Exception:
             _user_email = None
         if _user_email and contact_email == _user_email:
-            _set_mail_preview(mid, 'classement', 'done', {
-                'suggestion': None, 'suggestions': [], 'source': 'self'})
-            _set_mail_preview(mid, 'pj_classement', 'done', {
-                'suggestion': None, 'suggestions': [], 'source': 'self'})
-            _set_mail_preview(mid, 'echeance', 'done', [])
-            try:
-                _db.save_mail_classement(mid, None, 'self')
-                _db.save_mail_pj_classement(mid, None, 'self')
-                _db.save_mail_echeance(mid, [])
-            except Exception:
-                pass
+            _mark_mail_skipped(mid, 'self')
             return
 
-        # === Audit Fix A3 (02/05 fin) : skip mails automatiques ===
-        # Parité avec _prewarm_classement_for_mail : noreply / mailer-daemon
-        # / newsletters → Claude rendrait 'none' presque toujours, économie API.
-        # Audit 08/05 fix #2 : utilise _SPEC_NOREPLY_PATTERNS canonique
-        # (étendu pour couvrir donotreply / nepasrepondre / etc.) au lieu
-        # d'une liste locale dupliquée.
-        # Refonte N1 (11/05) : liste centralisée _AUTO_EMAIL_PATTERNS via _is_auto_email
+        # === 2bis. Skip mails automatiques (I-NOREPLY-01) ===
         if contact_email and _is_auto_email(contact_email):
-            _set_mail_preview(mid, 'classement', 'done', {
-                'suggestion': None, 'suggestions': [], 'source': 'none_auto_email'})
-            _set_mail_preview(mid, 'pj_classement', 'done', {
-                'suggestion': None, 'suggestions': [], 'source': 'none_auto_email'})
-            _set_mail_preview(mid, 'echeance', 'done', [])
-            try:
-                _db.save_mail_classement(mid, None, 'none_auto_email')
-                _db.save_mail_pj_classement(mid, None, 'none_auto_email')
-                _db.save_mail_echeance(mid, [])
-            except Exception as _e:
-                logger.debug(f"[unified] save auto_email: {_e}")
+            _mark_mail_skipped(mid, 'none_auto_email')
             logger.debug(f"[unified] mail automatique détecté ({contact_email}) → skip commis")
             return
 
-        # Récupérer le contexte (folders + contact + history)
+        # === 3. Contexte (folders + contact + history) ===
         try:
             folders_outlook = _get_outlook_folders_cached() or []
         except Exception:
             folders_outlook = []
         try:
-            _wf_uid = _get_current_user_id() or 'default' if _get_current_user_id else 'default'
+            _wf_uid = (_get_current_user_id() or 'default') if _get_current_user_id else 'default'
             wf_row = _db.get_user_windows_folders(_wf_uid)
             folders_windows = wf_row.get('folders', []) if wf_row else []
         except Exception:
@@ -3442,30 +3596,23 @@ def _prewarm_unified_for_mail(mid, mail_data):
         except Exception:
             recent_pj = []
 
-        # Étape 3 — Extraire contenu PJ pour résolution Devoteam
+        # === 4. Extraction texte PJ ===
         pj_text = ''
         has_pj = bool(mail_data.get('has_attachments') or (mail_data.get('attachments') or []))
         if has_pj:
             pj_text = _get_pj_text_for_unified_analyze(mid)
 
-        # === Tier DB pré-check + Top 3 (02/05 PM tardif, vision Yvan) ===
-        # 1. Désambiguïsation : règles DB d'historique tranchent via l'ID Graph
-        #    cryptique exact (le commis ne peut pas distinguer 100 dossiers
-        #    "Administratif" dans 100 SCI différentes).
-        # 2. Top 3 : on accumule jusqu'à 3 suggestions sans doublons (par
-        #    folder_path) à travers tous les tiers + sortie commis. Le frontend
-        #    affiche #1 en principale + #2/#3 en boulettes alternatives.
+        # === 5. Pré-calcul Top 3 via règles DB (tiers) ===
+        # Désambiguïsation : règles DB d'historique tranchent via l'ID Graph
+        # cryptique exact (le commis ne peut pas distinguer 100 dossiers
+        # "Administratif" dans 100 SCI différentes). Top 3 cumulé sans doublons
+        # (par folder_path) à travers tous les tiers + sortie commis.
         # Spec : docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md.
         try:
             subject_kw = _extract_subject_keywords(mail_data.get('subject', ''))
         except Exception:
             subject_kw = mail_data.get('subject', '')
 
-        # Tier MAIL — collecte top 3 sans doublons
-        mail_suggestions = []
-        _seen_mail = set()
-
-        # Audit Fix A14 (02/05 fin) : reason lisible par tier (UX)
         _TIER_REASONS = {
             'thread': 'thread déjà classé',
             'rule': 'classement habituel pour ce contact',
@@ -3473,7 +3620,7 @@ def _prewarm_unified_for_mail(mid, mail_data):
             'domain': 'domaine récurrent',
             'cross_contact': 'sujet récurrent',
         }
-
+        mail_suggestions, _seen_mail = [], set()
         def _add_mail_sug(sug, source):
             if not sug or not isinstance(sug, dict):
                 return
@@ -3498,15 +3645,11 @@ def _prewarm_unified_for_mail(mid, mail_data):
         except Exception as _e:
             logger.debug(f"[unified] Tier DB mail: {_e}")
 
-        # Tier PJ — collecte top 3 sans doublons
-        pj_suggestions = []
-        _seen_pj = set()
-
         _TIER_PJ_REASONS = {
             'rule': 'classement PJ habituel',
             'keywords': 'mots-clés du sujet',
         }
-
+        pj_suggestions, _seen_pj = [], set()
         def _add_pj_sug(sug, source):
             if not sug or not isinstance(sug, dict):
                 return
@@ -3531,7 +3674,25 @@ def _prewarm_unified_for_mail(mid, mail_data):
             except Exception as _e:
                 logger.debug(f"[unified] Tier DB pj: {_e}")
 
-        # Appel commis Haiku unifié
+        # === 6. Body length filter (refonte N6.1) ===
+        # Notification ultra-courte ("OK", "RDV confirmé"...) → skip Haiku.
+        # Les règles DB ci-dessus restent valides et seront persistées avec
+        # résumé vide. Économie ~5-15 % des appels Haiku (le sub-agent l'a chiffré).
+        body_raw = (mail_data.get('body') or '') or (mail_data.get('body_preview') or '')
+        body_stripped = _HTML_TAG_RE.sub(' ', body_raw or '').strip()
+        if len(body_stripped) < _COMMIS_MIN_BODY_LEN:
+            _persist_commis_results(
+                mid=mid, mail_data=mail_data,
+                points=[], actions=[],
+                mail_suggestions=mail_suggestions,
+                pj_suggestions=pj_suggestions,
+                has_pj=has_pj,
+                model='skip-short-body',
+            )
+            logger.debug(f"[unified] body trop court ({len(body_stripped)} chars) → skip Haiku")
+            return
+
+        # === 7. Appel commis Haiku unifié ===
         result = None
         for kind, payload in builder.analyze_one_mail_stream(
             mail=mail_data,
@@ -3551,26 +3712,7 @@ def _prewarm_unified_for_mail(mid, mail_data):
         if not result:
             raise Exception('No end event from analyze_one_mail_stream')
 
-        # === Remplir les 3 caches DB + RAM ===
-
-        # 1. Échéance
-        # Audit 08/05 fix #4 : Spec V1 = échéances « sortantes only ». Sur les
-        # mails entrants (cas de cette fonction, appelée par webhook reception
-        # + clic user), la détection doit être désactivée — l'échéance est
-        # déclarée explicitement par l'user au moment de la rédaction de SA
-        # réponse. Avant : E extraite par Haiku unifié pour TOUS les mails →
-        # affichage potentiel d'une « échéance » sur un mail reçu, contraire
-        # à la spec slide 5 + memory user.
-        # Note : on conserve l'extraction Haiku (le prompt produit P/A/E/F/J
-        # en 1 call, retirer E ne réduit pas le coût) mais on stocke vide.
-        ech_for_cache = []
-        try:
-            _db.save_mail_echeance(mid, ech_for_cache)
-        except Exception as _e:
-            logger.debug(f"[unified] save echeance: {_e}")
-        _set_mail_preview(mid, 'echeance', 'done', ech_for_cache)
-
-        # Compléter top 3 avec sortie commis si pas encore plein
+        # === 8. Compléter Top 3 avec sortie commis si pas plein ===
         fm = result.get('folder_mail')
         if fm and fm.get('folder_id') and len(mail_suggestions) < 3:
             fm_path = fm.get('folder_path', '')
@@ -3579,7 +3721,6 @@ def _prewarm_unified_for_mail(mid, mail_data):
                 s.setdefault('source', 'unified')
                 mail_suggestions.append(s)
                 _seen_mail.add(fm_path)
-
         fpj = result.get('folder_pj')
         if has_pj and fpj and fpj.get('folder_path') and len(pj_suggestions) < 3:
             fpj_path = fpj.get('folder_path', '')
@@ -3589,81 +3730,49 @@ def _prewarm_unified_for_mail(mid, mail_data):
                 pj_suggestions.append(s)
                 _seen_pj.add(fpj_path)
 
-        # 2. Classement mail — top 3 (#1 principale + #2/#3 boulettes alternatives)
-        if mail_suggestions:
-            primary = mail_suggestions[0]
-            primary_with_alts = dict(primary)
-            primary_with_alts['_suggestions'] = mail_suggestions
-            cls_data = {
-                'suggestion': primary,
-                'suggestions': mail_suggestions,
-                'source': primary.get('source', 'unified'),
-            }
-            try:
-                _db.save_mail_classement(mid, primary_with_alts,
-                                         primary.get('source', 'unified'))
-            except Exception as _e:
-                logger.debug(f"[unified] save classement: {_e}")
-        else:
-            cls_data = {'suggestion': None, 'suggestions': [], 'source': 'unified_none'}
-            try:
-                _db.save_mail_classement(mid, None, 'unified_none')
-            except Exception:
-                pass
-        _set_mail_preview(mid, 'classement', 'done', cls_data)
+        # === 9. Persister les 4 frigos ===
+        _persist_commis_results(
+            mid=mid, mail_data=mail_data,
+            points=result.get('points', []),
+            actions=result.get('actions', []),
+            mail_suggestions=mail_suggestions,
+            pj_suggestions=pj_suggestions,
+            has_pj=has_pj,
+            model='commis-n6.1',
+        )
 
-        # 3. Classement PJ — top 3 (#1 principale + #2/#3 boulettes alternatives)
-        if not has_pj:
-            pj_data = {'suggestion': None, 'suggestions': [], 'source': 'no_pj'}
-            try:
-                _db.save_mail_pj_classement(mid, None, 'no_pj')
-            except Exception:
-                pass
-        elif pj_suggestions:
-            pj_primary = pj_suggestions[0]
-            pj_primary_with_alts = dict(pj_primary)
-            pj_primary_with_alts['_suggestions'] = pj_suggestions
-            pj_data = {
-                'suggestion': pj_primary,
-                'suggestions': pj_suggestions,
-                'source': pj_primary.get('source', 'unified'),
-            }
-            try:
-                _db.save_mail_pj_classement(mid, pj_primary_with_alts,
-                                            pj_primary.get('source', 'unified'))
-            except Exception as _e:
-                logger.debug(f"[unified] save pj classement: {_e}")
-        else:
-            pj_data = {'suggestion': None, 'suggestions': [], 'source': 'unified_none'}
-            try:
-                _db.save_mail_pj_classement(mid, None, 'unified_none')
-            except Exception:
-                pass
-        _set_mail_preview(mid, 'pj_classement', 'done', pj_data)
+        # Reset retry compteur sur succès
+        _commis_retry_count.pop(mid, None)
 
         logger.info(
             f"[unified] OK {mid[:30]} — "
-            f"fm={cls_data.get('source')}({len(mail_suggestions)}), "
-            f"fpj={pj_data.get('source')}({len(pj_suggestions)}), "
-            f"ech={bool(ech and ech.get('description'))}, "
-            f"pj_text={len(pj_text)}c, points={len(result.get('points', []))}"
+            f"points={len(result.get('points', []))}, "
+            f"fm=({len(mail_suggestions)}), fpj=({len(pj_suggestions)}), "
+            f"pj_text={len(pj_text)}c"
         )
 
     except Exception as e:
-        logger.warning(f"[unified] FAILED {mid[:30]}: {e} — fallback sub-prewarms")
-        # Étape 4 — Fallback : lancer les 3 sub-prewarms originaux comme avant
-        try:
-            _spawn_bg(_prewarm_echeance_for_mail, args=(mid, mail_data), name='prewarm-ech-fb')
-        except Exception:
-            pass
-        try:
-            _spawn_bg(_prewarm_classement_for_mail, args=(mid, mail_data), name='prewarm-cls-fb')
-        except Exception:
-            pass
-        try:
-            _spawn_bg(_prewarm_pj_classement_for_mail, args=(mid, mail_data), name='prewarm-pj-fb')
-        except Exception:
-            pass
+        # === 10. Pas de fallback (refonte N6.1) — retry policy ===
+        # Avant N6.1 : 3 sub-prewarms cascade = 3× coût Haiku en cas de panne.
+        # Maintenant : retry au cycle BG suivant (45s) jusqu'à _COMMIS_MAX_RETRIES,
+        # puis abandon avec marquage 'error' permanent (évite retry indéfini sur
+        # erreur permanente type max_tokens insuffisant).
+        retries = _commis_retry_count.get(mid, 0) + 1
+        _commis_retry_count[mid] = retries
+        if retries >= _COMMIS_MAX_RETRIES:
+            logger.warning(
+                f"[unified] FAILED {mid[:30]} (retry {retries}/{_COMMIS_MAX_RETRIES}) "
+                f"→ abandon : {e}"
+            )
+            _set_mail_preview(mid, 'classement', 'error', None)
+            _set_mail_preview(mid, 'pj_classement', 'error', None)
+            _set_mail_preview(mid, 'echeance', 'error', None)
+            # Refonte N6.1 fix important #4 — pas de slot RAM 'summary'.
+        else:
+            logger.warning(
+                f"[unified] FAILED {mid[:30]} (retry {retries}/{_COMMIS_MAX_RETRIES}) "
+                f"→ retry au cycle BG suivant : {e}"
+            )
 
 
 def _prewarm_mail_preview(mail_data):
@@ -3678,12 +3787,13 @@ def _prewarm_mail_preview(mail_data):
     décisions identiques. Si filtré → aucun plat préparé en BG (tout sera
     généré à la commande au clic user, en parallèle, en streaming).
 
-    Phase 3 (02/05 PM tardif, vision Yvan « Cuisinier + Commis ») —
-    Au lieu de lancer 3 sub-prewarms en parallèle (échéance + classement
-    + classement PJ = 4 appels Haiku séparés avec le résumé), on lance 1
-    seul appel Haiku unifié (analyze_one_mail_stream → P/A/E/F/J) qui
-    remplit les 3 caches en une fois. En cas d'erreur, fallback auto sur
-    les 3 sub-prewarms originaux (préservation couverture audit).
+    Refonte N6.1 (12/05/2026) — commis Haiku unifié (vision « Cuisinier +
+    Commis » 02/05). 1 seul appel Haiku (`analyze_one_mail_stream` → P/A/F/J,
+    E ignoré côté entrants V1) qui remplit les 4 caches DB
+    (mail_summaries, mail_classement_cache, mail_pj_classement_cache,
+    mail_echeance_cache). En cas d'erreur : retry au cycle BG suivant (45s)
+    jusqu'à `_COMMIS_MAX_RETRIES`. PAS de fallback 3 sub-prewarms (supprimé
+    en N6.1, décision Yvan Q4 — évite 3× coût Haiku en cas de panne).
     """
     mid = _extract_imid_from_mail_data(mail_data)
     if not mid:
@@ -3737,11 +3847,12 @@ def _prewarm_mail_preview(mail_data):
             entry['pj_classement']['status'] = 'running'
             entry['pj_classement']['ts'] = now
         _mail_preview_cache[mid] = entry
-    # Phase 3 (02/05 PM tardif, vision Yvan « Cuisinier + Commis ») —
-    # 1 seul thread daemon qui appelle analyze_one_mail_stream (Haiku
-    # unifié P/A/E/F/J) au lieu des 3 sub-prewarms séparés. Si erreur,
-    # fallback automatique sur les 3 sub-prewarms originaux dans
-    # _prewarm_unified_for_mail.
+    # Commis Haiku unifié (refonte N6.1 12/05/2026, vision « Cuisinier + Commis »
+    # 02/05) — 1 seul thread daemon qui appelle `analyze_one_mail_stream`
+    # (Haiku unifié P/A/F/J + E ignoré côté entrants V1) et alimente les
+    # 4 caches DB. En cas d'erreur : retry au cycle BG suivant (45s) jusqu'à
+    # `_COMMIS_MAX_RETRIES`, puis abandon avec marquage 'error' permanent.
+    # PAS de fallback 3 sub-prewarms (supprimé en N6.1, décision Yvan Q4).
     # Lancé si au moins 1 plat n'est pas déjà en cache running/done.
     if not (skip_ech and skip_cls and skip_pj):
         _spawn_bg(_prewarm_unified_for_mail, args=(mid, mail_data), name='prewarm-unified')
@@ -5416,11 +5527,16 @@ def api_trigger_prefetch():
 
 
 # =============================================================================
-# RÉSUMÉS DE MAILS (21/04) — pattern batch calqué sur scan_echeances_batch
+# RÉSUMÉS DE MAILS — pipeline piggyback uniquement (refonte N6.1 12/05/2026)
 # =============================================================================
-# summarize_mails_to_db(mails)   → génère + sauve en DB (warmup + isolé)
-# Le call Claude batch utilise Haiku 3.5 (~8× moins cher que Sonnet).
-# Idempotent via _db.has_mail_summary (skip si déjà en DB).
+# summarize_mails_to_db(mails) — appelé UNIQUEMENT par 4 piggybacks au clic
+# user (ouverture mail, dialog_init bundle, /api/email_body cache HIT,
+# /api/email_body Graph fetch). Garde la couverture des mails ÉCARTÉS et
+# des mails très récents pas encore traités par le commis BG.
+# Pour le pipeline BG (warmup + cycle continu) : les résumés sont produits
+# par le commis Haiku unifié (`_prewarm_unified_for_mail`) qui persiste
+# P+A dans `mail_summaries` en 1 call (refonte N6.1).
+# Idempotent via _db.has_mail_summary.
 # =============================================================================
 
 def summarize_mails_to_db(mails, chunk_size=10):

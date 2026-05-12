@@ -2690,6 +2690,35 @@ class Database:
         )
         return c.fetchone() is not None
 
+    def get_all_dishes_for_mail(self, message_id):
+        """Refonte N6.1 (12/05/2026) — helper unifié : retourne les 4 frigos en 1 appel.
+
+        Économise 4× les boilerplates côté call sites (notamment
+        `_fetch_single_preview_plate`). Pas de gain perf significatif
+        (~150 µs sur 4 SELECT indexés), mais cohérence : 1 mail → 1 lookup.
+
+        Returns
+        -------
+        dict avec exactement 4 clés :
+            - 'summary'      : dict|None  — None = jamais calculé,
+                                            dict = {points: list[str], actions: list[str], ...}
+            - 'classement'   : dict|None  — None = jamais calculé,
+                                            dict = {suggestion, source, ...}
+            - 'pj_classement': dict|None  — idem classement
+            - 'echeance'     : dict|None  — None = jamais calculé,
+                                            dict = {echeances: list, ...}
+
+        Sémantique `None` vs `dict` : `None` distingue "jamais calculé"
+        (commis pas encore tourné) de "calculé = vide" (mail sans échéance
+        légitime). Important pour le check d'idempotence.
+        """
+        return {
+            'summary': self.get_mail_summary(message_id),
+            'classement': self.get_mail_classement(message_id),
+            'pj_classement': self.get_mail_pj_classement(message_id),
+            'echeance': self.get_mail_echeance(message_id),
+        }
+
     # --- CACHE CLASSEMENT PAR MAIL (Phase 1 corrigée 24/04) ----------------
     # Pattern idempotent calqué sur mail_summaries.
 
