@@ -936,6 +936,31 @@ Décision Yvan 07/05 : pas de différé du PJ — l'utilisateur attend une actio
 
 ---
 
+### 19. ⚠️ Cache `Database._USER_FIRST_NAME_CACHE` mono-user (à traiter au merge `feat/michael/multi-user`) — N3 12/05/2026
+
+**Origine** : Refonte Niveau 3 (« Carnet d'adresses ») 12/05/2026. La garde anti-inversion (invariant `I-CONTACT-01`) utilise un cache class-level `Database._USER_FIRST_NAME_CACHE` qui contient **UN SEUL** prénom partagé entre tous les users du process.
+
+**Pourquoi class-level** : éviter une requête SQL pendant `save_contact_profile` (la conn est dans une transaction `BEGIN IMMEDIATE`, ouvrir un cursor secondaire vers `settings.user_name` invaliderait la conn — cf bug latent `I-DB-CONN-01` corrigé le même jour).
+
+**Pourquoi c'est une dette** :
+- En mode mono-user (état actuel : Yvan ou un seul beta testeur connecté à la fois) → **aucun bug**.
+- En mode multi-tenant SaaS (branche `feat/michael/multi-user`) → user A et user B partagent le même prénom pour la garde anti-inversion → flag à tort OU laisse passer à tort selon qui s'est connecté en dernier.
+
+**Action au merge `feat/michael/multi-user` ↔ `feat/yvan/frontend`** :
+1. **AUCUN conflit Git attendu** — Michael ne touche pas à `database.py` lignes ~106-124. La dette est silencieuse.
+2. Refactorer le cache en `dict[user_id → prénom]` (class-level dict thread-safe avec lock léger)
+3. Dans `save_contact_profile`, résoudre l'user_id via `_uid()` AVANT le `BEGIN IMMEDIATE` (déjà le cas suite à fix `I-DB-CONN-01`), puis lookup `_USER_FIRST_NAME_CACHE.get(uid)` pour la garde
+4. Dans `app_plugin.py` boot : populer le dict avec **tous** les user_ids existants (`SELECT id FROM users` + `settings.user_name` per-user)
+5. Dans `api_save_setting` (key='user_name') : `set_user_first_name(uid, value)` au lieu de `set_user_first_name(value)`
+
+**Effort estimé** : ~30 min (refactor + tests + smoke).
+
+**Marqueur dans le code** : commentaire encadré `TODO(merge feat/michael/multi-user)` au-dessus de `_USER_FIRST_NAME_CACHE` dans `database.py` (visible à la relecture, grep `TODO(merge` revient à la surface).
+
+**Priorité** : 🔴 **À traiter AVANT activation 2e tenant en prod**. Pas urgent en beta mono-user.
+
+---
+
 ### 18. Tables MAPI hex legacy (folder_classifications, metrics, contact_profiles.entry_ids) — décision 11-12/05/2026
 
 **Origine** : Refonte Niveau 2 (« Stockage brut ») 11/05/2026. L'inspection DB OVH a révélé que 3 tables contiennent encore des IDs au format MAPI hex du proto V1 (`00000000FC53AE6995D7334387CA89C255EEB603...`), non-canonisables en IMID RFC 2822 :

@@ -103,11 +103,25 @@ class Database:
         # Tracker keyed par thread_id pour cleanup runtime des conn
         # zombies. Cf commentaire class-level ci-dessus + bilan 30/04 PM.
 
+    # ╔══════════════════════════════════════════════════════════════════════╗
+    # ║ TODO(merge feat/michael/multi-user) — DETTE MULTI-TENANT             ║
+    # ║                                                                      ║
+    # ║ Ce cache est CLASS-LEVEL (= UN SEUL prénom partagé entre TOUS les    ║
+    # ║ users du process). En multi-tenant SaaS (Michael), il faut le        ║
+    # ║ refactorer en `dict[user_id → prénom]` et résoudre l'user_id via     ║
+    # ║ `_uid()` au moment de la garde dans `save_contact_profile`.          ║
+    # ║                                                                      ║
+    # ║ AUCUN CONFLIT GIT attendu au merge — la dette est silencieuse.       ║
+    # ║ Sans ce refactor : user A et user B partagent le même prénom pour    ║
+    # ║ la garde anti-inversion → flag à tort OU laisse passer à tort.      ║
+    # ║                                                                      ║
+    # ║ Cf invariant I-CONTACT-01 + audit N3 (12/05/2026) + entrée #19       ║
+    # ║ dans `docs/PLUS_TARD_VF.md`.                                         ║
+    # ╚══════════════════════════════════════════════════════════════════════╝
     # Refonte N3 (12/05/2026) — Cache CLASS-LEVEL du prénom user pour la garde
     # anti-inversion. Pas de SQL pendant save_contact_profile : le cache est
     # populé une seule fois au démarrage de l'app (app_plugin.py) ou par les
-    # tests via set_user_first_name(). Class-level pour partage entre toutes
-    # les instances Database() (multi-user via _uid() reste isolé par instance).
+    # tests via set_user_first_name().
     _USER_FIRST_NAME_CACHE = None
 
     @classmethod
