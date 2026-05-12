@@ -3102,11 +3102,7 @@ def _prewarm_pj_classement_for_mail(mid, mail_data):
                         )
                         cached = None  # fall through au pipeline
                 if cached is not None:
-                    _sugg = cached.get('suggestion')
-                    # Fix 3 (25/04) : normaliser dest_folder → folder_path (ancienne structure DB rules)
-                    if isinstance(_sugg, dict) and 'dest_folder' in _sugg and 'folder_path' not in _sugg:
-                        _sugg = dict(_sugg)
-                        _sugg['folder_path'] = _sugg['dest_folder']
+                    _sugg = _normalize_pj_suggestion(cached.get('suggestion'))
                     # 02/05 PM tardif — reconstitution top 3 si _suggestions présent
                     _pj_slist = (_sugg.get('_suggestions', [_sugg])
                                  if isinstance(_sugg, dict) and '_suggestions' in _sugg
@@ -3153,10 +3149,7 @@ def _prewarm_pj_classement_for_mail(mid, mail_data):
                 suggestion = None
 
         if suggestion:
-            # Fix 3 (25/04) : normaliser dest_folder → folder_path avant sauvegarde
-            if isinstance(suggestion, dict) and 'dest_folder' in suggestion and 'folder_path' not in suggestion:
-                suggestion = dict(suggestion)
-                suggestion['folder_path'] = suggestion['dest_folder']
+            suggestion = _normalize_pj_suggestion(suggestion)
             try:
                 _db.save_mail_pj_classement(mid, suggestion, 'rule')
             except Exception as _e:
@@ -3302,6 +3295,25 @@ def _get_pj_text_for_unified_analyze(message_id):
         return ''
 
 
+def _normalize_pj_suggestion(sug):
+    """Normalise une suggestion PJ : si elle contient `dest_folder` sans
+    `folder_path`, on ajoute `folder_path = dest_folder` pour uniformité.
+
+    Pattern hérité — certaines sources (sub-prewarms historiques, règles DB)
+    utilisent `dest_folder`, d'autres (commis unifié, frontend) utilisent
+    `folder_path`. Helper unique pour éviter la duplication.
+
+    Retourne un nouveau dict (pas de mutation in-place).
+    """
+    if not isinstance(sug, dict):
+        return sug
+    if 'dest_folder' in sug and 'folder_path' not in sug:
+        s = dict(sug)
+        s['folder_path'] = s['dest_folder']
+        return s
+    return sug
+
+
 # =============================================================================
 # Refonte Niveau 6.1 (12/05/2026) — Commis Haiku unifié + 4 frigos
 # =============================================================================
@@ -3331,8 +3343,8 @@ def _mark_mail_skipped(mid, source):
 
     Idempotent (INSERT OR REPLACE côté DB, dict reset côté RAM).
     """
-    # Refonte N6.1 fix — 3 slots RAM (pas 4 : pas de slot 'summary' RAM car
-    # le frontend lit `mail_summaries` directement via /api/mail_summary).
+    # 3 slots RAM (echeance, classement, pj_classement). Le résumé est en
+    # DB uniquement — le frontend lit `mail_summaries` via /api/mail_summary.
     _set_mail_preview(mid, 'classement', 'done', {
         'suggestion': None, 'suggestions': [], 'source': source})
     _set_mail_preview(mid, 'pj_classement', 'done', {
@@ -3353,10 +3365,11 @@ def _mark_mail_skipped(mid, source):
         _db.save_mail_echeance(mid, [])
     except Exception as _e:
         logger.debug(f"[unified] save echeance mark_skipped({source}): {_e}")
-    # Refonte N6.1 fix important #3 — save_mail_summary DOIT être appelé ici
-    # sinon le check idempotence à 4 caches dans `_prewarm_unified_for_mail`
-    # ne sera jamais satisfait pour ces mails skipped (self / auto_email)
-    # → re-execute boucle infinie à chaque cycle BG (45s).
+    # `save_mail_summary` indispensable ici : sans ça, le check idempotence
+    # à 4 caches dans `_prewarm_unified_for_mail` ne sera jamais satisfait
+    # pour ces mails skipped (self / auto_email) → re-execute en boucle à
+    # chaque cycle BG (45s). Le model `source` distingue ces lignes des
+    # vrais commis ('commis-n6.1') et permet un audit/purge ultérieur.
     try:
         _db.save_mail_summary({
             'message_id': mid,
@@ -3400,10 +3413,8 @@ def _persist_commis_results(*, mid, mail_data, points, actions, mail_suggestions
         })
     except Exception as _e:
         logger.debug(f"[unified] save summary: {_e}")
-    # Refonte N6.1 fix important #4 — pas de slot RAM 'summary' :
-    # le frontend lit `mail_summaries` DB directement via /api/mail_summary.
-    # Pas de cohérence à maintenir en RAM (vs les 3 slots echeance/classement/
-    # pj_classement qui sont lus par le frontend via _mail_preview_cache).
+    # Pas de _set_mail_preview pour 'summary' : ce plat n'a pas de slot RAM
+    # (frontend lit la DB directement). Cf docstring de _prewarm_unified_for_mail.
 
     # 2. Échéance — V1 scope : entrants désactivés, on stocke [] (frontend
     # affiche "pas d'échéance" sur lecture). Le prompt commis demande encore
@@ -3497,7 +3508,7 @@ def _prewarm_unified_for_mail(mid, mail_data):
     Multi-tenant safe via `_db._uid()` et `_set_mail_preview` (UserScopedDict).
     """
     try:
-        # === 0. Garde retry (refonte N6.1 fix bloquant) ===
+        # === 0. Garde retry ===
         # Si on a déjà épuisé les retries pour ce mid → return early sans
         # tenter à nouveau. Évite la boucle infinie de retry au cycle BG.
         # Reset du compteur sur succès en bas de fonction.
@@ -3531,10 +3542,7 @@ def _prewarm_unified_for_mail(mid, mail_data):
                     'suggestions': _cls_list,
                     'source': _cls_cached.get('source', 'none'),
                 })
-                _ps = _pj_cached.get('suggestion')
-                if isinstance(_ps, dict) and 'dest_folder' in _ps and 'folder_path' not in _ps:
-                    _ps = dict(_ps)
-                    _ps['folder_path'] = _ps['dest_folder']
+                _ps = _normalize_pj_suggestion(_pj_cached.get('suggestion'))
                 _pj_list = (_ps.get('_suggestions', [_ps])
                             if isinstance(_ps, dict) and '_suggestions' in _ps
                             else ([_ps] if _ps else []))
@@ -3545,11 +3553,7 @@ def _prewarm_unified_for_mail(mid, mail_data):
                 })
                 _set_mail_preview(mid, 'echeance', 'done',
                                   _ech_cached.get('echeances', []))
-                # Refonte N6.1 fix important #4 — pas de slot RAM 'summary'
-                # (le frontend lit `mail_summaries` DB directement, cf
-                # _persist_commis_results commentaire). On a juste à confirmer
-                # ici que le summary DB est présent (déjà vérifié par
-                # `_summary_cached is not None` dans la condition).
+                # (pas de slot RAM 'summary' à restaurer — cf docstring)
                 logger.debug(f"[unified] cache DB HIT pour {mid[:30]} → skip commis")
                 return
         except Exception as _e:
@@ -3653,9 +3657,7 @@ def _prewarm_unified_for_mail(mid, mail_data):
         def _add_pj_sug(sug, source):
             if not sug or not isinstance(sug, dict):
                 return
-            s = dict(sug)
-            if 'dest_folder' in s and 'folder_path' not in s:
-                s['folder_path'] = s['dest_folder']
+            s = dict(_normalize_pj_suggestion(sug))
             fp = s.get('folder_path', '')
             if not fp or fp in _seen_pj or len(pj_suggestions) >= 3:
                 return
@@ -3767,7 +3769,7 @@ def _prewarm_unified_for_mail(mid, mail_data):
             _set_mail_preview(mid, 'classement', 'error', None)
             _set_mail_preview(mid, 'pj_classement', 'error', None)
             _set_mail_preview(mid, 'echeance', 'error', None)
-            # Refonte N6.1 fix important #4 — pas de slot RAM 'summary'.
+            # (pas de slot RAM 'summary' à marquer error — cf docstring)
         else:
             logger.warning(
                 f"[unified] FAILED {mid[:30]} (retry {retries}/{_COMMIS_MAX_RETRIES}) "
