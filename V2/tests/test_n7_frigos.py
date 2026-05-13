@@ -313,20 +313,164 @@ def critere_ttl_safety_net_split():
 # =============================================================================
 
 def invariant_frigo_purge_rules():
-    print("\n=== Invariant : _FRIGO_PURGE_RULES = table de vérité Yvan ===")
-    expected = {
-        'replied':    frozenset([ap.FRIGO_REPONSE, ap.FRIGO_RESUME]),
-        'classified': frozenset([ap.FRIGO_REPONSE, ap.FRIGO_CLASSEMENT_MAIL, ap.FRIGO_CLASSEMENT_PJ]),
-        'archived':   ap.ALL_FRIGOS,
-        'deleted':    ap.ALL_FRIGOS,
+    """Vérifie `_FRIGO_PURGE_RULES` contre la spec slide 5 + arbitrages Yvan
+    13/05/2026 EXPRIMÉS EN STRINGS LITÉRALS (pas dérivés des constantes du module).
+
+    Anti-pattern miroir-de-l'implémentation (banni N6.3) : le test ne se contente
+    PAS de comparer le dict à lui-même. Il vérifie que chaque FRIGO_* string
+    constant a bien la valeur littérale attendue (`'reply'`, `'summary'`, etc.)
+    ET que `_FRIGO_PURGE_RULES` respecte la table de vérité exprimée en strings.
+
+    Si demain quelqu'un swappe `FRIGO_REPONSE = 'XYZ'`, le test échoue (ce qui
+    n'aurait pas été le cas dans la version tautologique).
+    """
+    print("\n=== Invariant : _FRIGO_PURGE_RULES = spec slide 5 (strings littérales) ===")
+    # Table de vérité EXPRIMÉE EN STRINGS LITÉRALES (pas dérivée du module).
+    # Source : `docs/architecture/BoosterMail_Arbre_Decisionnel_v2.pptx` slide 5
+    # + arbitrages Yvan Q1/Q2 du 13/05/2026.
+    expected_table = {
+        'replied':    frozenset(['reply', 'summary']),
+        'classified': frozenset(['reply', 'classement', 'pj_classement']),
+        'archived':   frozenset(['reply', 'summary', 'classement', 'pj_classement', 'echeance']),
+        'deleted':    frozenset(['reply', 'summary', 'classement', 'pj_classement', 'echeance']),
+    }
+    # 1. Vérifier que les constantes FRIGO_* ont les valeurs string attendues.
+    expected_consts = {
+        'FRIGO_REPONSE': 'reply',
+        'FRIGO_RESUME': 'summary',
+        'FRIGO_CLASSEMENT_MAIL': 'classement',
+        'FRIGO_CLASSEMENT_PJ': 'pj_classement',
+        'FRIGO_ECHEANCE': 'echeance',
     }
     ok_count = 0
-    for action, expected_frigos in expected.items():
+    for const_name, expected_value in expected_consts.items():
+        actual = getattr(ap, const_name, None)
+        ok = actual == expected_value
+        ok_count += log_test(f"{const_name} = {actual!r} (attendu {expected_value!r})", ok)
+    # 2. Vérifier que _FRIGO_PURGE_RULES matches la table de vérité littérale.
+    for action, expected_frigos in expected_table.items():
         got = ap._FRIGO_PURGE_RULES.get(action)
         ok = got == expected_frigos
-        ok_count += log_test(f"action={action} → {sorted(got or set())}", ok,
-                             f"attendu {sorted(expected_frigos)}")
-    return ok_count, len(expected)
+        ok_count += log_test(
+            f"_FRIGO_PURGE_RULES[{action!r}] = {sorted(got or set())}",
+            ok,
+            f"attendu {sorted(expected_frigos)}"
+        )
+    return ok_count, len(expected_consts) + len(expected_table)
+
+
+def invariant_routes_call_dispatcher():
+    """Vérifie que les 5 routes terminales appellent bien `_purge_frigos_for_action`
+    avec la BONNE ACTION canonique.
+
+    Anti-pattern P4 N7 (audit rétrospectif) : sans cet invariant, si demain
+    quelqu'un retire l'appel `_purge_frigos_for_action(mid, 'replied')` de
+    `send_reply`, aucun test ne détecte la régression.
+
+    Méthode : `inspect.getsource(handler)` + grep des appels dispatcher avec
+    l'action attendue. Plus robuste que test Flask test_client (pas de mock
+    Graph/DB requis) et détecte la régression statique.
+    """
+    print("\n=== Invariant : routes terminales appellent `_purge_frigos_for_action` ===")
+    expected_calls = {
+        ap.send_reply: "_purge_frigos_for_action(message_id, 'replied')",
+        ap.api_classify_email: "_purge_frigos_for_action(message_id, 'classified')",
+        ap.api_classify_email_manual: "_purge_frigos_for_action(message_id, 'classified')",
+    }
+    ok_count = 0
+    for handler, expected_call in expected_calls.items():
+        try:
+            src = inspect.getsource(handler)
+        except (TypeError, OSError) as e:
+            log_test(f"{handler.__name__} → source illisible : {e}", False)
+            continue
+        # Normalisation simple : strip espaces autour
+        ok = expected_call in src
+        ok_count += log_test(
+            f"{handler.__name__} contient `{expected_call}`",
+            ok
+        )
+    # `_event_purge_mail` (delete + archive + reply_external) délègue à
+    # `_purge_frigos_for_action(message_id, _action_canonical)` — vérifier
+    # le pattern générique.
+    src_event = inspect.getsource(ap._event_purge_mail)
+    ok_event = "_purge_frigos_for_action(message_id, _action_canonical)" in src_event
+    ok_count += log_test(
+        "_event_purge_mail délègue à `_purge_frigos_for_action(message_id, _action_canonical)`",
+        ok_event
+    )
+    return ok_count, len(expected_calls) + 1
+
+
+def invariant_no_orphan_purge_calls():
+    """Vérifie qu'aucun site n'appelle directement `_reply_cache.pop`,
+    `_prefetch_cache.pop`, etc. en dehors des helpers centralisés
+    (`_purge_frigos_for_action`, `_reply_cache_cohesion_refresh`,
+    `_reply_cache_safety_net_loop`, fonctions de chargement disque).
+
+    Détecte les régressions où un dev oublie de passer par le dispatcher.
+    """
+    print("\n=== Invariant : 0 site purge directement les caches (hors helpers) ===")
+    import re
+    src_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'app_plugin.py')
+    with open(src_path, 'r', encoding='utf-8') as f:
+        src = f.read()
+    # Patterns interdits hors helpers centralisés
+    forbidden_patterns = [
+        r'_reply_cache\.pop\(',
+        r'_prefetch_cache\.pop\(',
+    ]
+    # Sites légitimes qui ont le droit d'appeler ces .pop directs.
+    # 2 catégories :
+    # (A) Helpers centralisés de purge : `_purge_frigos_for_action`,
+    #     `_reply_cache_cohesion_refresh`, `_reply_cache_safety_net_loop`,
+    #     `_multi_tenant_cleanup_loop`. Ils SONT le mécanisme légitime de
+    #     purge pour les events terminaux user et les cleanups système.
+    # (B) Fonctions "writer/consumer" qui gèrent leur propre slot temporaire :
+    #     - `_start_speculative` : nettoie son slot 'running' en cas d'erreur
+    #       de génération (le writer ne peut pas laisser un slot orphelin).
+    #     - `generate_reply` : consomme `_prefetch_cache` après usage (le
+    #       contexte A/B/C a été injecté dans le prompt, plus utile).
+    #     - `_load_reply_cache` / `_persist_reply_cache` : init/snapshot disque.
+    # Un dev qui ajoute un .pop direct dans une AUTRE fonction (ex: un nouveau
+    # handler de route) verra ce test échouer → forcé à utiliser le dispatcher.
+    legitimate_contexts = (
+        '_purge_frigos_for_action',
+        '_reply_cache_cohesion_refresh',
+        '_reply_cache_safety_net_loop',
+        '_load_reply_cache',
+        '_persist_reply_cache',
+        '_multi_tenant_cleanup_loop',
+        '_start_speculative',         # writer : cleanup slot 'running' en cas d'erreur
+        'generate_reply',             # consumer : pop prefetch après usage
+    )
+    lines = src.split('\n')
+    ok_count = 0
+    for pattern in forbidden_patterns:
+        offenders = []
+        in_legit = False
+        for i, line in enumerate(lines):
+            # Détecter entrée/sortie d'une fonction légitime (def x(...):)
+            for legit in legitimate_contexts:
+                if line.lstrip().startswith(f'def {legit}'):
+                    in_legit = True
+                    break
+            # Sortie de fonction : ligne au niveau 0 (sans indentation) après un bloc légitime
+            if in_legit and line and not line[0].isspace() and not line.startswith('def '):
+                in_legit = False
+            if in_legit:
+                continue
+            # Ignorer commentaires et docstrings (lignes commençant par # ou ")
+            stripped = line.lstrip()
+            if stripped.startswith('#') or stripped.startswith('"""') or stripped.startswith('"'):
+                continue
+            if re.search(pattern, line):
+                offenders.append(f"L{i+1}: {line.strip()[:80]}")
+        ok = not offenders
+        msg = pattern if ok else f"{pattern} — {len(offenders)} offender(s) : {offenders[:3]}"
+        ok_count += log_test(msg, ok)
+    return ok_count, len(forbidden_patterns)
 
 
 # =============================================================================
@@ -379,6 +523,8 @@ def main():
         invariant_helpers_n7_presents,
         invariant_frigo_purge_rules,
         invariant_no_orphan_constants,
+        invariant_routes_call_dispatcher,
+        invariant_no_orphan_purge_calls,
         critere_ttl_72h,
         critere_ttl_safety_net_split,
         critere_table_verite_replied,

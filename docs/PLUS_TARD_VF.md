@@ -1003,6 +1003,24 @@ partageront un mail (newsletter commune, mailing-list, alias générique).
 
 ---
 
+### 29. Étendre `_reply_cache_cohesion_refresh` aux 4 autres frigos — N7-bis 13/05/2026
+
+**Origine** : Audit rétrospectif N7 (P2). Le loop `_reply_cache_cohesion_refresh` (10 min, `app_plugin.py:4087`) compare `_reply_cache` aux mails actuellement dans l'inbox et purge les orphelins (mails supprimés côté Outlook Web sans webhook, mails déplacés hors inbox, etc.). **Asymétrie volontaire mais imparfaite** : ce loop ne nettoie QUE `_reply_cache`. Les 4 autres frigos (`_prefetch_cache`, `_mail_preview_cache` slots `classement`/`pj_classement`/`echeance`, 4 tables DB par-message) restent stale jusqu'au TTL 72h RAM ou au webhook Graph `deleted` (best-effort).
+
+**Risque actuel** : si l'user supprime un mail via Outlook Web et que le webhook Graph rate la notification (≤ 1% des cas en prod), le résumé/classement/PJ/échéance restent en base jusqu'au TTL `purge_old_emails` 730 jours. Croissance lente d'entrées zombies en DB.
+
+**Solution propre** : étendre le loop pour appeler `_purge_frigos_for_action(mid, 'deleted')` sur chaque orphelin détecté. Bénéfice : élimine les zombies en 10 min max (au lieu de 72h ou 730j).
+
+**Coût** : +5× plus de travail par cycle de cohésion (5 frigos vs 1). En pratique négligeable (cohésion = lookup set Python + grep DB, pas appel API).
+
+**Pourquoi pas traité dans N7-bis** : risque mono-user mode strict du loop (commentaire `app_plugin.py:4030` "le loop tourne en mono-user pour l'instant, voir `_warmup_cache` qui n'est pas encore user-scoped"). Étendre la cohésion en multi-tenant futur (merge `feat/michael/multi-user`) = re-travail. À traiter en même temps que le passage `_warmup_cache` en `_UserScopedDict`.
+
+**Effort estimé** : ~30 min (ajouter `_purge_frigos_for_action(mid, 'deleted')` dans la boucle de purge orphelins + ajuster tests).
+
+**Priorité** : 🟡 moyenne — pas urgent (webhooks Graph couvrent 99% des cas), mais à inclure dans la PR multi-tenant Michael pour cohérence.
+
+---
+
 ### 28. Bug latent `api_classify_email` purge `email_cache` avec mauvaise clé — N7 13/05/2026
 
 **Origine** : Audit démolisseur PRÉ-impl N7 (refonte des 5 frigos & nettoyage), point B.1.

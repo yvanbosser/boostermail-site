@@ -813,17 +813,11 @@ def _purge_frigos_for_action(message_id, action):
     _reply_metric_inc('purges_event')
 
 
-def _purge_message_caches(message_id):
-    """Purge totale (5 frigos + caches connexes) — wrapper rétro-compat N7.
-
-    Refonte N7 : devient un alias de `_purge_frigos_for_action(mid, 'deleted')`
-    (= purge complète selon la table de vérité). Conservé pour les callers
-    qui n'ont pas encore migré vers le nouveau dispatcher.
-
-    À terme (post N7-bis), les callers devraient appeler directement
-    `_purge_frigos_for_action(mid, <action>)` avec l'action explicite.
-    """
-    _purge_frigos_for_action(message_id, 'deleted')
+# Refonte N7-bis : `_purge_message_caches` wrapper rétro-compat supprimé.
+# Confirmé 0 caller actif (`grep _purge_message_caches V2/` → 0 hit hors
+# définition + tests/commentaires). Tous les callers appellent désormais
+# `_purge_frigos_for_action(mid, action)` directement avec l'action explicite.
+# Anti-récidive du pattern N6.3 "défense en code mort".
 
 
 # 29/04 PM audit constantes #29 — status caches en classe (rétro-compat
@@ -1107,7 +1101,7 @@ def _is_garbage_draft(text):
 def _is_warmup_cache_warm():
     """
     Plan 2 Phase 3.3 — teste si le warmup peut être SKIPPED :
-    - prefetch_cache_v2.json existe et < 48h (fraicheur globale)
+    - prefetch_cache_v2.json existe et < 72h (refonte N7 : 48h→72h)
     - au moins 5 entrées contexte A/B/C déjà en mémoire
     Retourne True → skip Graph fetch, warmup express <500ms.
     """
@@ -1135,7 +1129,7 @@ def _execute_warmup(graph):
     Appelable directement (auto-trigger) ou via la route HTTP.
 
     Plan 2 Phase 3 — orchestration optimisée :
-    - 3.3 Skip Graph fetch si cache chaud (<48h + 5 entrées prefetch)
+    - 3.3 Skip Graph fetch si cache chaud (<72h + 5 entrées prefetch)
     - 3.2 Progression UI multi-étapes
     - 3.4 Pré-warm templates confirmé (déjà import-time, log explicite)
     """
@@ -1168,7 +1162,7 @@ def _execute_warmup(graph):
                 })
                 _mark_warmup_done(True)  # Étape 7 multi-tenant — était _warmup_done = True
             logger.info(f"Warmup FAST PATH : cache chaud ({len(_warmup_cache)} mails + "
-                        f"prefetch < 48h) → skip Graph fetch")
+                        f"prefetch < 72h) → skip Graph fetch")
             # Relancer la spéculation TIER 1 en arrière-plan (cache peut avoir des gaps)
             _spawn_bg(_background_preload_loop)
 
@@ -2022,7 +2016,7 @@ else:
 _prefetch_lock = threading.Lock()
 
 # Cache prefetch persistant (fichier JSON) — portage proto
-# Sauvegarde à la fermeture, rechargement au démarrage. TTL 48h.
+# Sauvegarde à la fermeture, rechargement au démarrage. TTL 72h (refonte N7).
 _PREFETCH_CACHE_PATH = os.path.join(EASYMAIL_DIR, 'prefetch_cache_v2.json')
 _PREFETCH_CACHE_TTL = 72 * 3600  # 72h (refonte N7 : aligné spec "RAM 24h" Yvan → 72h pour traverser un week-end)
 
@@ -2117,7 +2111,7 @@ def _save_prefetch_cache(inbox_ids=None):
 
 def _load_prefetch_cache():
     """Charge le _prefetch_cache depuis disque. Appelé au démarrage.
-    Ignore les entrées dont le timestamp est > TTL (48h).
+    Ignore les entrées dont le timestamp est > TTL (72h, refonte N7).
 
     Étape 7 multi-tenant (29/04/2026) — détecte automatiquement le format :
     - Format v2 : ``{format_version: 2, entries_per_user: {uid: {mid: entry}}}``
@@ -4003,16 +3997,23 @@ def _prewarm_mail_previews_batch(mails):
 
 def _reply_cache_cohesion_refresh():
     """
-    Plan 2 Phase 2.D — Cohesion refresh (Plan 3 §9.1).
-    Compare les clés de _reply_cache vs les mails présents dans l'inbox
-    (via _warmup_cache + email_cache DB). Purge les entrées orphelines :
+    Cohesion refresh (loop 10 min) : compare les clés de `_reply_cache` vs les
+    mails actuellement dans l'inbox. Purge les entrées orphelines :
     - mails supprimés côté Outlook (delete)
     - mails déplacés hors inbox (archive / classify)
     - mails traités via Outlook directement (reply-externe)
 
-    Protège toujours les entrées user_modified=True (= drafts user édités).
-    Ces drafts sont gérés exclusivement par `_reply_cache_safety_net_loop`
-    qui applique 15j pour user_modified=True / 72h pour BG (refonte N7).
+    Protège toujours les entrées `user_modified=True` (drafts user édités —
+    gérées par `_reply_cache_safety_net_loop` qui applique 15j/72h selon le
+    type, refonte N7).
+
+    ⚠️ ASYMÉTRIE volontaire : ce loop ne nettoie QUE `_reply_cache`. Les 3
+    autres frigos (`_prefetch_cache`, `_mail_preview_cache`, slots DB) ne
+    sont PAS rafraîchis ici — ils sont purgés via webhook Graph `deleted`
+    + cascade `purge_old_emails` 730j + leur TTL propre (72h RAM).
+    Documenté dans I-FRIGO-N7-01 (audit/INVARIANTS.md) et flaggé en
+    PLUS_TARD_VF #29 pour traitement futur (étendre la cohésion aux 4
+    autres frigos = surcoût négligeable + plus de robustesse anti-zombies).
     """
     try:
         # Collecter l'ensemble des message_id actuellement dans l'inbox.
@@ -4095,32 +4096,13 @@ def _reply_cache_cohesion_refresh():
         logger.warning(f"[reply_cache cohesion] erreur : {e}")
 
 
-@app.route('/api/reply_cache/purge', methods=['POST'])
-def api_reply_cache_purge():
-    """
-    Purge explicite d'une entrée du cache (Plan 2 Phase 2.D).
-    Appelé par le frontend sur les événements non couverts par les hooks
-    existants : delete, archive, mail déplacé vers un autre dossier, etc.
-
-    Body JSON : { message_id, reason? }
-    Purge le _reply_cache ET le _prefetch_cache pour cohérence.
-    """
-    data = request.get_json() or {}
-    mid = data.get('message_id', '')
-    reason = data.get('reason', 'explicit')
-    if not mid:
-        return jsonify({"error": "message_id requis"}), 400
-    with _reply_lock:
-        # Refactor 23/04 : était source=='user_edit', maintenant via helper
-        was_user = _is_user_modified(_reply_cache.get(mid, {}))
-        _reply_cache.pop(mid, None)
-    with _prefetch_lock:
-        _prefetch_cache.pop(mid, None)
-    # Si c'était une entrée user_modified, re-persister le disque (suppression effective)
-    if was_user:
-        _spawn_bg(_persist_reply_cache)
-    logger.info(f"[reply_cache purge] {mid[:20]} ({reason})")
-    return jsonify({"ok": True, "user_draft_deleted": was_user})
+# Refonte N7-bis : route `POST /api/reply_cache/purge` (Plan 2 Phase 2.D)
+# supprimée. Confirmé 0 caller frontend (`grep "reply_cache/purge" V2/` →
+# 0 hit dans `*.js`/`*.html`). Tous les events terminaux (delete, archive,
+# move/classify) passent désormais par les handlers dédiés
+# `/api/delete_email`, `/api/archive_email`, `/api/classify_email[_manual]`
+# qui appellent le dispatcher unique `_purge_frigos_for_action` avec
+# l'action correcte. Anti-récidive pattern "défense en code mort".
 
 
 def _cohesion_refresh_loop():
@@ -8593,13 +8575,12 @@ def _event_purge_mail(message_id, action, reason):
     except NameError:
         existed = False
     # 3. Mapping action Outlook → action canonique de la table de vérité.
-    _action_canonical = {
-        'replied': 'replied',
-        'replied_external': 'replied',  # même sémantique que 'replied'
-        'classified': 'classified',
-        'archived': 'archived',
-        'deleted': 'deleted',
-    }.get(action, 'deleted')
+    # `_event_purge_mail` n'est appelé QUE par les 3 hooks Outlook deleted,
+    # archived, replied_external (cf grep sites d'appel). `replied_external`
+    # a la même sémantique que `replied` côté frigos. `classified` et
+    # `replied` directs passent par `_purge_frigos_for_action` sans
+    # transiter par ce wrapper.
+    _action_canonical = 'replied' if action == 'replied_external' else action
     _purge_frigos_for_action(message_id, _action_canonical)
     # 4. Purge mail BRUT (email_cache) uniquement si l'user en a fini.
     if _action_canonical in ('deleted', 'archived') or action == 'replied_external':
@@ -14773,7 +14754,7 @@ def api_activation_status():
     # user_activated : signaux stables uniquement
     user_activated = onboarding_done and style_profile_exists
 
-    # Cache chaud : prefetch_cache_v2.json existe et < 48h
+    # Cache chaud : prefetch_cache_v2.json existe et < 72h (refonte N7)
     cache_warm = False
     try:
         if os.path.exists(_PREFETCH_CACHE_PATH):
@@ -15859,7 +15840,7 @@ if __name__ == '__main__':
     print(f"  Proto (beta-testeurs) sur http://localhost:5050 — NON AFFECTE")
     print(f"{'='*60}\n")
 
-    _load_prefetch_cache()  # Phase 1.4 : recharge cache prefetch persistant (48h TTL)
+    _load_prefetch_cache()  # recharge cache prefetch persistant (72h TTL, refonte N7)
     _auto_trigger_warmup()  # Fix #5 : warmup automatique 3s après démarrage
     threading.Thread(target=_check_git_updates, daemon=True).start()  # MAJ auto Git
 

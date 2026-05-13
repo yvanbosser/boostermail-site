@@ -2889,11 +2889,11 @@ class Database:
         )
         return c.fetchone() is not None
 
-    # --- PURGE PAR MESSAGE_ID (audit 08/05 fix #6) -------------------------
-    # Avant : aucun DELETE pour les 4 tables mail_* → croissance illimitée
-    # (~150 MB/an/user) + entrées stale possibles si un IMID est ré-utilisé.
-    # Après : 4 méthodes appelées par _purge_message_caches (V2/app_plugin.py)
-    # à chaque event terminal (classement, send, delete, archive).
+    # --- PURGE PAR MESSAGE_ID -------------------------
+    # Garantit qu'aucune des 4 tables mail_* ne garde de données stale après
+    # un event terminal côté user (classement, envoi, archivage, suppression).
+    # Centralisé : appelé via `_purge_frigos_for_action(mid, action)` côté
+    # app_plugin.py (dispatcher table de vérité, refonte N7).
 
     # Whitelist des tables purgeables — verrou anti SQL-injection (table est
     # un identifiant non-bindable). Toute nouvelle table cache par-message
