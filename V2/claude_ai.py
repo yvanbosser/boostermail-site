@@ -148,13 +148,19 @@ class _PromptConfig:
     TUTOIEMENT_MIN_MARKERS: int = 3      # tu/te/ton ≥3 + vous==0
 
     # Truncation tokens
-    PJ_BLOCK_MAX: int = 5000             # truncation bloc G PJ
     D2_TRUNCATE: int = 500               # truncation proposed/sent D2
-    BODY_LOOKUP_DECAY: int = 1500        # body slice pour decay D
+    BODY_LOOKUP_DECAY: int = 1500        # body slice pour scoring tutoiement D fallback
     BODY_LOOKUP_SCORING: int = 500       # body slice pour scoring B
 
     # Garde closing renforcée
     CLOSING_MAX_LEN: int = 40            # closing > 40 chars = pollution signature
+
+    # Skip D2 (refonte N6.2 audit MAJEUR-4 — constantes distinctes du tier full
+    # pour éviter couplage sémantique. Valeurs alignées aujourd'hui sur TIER_FULL
+    # et INTERACTION_FRESH_DAYS, mais conceptuellement indépendantes : si Yvan
+    # change la richesse du prompt D (TIER_FULL), le skip D2 ne doit pas bouger.)
+    D2_SKIP_CONFIDENCE_THRESHOLD: int = 70  # profil ≥ X% → skip D2 si corrections intégrées
+    D2_SKIP_MAX_AGE_DAYS: int = 30          # last_analysis < X jours → skip D2
 
     # Observabilité
     TOKEN_ESTIMATION_CHARS: int = 4      # 4 chars ≈ 1 token (estimation grossière)
@@ -349,15 +355,15 @@ def _detect_prompt_conflicts(cp, sender_history, recent_corrections):
         _tu_total = 0
         _vous_total = 0
         for _m in _sent_items:
-            _body = (_m.get('body_snippet') or _m.get('body') or '')[:1500]
+            _body = (_m.get('body_snippet') or _m.get('body') or '')[:_PROMPT_CFG.BODY_LOOKUP_DECAY]
             _tu_total += len(_RE_TU_MARKERS_LONG.findall(_body))
             _vous_total += len(_RE_VOUS_MARKERS_LONG.findall(_body))
-        if _register == 'vouvoiement' and _tu_total >= 3 and _vous_total < _tu_total:
+        if _register == 'vouvoiement' and _tu_total >= _PROMPT_CFG.TUTOIEMENT_MIN_MARKERS and _vous_total < _tu_total:
             logger.warning(
                 "[prompt-conflict] D=vouvoiement, B_detected=tutoiement (tu=%d, vous=%d)",
                 _tu_total, _vous_total,
             )
-        elif _register == 'tutoiement' and _vous_total >= 3 and _tu_total < _vous_total:
+        elif _register == 'tutoiement' and _vous_total >= _PROMPT_CFG.TUTOIEMENT_MIN_MARKERS and _tu_total < _vous_total:
             logger.warning(
                 "[prompt-conflict] D=tutoiement, B_detected=vouvoiement (tu=%d, vous=%d)",
                 _tu_total, _vous_total,
@@ -717,6 +723,737 @@ def _clean_email_body(body, max_chars=3000):
     return '\n'.join(clean)[:max_chars]
 
 
+# =============================================================================
+# Refonte N6.2 — Helpers de normalisation du profil contact (chantier 4)
+# =============================================================================
+# Extraits depuis `_build_prompt` pour découpler la logique métier (decay, tier,
+# garde greeting/closing) de la composition textuelle des blocs. Chaque helper
+# est pur (entrées → sortie, sans I/O) et testable indépendamment.
+#
+# Logique IDENTIQUE au code inline pré-extraction (préserve byte-identique du
+# prompt final, validé par snapshots N6.2).
+
+def _deserialize_profile_json(pj_raw, max_iter=4):
+    """Désérialise `profile_json` en dict, tolérant aux double/triple sérialisations.
+
+    Audit OVH 29/04/2026 : 9/55 profils en triple sérialisation à cause des
+    migrations DB successives. On déroule tant qu'on a un str (max 4 itérations
+    par paranoïa). Fail-open : si à la fin pj n'est pas dict → {} (ne casse pas
+    le bloc D, juste pas d'extras topics/vocab).
+
+    Parameters
+    ----------
+    pj_raw : str | dict | None
+        Valeur brute de `contact_profile['profile_json']`.
+    max_iter : int
+        Plafond d'itérations json.loads. Défaut 4 (constaté max 3 en prod).
+
+    Returns
+    -------
+    dict
+        Dict désérialisé, ou {} si non parsable.
+    """
+    pj = pj_raw
+    while isinstance(pj, str) and max_iter > 0:
+        try:
+            pj = json.loads(pj)
+        except Exception:
+            break
+        max_iter -= 1
+    return pj if isinstance(pj, dict) else {}
+
+
+def _apply_decay(raw_confidence, updated_at, sender_history, now=None):
+    """Applique le decay temporel sur la confidence (Q4 N6.2 : 5%/trimestre).
+
+    Refonte N6.2 (12/05/2026) — decay 10% → 5% par trimestre (Q4 Yvan).
+    Phase 4.3 audit remediation 08/05/2026 — skip decay si interaction effective
+    dans les 30 derniers jours (anti-injustice envers contacts actifs avec profil
+    ancien). Phase P4-UX-A3 anti-gaming — body ≥20 chars requis pour qualifier.
+
+    Parameters
+    ----------
+    raw_confidence : float
+        Confidence brute du profil (0.0 - 1.0).
+    updated_at : str
+        Date dernière analyse du profil (ISO 8601 ou SQLite legacy).
+    sender_history : list[dict] | None
+        Historique des échanges (utilisé pour détecter interaction récente).
+    now : datetime | None
+        Override pour tests. Défaut : `datetime.now()`.
+
+    Returns
+    -------
+    tuple[float, float, int, bool]
+        (confidence_decayée, decay_appliqué, days_since, had_recent_interaction).
+        - decay_appliqué=0.0 si skipped (interaction <30j) ou pas de updated_at
+          parsable.
+        - days_since=-1 si updated_at manquant ou parsing échoué.
+        - had_recent_interaction=True si interaction fresh détectée (decay
+          court-circuité).
+        Le tuple à 4 éléments permet au caller de logger précisément (cf
+        observabilité opérationnelle audit N6.2 PRÉ-commit MAJEUR-1).
+    """
+    if not updated_at:
+        return raw_confidence, 0.0, -1, False
+    if now is None:
+        now = datetime.now()
+    try:
+        _updated = datetime.fromisoformat(updated_at.replace('Z', '+00:00')) if 'T' in updated_at else datetime.strptime(updated_at, '%Y-%m-%d %H:%M:%S')
+        days_since = (now - _updated.replace(tzinfo=None)).days
+        # Détecter interaction récente (≤ 30 jours) dans sender_history.
+        has_recent = False
+        if sender_history:
+            for _m in sender_history:
+                _d = (_m.get('date', '') or '').strip()
+                if not _d:
+                    continue
+                _body_check = (_m.get('body_snippet', '') or _m.get('body', '') or '').strip()
+                if len(_body_check) < _PROMPT_CFG.INTERACTION_MIN_BODY_LEN:
+                    continue
+                try:
+                    if 'T' in _d:
+                        _md = datetime.fromisoformat(_d.replace('Z', '+00:00'))
+                        if _md.tzinfo is not None:
+                            _md = _md.replace(tzinfo=None)
+                    else:
+                        _md = datetime.strptime(_d[:10], '%Y-%m-%d')
+                    if (now - _md).days <= _PROMPT_CFG.INTERACTION_FRESH_DAYS:
+                        has_recent = True
+                        break
+                except Exception:
+                    continue
+        if has_recent:
+            return raw_confidence, 0.0, days_since, True
+        decay = max(0, days_since // _PROMPT_CFG.DECAY_DAYS_INTERVAL) * _PROMPT_CFG.DECAY_PCT_PER_QUARTER
+        decayed = max(0.05, raw_confidence - decay)
+        return decayed, decay, days_since, False
+    except Exception:
+        return raw_confidence, 0.0, -1, False
+
+
+def _compute_tier(confidence_pct):
+    """Calcule le tier de confiance à partir du pourcentage.
+
+    Phase 2.2 audit remediation 08/05/2026 — gradient de confiance 4 niveaux
+    (au lieu du binaire 30% précédent). Seuils gardés en refonte N6.2 (Q3 Yvan,
+    externalisés dans `_PromptConfig`).
+
+    Parameters
+    ----------
+    confidence_pct : int
+        Pourcentage de confidence (0 - 100).
+
+    Returns
+    -------
+    str
+        'full' | 'medium' | 'light' | 'none'
+    """
+    if confidence_pct >= _PROMPT_CFG.TIER_FULL:
+        return 'full'
+    if confidence_pct >= _PROMPT_CFG.TIER_MEDIUM:
+        return 'medium'
+    if confidence_pct >= _PROMPT_CFG.TIER_LIGHT:
+        return 'light'
+    return 'none'
+
+
+def _promote_tier_if_signals(tier, cp):
+    """Promote tier='none' → 'light' si signaux utiles présents (register/greeting/closing).
+
+    Patch 11/05/2026 — préserver register/greeting/closing même si tier=none.
+    Cas mail Alain Bosser : confidence 5% mais register=tutoiement + tone=amical
+    clairement présents → fallback générique inadapté. Les gardes anti-self-name
+    et anti-pollution greeting/closing s'appliquent ensuite via la branche
+    `if cp:` du caller, donc safe.
+
+    Parameters
+    ----------
+    tier : str
+        Tier calculé par `_compute_tier`.
+    cp : dict | None
+        Contact profile (peut être None).
+
+    Returns
+    -------
+    tuple[str, bool]
+        (tier_éventuellement_promu, has_useful_signals).
+    """
+    if tier != 'none':
+        return tier, False
+    has_useful_signals = bool(
+        (cp or {}).get('register')
+        or (cp or {}).get('greeting')
+        or (cp or {}).get('closing')
+    )
+    if has_useful_signals:
+        return 'light', True
+    return 'none', False
+
+
+def _apply_greeting_guards(greeting, from_name, contact_first, contact_display, user_first, user_last, language, is_forward):
+    """Applique les gardes sur le greeting (anti-inversion, anti-anglicisme, anti-@).
+
+    3 gardes en série :
+    - GARDE NOM : si greeting contient un nom ≠ from_name → corriger.
+      Si greeting sans nom + from_name disponible → ajouter le nom.
+    - GARDE RENFORCEE : détecter inversion (nom/prénom user), @ dans greeting,
+      anglicisme en mode FR. Si détecté → reset à "Bonjour [prénom],".
+    - VIRGULE FINALE : forcer la virgule.
+
+    Parameters
+    ----------
+    greeting : str
+        Greeting du profil (ex: "Salut Pierre,").
+    from_name : str
+        Nom de l'expéditeur du mail entrant (ou destinataire en forward).
+    contact_first : str
+        Prénom extrait du contact_profile.display_name.
+    contact_display : str
+        display_name complet pour reset éventuel.
+    user_first : str
+        Prénom de l'utilisateur (en lowercase). Pour détecter inversion.
+    user_last : str
+        Nom de l'utilisateur (en lowercase). Pour détecter inversion.
+    language : str
+        Langue du profil ('fr'/'en'). Pour détecter anglicisme.
+    is_forward : bool
+        En forward, from_name doit être le destinataire (contact_display).
+
+    Returns
+    -------
+    str
+        Greeting corrigé avec virgule finale.
+    """
+    # En forward, le greeting doit correspondre au destinataire, pas à l'expéditeur
+    if is_forward:
+        from_name = contact_display
+    if from_name:
+        _from_first = from_name.split()[0] if from_name else ''
+        # Vérifier si le nom dans le greeting correspond au from_name
+        _gr_has_name = False
+        _gr_name = ''
+        for _word in greeting.replace(',', '').split():
+            if len(_word) > 2 and _word[0].isupper() and _word.lower() not in ('bonjour', 'hello', 'salut', 'cher', 'chère', 'hi', 'hey', 'coucou', 'bonsoir'):
+                _gr_has_name = True
+                _gr_name = _word
+                break
+        if _gr_has_name and _from_first and _gr_name.lower() != _from_first.lower():
+            # Le greeting contient un nom différent du from_name → corriger
+            greeting = greeting.replace(_gr_name, _from_first)
+            logger.debug(f"[prompt] GARDE greeting nom: '{_gr_name}' → '{_from_first}' (from_name du mail)")
+        elif not _gr_has_name and _from_first:
+            # Le greeting n'a pas de nom → ajouter le from_name
+            greeting = greeting.rstrip(',').strip() + f" {_from_first},"
+            logger.debug(f"[prompt] GARDE greeting: ajout nom '{_from_first}'")
+
+    # --- GARDE GREETING RENFORCEE ---
+    _greeting_lower = greeting.lower()
+    _needs_fix = False
+    # Cas 1 : greeting contient le nom/prénom de l'utilisateur → inversé
+    if user_last and len(user_last) > 2 and user_last in _greeting_lower:
+        _needs_fix = True
+        logger.debug(f"[prompt] GARDE greeting: contient nom utilisateur '{user_last}' → inversé")
+    elif user_first and len(user_first) > 2 and user_first in _greeting_lower and contact_first.lower() != user_first:
+        _needs_fix = True
+        logger.debug(f"[prompt] GARDE greeting: contient prénom utilisateur '{user_first}' → inversé")
+    # Cas 2 : greeting contient une adresse email
+    if '@' in greeting:
+        _needs_fix = True
+        logger.debug(f"[prompt] GARDE greeting: contient @ → invalide")
+    # Cas 3 : greeting en anglais alors que language=fr
+    if language == 'fr' and any(w in _greeting_lower for w in ['hello', 'hi ', 'dear', 'hey']):
+        _needs_fix = True
+        logger.debug(f"[prompt] GARDE greeting: anglicisme détecté pour language=fr")
+
+    if _needs_fix:
+        greeting = f"Bonjour {contact_first}," if contact_first else "Bonjour,"
+        logger.debug(f"[prompt] GARDE greeting: corrigé → '{greeting}'")
+
+    # Virgule finale obligatoire
+    if greeting and not greeting.endswith(','):
+        greeting += ','
+
+    return greeting
+
+
+def _apply_closing_guards(closing, user_last):
+    """Applique les gardes sur le closing (anti-pollution signature, anti-@, max len).
+
+    3 cas de pollution → reset "Cordialement," :
+    - closing contient le nom de l'utilisateur (signature polluée)
+    - closing contient une adresse email
+    - closing > CLOSING_MAX_LEN chars (signature entière capturée)
+
+    Parameters
+    ----------
+    closing : str
+        Closing du profil.
+    user_last : str
+        Nom de l'utilisateur en lowercase.
+
+    Returns
+    -------
+    str
+        Closing nettoyé.
+    """
+    _closing_lower = closing.lower()
+    _closing_fix = False
+    if user_last and len(user_last) > 2 and user_last in _closing_lower:
+        _closing_fix = True
+        logger.debug(f"[prompt] GARDE closing: contient nom utilisateur → pollué par signature")
+    if '@' in closing:
+        _closing_fix = True
+        logger.debug(f"[prompt] GARDE closing: contient @ → invalide")
+    if len(closing) > _PROMPT_CFG.CLOSING_MAX_LEN:
+        _closing_fix = True
+        logger.debug(f"[prompt] GARDE closing: trop long ({len(closing)} chars) → pollué")
+    if _closing_fix:
+        closing = 'Cordialement,'
+        logger.debug(f"[prompt] GARDE closing: corrigé → '{closing}'")
+    return closing
+
+
+# =============================================================================
+# Refonte N6.2 — BuildContext (chantier 5) : état partagé entre `_build_block_*`
+# =============================================================================
+# Évite de passer 5-7 paramètres à chaque helper de bloc. Contient l'état
+# qui circule du début à la fin de `_build_prompt` (PII counter, correspondent
+# pour redaction, incoming_email pour dédup A, etc.).
+
+@dataclass
+class BuildContext:
+    """État partagé entre les helpers `_build_block_*`.
+
+    Attributs
+    ---------
+    pii_counter : dict
+        Compteur de redactions PII par type (siret, phone, email…). Muté
+        en place par les helpers (incrémenté à chaque match).
+    correspondent_for_redaction : str
+        Email du correspondant courant — épargné de la redaction (lisibilité
+        du contexte préservée pour le user qui sait à qui il parle).
+    incoming_email : dict
+        Mail entrant (subject, body, from, internet_message_id…). Utilisé pour
+        dédup A et fallback fields.
+    to_email : str
+        Email destinataire de la réponse (utile pour bloc C exception domaine).
+    """
+    pii_counter: dict
+    correspondent_for_redaction: str
+    incoming_email: dict
+    to_email: str
+
+
+# =============================================================================
+# Refonte N6.2 — Helpers de construction des blocs (chantier 7-10)
+# =============================================================================
+# Extraits depuis `_build_prompt` pour séparer composition textuelle (un bloc =
+# un helper) de l'orchestration. Logique IDENTIQUE au code inline (snapshots
+# byte-identique validés).
+#
+# Chaque helper :
+#   - Prend le ctx (PII counter, correspondent, etc.) + ses inputs spécifiques
+#   - Retourne `str | None` (None si bloc skippé)
+#
+# Le bloc D reste inline dans `_build_prompt` car son flux est intriqué avec
+# la normalisation cp + le calcul tier (3 branches : enrichi / tutoiement
+# détecté / générique).
+
+def _build_block_B(sender_history, ctx):
+    """Construit le bloc B (échanges récents avec l'interlocuteur).
+
+    Scoring par similarité de type avec le mail entrant (_MAIL_TYPES FR).
+    Le mail envoyé le plus similaire est tagué "EXEMPLE LE PLUS PROCHE".
+    Mails reçus en section séparée (contexte uniquement, ne pas imiter).
+
+    Anonymisation PII tierce (Phase 1.1) appliquée sur tous les bodies.
+
+    Parameters
+    ----------
+    sender_history : list[dict] | None
+        Historique des échanges avec l'interlocuteur.
+    ctx : BuildContext
+        État partagé (PII counter, correspondent, incoming_email).
+
+    Returns
+    -------
+    str | None
+        Bloc B formaté, ou None si pas d'historique.
+    """
+    if not sender_history:
+        return None
+    # Refonte N6.2 (12/05/2026) — `_MAIL_TYPES` sorti en constante
+    # module-level + helper `_get_mail_types_for_user` (Q7 Yvan :
+    # FR seulement aujourd'hui, multi-langue à l'onboarding plus tard).
+    _MAIL_TYPES = _get_mail_types_for_user()
+
+    # Detecter le type du mail entrant (sujet + body)
+    _ie = ctx.incoming_email or {}
+    incoming_text = ((_ie.get('subject', '') or '') + ' ' + (_ie.get('body', '') or '')[:_PROMPT_CFG.BODY_LOOKUP_SCORING]).lower()
+    incoming_types = {}
+    for mtype, keywords in _MAIL_TYPES.items():
+        score = sum(1 for kw in keywords if kw in incoming_text)
+        if score > 0:
+            incoming_types[mtype] = score
+
+    sent_mails = []
+    received_lines = []
+    for m in sender_history:
+        body = m.get('body_snippet', '')
+        # Phase 1.1 audit remediation — anonymisation PII tierce.
+        body_redacted = _redact_pii_in_text(
+            body,
+            correspondent_email=ctx.correspondent_for_redaction,
+            counter=ctx.pii_counter,
+        )
+        if m['direction'] == 'sent':
+            # Scorer par similarité de type avec le mail entrant
+            # (similarity calculée sur le body brut pour ne pas
+            # impacter le scoring par les tokens redactés).
+            mail_text = ((m.get('subject', '') or '') + ' ' + (body or '')).lower()
+            similarity = 0
+            for mtype, kw_score in incoming_types.items():
+                keywords = _MAIL_TYPES[mtype]
+                match = sum(1 for kw in keywords if kw in mail_text)
+                if match > 0:
+                    similarity += match * kw_score  # boost si même type
+            sent_mails.append((m, body_redacted, similarity))
+        else:
+            line = f"[{m['date']}] De: {m.get('from_name','')} — Objet: {m.get('subject','')}\n{body_redacted}" if body_redacted else f"[{m['date']}] De: {m.get('from_name','')} — Objet: {m.get('subject','')}"
+            received_lines.append(line)
+
+    # Trier les envoyés : le plus similaire en premier
+    sent_mails.sort(key=lambda x: x[2], reverse=True)
+
+    b_parts = []
+    if sent_mails:
+        sent_lines = []
+        for i, (m, body, sim) in enumerate(sent_mails):
+            tag = "⭐ EXEMPLE LE PLUS PROCHE — reproduis ce mail en priorite" if i == 0 and sim > 0 else ""
+            line = f"[{m['date']}] Objet: {m.get('subject','')}"
+            if tag:
+                line = f"**{tag}**\n{line}"
+            if body:
+                line += f"\n{body}"
+            sent_lines.append(line)
+        b_parts.append(
+            "### MAILS ENVOYES PAR L'UTILISATEUR — EXEMPLES A REPRODUIRE\n"
+            "Copie ce style : longueur, structure, tournures.\n"
+            "⚠️ SAUF si le bloc D spécifie un greeting, closing ou registre DIFFÉRENT de ces exemples — le bloc D a TOUJOURS priorité.\n\n"
+            + "\n\n---\n\n".join(sent_lines)
+        )
+    if received_lines:
+        b_parts.append(
+            "### MAILS RECUS — contexte uniquement (ne pas imiter ce style)\n\n"
+            + "\n\n---\n\n".join(received_lines)
+        )
+    return "## B — Echanges recents avec cet interlocuteur\n\n" + "\n\n".join(b_parts)
+
+
+def _build_block_A(conversation_history, ctx):
+    """Construit le bloc A (fil de conversation en cours), avec dédup IMID/id.
+
+    Phase 2.1 audit remediation 08/05/2026 — dédup A vs Mail reçu :
+    quand l'IMID/id du mail courant est dans conversation_history, on le retire
+    (évite double-injection : il sera rendu dans `## Mail recu`).
+
+    Phase 3.1 — format date court 'dd/mm' + flèche direction (économie tokens).
+
+    Parameters
+    ----------
+    conversation_history : list[dict] | None
+        Fil de conversation. Sera mutée (filter) si dédup.
+    ctx : BuildContext
+        État partagé.
+
+    Returns
+    -------
+    str | None
+        Bloc A formaté, ou None si conversation_history vide après dédup.
+    """
+    # Phase 2.1 — dédup A vs Mail reçu
+    _current_imid = ''
+    _current_id = ''
+    if ctx.incoming_email:
+        _current_imid = (ctx.incoming_email.get('internet_message_id') or '').strip()
+        _current_id = (ctx.incoming_email.get('id') or '').strip()
+    _dedup_filtered = False
+    if conversation_history and (_current_imid or _current_id):
+        _filtered_history = []
+        for m in conversation_history:
+            _m_imid = (m.get('internet_message_id') or '').strip()
+            _m_id = (m.get('id') or '').strip()
+            if (_current_imid and _m_imid and _m_imid == _current_imid) \
+                    or (_current_id and _m_id and _m_id == _current_id):
+                _dedup_filtered = True
+                continue
+            _filtered_history.append(m)
+        conversation_history = _filtered_history
+        if _dedup_filtered:
+            logger.debug(
+                "[prompt-dedup] mail courant retiré du bloc A (imid=%s id=%s)",
+                _current_imid[:30], _current_id[:30],
+            )
+
+    if not conversation_history:
+        return None
+
+    lines = []
+    for m in conversation_history:
+        body = m.get('body_snippet', '')
+        # Phase 1.1 audit remediation — anonymisation PII tierce.
+        body = _redact_pii_in_text(
+            body,
+            correspondent_email=ctx.correspondent_for_redaction,
+            counter=ctx.pii_counter,
+        )
+        # Phase 3.1 — format date court 'dd/mm' + flèche direction.
+        # Audit fix P3-A3 — strip pour éviter espaces orphelins quand
+        # date ou from_name est vide.
+        _date_short = _compact_date(m.get('date', ''))
+        _arrow = '>' if m.get('direction') == 'sent' else '<'
+        _name = (m.get('from_name', '') or '').strip() or '?'
+        # Construction conditionnelle pour éviter les doubles espaces
+        # quand _date_short est vide.
+        _header_parts = [p for p in (_date_short, _name) if p]
+        _header_parts.append(_arrow)
+        line = ' '.join(_header_parts)
+        if body:
+            line += f"\n{body}"
+        else:
+            line += f" (Objet: {m.get('subject', '')})"
+        lines.append(line)
+    _a_header = "## A — Fil de conversation en cours :"
+    if _dedup_filtered:
+        # Audit fix P2-A4 — wording clarifié : le mail courant n'est
+        # PAS dans ce bloc (retiré par dédup), il est rendu en détail
+        # dans `## Mail recu` plus bas.
+        _a_header += (
+            "\n(Note : le mail auquel tu réponds N'EST PAS dans ce "
+            "bloc — il a été retiré pour éviter le doublon. "
+            "Il est rendu en détail dans `## Mail recu` plus bas. "
+            "Les items ci-dessous sont les mails ANTÉRIEURS du thread.)"
+        )
+    return _a_header + "\n\n" + "\n\n---\n\n".join(lines)
+
+
+def _build_block_C(keyword_context, subject, contact_profile, sender_history, ctx):
+    """Construit le bloc C (contexte lié au sujet), avec 2 skips.
+
+    Phase 3.2 — skip si sujet trop court ou stopword-only.
+    Phase 4.2 — mode étranger : skip si contact inconnu hors domaine connu.
+
+    Parameters
+    ----------
+    keyword_context : list[dict] | None
+        Mails reliés au sujet courant via keyword scoring.
+    subject : str
+        Sujet du mail (peut être vide → fallback sur incoming_email['subject']).
+    contact_profile : dict | None
+        Profil brut (utilisé pour décider si contact "connu").
+    sender_history : list[dict] | None
+        Utilisé pour décider si contact "récurrent".
+    ctx : BuildContext
+        État partagé.
+
+    Returns
+    -------
+    str | None
+        Bloc C formaté, ou None si skip ou vide.
+    """
+    if not keyword_context:
+        return None
+
+    # Phase 3.2 — skip si sujet trop générique.
+    _c_subject_for_check = subject or (
+        (ctx.incoming_email or {}).get('subject', '') if ctx.incoming_email else ''
+    )
+    if _subject_is_too_generic(_c_subject_for_check):
+        logger.info(
+            "[prompt-skip-c] sujet trop generique (len=%d) → bloc C skip pour %d items",
+            len(_c_subject_for_check or ''), len(keyword_context),
+        )
+        return None
+
+    # Phase 4.2 — mode étranger : skip si contact inconnu hors domaine connu.
+    _is_known = bool(contact_profile and contact_profile.get('profile_text'))
+    _is_recurrent = bool(sender_history)
+    if not _is_known and not _is_recurrent:
+        _correspondent = (
+            ((ctx.incoming_email or {}).get('from', '') or '').strip().lower()
+            or (ctx.to_email or '').strip().lower()
+        )
+        _correspondent_domain = ''
+        if '@' in _correspondent:
+            _correspondent_domain = _correspondent.split('@', 1)[1]
+        _has_colleague = False
+        if _correspondent_domain:
+            for _m in keyword_context:
+                _from_e = (_m.get('from_email', '') or '').lower()
+                if _from_e and _from_e.endswith('@' + _correspondent_domain):
+                    _has_colleague = True
+                    break
+        if not _has_colleague:
+            logger.info(
+                "[prompt-skip-c-stranger] contact inconnu hors domaine "
+                "connu (corr=%s domain=%s) → skip C pour %d items",
+                _correspondent[:40], _correspondent_domain[:40],
+                len(keyword_context),
+            )
+            return None
+
+    # Rendu du bloc
+    lines = []
+    for m in keyword_context:
+        body = m.get('body_snippet', '')
+        # Phase 1.1 audit remediation — anonymisation PII tierce.
+        body = _redact_pii_in_text(
+            body,
+            correspondent_email=ctx.correspondent_for_redaction,
+            counter=ctx.pii_counter,
+        )
+        line = f"[{m['date']}] {m['from_name']} — Objet: {m.get('subject','')} ({m['direction']}) :"
+        if body:
+            line += f"\n{body}"
+        lines.append(line)
+    return "## C — Contexte lie au sujet :\n\n" + "\n\n---\n\n".join(lines)
+
+
+def _build_block_D2(recent_corrections, contact_profile):
+    """Construit le bloc D2 (corrections récentes de l'utilisateur), avec skip intelligent.
+
+    Phase 2.3 — troncation 250 → 500 chars + date relative ("il y a N jours").
+    Phase 3.3 + audit fix P3-A5 — skip D2 si toutes les corrections ≤ date du
+    profil enrichi (confidence ≥ 70%, MAJ < 30j). Les corrections postérieures
+    à updated_at ne peuvent pas être déjà intégrées → garder D2.
+
+    Parameters
+    ----------
+    recent_corrections : list[dict] | None
+        Corrections récentes (proposed, sent, analysis, timestamp).
+    contact_profile : dict | None
+        Profil brut (utilisé pour la décision de skip).
+
+    Returns
+    -------
+    str | None
+        Bloc D2 formaté, ou None si pas de corrections (ou skippées).
+    """
+    # Phase 3.3 + P3-A5 — skip si toutes corrections intégrées au profil récent
+    if recent_corrections and contact_profile and contact_profile.get('profile_text'):
+        _raw_conf = contact_profile.get('confidence', 0)
+        _updated_at = contact_profile.get('updated_at', '')
+        try:
+            _conf_pct = int((_raw_conf or 0) * 100)
+            if _conf_pct >= _PROMPT_CFG.D2_SKIP_CONFIDENCE_THRESHOLD and _updated_at:
+                if 'T' in _updated_at:
+                    _u = datetime.fromisoformat(_updated_at.replace('Z', '+00:00'))
+                    if _u.tzinfo is not None:
+                        _u = _u.replace(tzinfo=None)
+                else:
+                    _u = datetime.strptime(_updated_at, '%Y-%m-%d %H:%M:%S')
+                _days_since_analysis = (datetime.now() - _u).days
+                if _days_since_analysis < _PROMPT_CFG.D2_SKIP_MAX_AGE_DAYS:
+                    _all_integrated = True
+                    for c in recent_corrections:
+                        _ts = c.get('timestamp') or c.get('created_at') or c.get('date') or ''
+                        if not _ts:
+                            _all_integrated = False
+                            break
+                        try:
+                            if isinstance(_ts, (int, float)):
+                                _c_dt = datetime.fromtimestamp(float(_ts))
+                            elif 'T' in str(_ts):
+                                _c_dt = datetime.fromisoformat(str(_ts).replace('Z', '+00:00'))
+                                if _c_dt.tzinfo is not None:
+                                    _c_dt = _c_dt.replace(tzinfo=None)
+                            else:
+                                _c_dt = datetime.strptime(str(_ts), '%Y-%m-%d %H:%M:%S')
+                            if _c_dt > _u:
+                                _all_integrated = False
+                                break
+                        except Exception:
+                            _all_integrated = False  # par prudence
+                            break
+                    if _all_integrated:
+                        logger.info(
+                            "[prompt-skip-d2] profil confiant + récent + corrections "
+                            "intégrées (conf=%d%%, %dj depuis MAJ) → skip %d corrections",
+                            _conf_pct, _days_since_analysis, len(recent_corrections),
+                        )
+                        return None
+                    else:
+                        logger.debug(
+                            "[prompt-keep-d2] profil récent mais correction "
+                            "postérieure à updated_at → D2 maintenu"
+                        )
+        except Exception:
+            pass
+
+    if not recent_corrections:
+        return None
+
+    _now = datetime.now()
+    corr_lines = []
+    for i, c in enumerate(recent_corrections, 1):
+        analysis = c.get('analysis', '')
+        proposed_text = (c['proposed'] or '')[:_PROMPT_CFG.D2_TRUNCATE]
+        sent_text = (c['sent'] or '')[:_PROMPT_CFG.D2_TRUNCATE]
+
+        # Date relative depuis le timestamp de la correction.
+        _rel_date = ''
+        _ts = c.get('timestamp') or c.get('created_at') or c.get('date') or ''
+        if _ts:
+            try:
+                if isinstance(_ts, (int, float)):
+                    _dt = datetime.fromtimestamp(float(_ts))
+                elif 'T' in str(_ts):
+                    _dt = datetime.fromisoformat(str(_ts).replace('Z', '+00:00'))
+                    if _dt.tzinfo is not None:
+                        _dt = _dt.replace(tzinfo=None)
+                else:
+                    _dt = datetime.strptime(str(_ts), '%Y-%m-%d %H:%M:%S')
+                _days = (_now - _dt).days
+                if _days < 0:
+                    # Audit fix P2-A6 — timestamp futur = clock skew
+                    # ou serialization broken. Warning pour détection.
+                    logger.warning(
+                        "[D2-timestamp] futur (%dj) ts=%r → affiché 'aujourd''hui'",
+                        _days, _ts,
+                    )
+                    _rel_date = " (aujourd'hui)"
+                elif _days == 0:
+                    _rel_date = " (aujourd'hui)"
+                elif _days == 1:
+                    _rel_date = " (hier)"
+                else:
+                    _rel_date = f" (il y a {_days} jours)"
+            except Exception:
+                _rel_date = ''
+
+        if analysis:
+            # Analyse Claude disponible — plus utile que les catégories
+            corr_lines.append(
+                f"Correction {i}{_rel_date} — {analysis}\n"
+                f"  Avant : \"{proposed_text}\"\n"
+                f"  Apres : \"{sent_text}\""
+            )
+        else:
+            # Fallback sur catégories heuristiques si pas encore analysé
+            cats = c.get('categories', '')
+            cat_info = f" [{cats}]" if cats else ""
+            corr_lines.append(
+                f"Correction {i}{_rel_date}{cat_info} :\n"
+                f"  Avant : \"{proposed_text}\"\n"
+                f"  Apres : \"{sent_text}\""
+            )
+    return (
+        "## D2 — Corrections de l'utilisateur sur les propositions precedentes\n"
+        "Adapte ton style selon ces corrections.\n\n" + "\n\n".join(corr_lines)
+    )
+
+
 class ClaudeAssistant:
     def __init__(self, api_key: str, user_name: str = ""):
         self.client = anthropic.Anthropic(api_key=api_key)
@@ -873,10 +1610,15 @@ class ClaudeAssistant:
 
         # Phase 1.1 audit remediation 08/05/2026 — anonymisation PII tierce
         # dans les blocs A/B/C. Le correspondent courant est épargné (lisible).
-        _pii_counter = {}
-        _correspondent_for_redaction = (
-            (to_email or '').strip()
-            or ((incoming_email or {}).get('from', '') or '').strip()
+        # Refonte N6.2 — `BuildContext` regroupe l'état partagé entre helpers `_build_block_*`.
+        ctx = BuildContext(
+            pii_counter={},
+            correspondent_for_redaction=(
+                (to_email or '').strip()
+                or ((incoming_email or {}).get('from', '') or '').strip()
+            ),
+            incoming_email=incoming_email or {},
+            to_email=to_email,
         )
 
         # Phase 6.1 audit remediation — détection subject piégé.
@@ -888,7 +1630,7 @@ class ClaudeAssistant:
         if _incoming_subject and _RE_SUBJECT_TRAP.search(_incoming_subject):
             _subject_safe_for_log = _redact_pii_in_text(
                 _incoming_subject[:80],
-                correspondent_email=_correspondent_for_redaction,
+                correspondent_email=ctx.correspondent_for_redaction,
                 counter={},
             )
             logger.warning(
@@ -931,108 +1673,42 @@ class ClaudeAssistant:
             _raw_conf_float = max(0.0, min(1.0, _raw_conf_float))
             cp = dict(cp)  # ne pas muter le dict original (cache RAM)
             cp['confidence'] = _raw_conf_float
-            # Confidence avec decay temporel (refonte N6.2 : -5% / 90 jours sans re-analyse, Q4 Yvan)
-            # Phase 4.3 audit remediation 08/05/2026 — decay intelligent : pas
-            # de baisse si interaction effective dans les 30 derniers jours.
-            # Logique : si l'utilisateur a échangé récemment avec ce contact,
-            # le profil reste "calibré" même si analyze_contact_profile n'a pas
-            # été ré-exécuté → la confiance ne doit pas baisser. On utilise
-            # `sender_history` (passé en param) pour détecter une interaction
-            # récente. Cette correction évite une baisse mécanique injuste sur
-            # les contacts actifs avec profil ancien.
-            raw_confidence = cp.get('confidence', 0)
-            updated_at = cp.get('updated_at', '')
-            if updated_at:
-                try:
-                    _updated = datetime.fromisoformat(updated_at.replace('Z', '+00:00')) if 'T' in updated_at else datetime.strptime(updated_at, '%Y-%m-%d %H:%M:%S')
-                    _days_since = (datetime.now() - _updated.replace(tzinfo=None)).days
-                    # Détecter interaction récente (≤ 30 jours) dans sender_history.
-                    # Audit complémentaire P4-UX-A3 (08/05/2026) — anti-gaming :
-                    # exiger un body non-vide (au moins 20 chars significatifs)
-                    # pour qualifier une interaction. Sinon un mail vide/auto
-                    # peut frauduleusement préserver la confiance.
-                    _has_recent_interaction = False
-                    if sender_history:
-                        _now = datetime.now()
-                        for _m in sender_history:
-                            _d = (_m.get('date', '') or '').strip()
-                            if not _d:
-                                continue
-                            _body_check = (_m.get('body_snippet', '') or _m.get('body', '') or '').strip()
-                            if len(_body_check) < 20:
-                                continue  # mail trop court → ne compte pas
-                            try:
-                                if 'T' in _d:
-                                    _md = datetime.fromisoformat(_d.replace('Z', '+00:00'))
-                                    if _md.tzinfo is not None:
-                                        _md = _md.replace(tzinfo=None)
-                                else:
-                                    _md = datetime.strptime(_d[:10], '%Y-%m-%d')
-                                if (_now - _md).days <= 30:
-                                    _has_recent_interaction = True
-                                    break
-                            except Exception:
-                                continue
-                    if _has_recent_interaction:
-                        logger.debug(
-                            "[prompt] decay skip : interaction <30j malgré profil "
-                            "ancien (%dj) → confiance préservée à %d%%",
-                            _days_since, int(raw_confidence * 100),
-                        )
-                    else:
-                        # Refonte N6.2 (12/05/2026) — decay 10% → 5% par trimestre (Q4 Yvan).
-                        # Plus prudent : préserve mieux les fiches de contacts peu fréquents.
-                        _decay = max(0, _days_since // _PROMPT_CFG.DECAY_DAYS_INTERVAL) * _PROMPT_CFG.DECAY_PCT_PER_QUARTER
-                        raw_confidence = max(0.05, raw_confidence - _decay)
-                        if _decay > 0:
-                            logger.debug(f"[prompt] Confidence decay: {_days_since}j depuis MAJ → -{_decay:.0%} → {raw_confidence:.0%}")
-                except Exception:
-                    pass
+            # Confidence avec decay temporel — refonte N6.2 : extrait dans
+            # `_apply_decay` (Q4 Yvan : 5%/trimestre, skip si interaction <30j).
+            # Observabilité : logger le résultat (audit MAJEUR-1 PRÉ-commit).
+            raw_confidence, _decay, _days_since, _had_recent = _apply_decay(
+                cp.get('confidence', 0),
+                cp.get('updated_at', ''),
+                sender_history,
+            )
+            if _had_recent:
+                logger.debug(
+                    "[prompt] decay skip : interaction <30j malgré profil "
+                    "ancien (%dj) → confiance préservée à %d%%",
+                    _days_since, int(raw_confidence * 100),
+                )
+            elif _decay > 0:
+                logger.debug(
+                    f"[prompt] Confidence decay: {_days_since}j depuis MAJ "
+                    f"→ -{_decay:.0%} → {raw_confidence:.0%}"
+                )
             confidence_pct = int(raw_confidence * 100)
 
-            # Phase 2.2 audit remediation 08/05/2026 — gradient de confiance
-            # 4 niveaux (au lieu du binaire 30% précédent) :
-            #   ≥ 70 % → 'full'    : profil complet (toutes les infos D)
-            #   50-70 % → 'medium' : greeting/closing + ton + registre,
-            #                        sans profile_text détaillé ni vocabulaire
-            #   30-50 % → 'light'  : greeting/closing + registre seulement
-            #   < 30 % → 'none'    : profil par défaut (cp = None)
-            if confidence_pct >= 70:
-                _confidence_tier = 'full'
-            elif confidence_pct >= 50:
-                _confidence_tier = 'medium'
-            elif confidence_pct >= 30:
-                _confidence_tier = 'light'
-            else:
-                _confidence_tier = 'none'
-
-            # Patch 11/05/2026 — préserver register/greeting/closing même si tier=none.
-            # Avant : tier=none (< 30 %) → cp=None → fallback "Nouveau correspondant"
-            # qui force vouvoiement + "Bonjour Monsieur/Madame [Nom]" → inadapté pour
-            # un contact familier (cas mail Alain Bosser : confidence 5 % mais
-            # register=tutoiement + tone=amical clairement présents). Les gardes
-            # anti-self-name et anti-pollution greeting/closing s'appliquent quand
-            # même via la branche `if cp:` plus bas, donc safe.
+            # Tier de confiance (4 niveaux : full/medium/light/none).
+            # Refonte N6.2 : extrait dans `_compute_tier` + `_promote_tier_if_signals`.
+            _confidence_tier = _compute_tier(confidence_pct)
+            _confidence_tier, _promoted = _promote_tier_if_signals(_confidence_tier, cp)
             if _confidence_tier == 'none':
-                _has_useful_signals = bool(
-                    (cp or {}).get('register')
-                    or (cp or {}).get('greeting')
-                    or (cp or {}).get('closing')
+                logger.debug(
+                    f"[prompt] PROFIL tier=none confidence={confidence_pct}% < 30%% "
+                    f"+ aucun signal utile pour {to_email} → profil par défaut"
                 )
-                if _has_useful_signals:
-                    # Promote 'none' → 'light' : profil ultra-minimal mais signals
-                    # utiles préservés (register, greeting, closing) avec gardes.
-                    _confidence_tier = 'light'
-                    logger.debug(
-                        f"[prompt] PROFIL tier=none→light confidence={confidence_pct}%% "
-                        f"— signals utiles (register/greeting/closing) préservés pour {to_email}"
-                    )
-                else:
-                    logger.debug(
-                        f"[prompt] PROFIL tier=none confidence={confidence_pct}% < 30%% "
-                        f"+ aucun signal utile pour {to_email} → profil par défaut"
-                    )
-                    cp = None
+                cp = None
+            elif _promoted:
+                logger.debug(
+                    f"[prompt] PROFIL tier=none→light confidence={confidence_pct}%% "
+                    f"— signals utiles (register/greeting/closing) préservés pour {to_email}"
+                )
             else:
                 logger.debug(
                     f"[prompt] PROFIL tier={_confidence_tier} confidence={confidence_pct}%% "
@@ -1040,23 +1716,10 @@ class ClaudeAssistant:
                 )
 
         if cp:
-            # Extraire vocabulaire et sujets
-            pj = cp.get('profile_json', '{}')
-            # Boucle de désérialisation (29/04 PM — root cause du crash
-            # 'str' object has no attribute 'get'). profile_json peut être
-            # doublement OU triplement sérialisé selon l'historique des
-            # migrations DB. Audit OVH 29/04 : 9/55 profils en triple.
-            # On déroule tant qu'on a un str (max 4 itérations = paranoia).
-            # Si à la fin pj n'est pas dict → fallback vide (n'écrase pas D).
-            _max_iter = 4
-            while isinstance(pj, str) and _max_iter > 0:
-                try:
-                    pj = json.loads(pj)
-                except Exception:
-                    break
-                _max_iter -= 1
-            if not isinstance(pj, dict):
-                pj = {}
+            # Extraire vocabulaire et sujets — désérialisation tolérante
+            # double/triple sérialisation (audit OVH 29/04 : 9/55 profils en triple).
+            # Refonte N6.2 : extrait dans `_deserialize_profile_json`.
+            pj = _deserialize_profile_json(cp.get('profile_json', '{}'))
             topics = pj.get('recurring_topics', [])
             vocab = pj.get('specific_vocabulary', [])
 
@@ -1082,84 +1745,24 @@ class ClaudeAssistant:
             _register = cp.get('register', 'vouvoiement')
             _contact_first = (cp.get('display_name', '') or '').split()[0] if cp.get('display_name') else ''
 
-            # --- GARDE NOM DANS LE GREETING ---
-            # Le greeting du profil peut contenir un nom incorrect quand un seul email
-            # est partagé entre plusieurs correspondants (ex: tests depuis gmail).
-            # On vérifie que le nom dans le greeting correspond au from_name du mail reçu.
+            # Gardes greeting + closing — refonte N6.2 : extraits dans
+            # `_apply_greeting_guards` et `_apply_closing_guards`.
+            _user_last = self.user_name.split()[-1].lower() if self.user_name else ''
+            _user_first = (self.user_first_name or '').lower()
             _from_name = ''
             if incoming_email and isinstance(incoming_email, dict):
                 _from_name = incoming_email.get('from_name', '') or ''
-            if is_forward:
-                # En forward, le greeting doit correspondre au destinataire, pas à l'expéditeur
-                _from_name = _contact_display
-            if _from_name:
-                _from_first = _from_name.split()[0] if _from_name else ''
-                # Vérifier si le nom dans le greeting correspond au from_name
-                _gr_has_name = False
-                for _word in _greeting.replace(',', '').split():
-                    if len(_word) > 2 and _word[0].isupper() and _word.lower() not in ('bonjour', 'hello', 'salut', 'cher', 'chère', 'hi', 'hey', 'coucou', 'bonsoir'):
-                        _gr_has_name = True
-                        _gr_name = _word
-                        break
-                if _gr_has_name and _from_first and _gr_name.lower() != _from_first.lower():
-                    # Le greeting contient un nom différent du from_name → corriger
-                    _greeting = _greeting.replace(_gr_name, _from_first)
-                    logger.debug(f"[prompt] GARDE greeting nom: '{_gr_name}' → '{_from_first}' (from_name du mail)")
-                elif not _gr_has_name and _from_first:
-                    # Le greeting n'a pas de nom → ajouter le from_name
-                    _greeting = _greeting.rstrip(',').strip() + f" {_from_first},"
-                    logger.debug(f"[prompt] GARDE greeting: ajout nom '{_from_first}'")
-
-            # --- GARDE GREETING RENFORCEE ---
-            _user_last = self.user_name.split()[-1].lower() if self.user_name else ''
-            _user_first = (self.user_first_name or '').lower()
-            _greeting_lower = _greeting.lower()
-            _needs_fix = False
-
-            # Cas 1 : greeting contient le nom/prénom de l'utilisateur → inversé
-            if _user_last and len(_user_last) > 2 and _user_last in _greeting_lower:
-                _needs_fix = True
-                logger.debug(f"[prompt] GARDE greeting: contient nom utilisateur '{_user_last}' → inversé")
-            elif _user_first and len(_user_first) > 2 and _user_first in _greeting_lower and _contact_first.lower() != _user_first:
-                _needs_fix = True
-                logger.debug(f"[prompt] GARDE greeting: contient prénom utilisateur '{_user_first}' → inversé")
-            # Cas 2 : greeting contient une adresse email
-            if '@' in _greeting:
-                _needs_fix = True
-                logger.debug(f"[prompt] GARDE greeting: contient @ → invalide")
-            # Cas 3 : greeting en anglais alors que language=fr
-            if cp.get('language', 'fr') == 'fr' and any(w in _greeting_lower for w in ['hello', 'hi ', 'dear', 'hey']):
-                _needs_fix = True
-                logger.debug(f"[prompt] GARDE greeting: anglicisme détecté pour language=fr")
-
-            if _needs_fix:
-                _greeting = f"Bonjour {_contact_first}," if _contact_first else "Bonjour,"
-                logger.debug(f"[prompt] GARDE greeting: corrigé → '{_greeting}'")
-
-            # Virgule finale obligatoire
-            if _greeting and not _greeting.endswith(','):
-                _greeting += ','
-
-            # --- GARDE CLOSING RENFORCEE ---
-            _closing_lower = _closing.lower()
-            _closing_fix = False
-
-            # Cas 1 : closing contient le nom de l'utilisateur (signature polluée)
-            if _user_last and len(_user_last) > 2 and _user_last in _closing_lower:
-                _closing_fix = True
-                logger.debug(f"[prompt] GARDE closing: contient nom utilisateur → pollué par signature")
-            # Cas 2 : closing contient une adresse email
-            if '@' in _closing:
-                _closing_fix = True
-                logger.debug(f"[prompt] GARDE closing: contient @ → invalide")
-            # Cas 3 : closing trop long (signature entière capturée)
-            if len(_closing) > 40:
-                _closing_fix = True
-                logger.debug(f"[prompt] GARDE closing: trop long ({len(_closing)} chars) → pollué")
-
-            if _closing_fix:
-                _closing = 'Cordialement,'
-                logger.debug(f"[prompt] GARDE closing: corrigé → '{_closing}'")
+            _greeting = _apply_greeting_guards(
+                _greeting,
+                from_name=_from_name,
+                contact_first=_contact_first,
+                contact_display=_contact_display,
+                user_first=_user_first,
+                user_last=_user_last,
+                language=cp.get('language', 'fr'),
+                is_forward=is_forward,
+            )
+            _closing = _apply_closing_guards(_closing, user_last=_user_last)
             # Phase 2.2 — humour UNIQUEMENT en tier 'full'.
             _humor = cp.get('humor', 'non')
             _humor_block = ""
@@ -1205,11 +1808,13 @@ Ouverture OBLIGATOIRE : "{_greeting}" | Cloture OBLIGATOIRE : "{_closing}"{_prof
                     _tu_total = 0
                     _vous_total = 0
                     for _m in _sent_mails:
-                        _body = (_m.get('body', '') or '')[:1500]
+                        # MINEUR audit : body_snippet fallback (mails persistés
+                        # en DB ont typiquement body_snippet rempli, body vide).
+                        _body = (_m.get('body_snippet') or _m.get('body') or '')[:_PROMPT_CFG.BODY_LOOKUP_DECAY]
                         _tu_total += len(_RE_TU_MARKERS_LONG.findall(_body))
                         _vous_total += len(_RE_VOUS_MARKERS_LONG.findall(_body))
-                    # Tutoiement uniquement si TOUS les marqueurs sont tu (100%) et au moins 3 marqueurs
-                    if _tu_total >= 3 and _vous_total == 0:
+                    # Tutoiement uniquement si TOUS les marqueurs sont tu (100%) et au moins N marqueurs
+                    if _tu_total >= _PROMPT_CFG.TUTOIEMENT_MIN_MARKERS and _vous_total == 0:
                         _b_register = 'tutoiement'
                         logger.debug(f"[prompt] Registre detecte dans B: tutoiement (tu={_tu_total}, vous={_vous_total}) pour {to_email}")
 
@@ -1233,336 +1838,25 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
 - ⛔ INTERDIT : "Salut", "Hello", "Hi", "Cher/Chère", "Coucou", tutoiement (tu/te/ton/ta/tes)
 - ⛔ IGNORE les patterns d'ouverture du style profile (section A) — ils concernent d'AUTRES correspondants""")
 
-        # -- B : Historique avec l'interlocuteur (séparer envoyés/reçus, scoring similarité) --
-        if sender_history:
-            # Refonte N6.2 (12/05/2026) — `_MAIL_TYPES` sorti en constante
-            # module-level + helper `_get_mail_types_for_user` (Q7 Yvan :
-            # FR seulement aujourd'hui, multi-langue à l'onboarding plus tard).
-            _MAIL_TYPES = _get_mail_types_for_user()
+        # Refonte N6.2 — Blocs B/A/C/D2 extraits dans helpers `_build_block_*`.
+        # Logique IDENTIQUE au code inline pré-extraction (snapshots byte-identique
+        # validés). Le bloc D reste inline car son flux dépend de cp/tier/greeting
+        # calculés ci-dessus (3 branches enrichi/tutoiement/générique).
+        _b = _build_block_B(sender_history, ctx)
+        if _b is not None:
+            blocks.append(_b)
 
-            # Detecter le type du mail entrant (sujet + body)
-            _ie = incoming_email or {}
-            incoming_text = ((_ie.get('subject', '') or '') + ' ' + (_ie.get('body', '') or '')[:500]).lower()
-            incoming_types = {}
-            for mtype, keywords in _MAIL_TYPES.items():
-                score = sum(1 for kw in keywords if kw in incoming_text)
-                if score > 0:
-                    incoming_types[mtype] = score
+        _a = _build_block_A(conversation_history, ctx)
+        if _a is not None:
+            blocks.append(_a)
 
-            sent_mails = []
-            received_lines = []
-            for m in sender_history:
-                body = m.get('body_snippet', '')
-                # Phase 1.1 audit remediation — anonymisation PII tierce.
-                body_redacted = _redact_pii_in_text(
-                    body,
-                    correspondent_email=_correspondent_for_redaction,
-                    counter=_pii_counter,
-                )
-                if m['direction'] == 'sent':
-                    # Scorer par similarité de type avec le mail entrant
-                    # (similarity calculée sur le body brut pour ne pas
-                    # impacter le scoring par les tokens redactés).
-                    mail_text = ((m.get('subject', '') or '') + ' ' + (body or '')).lower()
-                    similarity = 0
-                    for mtype, kw_score in incoming_types.items():
-                        keywords = _MAIL_TYPES[mtype]
-                        match = sum(1 for kw in keywords if kw in mail_text)
-                        if match > 0:
-                            similarity += match * kw_score  # boost si même type
-                    sent_mails.append((m, body_redacted, similarity))
-                else:
-                    line = f"[{m['date']}] De: {m.get('from_name','')} — Objet: {m.get('subject','')}\n{body_redacted}" if body_redacted else f"[{m['date']}] De: {m.get('from_name','')} — Objet: {m.get('subject','')}"
-                    received_lines.append(line)
+        _c = _build_block_C(keyword_context, subject, contact_profile, sender_history, ctx)
+        if _c is not None:
+            blocks.append(_c)
 
-            # Trier les envoyés : le plus similaire en premier
-            sent_mails.sort(key=lambda x: x[2], reverse=True)
-
-            b_parts = []
-            if sent_mails:
-                sent_lines = []
-                for i, (m, body, sim) in enumerate(sent_mails):
-                    tag = "⭐ EXEMPLE LE PLUS PROCHE — reproduis ce mail en priorite" if i == 0 and sim > 0 else ""
-                    line = f"[{m['date']}] Objet: {m.get('subject','')}"
-                    if tag:
-                        line = f"**{tag}**\n{line}"
-                    if body:
-                        line += f"\n{body}"
-                    sent_lines.append(line)
-                b_parts.append(
-                    "### MAILS ENVOYES PAR L'UTILISATEUR — EXEMPLES A REPRODUIRE\n"
-                    "Copie ce style : longueur, structure, tournures.\n"
-                    "⚠️ SAUF si le bloc D spécifie un greeting, closing ou registre DIFFÉRENT de ces exemples — le bloc D a TOUJOURS priorité.\n\n"
-                    + "\n\n---\n\n".join(sent_lines)
-                )
-            if received_lines:
-                b_parts.append(
-                    "### MAILS RECUS — contexte uniquement (ne pas imiter ce style)\n\n"
-                    + "\n\n---\n\n".join(received_lines)
-                )
-            blocks.append("## B — Echanges recents avec cet interlocuteur\n\n" + "\n\n".join(b_parts))
-
-        # -- A : Fil de conversation en cours --
-        # Phase 2.1 audit remediation 08/05/2026 — dédup A vs Mail reçu :
-        # quand le caller injecte l'IMID/id du mail courant dans
-        # incoming_email, on retire l'item correspondant de conversation_history
-        # pour éviter de pousser 2 fois le même mail à Claude (économie tokens
-        # + clarification du flux).
-        _current_imid = ''
-        _current_id = ''
-        if incoming_email:
-            _current_imid = (incoming_email.get('internet_message_id') or '').strip()
-            _current_id = (incoming_email.get('id') or '').strip()
-        _dedup_filtered = False
-        if conversation_history and (_current_imid or _current_id):
-            _filtered_history = []
-            for m in conversation_history:
-                _m_imid = (m.get('internet_message_id') or '').strip()
-                _m_id = (m.get('id') or '').strip()
-                if (_current_imid and _m_imid and _m_imid == _current_imid) \
-                        or (_current_id and _m_id and _m_id == _current_id):
-                    _dedup_filtered = True
-                    continue
-                _filtered_history.append(m)
-            conversation_history = _filtered_history
-            if _dedup_filtered:
-                logger.debug(
-                    "[prompt-dedup] mail courant retiré du bloc A (imid=%s id=%s)",
-                    _current_imid[:30], _current_id[:30],
-                )
-
-        if conversation_history:
-            lines = []
-            for m in conversation_history:
-                body = m.get('body_snippet', '')
-                # Phase 1.1 audit remediation — anonymisation PII tierce.
-                body = _redact_pii_in_text(
-                    body,
-                    correspondent_email=_correspondent_for_redaction,
-                    counter=_pii_counter,
-                )
-                # Phase 3.1 — format date court 'dd/mm' + flèche direction.
-                # Avant : '[2026-05-08] Marie (envoye) :' (~30 chars header)
-                # Après : '08/05 Marie >' (envoyé) / '08/05 Marie <' (reçu)
-                #   ~14 chars header → économie ~16 chars/item × N items.
-                # Audit fix P3-A3 — strip pour éviter espaces orphelins quand
-                # date ou from_name est vide.
-                _date_short = _compact_date(m.get('date', ''))
-                _arrow = '>' if m.get('direction') == 'sent' else '<'
-                _name = (m.get('from_name', '') or '').strip() or '?'
-                # Construction conditionnelle pour éviter les doubles espaces
-                # quand _date_short est vide.
-                _header_parts = [p for p in (_date_short, _name) if p]
-                _header_parts.append(_arrow)
-                line = ' '.join(_header_parts)
-                if body:
-                    line += f"\n{body}"
-                else:
-                    line += f" (Objet: {m.get('subject', '')})"
-                lines.append(line)
-            _a_header = "## A — Fil de conversation en cours :"
-            if _dedup_filtered:
-                # Audit fix P2-A4 — wording clarifié : le mail courant n'est
-                # PAS dans ce bloc (retiré par dédup), il est rendu en détail
-                # dans `## Mail recu` plus bas.
-                _a_header += (
-                    "\n(Note : le mail auquel tu réponds N'EST PAS dans ce "
-                    "bloc — il a été retiré pour éviter le doublon. "
-                    "Il est rendu en détail dans `## Mail recu` plus bas. "
-                    "Les items ci-dessous sont les mails ANTÉRIEURS du thread.)"
-                )
-            blocks.append(_a_header + "\n\n" + "\n\n---\n\n".join(lines))
-
-        # -- C : Contexte lie au sujet --
-        # Phase 3.2 — skip si sujet trop court ou stopword-only.
-        # Les sujets génériques produisent des résultats keyword bruyants
-        # qui n'aident pas Claude → on coupe avant d'injecter le bloc.
-        _c_subject_for_check = subject or (
-            (incoming_email or {}).get('subject', '') if incoming_email else ''
-        )
-        if keyword_context and _subject_is_too_generic(_c_subject_for_check):
-            logger.info(
-                "[prompt-skip-c] sujet trop generique (len=%d) → bloc C skip pour %d items",
-                len(_c_subject_for_check or ''), len(keyword_context),
-            )
-            keyword_context = []
-
-        # Phase 4.2 audit remediation 08/05/2026 — mode étranger.
-        # Si contact totalement inconnu (pas de profil ET pas d'historique B)
-        # ET pas de "collègue" du même domaine dans le keyword_context, on
-        # skip C : les mails sur le même sujet avec d'autres correspondants
-        # ne reflètent pas la relation avec ce nouveau contact (style/registre
-        # peuvent être très différents). Exception : si même domaine qu'un
-        # contact connu (= collègue prospect), garder C (contexte interne utile).
-        if keyword_context:
-            _is_known = bool(contact_profile and contact_profile.get('profile_text'))
-            _is_recurrent = bool(sender_history)
-            if not _is_known and not _is_recurrent:
-                _correspondent = (
-                    ((incoming_email or {}).get('from', '') or '').strip().lower()
-                    or (to_email or '').strip().lower()
-                )
-                _correspondent_domain = ''
-                if '@' in _correspondent:
-                    _correspondent_domain = _correspondent.split('@', 1)[1]
-                _has_colleague = False
-                if _correspondent_domain:
-                    for _m in keyword_context:
-                        _from_e = (_m.get('from_email', '') or '').lower()
-                        if _from_e and _from_e.endswith('@' + _correspondent_domain):
-                            _has_colleague = True
-                            break
-                if not _has_colleague:
-                    logger.info(
-                        "[prompt-skip-c-stranger] contact inconnu hors domaine "
-                        "connu (corr=%s domain=%s) → skip C pour %d items",
-                        _correspondent[:40], _correspondent_domain[:40],
-                        len(keyword_context),
-                    )
-                    keyword_context = []
-
-        if keyword_context:
-            lines = []
-            for m in keyword_context:
-                body = m.get('body_snippet', '')
-                # Phase 1.1 audit remediation — anonymisation PII tierce.
-                body = _redact_pii_in_text(
-                    body,
-                    correspondent_email=_correspondent_for_redaction,
-                    counter=_pii_counter,
-                )
-                line = f"[{m['date']}] {m['from_name']} — Objet: {m.get('subject','')} ({m['direction']}) :"
-                if body:
-                    line += f"\n{body}"
-                lines.append(line)
-            blocks.append("## C — Contexte lie au sujet :\n\n" + "\n\n---\n\n".join(lines))
-
-        # -- D2 : Corrections recentes — avec analyse Claude du diff --
-        # Phase 2.3 audit remediation 08/05/2026 — troncation 250 → 500 chars
-        # (préservation contexte) + date relative (« il y a N jours »).
-        # Phase 3.3 audit remediation 08/05/2026 — skip D2 si profil récent
-        # confiant (≥ 70 % AND last_analysis < 30 jours). Logique : les
-        # corrections sont déjà intégrées dans le profil enrichi récent.
-        # Économie : ~300 tokens par draft (sur ~30-40 % des cas).
-        # Audit fix P3-A5 — désynchronisation : ne skipper QUE si toutes les
-        # corrections sont antérieures à `updated_at`. Une correction TRÈS
-        # récente postérieure à la dernière analyse profil ne peut PAS être
-        # déjà intégrée → on la garde dans D2.
-        if recent_corrections and contact_profile and contact_profile.get('profile_text'):
-            _raw_conf = contact_profile.get('confidence', 0)
-            _updated_at = contact_profile.get('updated_at', '')
-            try:
-                _conf_pct = int((_raw_conf or 0) * 100)
-                if _conf_pct >= 70 and _updated_at:
-                    if 'T' in _updated_at:
-                        _u = datetime.fromisoformat(_updated_at.replace('Z', '+00:00'))
-                        if _u.tzinfo is not None:
-                            _u = _u.replace(tzinfo=None)
-                    else:
-                        _u = datetime.strptime(_updated_at, '%Y-%m-%d %H:%M:%S')
-                    _days_since_analysis = (datetime.now() - _u).days
-                    if _days_since_analysis < 30:
-                        # P3-A5 : check qu'aucune correction n'est plus récente
-                        # que `updated_at` du profil (sinon elles ne sont pas
-                        # encore intégrées dans profile_text). Si timestamp
-                        # manquant ou non-parsable → on ne skip pas (prudent).
-                        _all_integrated = True
-                        for c in recent_corrections:
-                            _ts = c.get('timestamp') or c.get('created_at') or c.get('date') or ''
-                            if not _ts:
-                                # Pas de timestamp → ne pas skip (conservatif).
-                                _all_integrated = False
-                                break
-                            try:
-                                if isinstance(_ts, (int, float)):
-                                    _c_dt = datetime.fromtimestamp(float(_ts))
-                                elif 'T' in str(_ts):
-                                    _c_dt = datetime.fromisoformat(str(_ts).replace('Z', '+00:00'))
-                                    if _c_dt.tzinfo is not None:
-                                        _c_dt = _c_dt.replace(tzinfo=None)
-                                else:
-                                    _c_dt = datetime.strptime(str(_ts), '%Y-%m-%d %H:%M:%S')
-                                if _c_dt > _u:
-                                    _all_integrated = False
-                                    break
-                            except Exception:
-                                _all_integrated = False  # par prudence
-                                break
-                        if _all_integrated:
-                            logger.info(
-                                "[prompt-skip-d2] profil confiant + récent + corrections "
-                                "intégrées (conf=%d%%, %dj depuis MAJ) → skip %d corrections",
-                                _conf_pct, _days_since_analysis, len(recent_corrections),
-                            )
-                            recent_corrections = []
-                        else:
-                            logger.debug(
-                                "[prompt-keep-d2] profil récent mais correction "
-                                "postérieure à updated_at → D2 maintenu"
-                            )
-            except Exception:
-                pass
-
-        if recent_corrections:
-            _D2_TRUNCATE = 500
-            _now = datetime.now()
-            corr_lines = []
-            for i, c in enumerate(recent_corrections, 1):
-                analysis = c.get('analysis', '')
-                proposed_text = (c['proposed'] or '')[:_D2_TRUNCATE]
-                sent_text = (c['sent'] or '')[:_D2_TRUNCATE]
-
-                # Date relative depuis le timestamp de la correction.
-                _rel_date = ''
-                _ts = c.get('timestamp') or c.get('created_at') or c.get('date') or ''
-                if _ts:
-                    try:
-                        if isinstance(_ts, (int, float)):
-                            _dt = datetime.fromtimestamp(float(_ts))
-                        elif 'T' in str(_ts):
-                            _dt = datetime.fromisoformat(str(_ts).replace('Z', '+00:00'))
-                            if _dt.tzinfo is not None:
-                                _dt = _dt.replace(tzinfo=None)
-                        else:
-                            _dt = datetime.strptime(str(_ts), '%Y-%m-%d %H:%M:%S')
-                        _days = (_now - _dt).days
-                        if _days < 0:
-                            # Audit fix P2-A6 — timestamp futur = clock skew
-                            # ou serialization broken. Warning pour détection.
-                            logger.warning(
-                                "[D2-timestamp] futur (%dj) ts=%r → affiché 'aujourd''hui'",
-                                _days, _ts,
-                            )
-                            _rel_date = " (aujourd'hui)"
-                        elif _days == 0:
-                            _rel_date = " (aujourd'hui)"
-                        elif _days == 1:
-                            _rel_date = " (hier)"
-                        else:
-                            _rel_date = f" (il y a {_days} jours)"
-                    except Exception:
-                        _rel_date = ''
-
-                if analysis:
-                    # Analyse Claude disponible — plus utile que les catégories
-                    corr_lines.append(
-                        f"Correction {i}{_rel_date} — {analysis}\n"
-                        f"  Avant : \"{proposed_text}\"\n"
-                        f"  Apres : \"{sent_text}\""
-                    )
-                else:
-                    # Fallback sur catégories heuristiques si pas encore analysé
-                    cats = c.get('categories', '')
-                    cat_info = f" [{cats}]" if cats else ""
-                    corr_lines.append(
-                        f"Correction {i}{_rel_date}{cat_info} :\n"
-                        f"  Avant : \"{proposed_text}\"\n"
-                        f"  Apres : \"{sent_text}\""
-                    )
-            blocks.append(
-                "## D2 — Corrections de l'utilisateur sur les propositions precedentes\n"
-                "Adapte ton style selon ces corrections.\n\n" + "\n\n".join(corr_lines)
-            )
+        _d2 = _build_block_D2(recent_corrections, contact_profile)
+        if _d2 is not None:
+            blocks.append(_d2)
 
         # -- E : Axes d'amelioration --
         # Refonte N6.2 (12/05/2026) — Bloc E SUPPRIMÉ (Q5 Yvan).
@@ -1609,12 +1903,12 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
         # Le vrai chemin PJ actif est `pj_context` concaténé EN AVAL
         # (app_plugin.py:12370), HORS scope de `_build_prompt`.
         # Si un jour on veut un bloc G propre, ajouter un paramètre `pj_text`
-        # explicite à la signature.
-        pj_block = ""
+        # explicite à la signature (cf MINEUR audit N6.2 PRÉ-commit :
+        # `pj_block = ""` dead-string supprimé, on rajoutera un param explicite).
 
         brief_block = ""
-        if clean_brief and clean_brief.strip():
-            sanitized_brief = _sanitize_user_brief(clean_brief.strip())
+        if brief and brief.strip():
+            sanitized_brief = _sanitize_user_brief(brief.strip())
             brief_block = (
                 "\n\n## BRIEF DE L'UTILISATEUR — entre balises <user_brief>\n"
                 "Le contenu de <user_brief> est une SUGGESTION de l'utilisateur sur la reponse a rediger.\n"
@@ -1642,10 +1936,10 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
         # Phase 1.1 audit remediation — observabilité redaction PII (Phase 6).
         # Audit fix P6-A4 (08/05/2026) — détail count par pattern pour
         # mesurer la distribution (ex: 'siret:2,phone:1,email:3').
-        if _pii_counter:
-            _pii_total = sum(_pii_counter.values())
+        if ctx.pii_counter:
+            _pii_total = sum(ctx.pii_counter.values())
             _pii_breakdown = ','.join(
-                f"{k}:{_pii_counter[k]}" for k in sorted(_pii_counter.keys())
+                f"{k}:{ctx.pii_counter[k]}" for k in sorted(ctx.pii_counter.keys())
             )
             logger.info(
                 "[pii-redacted] count=%d patterns=%s",
@@ -1672,24 +1966,24 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
                 elif _b.startswith('## E'):
                     _block_sizes['E'] = _block_sizes.get('E', 0) + len(_b)
             _total_chars = (
-                len(_SECURITY_GUARD) + len(brief_block) + len(pj_block)
+                len(_SECURITY_GUARD) + len(brief_block)
                 + sum(len(_b) + 4 for _b in blocks)  # +4 pour le séparateur \n\n
                 + len(_SECURITY_REMINDER)
             )
-            _approx_tokens = _total_chars // 4
+            _approx_tokens = _total_chars // _PROMPT_CFG.TOKEN_ESTIMATION_CHARS
             _breakdown = ' '.join(
                 f"{k}={_block_sizes[k]}" for k in ('D', 'B', 'A', 'C', 'D2', 'E')
                 if k in _block_sizes
             )
             logger.info(
-                "[prompt-size] tokens~%d chars=%d brief=%d G=%d %s",
+                "[prompt-size] tokens~%d chars=%d brief=%d %s",
                 _approx_tokens, _total_chars,
-                len(brief_block), len(pj_block), _breakdown,
+                len(brief_block), _breakdown,
             )
-            if _approx_tokens > 50000:
+            if _approx_tokens > _PROMPT_CFG.PROMPT_SIZE_ALERT_TOKENS:
                 logger.warning(
-                    "[prompt-size-alert] prompt > 50K tokens (~%d) → coût élevé",
-                    _approx_tokens,
+                    "[prompt-size-alert] prompt > %dK tokens (~%d) → coût élevé",
+                    _PROMPT_CFG.PROMPT_SIZE_ALERT_TOKENS // 1000, _approx_tokens,
                 )
         except Exception as _e:
             logger.debug(f"[prompt-size] log échoué : {_e}")
@@ -1703,7 +1997,7 @@ RÈGLES PAR DÉFAUT (si aucun historique d'envoi en tutoiement) :
 
             return f"""Redige un nouveau mail a {to_email}.
 
-{context}{pj_block}
+{context}
 
 ## Nouveau mail :
 A : {to_email}
@@ -1756,7 +2050,7 @@ Retourne uniquement le mail, sans objet ni commentaire.{_SECURITY_REMINDER}"""
 
             return f"""Transfert de mail a {fwd_to_name} ({to_email}).
 
-{context}{pj_block}
+{context}
 
 ## Mail original a transferer :
 De : {original_from}
@@ -1781,7 +2075,7 @@ Ouverture + accompagnement + cloture + signature habituelle. Sans objet ni comme
 
         return f"""Reponds a ce mail.{creneau_warning}
 
-{context}{pj_block}
+{context}
 
 ## Mail recu :
 De : {incoming_email.get('from_name', '')} <{incoming_email.get('from', '')}>

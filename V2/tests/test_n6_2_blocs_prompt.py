@@ -64,8 +64,9 @@ def critere_prompt_config():
         cfg.DECAY_PCT_PER_QUARTER == 0.05
     )
     ok4 = log_test(
-        f"PJ block max=5000 (trouvé {cfg.PJ_BLOCK_MAX})",
-        cfg.PJ_BLOCK_MAX == 5000
+        f"D2 skip seuils découplés (conf={cfg.D2_SKIP_CONFIDENCE_THRESHOLD}, "
+        f"max_age={cfg.D2_SKIP_MAX_AGE_DAYS}j) — MAJEUR-4 audit",
+        cfg.D2_SKIP_CONFIDENCE_THRESHOLD == 70 and cfg.D2_SKIP_MAX_AGE_DAYS == 30
     )
     return sum([ok1, ok2, ok3, ok4]), 4
 

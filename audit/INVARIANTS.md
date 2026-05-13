@@ -541,14 +541,27 @@ Refonte de `_build_prompt` dans `V2/claude_ai.py` selon arbitrages Yvan Q1-Q8 du
 - **Q7 `_MAIL_TYPES` mots-clés FR seulement** : sortis en constante module-level `_MAIL_TYPES_FR` + helper `_get_mail_types_for_user(user_language=None)` retournant `_MAIL_TYPES_FR` par défaut. Architecture prête pour onboarding multilingue futur (cf PLUS_TARD_VF.md #26).
 - **B3 fix audit** : `_SECURITY_GUARD` corrigé pour lister `A, B, C, D, D2` (D ajouté car oublié à l'origine + E retiré). `_SECURITY_REMINDER` aligné.
 - **Helper `_parse_flexible_datetime`** : centralise le parsing ISO 8601 / ISO sans tz / SQLite legacy. Fail-open (None si invalide).
-- **Tests** (`tests/test_n6_2_blocs_prompt.py`, 17/17) :
-  - `_PROMPT_CFG.TIER_FULL = 70`, `DECAY_PCT_PER_QUARTER = 0.05`
-  - 6 cas `_parse_flexible_datetime`
-  - `_MAIL_TYPES_FR` FR seulement (pas de 'reminder' EN)
-  - 0 `## E —` dans `_build_prompt`
-  - 0 param `learning_priorities` dans signature
-  - `_SECURITY_GUARD` mentionne `A, B, C, D, D2` correctement
-- **Historique** : refonte 12/05/2026 N6.2 (branche `feat/yvan/frontend`).
+- **Phase 2 extraction structurelle (13/05/2026)** : `_build_prompt` passe de 1002 → 528 lignes (-47%). 10 helpers métier extraits au module-level :
+  - `_deserialize_profile_json` : déroule jusqu'à 4 itérations json.loads (audit OVH : 9/55 profils en triple sérialisation)
+  - `_apply_decay(raw_conf, updated_at, sender_history, now=None)` : retourne tuple à 4 (decayed, decay, days_since, had_recent) — observabilité préservée (logs decay dans le caller)
+  - `_compute_tier(confidence_pct)` : 4 niveaux full/medium/light/none (seuils `_PromptConfig`)
+  - `_promote_tier_if_signals(tier, cp)` : promote 'none'→'light' si register/greeting/closing utiles
+  - `_apply_greeting_guards(...)` : 3 gardes (inversion user, anglicisme FR, '@')
+  - `_apply_closing_guards(closing, user_last)` : 3 gardes pollution
+  - `_build_block_B`, `_build_block_A`, `_build_block_C`, `_build_block_D2` : retournent str|None
+  - Dataclass `BuildContext` : pii_counter + correspondent_for_redaction + incoming_email + to_email (groupe l'état partagé)
+- **Audit MAJEURS pré-commit (13/05/2026)** :
+  - MAJEUR-1 : logs decay re-injectés dans `_build_prompt` après appel `_apply_decay` (observabilité opérationnelle préservée)
+  - MAJEUR-3 : 4 constantes `_PromptConfig` substituées (`BODY_LOOKUP_DECAY`, `TUTOIEMENT_MIN_MARKERS`, `TOKEN_ESTIMATION_CHARS`, `PROMPT_SIZE_ALERT_TOKENS`). `PJ_BLOCK_MAX` supprimé (constante morte, bloc G n'existe plus).
+  - MAJEUR-4 : `D2_SKIP_CONFIDENCE_THRESHOLD = 70` et `D2_SKIP_MAX_AGE_DAYS = 30` ajoutés et utilisés dans `_build_block_D2` (découplage sémantique d'avec `TIER_FULL` et `INTERACTION_FRESH_DAYS`)
+  - MINEUR : `body_snippet or body` dans détection tutoiement bloc D fallback (mails persistés DB ont typiquement body_snippet, body vide)
+  - MINEUR : aliases `_pii_counter` / `_correspondent_for_redaction` supprimés (accès direct `ctx.*`)
+  - MINEUR : `pj_block = ""` dead-string supprimé (jamais réassigné depuis suppression bloc G)
+- **Tests régression** :
+  - `tests/test_n6_2_blocs_prompt.py` (17/17) — invariants source + helpers
+  - `tests/test_n6_2_prompt_snapshots.py` (18 snapshots byte-identique) — `FROZEN_NOW = 2026-05-12T10:00:00`. Couvre : 5 tier (full/medium/light/promoted/no_profile) + forward + first_mail + sender_history + conversation_history + brief + decay 180j + 3 guards (greeting anglicisme/inversion, closing pollution) + 4 blocs (B scoring, A dédup IMID, C skip generic, C skip stranger).
+- **Bug régression fixé (e8a4f1c → 13/05)** : `clean_brief` orphan reference (PJ chaîne magique parsing supprimé en phase 1 sans nettoyer les références aval) → remplacé par `brief` direct.
+- **Historique** : refonte 12-13/05/2026 N6.2 (branche `feat/yvan/frontend`), 2 commits (e8a4f1c phase 1, suivi de l'extraction structurelle).
 
 ### I-DB-CONN-01 : Une seule Database() instance par db_path par TID (latent fix 12/05/2026)
 Le tracker class-level `Database._all_conns[tid] = conn` est keyé par thread_id seul. **Ne JAMAIS instancier plusieurs `Database(db_path)` simultanément dans le même thread** : la seconde instance, via `_conn()`, kicke et ferme la conn de la première (assumée zombie), provoquant `ProgrammingError: Cannot operate on a closed database` downstream.
