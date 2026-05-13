@@ -435,10 +435,14 @@ class Database:
             )
         """)
 
-        # -- Cache échéances pré-scannées par mail (Phase 1 corrigée 24/04) --
-        # Pattern idempotent : pré-filtre heuristique (_has_echeance_pattern)
-        # puis scan Claude si candidat. Résultat = liste d'échéances ou []
-        # (= Néant). Évite re-scan coûteux.
+        # -- Cache échéances pré-scannées par mail --
+        # Refonte N6.3 : entrants (scope V1 hors échéances) → `[]` écrit par
+        # `_persist_commis_results` (commis Haiku tourne avec scan_echeance=False,
+        # pas de yield E). Compose sortants → écrit par le commis Haiku avec
+        # scan_echeance=True via `/api/post_generation_analyze`. Côté mail
+        # envoyé, scan IA via `/api/echeances/post_send/<mid>` (scan_echeances_batch).
+        # Idempotence anti-boucle BG : présence d'une entrée (même vide) suffit
+        # à dire "déjà calculé".
         c.execute("""
             CREATE TABLE IF NOT EXISTS mail_echeance_cache (
                 message_id TEXT PRIMARY KEY,
@@ -2917,8 +2921,8 @@ class Database:
                 (message_id, uid)
             )
             conn.commit()
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug(f"[purge_mail_summary] echec mid={message_id}: {_e}")
 
     def purge_mail_classement(self, message_id):
         """Supprime l'entrée mail_classement_cache pour ce message_id."""
@@ -2932,8 +2936,8 @@ class Database:
                 (message_id, uid)
             )
             conn.commit()
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug(f"[purge_mail_classement] echec mid={message_id}: {_e}")
 
     def purge_mail_pj_classement(self, message_id):
         """Supprime l'entrée mail_pj_classement_cache pour ce message_id."""
@@ -2947,8 +2951,8 @@ class Database:
                 (message_id, uid)
             )
             conn.commit()
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug(f"[purge_mail_pj_classement] echec mid={message_id}: {_e}")
 
     def purge_mail_echeance(self, message_id):
         """Supprime l'entrée mail_echeance_cache pour ce message_id."""
@@ -2962,8 +2966,8 @@ class Database:
                 (message_id, uid)
             )
             conn.commit()
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug(f"[purge_mail_echeance] echec mid={message_id}: {_e}")
 
     # --- MÉTRIQUES ---------------------------------------------------------
 

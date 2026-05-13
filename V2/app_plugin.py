@@ -3416,10 +3416,13 @@ def _persist_commis_results(*, mid, mail_data, points, actions, mail_suggestions
     # Pas de _set_mail_preview pour 'summary' : ce plat n'a pas de slot RAM
     # (frontend lit la DB directement). Cf docstring de _prewarm_unified_for_mail.
 
-    # 2. Échéance — V1 scope : entrants désactivés, on stocke [] (frontend
-    # affiche "pas d'échéance" sur lecture). Le prompt commis demande encore
-    # E pour ne pas casser /api/post_generation_analyze (mails compose),
-    # mais le résultat E est ignoré côté entrants (cf docstring fonction).
+    # 2. Échéance — scope V1 = sortants only, donc entrants : on stocke [].
+    # Le commis Haiku entrants tourne avec `scan_echeance=False` (cf appel
+    # dans `_prewarm_mail_preview`) — la section E est absente du prompt,
+    # pas de yield('echeance'), `result['echeance']` reste None. Ce
+    # `save_mail_echeance(mid, [])` est OBLIGATOIRE pour l'idempotence
+    # (sinon `_prewarm_unified_for_mail` relance en boucle toutes les 45s
+    # car `has_mail_echeance(mid)` retournerait False).
     try:
         _db.save_mail_echeance(mid, [])
     except Exception as _e:
@@ -3695,6 +3698,11 @@ def _prewarm_unified_for_mail(mid, mail_data):
             return
 
         # === 7. Appel commis Haiku unifié ===
+        # `scan_echeance=False` : scope V1 = échéances sortantes uniquement,
+        # les entrants jettent toujours le résultat E (commit `[]` en DB à
+        # `_persist_commis_results`). Économise tokens + cohérence prompt.
+        # La route `/api/post_generation_analyze` (mails compose sortants)
+        # reste sur scan_echeance=True par défaut.
         result = None
         for kind, payload in builder.analyze_one_mail_stream(
             mail=mail_data,
@@ -3704,6 +3712,7 @@ def _prewarm_unified_for_mail(mid, mail_data):
             contact_profile=contact_profile,
             recent_classifications=recent_class,
             recent_pj_classifications=recent_pj,
+            scan_echeance=False,
         ):
             if kind == 'end':
                 result = payload
@@ -8222,7 +8231,7 @@ def _extract_subject_keywords(subject):
     """Extrait mots significatifs du sujet pour matching classement."""
     if not subject:
         return ''
-    cleaned = re.sub(r'^(Re|Fw|Fwd|Tr|FW|RE)\s*:\s*', '', subject, flags=re.IGNORECASE).strip()
+    cleaned = _strip_reply_prefixes(subject).strip()
     user_name = _get_user_name('').lower()
     user_last = user_name.split()[-1] if user_name else ''
     _STOP = {'le','la','les','un','une','des','et','ou','de','du','en','est','pour','avec','sur',
@@ -9694,79 +9703,9 @@ def api_classement_pj_single(message_id):
     return jsonify(_fetch_single_preview_plate(message_id, 'pj_classement'))
 
 
-@app.route('/api/echeances/pre_scan', methods=['POST'])
-def api_echeances_pre_scan():
-    """Pre-scan echéances pendant la relecture (avant envoi).
-    Lance le scan Claude en background, stocke le résultat dans _echeance_pre_scan_cache.
-    Le post-envoi réutilisera ce résultat au lieu de relancer un scan."""
-    if _db.get_setting('echeances_enabled', '1') == '0':
-        return jsonify({"ok": True, "echeances": []})
-    data = request.get_json(force=True) or {}
-    body = (data.get('body') or '').strip()
-    to_email = _normalize_email(data.get('to'))
-    subject = (data.get('subject') or '').strip()
-    if not body or body.startswith('Erreur'):
-        return jsonify({"ok": True, "echeances": []})
-
-    # Pre-filtre heuristique : skip si aucun pattern d'echeance detecte
-    _body_clean = _HTML_TAG_RE.sub('',body).strip()
-    if not _has_echeance_pattern(_body_clean):
-        return jsonify({"ok": True, "echeances": [], "skipped": "no_pattern"})
-
-    # Cle de cache basee sur le contenu (hash du body tronque)
-    scan_key = hashlib.md5((to_email + '|' + subject + '|' + _body_clean[:500]).encode()).hexdigest()
-    # Skip + réservation atomique sous lock (Audit fix : race condition)
-    with _echeance_pre_scan_lock:
-        existing = _echeance_pre_scan_cache.get(scan_key)
-        if existing and existing.get('status') in ('running', 'done'):
-            return jsonify({"ok": True, "scan_key": scan_key})
-        _trim_dict_cache(_echeance_pre_scan_cache, _MAX_PRE_SCAN_CACHE)
-        _echeance_pre_scan_cache[scan_key] = {
-            'status': 'running', 'echeances': [], 'ts': time.time(),
-            'body': body, 'to': to_email, 'subject': subject
-        }
-
-    def _do_pre_scan():
-        try:
-            _builder = _get_prompt_builder()
-            if not _builder:
-                with _echeance_pre_scan_lock:
-                    _echeance_pre_scan_cache[scan_key] = {
-                        'status': 'done', 'echeances': [], 'ts': time.time()}
-                return
-            mails_to_scan = [{
-                'entry_id': '',
-                'direction': 'sent',
-                'subject': subject,
-                'body': body,
-                'correspondent': to_email,
-                'correspondent_name': '',
-                'date': datetime.now().strftime("%Y-%m-%d")
-            }]
-            echeances = _builder.scan_echeances_batch(mails_to_scan)
-            with _echeance_pre_scan_lock:
-                _echeance_pre_scan_cache[scan_key] = {
-                    'status': 'done', 'echeances': echeances or [], 'ts': time.time(),
-                    'body': body, 'to': to_email, 'subject': subject
-                }
-            logger.debug(f"[echeances] Pre-scan termine: {len(echeances or [])} echeance(s)")
-        except Exception as e:
-            logger.warning(f"[echeances] Erreur pre-scan: {e}")
-            with _echeance_pre_scan_lock:
-                _echeance_pre_scan_cache[scan_key] = {
-                    'status': 'done', 'echeances': [], 'ts': time.time()}
-
-    threading.Thread(target=_do_pre_scan, daemon=True).start()
-
-    # Nettoyage entrees > 120s (sous lock)
-    _now = time.time()
-    with _echeance_pre_scan_lock:
-        stale = [k for k, v in list(_echeance_pre_scan_cache.items())
-                 if (_now - v.get('ts', 0)) > 120]
-        for k in stale:
-            _echeance_pre_scan_cache.pop(k, None)
-
-    return jsonify({"ok": True, "scan_key": scan_key})
+# Refonte N6.3 : route POST /api/echeances/pre_scan SUPPRIMÉE — cache orphelin
+# (jamais relu par le post-send qui re-scanne via Claude). Le seul chemin actif
+# est désormais `/api/echeances/post_send/<message_id>`.
 
 
 @app.route('/api/echeances/purge_archives', methods=['POST'])
@@ -9810,32 +9749,32 @@ def api_echeances_search_relance_mail():
 
 @app.route('/api/echeances/check_sender', methods=['GET'])
 def api_echeances_check_sender():
-    """Vérifie si l'expéditeur d'un mail a des échéances actives liées."""
+    """Vérifie si l'expéditeur d'un mail a des échéances actives liées.
+
+    Refonte N6.3 : matching centralisé dans `_match_for_check_sender`
+    (sémantique byte-identique : ≥ 2 mots communs de longueur ≥ 3).
+    """
     sender = _normalize_email(request.args.get('email', ''))
     mail_subject = request.args.get('subject', '').strip()
     if not sender:
         return jsonify({"echeances": []})
     try:
         all_active = _db.get_echeances(statut='active')
-    except Exception:
+    except Exception as _e:
+        logger.debug(f"[check_sender] get_echeances échoué : {_e}")
         return jsonify({"echeances": []})
-    subject_clean = re.sub(r'^(Re|Fw|Fwd|Tr)\s*:\s*', '', mail_subject, flags=re.IGNORECASE).lower()
-    subject_words = {w for w in subject_clean.split() if len(w) >= 3}
     matched = []
     for ech in all_active:
-        ech_corr = _normalize_email(ech.get('correspondant'))
-        if ech_corr != sender:
+        if _normalize_email(ech.get('correspondant')) != sender:
             continue
-        desc_text = (ech.get('description') or '') + ' ' + (ech.get('original_subject') or '')
-        desc_words = {w.lower() for w in desc_text.split() if len(w) >= 3}
-        common = subject_words & desc_words
-        if len(common) >= 2:
-            matched.append({
-                'id': ech['id'],
-                'description': ech.get('description', ''),
-                'date_echeance': ech.get('date_echeance', ''),
-                'nb_relances': ech.get('nb_relances', 0)
-            })
+        if not _match_for_check_sender(ech, mail_subject):
+            continue
+        matched.append({
+            'id': ech['id'],
+            'description': ech.get('description', ''),
+            'date_echeance': ech.get('date_echeance', ''),
+            'nb_relances': ech.get('nb_relances', 0)
+        })
     return jsonify({"echeances": matched})
 
 
@@ -10206,68 +10145,144 @@ if _UserScopedDict is not None:
 else:
     _classify_momentum = {}
 
-# --- Échéances (pre-filtre heuristique, $0) ----------------------------------
-# Étape 7 multi-tenant — _echeance_pre_scan_cache via UserScopedDict.
-if _UserScopedDict is not None:
-    _echeance_pre_scan_cache = _UserScopedDict('echeance_pre_scan')   # scan_key → {'status', 'echeances', 'ts'}
-else:
-    _echeance_pre_scan_cache = {}
-_echeance_pre_scan_lock = threading.Lock()  # Audit : protège _echeance_pre_scan_cache
-_ECHEANCE_DATE_PATTERNS = re.compile(
-    r'(?:'
-    r'\d{1,2}[/\-\.]\d{1,2}(?:[/\-\.]\d{2,4})?'
-    r'|\d{1,2}\s+(?:janvier|fevrier|f[eé]vrier|mars|avril|mai|juin|juillet|aout|ao[uû]t|septembre|octobre|novembre|decembre|d[eé]cembre)'
-    r'|(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)(?:\s+prochain)?'
-    r'|demain|apres[- ]demain'
-    r'|(?:la\s+)?semaine\s+prochaine|fin\s+de\s+(?:semaine|mois)|debut\s+(?:de\s+)?(?:semaine|mois)'
-    r'|sous\s+\d+[hjms]|sous\s+\d+\s+jours?|dans\s+\d+\s+(?:jours?|semaines?|mois)'
-    r'|(?:T[1-4]|premier|deuxieme|troisieme|quatrieme)\s+trimestre'
-    r')', re.IGNORECASE
-)
-_ECHEANCE_REFERENCE_WORDS = re.compile(
-    r'(?:lors\s+de|suite\s+[aà]|comme\s+convenu|comme\s+[eé]voqu[eé]|en\s+date\s+du|re[cç]u\s+le|envoy[eé]\s+le|sign[eé]\s+le|depuis\s+le)',
-    re.IGNORECASE
-)
-_ECHEANCE_ENGAGEMENT_WORDS = re.compile(
-    r'(?:avant\s+le|d[\'\u2019]ici\s+le|au\s+plus\s+tard|pour\s+le|je\s+reviens|je\s+vous\s+tiens|je\s+vous\s+confirme|merci\s+de|pourriez[- ]vous|pri[eè]re\s+de|rendez[- ]vous|r[eé]union\s+pr[eé]vue|appel\s+pr[eé]vu|date\s+limite|deadline|expire\s+le|pr[eé]vu\s+le|planifi[eé]\s+le|programm[eé]\s+le|sous\s+\d+|dans\s+les\s+meilleurs\s+d[eé]lais)',
-    re.IGNORECASE
-)
-_MAX_PRE_SCAN_CACHE = 30  # limite cache pre-scan echéances
+# Refonte N6.3 : route POST /api/echeances/pre_scan, son cache + lock + regex
+# heuristiques (_ECHEANCE_DATE_PATTERNS, _ECHEANCE_REFERENCE_WORDS,
+# _ECHEANCE_ENGAGEMENT_WORDS), le helper _has_echeance_pattern, la constante
+# _MAX_PRE_SCAN_CACHE et la version locale _trim_dict_cache (FIFO simple) ont
+# été supprimés ensemble. Le cache était orphelin (écrit jamais relu). Le
+# post-send re-scanne via Claude. La version _trim_dict_cache restante (plus
+# haut dans le fichier, trim par ts) est utilisée par _pj_text_cache.
 
 
-def _trim_dict_cache(d, max_size):
-    """Limite la taille d'un dict cache en supprimant les plus anciennes entrees."""
-    if len(d) >= max_size:
-        # Supprimer assez d'entrées pour revenir à max_size - 1 (place pour le nouveau)
-        keys_to_remove = list(d.keys())[:max(1, len(d) - max_size + 1)]
-        for k in keys_to_remove:
-            d.pop(k, None)
+# === Helpers texte partagés (refonte N6.3) ============================
+# Extraits depuis 3 sites de matching divergents pour éliminer le copy-paste
+# inline. Le sous-helper `_extract_significant_words` factorise tokenisation
+# + filtres, les 3 helpers métier (`_match_for_cancel`, `_match_for_check_sender`,
+# `_db.echeance_exists`) gardent leur sémantique propre (seuils, longueurs
+# min, stop-words) — calibrés byte-identique sur les algos d'origine.
+
+_RE_REPLY_PREFIXES = re.compile(r'^(Re|Fw|Fwd|Tr)\s*:\s*', re.IGNORECASE)
 
 
-def _has_echeance_pattern(text):
-    """Pre-filtre heuristique : detecte si un texte contient potentiellement une echeance.
-    Retourne True si une date FUTURE + un contexte d'engagement sont detectes ($0, aucun appel IA)."""
+def _strip_reply_prefixes(subject):
+    """Strip les préfixes Re/Fw/Fwd/Tr en tête de sujet (gardé avec espaces normalisés).
+
+    Centralise les 5 sites qui faisaient ce strip inline (`_auto_cancel_*`,
+    `api_echeances_check_sender`, Bloc F prompt, `/relance`, `_post_send_learning`).
+    Retourne le sujet sans préfixe. Si pas de préfixe, retourne le sujet inchangé.
+    """
+    return _RE_REPLY_PREFIXES.sub('', subject or '')
+
+
+def _extract_significant_words(text, min_len=4):
+    """Extrait l'ensemble des mots lowercase de longueur ≥ min_len.
+
+    Sous-helper unique partagé par `_match_for_cancel` (min_len=4) et
+    `_match_for_check_sender` (min_len=3). Pas de filtrage stop-words ici —
+    les algos de matching réponse↔échéance reposent sur la longueur min
+    seule (un stop-word de 4+ chars comme "pour" est considéré significatif).
+
+    Returns
+    -------
+    set[str]
+        Mots lowercase uniques de longueur ≥ min_len. Vide si text falsy.
+    """
     if not text:
-        return False
-    # Etape 1 : chercher une date
-    if not _ECHEANCE_DATE_PATTERNS.search(text):
-        return False
-    # Etape 2 : verifier que ce n'est pas une reference au passe
-    for date_match in _ECHEANCE_DATE_PATTERNS.finditer(text):
-        start = max(0, date_match.start() - 100)
-        context_before = text[start:date_match.start()]
-        if _ECHEANCE_REFERENCE_WORDS.search(context_before):
-            continue  # Date de reference passee, ignorer
-        # Etape 3 : verifier qu'il y a un contexte d'engagement dans les 200 chars autour
-        context_around = text[max(0, date_match.start()-100):min(len(text), date_match.end()+100)]
-        if _ECHEANCE_ENGAGEMENT_WORDS.search(context_around):
-            return True
-    return False
+        return set()
+    return {w.lower() for w in text.split() if len(w) >= min_len}
+
+
+def _match_for_cancel(echeance, reply_subject):
+    """Match strict réponse↔échéance pour auto-annulation.
+
+    Sémantique : ≥ 3 mots communs (longueur ≥ 4) entre le sujet de la réponse
+    (Re:/Fw: strippés) et le `description + ' ' + original_subject` de l'échéance.
+
+    Le coût d'un faux positif est borné — l'auto-annulation passe en
+    `pending_confirmation`, l'utilisateur valide. Donc seuil strict pour
+    minimiser le bruit côté "À confirmer".
+
+    Returns
+    -------
+    bool
+        True si match confirmé selon les règles ci-dessus.
+    """
+    subject_clean = _strip_reply_prefixes(reply_subject).lower()
+    subject_words = _extract_significant_words(subject_clean, min_len=4)
+    desc_text = (echeance.get('description') or '') + ' ' + (echeance.get('original_subject') or '')
+    desc_words = _extract_significant_words(desc_text, min_len=4)
+    return len(subject_words & desc_words) >= 3
+
+
+def _match_for_check_sender(echeance, subject):
+    """Match permissif "ce contact a-t-il une échéance liée à ce sujet ?".
+
+    Sémantique : ≥ 2 mots communs (longueur ≥ 3) entre le sujet courant et le
+    `description + ' ' + original_subject` de l'échéance.
+
+    Le coût d'un faux positif est minimal — c'est juste un signal UI (badge
+    "ce contact a des échéances actives"). Donc seuil plus permissif.
+
+    Returns
+    -------
+    bool
+        True si match confirmé selon les règles ci-dessus.
+    """
+    subject_clean = _strip_reply_prefixes(subject).lower()
+    subject_words = _extract_significant_words(subject_clean, min_len=3)
+    desc_text = (echeance.get('description') or '') + ' ' + (echeance.get('original_subject') or '')
+    desc_words = _extract_significant_words(desc_text, min_len=3)
+    return len(subject_words & desc_words) >= 2
+
+
+def _parse_db_date(date_str):
+    """Parse une date 'YYYY-MM-DD' stockée en DB (fail-open).
+
+    Centralise les 3 sites de parsing strict `datetime.strptime(s, '%Y-%m-%d')`
+    qui étaient enveloppés dans des try/except verbeux.
+
+    Parameters
+    ----------
+    date_str : str | None
+        Date au format `YYYY-MM-DD` ou valeur falsy.
+
+    Returns
+    -------
+    Optional[datetime]
+        datetime à minuit (jour entier) si parsing OK, None sinon. Le caller
+        choisit `.date()` ou comparaison avec `datetime.now()` selon besoin.
+    """
+    if not date_str:
+        return None
+    try:
+        return datetime.strptime(date_str, '%Y-%m-%d')
+    except (ValueError, TypeError):
+        return None
+
+
+# Mois FR pour formatage humain — utilisé par `/api/echeances/<id>/relance`
+# et tout autre site qui formate une date_echeance en français lisible.
+_MOIS_FR = (
+    'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+    'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
+)
+
+
+def _format_date_fr(dt):
+    """Formate un datetime en 'jour mois année' français (ex: '15 mai 2026')."""
+    if dt is None:
+        return ''
+    return f"{dt.day} {_MOIS_FR[dt.month - 1]} {dt.year}"
 
 
 def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids=None):
     """Annule auto les echeances actives d'un correspondant si le correspondant a REPONDU (mail recu).
-    NE SE DECLENCHE PAS quand l'utilisateur ENVOIE un mail — seulement quand il REPOND a un mail recu."""
+    NE SE DECLENCHE PAS quand l'utilisateur ENVOIE un mail — seulement quand il REPOND a un mail recu.
+
+    Refonte N6.3 : le matching réponse↔échéance est désormais centralisé dans
+    `_match_for_cancel` (sémantique byte-identique avec l'algo précédent : ≥ 3
+    mots communs de longueur ≥ 4).
+    """
     exclude_ids = exclude_ids or set()
     from_email = ''
     if cached_email:
@@ -10277,11 +10292,9 @@ def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids
 
     try:
         all_echeances = _db.get_echeances(statut='active')
-    except Exception:
+    except Exception as _e:
+        logger.debug(f"[auto-cancel] get_echeances échoué : {_e}")
         return
-
-    subject_clean = re.sub(r'^(Re|Fw|Fwd|Tr)\s*:\s*', '', subject or '', flags=re.IGNORECASE).lower()
-    subject_words = {w for w in subject_clean.split() if len(w) >= 4}
 
     for ech in all_echeances:
         if ech.get('id') in exclude_ids:
@@ -10289,19 +10302,19 @@ def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids
         ech_corr = _normalize_email(ech.get('correspondant', ''))
         if ech_corr != from_email:
             continue
-        desc_text = (ech.get('description') or '') + ' ' + (ech.get('original_subject') or '')
-        desc_words = {w.lower() for w in desc_text.split() if len(w) >= 4}
-        common = subject_words & desc_words
-        if len(common) >= 3:
-            try:
-                # Décision 05/05 (gap §10.4) : statut intermédiaire 'pending_confirmation'
-                # au lieu d'annulation silencieuse. L'utilisateur confirme/conserve via
-                # la section "À confirmer" de la page Échéances.
-                _db.update_echeance(ech['id'], {'statut': 'pending_confirmation'})
-                logger.debug(f"[echeances] Pending confirmation: '{(ech.get('description') or '')[:50]}' "
-                      f"(correspondant a repondu, mots communs: {common})")
-            except Exception:
-                pass
+        if not _match_for_cancel(ech, subject):
+            continue
+        try:
+            # Statut intermédiaire 'pending_confirmation' au lieu d'annulation
+            # silencieuse — l'utilisateur valide/conserve via la section
+            # "À confirmer" de la page Échéances.
+            _db.update_echeance(ech['id'], {'statut': 'pending_confirmation'})
+            logger.debug(
+                f"[echeances] Pending confirmation: '{(ech.get('description') or '')[:50]}' "
+                f"(correspondant a repondu)"
+            )
+        except Exception as _e:
+            logger.debug(f"[auto-cancel] update_echeance échoué pour id={ech.get('id')}: {_e}")
 
 
 # --- PJ extraction & upload ---------------------------------------------------
@@ -12267,7 +12280,7 @@ def generate_reply():
         # Bloc A : conversation thread (même sujet, même correspondant)
         if subject:
             try:
-                clean_subj = re.sub(r'^(Re|Fw|Fwd|Tr)\s*:\s*', '', subject, flags=re.IGNORECASE).strip()
+                clean_subj = _strip_reply_prefixes(subject).strip()
                 if clean_subj and len(clean_subj) > 3:
                     a_results = graph.search_emails(
                         f'subject:"{clean_subj}" from:{correspondent} OR to:{correspondent}',
@@ -12282,7 +12295,7 @@ def generate_reply():
         # Contexte C : mails liés au sujet (Mode Standard, sauf importance R)
         if importance_int >= 2 and subject:
             try:
-                clean_subject = re.sub(r'^(Re|Fw|Fwd|Tr)\s*:\s*', '', subject, flags=re.IGNORECASE).strip()
+                clean_subject = _strip_reply_prefixes(subject).strip()
                 if clean_subject and len(clean_subject) > 3:
                     c_results = graph.search_by_subject(clean_subject, max_results=10)
                     keyword_context = _normalize_context_c(c_results, 'subject_search',
@@ -12301,23 +12314,21 @@ def generate_reply():
                     date_e = ech.get('date_echeance', '')
                     desc = ech.get('description', '')
                     etype = ech.get('type', '')
-                    try:
-                        # Off-by-one fix (audit Pass 8) : date_e parsée à 00:00:00,
-                        # datetime.now() à HH:MM en cours → comparaison sur date()
-                        # uniquement pour des jours-calendaires propres.
-                        _date_target = datetime.strptime(date_e, "%Y-%m-%d").date()
-                        days_left = (_date_target - datetime.now().date()).days
+                    # Off-by-one fix : comparaison sur `.date()` uniquement (les
+                    # jours-calendaires propres ; éviter l'effet HH:MM courant).
+                    _dt_target = _parse_db_date(date_e)
+                    if _dt_target is None:
+                        statut_str = ""
+                    else:
+                        days_left = (_dt_target.date() - datetime.now().date()).days
                         if days_left < 0:
                             statut_str = "DEPASSEE"
                         elif days_left == 0:
                             statut_str = "AUJOURD'HUI"
                         elif days_left <= 3:
-                            # Garde anti-pluriel négatif : days_left est >0 ici (branche elif)
                             statut_str = f"dans {days_left} jour{'s' if days_left > 1 else ''}"
                         else:
                             statut_str = f"dans {days_left} jours"
-                    except Exception:
-                        statut_str = ""
                     ech_lines.append(f"- [{etype}] Echeance {date_e} : \"{desc}\" — {statut_str}")
                 ech_block = "\n".join(ech_lines)
                 brief = (brief or "") + f"""
@@ -15110,29 +15121,14 @@ def api_echeance_relance(echeance_id):
         if not ech:
             return jsonify({'status': 'error', 'reason': 'Échéance introuvable'}), 404
 
-        # Calcul du retard
-        days_late = 0
-        try:
-            from datetime import datetime as _dt
-            _ech_date = _dt.strptime(ech['date_echeance'], '%Y-%m-%d')
-            days_late = (_dt.now() - _ech_date).days
-        except Exception:
-            pass
-
-        # Date formatée FR (ex : "15 mai 2026") pour le brief lisible
-        date_formatted = ech.get('date_echeance') or 'non définie'
-        try:
-            from datetime import datetime as _dt
-            _MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
-                     'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
-            _d = _dt.strptime(ech['date_echeance'], '%Y-%m-%d')
-            date_formatted = f"{_d.day} {_MOIS[_d.month - 1]} {_d.year}"
-        except Exception:
-            pass
+        # Calcul retard + date formatée FR via helpers centralisés (N6.3).
+        _ech_dt = _parse_db_date(ech.get('date_echeance'))
+        days_late = (datetime.now() - _ech_dt).days if _ech_dt else 0
+        date_formatted = _format_date_fr(_ech_dt) if _ech_dt else (ech.get('date_echeance') or 'non définie')
 
         # Sujet : strip Re:/Fw: et préfixe avec Re:
         original = (ech.get('original_subject') or ech.get('description') or '').strip()
-        subject_clean = re.sub(r'^(Re|Fw|Fwd|Tr)\s*:\s*', '', original, flags=re.IGNORECASE).strip()
+        subject_clean = _strip_reply_prefixes(original).strip()
         subject = ('Re: ' + subject_clean) if subject_clean else 'Relance'
 
         # Type humanisé pour le brief

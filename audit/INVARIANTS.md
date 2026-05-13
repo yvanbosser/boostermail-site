@@ -533,6 +533,42 @@ Le commis Haiku (`_prewarm_unified_for_mail`) produit P/A/F/J en 1 seul appel `a
 - **Pourquoi** : avant N6.1, ~25 patches accumulés depuis 02/05 (vision Cuisinier+Commis), 4 caches DB séparés sans helper unifié, fallback 3 sub-prewarms en cascade (3× coût Haiku en panne), résumé P+A produit puis jeté (doublonné par `summarize_mails_batch`), commentaire d'ordre des règles mensonger.
 - **Historique** : refonte 12/05/2026 N6.1 (branche `feat/yvan/frontend`).
 
+### I-ECHEANCE-N63-01 : Refonte N6.3 — Échéances scope Python (13/05/2026)
+Refonte du scope échéances dans `V2/app_plugin.py`, `V2/claude_ai.py`, `V2/database.py`. Spec source de vérité : `docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md` (consolidée 05/05/2026). Scope V1 = engagements **sortants only** + auto-annulation déclenchée par réponse reçue.
+
+- **Code mort supprimé** :
+  - Route `POST /api/echeances/pre_scan` (~73 lignes) + cache `_echeance_pre_scan_cache` + lock `_echeance_pre_scan_lock` + cleanup TTL 120s : tous supprimés. Le cache était **orphelin** (écrit jamais relu, le post-send re-scannait via Claude).
+  - 3 regex compilées (`_ECHEANCE_DATE_PATTERNS`, `_ECHEANCE_REFERENCE_WORDS`, `_ECHEANCE_ENGAGEMENT_WORDS`) + helper `_has_echeance_pattern` (pré-filtre heuristique $0) : devenus orphelins, supprimés.
+  - Version locale `_trim_dict_cache` (FIFO simple, app_plugin.py:10238) supprimée. Le caller `_pj_text_cache` (10336) utilise désormais la version définie plus haut (2817, trim par `ts` — adapté car entrées contiennent un `ts`).
+- **Directive `E:` (échéance) du commis Haiku conditionnée** :
+  - `analyze_one_mail_stream` (claude_ai.py:3557) a un nouveau param `scan_echeance: bool = True` (kw-able, backward-compat).
+  - Quand `scan_echeance=False` : section E absente du prompt, parser saute la branche `E:`, le dict end retourne `'echeance': None`. Économie tokens + cohérence prompt côté entrants.
+  - Caller `_prewarm_mail_preview` (mails entrants V1 hors scope échéance) passe `scan_echeance=False`. Caller `api_post_generation_analyze` (brouillons compose sortants, scope V1) garde default `True`. Comportement préservé pour le frontend (`dialog.js:3612` consomme toujours `data.echeance`).
+  - `_db.save_mail_echeance(mid, [])` à `_persist_commis_results:3424` reste OBLIGATOIRE (idempotence anti-boucle BG, validé par `test_n6_1:262`).
+- **3 algos de matching réponse↔échéance factorisés** (sans unification, sémantique préservée byte-identique) :
+  - Sous-helper unique `_extract_significant_words(text, min_len)` (lowercase + filtre len).
+  - `_strip_reply_prefixes(subject)` : centralise les **5 sites** de `re.sub(r'^(Re|Fw|Fwd|Tr)\s*:\s*', ...)` (auto_cancel + check_sender + Bloc F prompt + 2 sites contextes A/C).
+  - `_match_for_cancel(echeance, reply_subject)` : ≥ 3 mots communs len ≥ 4 (algo `_auto_cancel_echeances_on_reply` original byte-identique).
+  - `_match_for_check_sender(echeance, subject)` : ≥ 2 mots communs len ≥ 3 (algo `api_echeances_check_sender` original byte-identique).
+  - `_db.echeance_exists` (algo proportionnel 60% + stop-words FR distinct) **NON migré** — hors scope unification (cf démolisseur D1 : impossible de réduire 3 algos structurellement différents à un score continu sans dérive).
+- **Parsing date centralisé** :
+  - `_parse_db_date(s)` : fail-open Optional[datetime] pour les **3 sites** de `datetime.strptime(s, '%Y-%m-%d')` (Bloc F prompt génération, `/relance` days_late, `/relance` date_formatted).
+  - `_format_date_fr(dt)` : nouveau helper + tuple module-level `_MOIS_FR` (substitue les listes `_MOIS = [...]` inline).
+- **Try/except silencieux loggés** :
+  - 4 méthodes `purge_mail_*` (database.py:2920+) : `except Exception: pass` → `logger.debug` avec contexte (mid).
+  - `_auto_cancel_echeances_on_reply` (2 sites) : idem.
+- **Tests régression N6.3** (`tests/test_n6_3_echeances.py`, 38/38 OK) :
+  - 6 critères helpers (`_strip_reply_prefixes`, `_extract_significant_words`, `_match_for_cancel`, `_match_for_check_sender`, `_parse_db_date`, `_format_date_fr`) avec cas limites.
+  - 3 invariants source : route `pre_scan` absente, helper+regex `_has_echeance_pattern`+`_ECHEANCE_*` supprimés, param `scan_echeance=False` câblé côté entrants.
+- **Tests N6.1 + N6.2 baseline** : 24/24 + 17/17 + 24/24 toujours OK (zéro régression).
+- **Contrats API préservés** : 10 routes échéances actives (URL + méthode + shape JSON inchangés). Seule `/api/echeances/pre_scan` supprimée — aucun consommateur côté `dialog.js`/`popup.js`/`taskpane.js` (vérifié grep).
+- **DB schema inchangé** : table `echeances` (15 colonnes + 2 migrations `nb_relances`/`relances_dates`) + 3 indexes existants. Aucune migration. Note : `rappel_jours` et `extrait_mail` restent "stockés non lus" (gaps connus dans la spec §10, hors scope refonte).
+- **Audit sub-agent démolisseur PRÉ-impl** : a évité 3 erreurs (faux byte-identique sur unification 3 algos, suppression `save_mail_echeance` qui aurait créé boucle infinie, casse `api_post_generation_analyze` côté frontend). Plan ajusté avant écriture code.
+- **Audit sub-agent regard frais PRÉ-commit** : 1 finding mineur traité (commentaire `database.py:439` obsolète mentionnait `_has_echeance_pattern` supprimé — mis à jour pour décrire le nouveau flow).
+- **Historique** : refonte 13/05/2026 N6.3 (branche `feat/yvan/frontend`).
+
+---
+
 ### I-PROMPT-N62-01 : Refonte N6.2 — Blocs du prompt Sonnet propres (12/05/2026)
 Refonte de `_build_prompt` dans `V2/claude_ai.py` selon arbitrages Yvan Q1-Q8 du 12/05/2026.
 - **Q4 Decay confidence** : `_PROMPT_CFG.DECAY_PCT_PER_QUARTER = 0.05` (était `0.10`). Centralisé dans dataclass frozen `_PromptConfig`.
