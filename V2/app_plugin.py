@@ -662,47 +662,168 @@ def _normalize_reply_greeting_closing(contact_profile, correspondent_email, user
     return greeting, closing
 
 
-def _purge_message_caches(message_id):
-    """Purge en cascade tous les caches (RAM + DB) liés à un message_id.
+# === Refonte N7 — Les 5 frigos & règles de nettoyage =====================
+# Source de vérité : `docs/architecture/BoosterMail_Arbre_Decisionnel_v2.pptx`
+# slide 5 + arbitrages Yvan 13/05/2026.
+#
+# Avant N7 : `_purge_message_caches` purgeait les 5 frigos en bloc à chaque
+# event (répondu, classé, archivé, supprimé) → sur-purge systématique vs spec.
+# Après N7 : dispatcher `_purge_frigos_for_action(mid, action)` qui lit la
+# table de vérité `_FRIGO_PURGE_RULES` et purge sélectivement les frigos
+# concernés par l'action utilisateur.
+#
+# Identifiants des 5 frigos (= clés conceptuelles, pas noms de caches RAM
+# directs) :
 
-    Couvre :
-      - `_reply_cache` + `_prefetch_cache` (génération réponse spéculative)
-      - `_mail_preview_cache` (RAM, résumé + classements + échéance pré-cuits)
-      - cache compose post-envoi (1 clé dict via `_compose_cache_key`)
-      - 4 tables DB par-message via `_db.purge_mail_caches` (mail_summaries,
-        mail_classement_cache, mail_pj_classement_cache, mail_echeance_cache)
+FRIGO_REPONSE = 'reply'           # cible : _reply_cache + _prefetch_cache (toujours ensemble)
+FRIGO_RESUME = 'summary'          # cible : DB `mail_summaries` (pas de slot RAM)
+FRIGO_CLASSEMENT_MAIL = 'classement'    # cible : _mail_preview_cache['classement'] + DB `mail_classement_cache`
+FRIGO_CLASSEMENT_PJ = 'pj_classement'   # cible : _mail_preview_cache['pj_classement'] + DB `mail_pj_classement_cache`
+FRIGO_ECHEANCE = 'echeance'       # cible : _mail_preview_cache['echeance'] + DB `mail_echeance_cache`
 
-    Sites visés : `api_classify_email`, `api_send_reply`, `_event_purge_mail`.
-    Best-effort : un cache non encore défini (boot précoce) est ignoré silencieusement.
-    Garantit l'absence de données stale si l'IMID est ré-utilisé.
+ALL_FRIGOS = frozenset([
+    FRIGO_REPONSE, FRIGO_RESUME, FRIGO_CLASSEMENT_MAIL,
+    FRIGO_CLASSEMENT_PJ, FRIGO_ECHEANCE,
+])
+
+# Mapping frigo → table DB associée (pour purge sélective via
+# `_db.purge_mail_caches(mid, tables=...)`).
+_FRIGO_TO_DB_TABLE = {
+    FRIGO_RESUME: 'mail_summaries',
+    FRIGO_CLASSEMENT_MAIL: 'mail_classement_cache',
+    FRIGO_CLASSEMENT_PJ: 'mail_pj_classement_cache',
+    FRIGO_ECHEANCE: 'mail_echeance_cache',
+}
+
+# Mapping frigo → slot dans `_mail_preview_cache` (RAM). FRIGO_REPONSE
+# n'utilise PAS ce cache (a son propre `_reply_cache`). FRIGO_RESUME n'a
+# pas de slot RAM (commit N6.1 a retiré — frontend lit DB directement).
+_FRIGO_TO_RAM_SLOT = {
+    FRIGO_CLASSEMENT_MAIL: 'classement',
+    FRIGO_CLASSEMENT_PJ: 'pj_classement',
+    FRIGO_ECHEANCE: 'echeance',
+}
+
+# Table de vérité spec slide 5 — quels frigos vider selon l'action user.
+# Tranché par Yvan 13/05/2026 :
+#   - répondu  → vide UNIQUEMENT Brouillon + Résumé (garde Classements + Échéance pour la popup post-envoi)
+#   - classé   → vide Brouillon + Classement Mail + Classement PJ (garde Résumé + Échéance — le mail reste lisible dans son nouveau dossier)
+#   - archivé  → vide TOUT (équivalent suppression — l'user en a fini avec ce mail)
+#   - supprimé → vide TOUT
+_FRIGO_PURGE_RULES = {
+    'replied':    frozenset([FRIGO_REPONSE, FRIGO_RESUME]),
+    'classified': frozenset([FRIGO_REPONSE, FRIGO_CLASSEMENT_MAIL, FRIGO_CLASSEMENT_PJ]),
+    'archived':   ALL_FRIGOS,
+    'deleted':    ALL_FRIGOS,
+}
+
+
+def _mail_preview_purge_slot(message_id, slot):
+    """Purge UN slot du `_mail_preview_cache` (granularité fine).
+
+    Refonte N7 : nécessaire pour les actions qui purgent seulement
+    certains frigos (replied → uniquement Brouillon+Résumé). Pop l'entrée
+    entière si tous les slots sont vides après la suppression (évite les
+    dicts orphelins en RAM).
+
+    Best-effort : si `_mail_preview_cache` n'est pas encore défini (boot
+    précoce), no-op silencieux.
+    """
+    if not message_id or not slot:
+        return
+    try:
+        with _mail_preview_lock:
+            entry = _mail_preview_cache.get(message_id)
+            if not entry:
+                return
+            entry.pop(slot, None)
+            if not entry:
+                _mail_preview_cache.pop(message_id, None)
+    except NameError:
+        pass  # cache pas encore défini
+
+
+def _purge_frigos_for_action(message_id, action):
+    """Purge sélectivement les frigos selon l'action utilisateur (table de vérité).
+
+    Refonte N7 : source de vérité unique pour le nettoyage des 5 frigos
+    pré-cuits. Lit `_FRIGO_PURGE_RULES[action]` pour déterminer quels
+    frigos vider, puis applique la purge sur les caches RAM + tables DB
+    correspondants.
+
+    Parameters
+    ----------
+    message_id : str
+        IMID canonique du mail.
+    action : str
+        Une clé de `_FRIGO_PURGE_RULES` ('replied', 'classified',
+        'archived', 'deleted'). Toute autre valeur → no-op silencieux.
+
+    Best-effort : un échec sur un frigo (RAM ou DB) est loggé en debug
+    et n'empêche pas les autres frigos d'être purgés.
     """
     if not message_id:
         return
-    with _reply_lock:
-        _reply_cache.pop(message_id, None)
-    with _prefetch_lock:
-        _prefetch_cache.pop(message_id, None)
-    # Mail preview (résumé pré-calculé)
-    try:
-        with _mail_preview_lock:
-            _mail_preview_cache.pop(message_id, None)
-    except NameError:
-        pass  # cache pas encore défini (purge appelée tôt)
-    # Post-send cache compose (refonte N6.3-bis : 1 clé dict regroupant
-    # body+subject+from_email, plus 3 clés séparées préfixées).
-    try:
-        with _post_send_lock:
-            _compose_key = _compose_cache_key(message_id)
-            _post_send_cache.pop(_compose_key, None)
-            _post_send_timestamps.pop(_compose_key, None)
-    except NameError:
-        pass
-    # Refonte N6.3-bis : 4 méthodes `purge_mail_*` factorisées en
-    # `purge_mail_caches(mid)` qui purge les 4 tables en 1 transaction.
-    try:
-        _db.purge_mail_caches(message_id)
-    except Exception as _e:
-        logger.debug(f"[purge-msg-caches] DB purge err {message_id[:20]} : {_e}")
+    frigos = _FRIGO_PURGE_RULES.get(action)
+    if not frigos:
+        logger.debug(f"[purge_frigos] action inconnue : {action!r}")
+        return
+
+    # Frigo Réponse → _reply_cache + _prefetch_cache (toujours ensemble :
+    # le prefetch alimente le contexte de la spéculation).
+    if FRIGO_REPONSE in frigos:
+        try:
+            with _reply_lock:
+                _reply_cache.pop(message_id, None)
+        except NameError:
+            pass
+        try:
+            with _prefetch_lock:
+                _prefetch_cache.pop(message_id, None)
+        except NameError:
+            pass
+        # Le post_send_cache compose (brouillon envoyé) est purgé en même
+        # temps que le frigo Réponse — le compose est consommé une fois
+        # par /api/echeances/post_send, ensuite plus utile.
+        try:
+            with _post_send_lock:
+                _compose_key = _compose_cache_key(message_id)
+                _post_send_cache.pop(_compose_key, None)
+                _post_send_timestamps.pop(_compose_key, None)
+        except NameError:
+            pass
+
+    # Slots RAM `_mail_preview_cache` (Classement Mail / PJ / Échéance).
+    for frigo, slot in _FRIGO_TO_RAM_SLOT.items():
+        if frigo in frigos:
+            _mail_preview_purge_slot(message_id, slot)
+
+    # Tables DB : purge sélective via la whitelist côté Database.
+    db_tables_to_purge = [
+        _FRIGO_TO_DB_TABLE[f]
+        for f in frigos
+        if f in _FRIGO_TO_DB_TABLE
+    ]
+    if db_tables_to_purge:
+        try:
+            _db.purge_mail_caches(message_id, tables=db_tables_to_purge)
+        except Exception as _e:
+            logger.debug(f"[purge_frigos] DB purge err {message_id[:20]} action={action} : {_e}")
+
+    _reply_metric_inc('purges_event')
+
+
+def _purge_message_caches(message_id):
+    """Purge totale (5 frigos + caches connexes) — wrapper rétro-compat N7.
+
+    Refonte N7 : devient un alias de `_purge_frigos_for_action(mid, 'deleted')`
+    (= purge complète selon la table de vérité). Conservé pour les callers
+    qui n'ont pas encore migré vers le nouveau dispatcher.
+
+    À terme (post N7-bis), les callers devraient appeler directement
+    `_purge_frigos_for_action(mid, <action>)` avec l'action explicite.
+    """
+    _purge_frigos_for_action(message_id, 'deleted')
 
 
 # 29/04 PM audit constantes #29 — status caches en classe (rétro-compat
@@ -1903,7 +2024,7 @@ _prefetch_lock = threading.Lock()
 # Cache prefetch persistant (fichier JSON) — portage proto
 # Sauvegarde à la fermeture, rechargement au démarrage. TTL 48h.
 _PREFETCH_CACHE_PATH = os.path.join(EASYMAIL_DIR, 'prefetch_cache_v2.json')
-_PREFETCH_CACHE_TTL = 48 * 3600  # 48h en secondes
+_PREFETCH_CACHE_TTL = 72 * 3600  # 72h (refonte N7 : aligné spec "RAM 24h" Yvan → 72h pour traverser un week-end)
 
 def _save_prefetch_cache(inbox_ids=None):
     """Sauvegarde le _prefetch_cache V2 sur disque (JSON).
@@ -2289,7 +2410,15 @@ def _normalize_reply_to_html(text):
     # plus haut. Tous les <p> en HTML compact, le margin CSS gère l'espacement.
     return ''.join(html_parts)
 _reply_lock = threading.Lock()
-_REPLY_CACHE_SAFETY_NET = 28 * 24 * 3600  # 4 semaines — safety net anti-fuite
+# Refonte N7 : split TTL safety_net selon `user_modified` (arbitrage Yvan 13/05).
+# - Brouillons user-modifiés (`user_modified=True`) : 15 jours — l'user a investi
+#   du contenu, on protège ses brouillons en cours pour qu'ils survivent à un
+#   week-end de vacances ou une absence prolongée.
+# - Spéculations BG (`user_modified=False`) : 72h — aligné avec les autres frigos
+#   pré-cuits. Si re-cuit nécessaire, cont-spec loop le repérera.
+_REPLY_CACHE_SAFETY_NET_USER = 15 * 24 * 3600   # 15j (brouillons user_modified)
+_REPLY_CACHE_SAFETY_NET_BG = 72 * 3600          # 72h (spéculations BG)
+_REPLY_CACHE_SAFETY_NET = _REPLY_CACHE_SAFETY_NET_USER  # alias rétro-compat (max valeur — utilisé par le multi-tenant cleanup)
 _DRAFTS_CACHE_PATH = os.path.join(EASYMAIL_DIR, 'drafts_v2.json')
 
 # Plan 2 Phase 2.A.9 — Métriques cache (hit rate + purges)
@@ -2333,16 +2462,11 @@ def _reply_cache_metrics_report_loop():
             logger.warning(f"[reply_cache metrics] log error : {e}")
         time.sleep(15 * 60)  # 15 min
 
-# --- Plan 2 Phase 2.C — Post-send caches (portés depuis proto app.py:415-467) ---
-# Cleanup 27/04 PM (audit kit #10) — _echeance_post_send_cache,
-# _classification_post_send_cache et _pj_classification_post_send_cache
-# supprimes : declares mais JAMAIS utilises (ni read ni write) dans tout
-# le code V2. Etaient prevus pour eviter un re-appel Claude post-envoi
-# mais l'implementation a ete remplacee par d'autres mecanismes
-# (mail_preview_cache, classification post-send via DB).
-_MAX_POST_SEND_CACHE = 30
-_MAX_PJ_POST_SEND_CACHE = 30
-_POST_SEND_CACHE_TTL = 5 * 60  # 5 min (constante conservee, peut etre utilisee ailleurs)
+# Refonte N7 : 3 constantes orphelines `_MAX_POST_SEND_CACHE` /
+# `_MAX_PJ_POST_SEND_CACHE` / `_POST_SEND_CACHE_TTL` supprimées (les 3 caches
+# associés `_echeance_post_send_cache` / `_classification_post_send_cache` /
+# `_pj_classification_post_send_cache` ont été supprimés 27/04 audit kit #10
+# — write-only ou jamais utilisés). Le grep confirme 0 caller restant.
 
 # --- Phase 2.A (24/04 plan structurel) — Pré-chauffe BG preview dialog 80%
 # Alimente les cards `infoEcheance` + `infoClassement` du dialog 80% avec
@@ -2794,11 +2918,11 @@ def _extract_imid_from_mail_data(mail_data):
 
     return ''
 
-# O4 (08/05) — TTL frigos courts en RAM porté à 24h (au lieu d'1h).
-# Réduit les hits DB redondants pendant une journée de travail : le user
-# revient sur les mêmes mails plusieurs fois → cache RAM toujours chaud.
-# Idempotence DB garantit zéro perte même si RAM vidée (restart serveur).
-_MAIL_PREVIEW_TTL = 86400  # 24h
+# Refonte N7 (13/05/2026) — TTL frigos courts en RAM porté à 72h (au lieu de 24h).
+# Arbitrage Yvan : 24h ne traverse pas un week-end (mail vendredi soir → lundi
+# 9h = 63h plus tard). 72h offre la marge nécessaire. Idempotence DB garantit
+# zéro perte même si RAM vidée (restart serveur).
+_MAIL_PREVIEW_TTL = 72 * 3600  # 72h (3 jours)
 _MAIL_PREVIEW_MAX = 100
 
 # Cache partagé arborescence Outlook (évite les 429 quand 30+ threads prewarm
@@ -3886,7 +4010,9 @@ def _reply_cache_cohesion_refresh():
     - mails déplacés hors inbox (archive / classify)
     - mails traités via Outlook directement (reply-externe)
 
-    Protège toujours les entrées user_edit (safety net 4 semaines uniquement).
+    Protège toujours les entrées user_modified=True (= drafts user édités).
+    Ces drafts sont gérés exclusivement par `_reply_cache_safety_net_loop`
+    qui applique 15j pour user_modified=True / 72h pour BG (refonte N7).
     """
     try:
         # Collecter l'ensemble des message_id actuellement dans l'inbox.
@@ -4337,12 +4463,21 @@ def _load_reply_cache():
 
 
 def _reply_cache_safety_net_loop():
-    """Thread BG qui purge les entrées > 4 semaines. Scan 1× toutes les 6h.
+    """Thread BG qui purge les entrées trop anciennes. Scan 1× toutes les 6h.
 
-    Étape 7 multi-tenant (29/04/2026) : itère sur tous les sub-caches user.
-    Le critère « > 4 semaines » est universel (timestamp-based), donc s'applique
-    identiquement quel que soit le user.
+    Refonte N7 (13/05/2026) : 2 seuils selon `user_modified` (arbitrage Yvan) :
+      - `user_modified=True`  → 15 jours (brouillons en cours d'édition).
+      - `user_modified=False` → 72h (spéculations BG, alignées avec les autres
+        frigos pré-cuits).
+
+    Étape 7 multi-tenant : itère sur tous les sub-caches user. Le critère
+    timestamp est universel (s'applique identiquement quel que soit le user).
     """
+    def _entry_stale(entry, now):
+        ts = entry.get('timestamp', 0)
+        threshold = _REPLY_CACHE_SAFETY_NET_USER if _is_user_modified(entry) else _REPLY_CACHE_SAFETY_NET_BG
+        return now - ts > threshold
+
     while True:
         try:
             now = time.time()
@@ -4350,21 +4485,22 @@ def _reply_cache_safety_net_loop():
             if _iter_user_caches is not None:
                 with _reply_lock:
                     for user_id, sub_cache in _iter_user_caches('reply'):
-                        stale = [k for k, v in sub_cache.items()
-                                 if now - v.get('timestamp', 0) > _REPLY_CACHE_SAFETY_NET]
+                        stale = [k for k, v in sub_cache.items() if _entry_stale(v, now)]
                         for k in stale:
                             sub_cache.pop(k, None)
                             purged += 1
             else:
                 # Fallback ultra-défensif : ancien comportement direct.
                 with _reply_lock:
-                    stale = [k for k, v in _reply_cache.items()
-                             if now - v.get('timestamp', 0) > _REPLY_CACHE_SAFETY_NET]
+                    stale = [k for k, v in _reply_cache.items() if _entry_stale(v, now)]
                     for k in stale:
                         _reply_cache.pop(k, None)
                         purged += 1
             if purged:
-                logger.info(f"[reply_cache safety net] {purged} entrée(s) > 4 semaines purgée(s)")
+                logger.info(
+                    f"[reply_cache safety net] {purged} entrée(s) purgée(s) "
+                    f"(seuils : user_modified=15j, BG=72h)"
+                )
                 _reply_metric_inc('purges_safety', purged)
                 _persist_reply_cache()
         except Exception as e:
@@ -8423,46 +8559,59 @@ def api_suggest_folder(message_id):
 # qui "termine" un mail côté user.
 
 def _event_purge_mail(message_id, action, reason):
-    """Helper commun pour les hooks delete/archive/reply-external : purge complète.
+    """Helper commun pour les hooks Outlook (delete/archive/reply-external).
 
-    Audit 08/05 fix #7 : appelle aussi _purge_message_caches pour couvrir
-    _mail_preview_cache + _post_send_cache + 4 tables DB. Avant : asymétrie
-    avec api_classify_email/api_send_reply (qui passaient par
-    _purge_message_caches), donc un mail supprimé via Outlook gardait son
-    preview/résumé/classement DB → suggestions stale possibles.
+    Refonte N7 : réduit à un wrapper léger qui orchestre 3 opérations :
+      1. `_db.mark_treated(mid, action)` — marquage applicatif (pas un frigo,
+         sert au filtrage upstream des suggestions classement).
+      2. `_purge_frigos_for_action(mid, action)` — purge des 5 frigos
+         selon la table de vérité spec slide 5.
+      3. `_db.purge_email_cache_for(mid)` — purge du mail BRUT (table
+         email_cache), UNIQUEMENT pour les actions où le mail n'est plus
+         pertinent côté user (deleted / archived / replied_external).
+         Pour 'replied' (= user a répondu mais le mail reste dans l'inbox),
+         on garde le mail brut accessible.
+
+    Persistance disque `_reply_cache` rejouée si une entrée a été purgée
+    (évite zombies au restart).
     """
     if not message_id:
         return
+    # 1. Marquage applicatif (filtrage upstream futur)
     try:
         _db.mark_treated(message_id, action=action)
     except Exception as e:
-        # Fix audit 22/04 : ne pas avaler silencieusement — mark_treated rate
-        # = le mail sera re-suggéré, user confusion. Log pour diagnostic.
-        logger.warning(f"[event-purge] mark_treated échec msg={message_id[:20]} "
-                       f"action={action} : {e}")
-    with _reply_lock:
-        # Refactor 23/04 : helper _is_user_modified() (était source=='user_edit')
-        existed = message_id in _reply_cache
-        _reply_cache.pop(message_id, None)
-    with _prefetch_lock:
-        _prefetch_cache.pop(message_id, None)
+        logger.warning(
+            f"[event-purge] mark_treated échec msg={message_id[:20]} "
+            f"action={action} : {e}"
+        )
+    # 2. Track si une entrée _reply_cache existait avant purge (pour
+    # déclencher la persistance disque si elle disparaît).
     try:
-        _db.purge_email_cache_for(message_id)
-    except Exception as e:
-        logger.debug(f"[event-purge] purge_email_cache_for échec msg={message_id[:20]} : {e}")
-    # Audit 08/05 fix #7 : étendre à _mail_preview_cache + _post_send_cache
-    # + 4 tables DB. _purge_message_caches est idempotent et best-effort.
-    try:
-        _purge_message_caches(message_id)
-    except Exception as e:
-        logger.debug(f"[event-purge] _purge_message_caches échec : {e}")
-    # Fix 23/04 (nettoyage cohérent 2 sources) : persister le disque dès qu'une
-    # entrée du cache est purgée, peu importe son type. Avant : persist seulement
-    # si user_edit → les bg_speculation purgées restaient sur disque jusqu'au
-    # prochain _persist_reply_cache déclenché ailleurs → zombies au restart.
+        with _reply_lock:
+            existed = message_id in _reply_cache
+    except NameError:
+        existed = False
+    # 3. Mapping action Outlook → action canonique de la table de vérité.
+    _action_canonical = {
+        'replied': 'replied',
+        'replied_external': 'replied',  # même sémantique que 'replied'
+        'classified': 'classified',
+        'archived': 'archived',
+        'deleted': 'deleted',
+    }.get(action, 'deleted')
+    _purge_frigos_for_action(message_id, _action_canonical)
+    # 4. Purge mail BRUT (email_cache) uniquement si l'user en a fini.
+    if _action_canonical in ('deleted', 'archived') or action == 'replied_external':
+        try:
+            _db.purge_email_cache_for(message_id)
+        except Exception as e:
+            logger.debug(
+                f"[event-purge] purge_email_cache_for échec msg={message_id[:20]} : {e}"
+            )
+    # 5. Persistance disque _reply_cache si entrée purgée.
     if existed:
         _spawn_bg(_persist_reply_cache)
-    _reply_metric_inc('purges_event')
     logger.info(f"[event-purge] {action} {message_id[:20]} ({reason})")
 
 
@@ -8623,9 +8772,14 @@ def api_classify_email():
                 'ts': time.time(),
             })
 
-        # Nettoyer les caches (mail classé = traité, plus besoin du prefetch ni de la réponse pré-générée)
-        _purge_message_caches(message_id)
-        # Purger le cache DB email_cache pour ce mail
+        # Refonte N7 : action='classified' selon table de vérité spec slide 5.
+        # Vide Brouillon + Classement Mail + Classement PJ ; GARDE Résumé +
+        # Échéance (mail reste consultable dans son nouveau dossier).
+        _purge_frigos_for_action(message_id, 'classified')
+        # NOTE : `purge_email_cache_for(new_id)` est un BUG LATENT documenté
+        # dans PLUS_TARD_VF.md item #28 — `new_id` est un Graph Entry ID
+        # post-déplacement, pas un IMID. Le DELETE ne fait rien (silencieux).
+        # Conservé tel quel hors scope N7 strict.
         try:
             _db.purge_email_cache_for(new_id)
         except Exception:
@@ -8736,8 +8890,9 @@ def api_classify_email_manual():
                 'ts': time.time(),
             })
 
-        # 5) Nettoyer les caches
-        _purge_message_caches(message_id)
+        # 5) Refonte N7 : action='classified' (cf table de vérité spec slide 5).
+        _purge_frigos_for_action(message_id, 'classified')
+        # Bug latent purge_email_cache_for(new_id) — cf PLUS_TARD_VF.md #28.
         try:
             _db.purge_email_cache_for(new_id)
         except Exception:
@@ -13064,10 +13219,13 @@ def send_reply():
             _extract_learned_template_post_send(message_id, raw_body, mode)
         except Exception as _e:
             logger.debug(f"[learned-tpl] hook error : {_e}")
-        # Nettoyer les deux caches (mail envoyé = traité)
+        # Refonte N7 : action='replied' selon table de vérité spec slide 5.
+        # Vide Brouillon + Résumé ; GARDE Classement Mail + Classement PJ +
+        # Échéance pour la popup post-envoi (cf arbitrage Yvan).
+        # `_reply_metric_inc('purges_event')` est désormais centralisé dans
+        # `_purge_frigos_for_action`, pas besoin de l'appeler ici.
         if message_id:
-            _purge_message_caches(message_id)
-            _reply_metric_inc('purges_event')
+            _purge_frigos_for_action(message_id, 'replied')
         return jsonify(result)
     except GraphAuthError:
         return jsonify({"error": "Token expiré", "auth_required": True}), 401

@@ -1003,6 +1003,52 @@ partageront un mail (newsletter commune, mailing-list, alias générique).
 
 ---
 
+### 28. Bug latent `api_classify_email` purge `email_cache` avec mauvaise clé — N7 13/05/2026
+
+**Origine** : Audit démolisseur PRÉ-impl N7 (refonte des 5 frigos & nettoyage), point B.1.
+
+**Symptôme** : `app_plugin.py:8627-8632` — après un classement de mail, le code appelle `_db.purge_email_cache_for(new_id)` où `new_id` est l'**Entry ID Graph retourné par le déplacement** (Outlook donne un nouvel ID au mail dans son nouveau dossier). Or la table `email_cache` est **keyée sur l'IMID** (`internet_message_id`, identifiant universel du mail) depuis la refonte N2 (11/05/2026).
+
+**Conséquence** : `purge_email_cache_for(new_id)` cherche un mail avec `imid = new_id`, qui n'existe pas (puisque `new_id` est un Graph Entry ID, pas un IMID). **Le DELETE ne fait rien.** L'entrée stale du mail brut reste en base jusqu'au TTL 730 jours.
+
+**Impact** : croissance lente de `email_cache` avec entrées orphelines après chaque classement utilisateur. Pas critique en mono-user (purge TTL 2 ans s'en occupe) mais devient un problème de coût stockage en SaaS multi-tenant à grande échelle.
+
+**Solution** : passer `message_id` (l'IMID d'origine, disponible dans le contexte de la route) à `purge_email_cache_for(...)` au lieu de `new_id`.
+
+**Effort estimé** : ~10 min (1 ligne à corriger + 1 test ciblé).
+
+**Priorité** : 🟡 moyenne — pas urgent (TTL 2 ans), mais à corriger pour ne pas alimenter la dette stockage.
+
+**Pourquoi pas traité dans N7** : N7 = refonte des 5 frigos pré-cuits (slide 5 arbre V2). `email_cache` est le mail brut, scope adjacent. Ne pas mélanger 2 refontes dans 1 commit (leçon N6.3 mensonge métriques).
+
+---
+
+### 27. Purge intelligente de la table `threads` (mémoire long-terme apprentissage) — N7 13/05/2026
+
+**Origine** : Question Yvan pendant N7. La table `threads` stocke chaque mail envoyé + reçu par contact pour nourrir le prompt Sonnet (bloc B "exemples à reproduire"). Elle n'est **JAMAIS purgée** automatiquement — uniquement par `purge_learning_data` (wipe explicite RGPD).
+
+**Calcul du volume** :
+- ~3 KB par entrée (subject + body tronqué 3000 chars + métadonnées)
+- 1 user actif = ~40 entrées/jour → ~44 MB/an → ~440 MB sur 10 ans
+- SaaS 1 000 users actifs → **~440 GB sur 10 ans**
+
+**Problème** : croissance illimitée. La plupart des entrées sont **dormantes** (le bloc B lit uniquement les **15 derniers** échanges par contact). Et `contact_profiles.profile_text` capture déjà le style appris à partir d'un échantillon large via `analyze_contact_profile`. Donc l'historique très ancien est **redondant**.
+
+**Solution propre prévue (N12-bis ou équivalent)** :
+1. **Rolling window** : garder les 30 derniers échanges par contact (= double de `limit=15` du bloc B pour avoir une marge).
+2. **Protection nouveaux contacts** : garder TOUT pour les contacts récents (<6 mois) — le profil n'est pas encore stable.
+3. **Purge des contacts dormants** : >24 mois sans nouvel échange → leur `contact_profiles.profile_text` capture déjà l'essentiel.
+
+**Gain attendu** : passage de "croissance illimitée" à un palier stable autour de **~50-100 MB par user** une fois l'historique mature.
+
+**Pourquoi pas traité dans N7** : N7 = refonte des 5 frigos pré-cuits (pré-calculs Claude par-mail-reçu, slide 5 arbre V2). La purge intelligente de `threads` touche l'apprentissage long-terme (table indépendante, sémantique différente). C'est un sujet large qui touche aussi `contact_profiles`, `style_corrections`. À traiter dans un futur **N12-bis** cohérent avec le niveau 12 "Gestion contacts — création + purge 24 mois".
+
+**Priorité** : 🟡 moyenne — pas critique tant que la beta est mono-user (Yvan), devient critique avant scaling SaaS au-delà de ~100 users.
+
+**Invariant en place** : `I-THREADS-N7-01` ajouté dans INVARIANTS.md — la table `threads` n'est purgée par AUCUN event mail (replied/classified/archived/deleted) ni par TTL. Cohérence préservée par N7.
+
+---
+
 ### 26. Onboarding multilingue : déclaration langue user + scoring `_MAIL_TYPES` adapté — N6.2 12/05/2026
 
 **Origine** : Refonte Niveau 6.2 (« Blocs du prompt Sonnet ») 12/05/2026, décision Yvan Q7.

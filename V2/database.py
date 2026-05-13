@@ -2905,20 +2905,43 @@ class Database:
         'mail_echeance_cache',
     )
 
-    def purge_mail_caches(self, message_id):
-        """Purge en une transaction les 4 caches DB par-message pour message_id.
+    def purge_mail_caches(self, message_id, tables=None):
+        """Purge sélectivement (ou totalement) les caches DB par-message pour `message_id`.
 
-        Refonte N6.3-bis : remplace 4 méthodes individuelles quasi-identiques.
-        Source de vérité unique via _PURGEABLE_MAIL_TABLES (whitelist =
-        verrou anti SQL-injection sur l identifiant table non-bindable).
-        Best-effort : un échec sur une table est loggé et n empêche pas les
+        Refonte N6.3-bis : remplace 4 méthodes individuelles quasi-identiques par
+        un dispatcher whitelist (verrou anti SQL-injection sur l'identifiant
+        table non-bindable).
+
+        Refonte N7 : ajout du param `tables` pour purge **sélective** selon la
+        table de vérité spec slide 5 (le frigo Résumé n'est PAS purgé sur
+        action='classified', etc.). `tables=None` conserve le comportement
+        legacy (purge complète = compatible avec tous les callers existants).
+
+        Parameters
+        ----------
+        message_id : str
+            IMID canonique du mail (clé des 4 tables `mail_*`).
+        tables : Iterable[str] | None
+            Sous-ensemble de `_PURGEABLE_MAIL_TABLES` à purger. Si None,
+            purge complète (rétro-compat). Toute table non-whitelistée est
+            ignorée (verrou anti SQL-injection).
+
+        Best-effort : un échec sur une table est loggé et n'empêche pas les
         autres. Commit unique en fin pour atomicité.
         """
         if not message_id:
             return
+        if tables is None:
+            tables_to_purge = self._PURGEABLE_MAIL_TABLES
+        else:
+            # Filtre via whitelist — toute table inconnue est silencieusement ignorée
+            # (sécurité défensive : pas d'interpolation SQL sur entrée arbitraire).
+            tables_to_purge = tuple(t for t in tables if t in self._PURGEABLE_MAIL_TABLES)
+            if not tables_to_purge:
+                return
         uid = self._uid()
         conn = self._conn()
-        for table in self._PURGEABLE_MAIL_TABLES:
+        for table in tables_to_purge:
             try:
                 conn.execute(
                     f"DELETE FROM {table} WHERE message_id = ? AND user_id = ?",

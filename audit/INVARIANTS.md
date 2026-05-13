@@ -533,6 +533,50 @@ Le commis Haiku (`_prewarm_unified_for_mail`) produit P/A/F/J en 1 seul appel `a
 - **Pourquoi** : avant N6.1, ~25 patches accumulés depuis 02/05 (vision Cuisinier+Commis), 4 caches DB séparés sans helper unifié, fallback 3 sub-prewarms en cascade (3× coût Haiku en panne), résumé P+A produit puis jeté (doublonné par `summarize_mails_batch`), commentaire d'ordre des règles mensonger.
 - **Historique** : refonte 12/05/2026 N6.1 (branche `feat/yvan/frontend`).
 
+### I-FRIGO-N7-01 : Refonte N7 — Les 5 frigos & règles de nettoyage (13/05/2026)
+Refonte du système de purge cache multi-niveau (RAM + DB) selon spec slide 5 de l'arbre décisionnel V2 + arbitrages Yvan 13/05/2026 (4 questions produit tranchées).
+
+- **Source de vérité unique** : constante `_FRIGO_PURGE_RULES` dans `V2/app_plugin.py` qui mappe `action → set de frigos à vider`. Une seule définition pour tout le système.
+- **Dispatcher unique** : `_purge_frigos_for_action(mid, action)` remplace les 11 sites de purge dispersés. Best-effort par-frigo (un échec n'empêche pas les autres).
+- **Table de vérité** appliquée strictement (tranchée par Yvan) :
+  - `replied`    → vide Brouillon + Résumé, garde Classement Mail + Classement PJ + Échéance (popup post-envoi)
+  - `classified` → vide Brouillon + Classement Mail + Classement PJ, garde Résumé + Échéance
+  - `archived`   → vide les 5 frigos
+  - `deleted`    → vide les 5 frigos
+- **TTL alignement** (RAM) :
+  - `_MAIL_PREVIEW_TTL = 72*3600` (72h) — avant : 24h. Couvre un week-end.
+  - `_PREFETCH_CACHE_TTL = 72*3600` (72h) — avant : 48h.
+  - `_REPLY_CACHE_SAFETY_NET_USER = 15*24*3600` (15j brouillons `user_modified=True`).
+  - `_REPLY_CACHE_SAFETY_NET_BG = 72*3600` (72h spéculations BG).
+  - `_reply_cache_safety_net_loop` branche sur `_is_user_modified(entry)` pour appliquer le seuil correct.
+- **`_event_purge_mail` réduit en wrapper léger** : `mark_treated` + `_purge_frigos_for_action` + (conditionnel pour `deleted`/`archived`/`replied_external`) `purge_email_cache_for` (mail brut).
+- **`_mail_preview_purge_slot(mid, slot)`** : granularité fine (pop slot + pop entrée si tous slots vidés, anti-orphelin RAM).
+- **`_db.purge_mail_caches(mid, tables=None)`** étendu : param `tables` permet purge sélective via whitelist `_PURGEABLE_MAIL_TABLES` (verrou anti SQL-injection). `tables=None` = purge complète rétro-compat.
+- **Code mort supprimé** : 3 constantes `_MAX_POST_SEND_CACHE` / `_MAX_PJ_POST_SEND_CACHE` / `_POST_SEND_CACHE_TTL` orphelines (les 3 caches associés avaient été supprimés 27/04 audit kit #10, les constantes restaient).
+- **Tests** (`tests/test_n7_frigos.py`, 66/66) :
+  - 4× critère table de vérité (replied/classified/archived/deleted × 9 frigos chacun)
+  - Idempotence purge × 2 + action inconnue = no-op
+  - Granularité `_mail_preview_purge_slot` (pop slot + pop entrée si vidée)
+  - TTL alignement (5 constantes vérifiées)
+  - Invariants : helpers présents, `_FRIGO_PURGE_RULES` matches spec, 3 constantes orphelines absentes
+  - Tests avec **VRAIS writers** (`_set_mail_preview`, `_db.save_*`, écriture directe `_reply_cache`) + **VRAIS readers** (`_db.has_*`, lecture RAM directe). Pas de mock miroir-de-l'implémentation.
+- **Patches résiduels documentés (transparence, NON traités dans N7)** :
+  - PLUS_TARD_VF #27 : purge intelligente `threads` (croissance illimitée long-terme, ~440 GB sur 10 ans à 1000 users SaaS). À traiter dans futur **N12-bis** (cohérent avec niveau 12 "Gestion contacts").
+  - PLUS_TARD_VF #28 : bug latent `api_classify_email` purge `email_cache` avec `new_id` (Graph Entry ID post-déplacement) au lieu de `message_id` (IMID). Le DELETE silencieux ne nettoie rien. Hors scope N7 strict, à fixer en ~10 min.
+- **Historique** : refonte 13/05/2026 N7 (branche `feat/yvan/frontend`).
+
+### I-THREADS-N7-01 : Table `threads` (mémoire long-terme apprentissage) — invariants de purge
+La table `threads` (stockage par contact des mails envoyés + reçus pour nourrir le bloc B du prompt Sonnet) :
+- **N'est purgée par AUCUN event mail** (replied / classified / archived / deleted). Confirmé par audit cartographique N7.
+- **N'est purgée par AUCUN TTL automatique** (pas de cron `purge_threads_*`, pas de cascade depuis `purge_old_emails`).
+- **Effacée uniquement** par `purge_learning_data()` (database.py:2347) = action RGPD explicite "remettre BoosterMail à zéro pour cet utilisateur".
+- **Lecture** : `get_threads_for_correspondent(email, limit=15)` (bloc B prompt Sonnet — refonte N6.2).
+- **Écriture** : `save_to_thread(direction='sent'|'received', ...)` appelé par `/send_reply` après envoi.
+- **Test** : `grep "DELETE FROM threads" V2/` → 1 seul hit (`database.py:2351` dans `purge_learning_data`).
+- **Pourquoi** : c'est la source de vérité de l'apprentissage du style par contact. Le bloc B (exemples à reproduire) en dépend. Toute purge automatique = perte de qualité du ghost-writer.
+- **Limite identifiée** : croissance illimitée (~44 MB/an/user actif). Documenté PLUS_TARD_VF #27 pour traitement futur (purge rolling-window par contact + purge contacts dormants), hors scope N7.
+- **Historique** : invariant formalisé 13/05/2026 N7 suite à question Yvan pendant la refonte.
+
 ### I-ECHEANCE-N63bis-01 : Refonte N6.3-bis — Finition scope Échéances (13/05/2026)
 Suite de N6.3 après audit rétrospectif qui a démasqué : "5 patches résolus sur 25, métriques du commit message inexactes". Cette refonte clôt les 20 patches résiduels identifiés.
 
