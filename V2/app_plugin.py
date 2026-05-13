@@ -7005,7 +7005,7 @@ def _start_speculative(mail_data):
                 subject=subject,
                 contact_profile=contact_profile,
                 recent_corrections=recent_corrections,
-                learning_priorities=[],
+                # Refonte N6.2 — `learning_priorities` retiré (Q5 Yvan : dead code).
             )
             # Audit 08/05 fix doublons — décision Yvan : « Claude partout ».
             # Avant : postfix "NE PAS inclure d'ouverture/clôture/signature"
@@ -10590,13 +10590,8 @@ def _check_git_updates():
 _sends_since_recal = 0
 _has_correction_since_recal = False
 _recal_lock = threading.Lock()          # protège les compteurs de recalibrage
-# Étape 7 multi-tenant — _learning_priorities_cache via UserScopedDict.
-# One-shot dict {time, value} pour cache 5min des priorités d'apprentissage.
-# Sub-cache user vide initialement → utiliser .get('time', 0) côté lecture.
-if _UserScopedDict is not None:
-    _learning_priorities_cache = _UserScopedDict('learning_priorities')
-else:
-    _learning_priorities_cache = {'time': 0, 'value': None}
+# Refonte N6.2 (12/05/2026) — `_learning_priorities_cache` supprimé (Q5 Yvan :
+# le bloc E du prompt n'était jamais alimenté en production, dead code éliminé).
 
 # --- Profils contacts ---------------------------------------------------------
 _new_profile_toast = None
@@ -12147,10 +12142,7 @@ def generate_reply():
     keyword_context = []
     contact_profile = None
     recent_corrections = []
-    try:
-        learning_priorities = _get_cached_learning_priorities() or []
-    except Exception:
-        learning_priorities = []
+    # Refonte N6.2 (12/05/2026) — `learning_priorities` retiré (Q5 Yvan : dead code).
 
     graph = get_graph()
 
@@ -12364,7 +12356,7 @@ INSTRUCTIONS ECHEANCES :
                 subject=subject,
                 contact_profile=contact_profile,
                 recent_corrections=recent_corrections,
-                learning_priorities=learning_priorities,
+                # Refonte N6.2 — `learning_priorities` retiré (Q5 Yvan : dead code).
             )
             # Ajouter le contexte PJ si présent — bloc analyse 5 etapes
             if pj_context:
@@ -14095,52 +14087,10 @@ Applique les regles de ce niveau pour la regeneration des sections :
         logger.error(f"[recalibrage] Erreur: {e}")
 
 
-def _get_cached_learning_priorities():
-    """Version cachée (5 min) des priorités d'apprentissage."""
-    # Étape 7 multi-tenant — utilise .get() avec default car sub-cache
-    # user-scoped initialement vide (pas de pré-init {'time': 0, 'value': None}).
-    if time.time() - _learning_priorities_cache.get('time', 0) < 300:
-        return _learning_priorities_cache.get('value')
-    result = _get_learning_priorities()
-    _learning_priorities_cache['value'] = result
-    _learning_priorities_cache['time'] = time.time()
-    return result
-
-
-def _get_learning_priorities():
-    """Identifie les axes faibles du score et génère des consignes d'amélioration."""
-    priorities = []
-
-    style_path = os.path.join(EASYMAIL_DIR, "style_profile.txt")
-    style_exists = os.path.exists(style_path)
-    corrections_count = _db.count_corrections()
-    profiles = _db.get_all_contact_profiles()
-    metrics = _db.get_metrics_summary()
-    total_mails_sent = metrics.get('total_mails', 0)
-    direct_rate = metrics.get('direct_send_rate', 0)
-
-    if not style_exists:
-        priorities.append("URGENT : Aucun profil de style — utilise un ton professionnel generique")
-    elif corrections_count < 5:
-        priorities.append("Peu de retour utilisateur — reste prudent sur le style, reste naturel et concis")
-
-    if len(profiles) < 3:
-        priorities.append("Peu de correspondants connus — analyse bien l'historique B pour deduire registre et ton")
-
-    if total_mails_sent >= 5 and direct_rate < 50:
-        priorities.append(f"Taux d'envoi direct faible ({direct_rate}%) — sois plus fidele au style naturel et plus concis.")
-    elif total_mails_sent >= 10 and direct_rate < 70:
-        priorities.append(f"Taux d'envoi direct moyen ({direct_rate}%) — continue a affiner ton/longueur")
-
-    if corrections_count >= 3:
-        recent = _db.get_recent_corrections(limit=5)
-        if recent:
-            all_texts = ' '.join(r.get('sent', '') for r in recent).lower()
-            proposed_texts = ' '.join(r.get('proposed', '') for r in recent).lower()
-            if len(all_texts) < len(proposed_texts) * 0.7:
-                priorities.append("L'utilisateur raccourcit souvent tes propositions — sois plus concis et direct")
-
-    return priorities if priorities else None
+# Refonte N6.2 (12/05/2026) — `_get_cached_learning_priorities` et
+# `_get_learning_priorities` supprimés (Q5 Yvan : bloc E du prompt jamais
+# alimenté en pratique, le résultat n'était jamais consommé par Claude).
+# Historique git si réactivation (commit pré-N6.2).
 
 
 # =============================================================================

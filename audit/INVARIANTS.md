@@ -533,6 +533,23 @@ Le commis Haiku (`_prewarm_unified_for_mail`) produit P/A/F/J en 1 seul appel `a
 - **Pourquoi** : avant N6.1, ~25 patches accumulés depuis 02/05 (vision Cuisinier+Commis), 4 caches DB séparés sans helper unifié, fallback 3 sub-prewarms en cascade (3× coût Haiku en panne), résumé P+A produit puis jeté (doublonné par `summarize_mails_batch`), commentaire d'ordre des règles mensonger.
 - **Historique** : refonte 12/05/2026 N6.1 (branche `feat/yvan/frontend`).
 
+### I-PROMPT-N62-01 : Refonte N6.2 — Blocs du prompt Sonnet propres (12/05/2026)
+Refonte de `_build_prompt` dans `V2/claude_ai.py` selon arbitrages Yvan Q1-Q8 du 12/05/2026.
+- **Q4 Decay confidence** : `_PROMPT_CFG.DECAY_PCT_PER_QUARTER = 0.05` (était `0.10`). Centralisé dans dataclass frozen `_PromptConfig`.
+- **Q5 Bloc E supprimé** : zéro `## E —` dans `_build_prompt`. Paramètre `learning_priorities` retiré de la signature. Fonctions `_get_cached_learning_priorities` + `_get_learning_priorities` + cache `_learning_priorities_cache` supprimés côté `app_plugin.py`. Callers `_start_speculative:7004` et `/generate_reply:12363` migrés.
+- **Q6 Bloc G code mort** : audit B2 a confirmé qu'aucun caller actif n'injectait `[CONTENU DES PIÈCES JOINTES` dans `brief`. Le parsing de la chaîne magique a été supprimé de `_build_prompt`. Le vrai chemin PJ actif est `pj_context` concaténé EN AVAL (app_plugin.py:12370, hors scope `_build_prompt`).
+- **Q7 `_MAIL_TYPES` mots-clés FR seulement** : sortis en constante module-level `_MAIL_TYPES_FR` + helper `_get_mail_types_for_user(user_language=None)` retournant `_MAIL_TYPES_FR` par défaut. Architecture prête pour onboarding multilingue futur (cf PLUS_TARD_VF.md #26).
+- **B3 fix audit** : `_SECURITY_GUARD` corrigé pour lister `A, B, C, D, D2` (D ajouté car oublié à l'origine + E retiré). `_SECURITY_REMINDER` aligné.
+- **Helper `_parse_flexible_datetime`** : centralise le parsing ISO 8601 / ISO sans tz / SQLite legacy. Fail-open (None si invalide).
+- **Tests** (`tests/test_n6_2_blocs_prompt.py`, 17/17) :
+  - `_PROMPT_CFG.TIER_FULL = 70`, `DECAY_PCT_PER_QUARTER = 0.05`
+  - 6 cas `_parse_flexible_datetime`
+  - `_MAIL_TYPES_FR` FR seulement (pas de 'reminder' EN)
+  - 0 `## E —` dans `_build_prompt`
+  - 0 param `learning_priorities` dans signature
+  - `_SECURITY_GUARD` mentionne `A, B, C, D, D2` correctement
+- **Historique** : refonte 12/05/2026 N6.2 (branche `feat/yvan/frontend`).
+
 ### I-DB-CONN-01 : Une seule Database() instance par db_path par TID (latent fix 12/05/2026)
 Le tracker class-level `Database._all_conns[tid] = conn` est keyé par thread_id seul. **Ne JAMAIS instancier plusieurs `Database(db_path)` simultanément dans le même thread** : la seconde instance, via `_conn()`, kicke et ferme la conn de la première (assumée zombie), provoquant `ProgrammingError: Cannot operate on a closed database` downstream.
 - **Règle pour helpers utility (BG threads, atexit, scripts CLI)** : si on a besoin d'une SELECT one-shot sans contexte Flask, utiliser `sqlite3.connect(db_path)` raw + close — pas `Database()`.

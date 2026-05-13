@@ -1003,6 +1003,30 @@ partageront un mail (newsletter commune, mailing-list, alias générique).
 
 ---
 
+### 26. Onboarding multilingue : déclaration langue user + scoring `_MAIL_TYPES` adapté — N6.2 12/05/2026
+
+**Origine** : Refonte Niveau 6.2 (« Blocs du prompt Sonnet ») 12/05/2026, décision Yvan Q7.
+
+**Contexte** : le scoring de similarité par type de mail (bloc B du prompt Sonnet) utilise une liste hardcodée de 8 catégories × ~10 mots-clés (relance, confirmation, demande, juridique, facturation, transmission, mécontentement, planification). Aujourd'hui : **mots-clés FR seulement**.
+
+**Risque actuel** : un user anglophone n'aura aucune catégorisation de son mail entrant → le bloc B n'aura pas d'« exemple le plus proche » étoilé → Claude ne pourra pas copier le style "relance EN" vs "confirmation EN" de l'user. Qualité de réponse Sonnet dégradée pour anglophones.
+
+**Solution prévue à l'onboarding BoosterMail** :
+1. À l'inscription / onboarding, l'user déclare sa langue principale (FR / EN / autre)
+2. Le setting `user_language` est stocké en DB (table `users` ou `settings`)
+3. Le helper `_get_mail_types_for_user(user_language=...)` dans `V2/claude_ai.py` retourne la liste adaptée à la langue
+
+**Préparation faite N6.2** :
+- `_MAIL_TYPES` sorti en constante module-level `_MAIL_TYPES_FR` (1 source de vérité FR)
+- Helper `_get_mail_types_for_user(user_language=None)` existe déjà, retourne `_MAIL_TYPES_FR` par défaut
+- Signature préservée : le jour où on active la version multilingue, c'est ~5 lignes à modifier dans le helper (ajout `_MAIL_TYPES_EN` + dispatch sur `user_language`)
+
+**Effort estimé** : ~30 min (créer `_MAIL_TYPES_EN` avec traduction + dispatch dans helper + tests + UI onboarding pour collecter la langue).
+
+**Priorité** : 🟡 moyenne — pas urgent en beta mono-user Yvan (FR), à activer AVANT premier client EN.
+
+---
+
 ### 24. Limitation IDN (domaines unicode) dans `_extract_emails_from_field` — N5 12/05/2026
 
 **Origine** : Refonte Niveau 5 (« Filtre 2 VIP/Partiel ») 12/05/2026. La regex `_EMAIL_EXTRACT_RE` qui parse les emails depuis les champs to/cc Graph est en ASCII strict (`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`).
