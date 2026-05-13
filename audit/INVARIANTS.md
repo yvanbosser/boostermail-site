@@ -588,10 +588,24 @@ Refonte de `_build_prompt` dans `V2/claude_ai.py` selon arbitrages Yvan Q1-Q8 du
 - **Tests régression phase 3** :
   - `tests/test_n6_2_blocs_prompt.py` : 17/17 OK (invariant E re-renforcé sur 12 helpers).
   - `tests/test_n6_2_prompt_snapshots.py` : **20 snapshots** byte-identique. `_FakeAssistant` accepte `user_name` override par scénario (kwarg `_user_name` extrait avant appel `_build_prompt`).
-- **Historique** : refonte 12-13/05/2026 N6.2 (branche `feat/yvan/frontend`), 3 commits :
+- **Phase 4 audit DRY final (13/05/2026)** — sub-agent ultra-sévère a remonté 5 MAJEURS et 15 MINEURS post-phase-3. Tous traités dans le même commit :
+  - **DRY date parsing** : `_parse_flexible_datetime` ÉTENDU (accepte epoch int/float + 'YYYY-MM-DD' date seule) + MIGRÉ aux 4 sites où le pattern `if 'T' in v: fromisoformat else strptime` était inline (`_apply_decay`, `_should_skip_d2_as_integrated`, `_build_block_D2 rendu`). Helper `_parse_correction_timestamp(c)` consolide la séquence `c.get('timestamp') or c.get('created_at') or c.get('date')`. Avant : copie-coller 3× dans le scope. Après : 1 source de vérité.
+  - **Helper `_should_skip_d2_as_integrated`** : extrait du try/except imbriqué de `_build_block_D2` (skip path). Décide proprement si toutes les corrections sont antérieures à `updated_at`. Élimine 2 niveaux de nesting.
+  - **`_build_refine_prompt` aligné** : utilisait des gardes greeting/closing DIVERGENTES (subset partiel des règles de `_build_prompt`). Migré pour passer par `_apply_greeting_guards` + `_apply_closing_guards` — règles strictement identiques entre génération initiale et refinement.
+  - **3 constantes manquantes** dans `_PromptConfig` : `MIN_CONFIDENCE_FLOOR = 0.05` (plancher decay, désambiguïsé de DECAY_PCT_PER_QUARTER), `MIN_NAME_LEN_FOR_GUARD = 3` (seuil len user_last/first pour gardes), `HUMOR_EXAMPLES_MAX = 2` (max exemples humour cités).
+  - **`_observe_subject_trap` API simplifiée** : ne prend plus `incoming_email` séparément (double source de vérité avec `ctx.incoming_email`) — lit uniquement depuis `ctx`. `BuildContext.incoming_email: dict` (garanti par le constructeur, jamais None) → suppression des `(ctx.incoming_email or {}).get(...)` redondants dans `_build_block_A/B/C`.
+  - **Mutation double `cp['confidence']` supprimée** : `_normalize_contact_profile` mutait `cp['confidence']` 2 fois (coerce + post-decay). Maintenant 1 seule mutation finale, avec variable locale `_coerced_confidence` intermédiaire.
+  - **Mock `fromtimestamp`** ajouté dans tests snapshots (sinon scénario avec timestamp epoch crashait silencieusement).
+  - **4 snapshots branches non couvertes** ajoutés : `block_d2_skip_integrated` (toutes corrections intégrées → D2 absent), `block_d2_timestamp_epoch` (timestamp int), `decay_skip_had_recent_interaction` (decay skippé car interaction <30j), `pii_redaction_effective` (SIRET + téléphone détectés et redactés).
+  - **Renames cosmétiques** : variable locale `_MAIL_TYPES` (uppercase = convention constante) → `mail_types` (lowercase). Comments "MAJEUR-X audit" virés (références internes inutilisables hors contexte).
+- **Tests régression phase 4** :
+  - `tests/test_n6_2_blocs_prompt.py` : 17/17 OK
+  - `tests/test_n6_2_prompt_snapshots.py` : **24 snapshots** byte-identique (20 phase 3 + 4 phase 4 branches critiques)
+- **Historique** : refonte 12-13/05/2026 N6.2 (branche `feat/yvan/frontend`), 4 commits :
   - `e8a4f1c` phase 1 (décisions Q1-Q8 + helpers `_PromptConfig` / `_parse_flexible_datetime`)
   - `0344241` phase 2 (10 helpers métier extraits, `_build_prompt` 1002→528)
-  - phase 3 (extraction complète orchestrateur, `_build_prompt` 528→111, audit sub-agent 4 MAJEURS + 2 MINEURS traités)
+  - `035d6ec` phase 3 (extraction complète orchestrateur, `_build_prompt` 528→111, audit sub-agent 4 MAJEURS + 2 MINEURS)
+  - phase 4 (DRY final : helper date parsing utilisé partout, refine aligné, 3 constantes ajoutées, API ctx-only, 4 snapshots branches)
 
 ### I-DB-CONN-01 : Une seule Database() instance par db_path par TID (latent fix 12/05/2026)
 Le tracker class-level `Database._all_conns[tid] = conn` est keyé par thread_id seul. **Ne JAMAIS instancier plusieurs `Database(db_path)` simultanément dans le même thread** : la seconde instance, via `_conn()`, kicke et ferme la conn de la première (assumée zombie), provoquant `ProgrammingError: Cannot operate on a closed database` downstream.

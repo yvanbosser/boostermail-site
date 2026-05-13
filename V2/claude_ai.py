@@ -152,6 +152,7 @@ class _PromptConfig:
     DECAY_DAYS_INTERVAL: int = 90        # quart d'année
     INTERACTION_FRESH_DAYS: int = 30     # skip decay si interaction <30j
     INTERACTION_MIN_BODY_LEN: int = 20   # anti-gaming : body ≥20 chars requis
+    MIN_CONFIDENCE_FLOOR: float = 0.05   # plancher après decay (évite tomber à 0)
 
     # Tutoiement detect dans fallback D (pas de profil)
     TUTOIEMENT_MIN_MARKERS: int = 3      # tu/te/ton ≥3 + vous==0
@@ -161,13 +162,14 @@ class _PromptConfig:
     BODY_LOOKUP_DECAY: int = 1500        # body slice pour scoring tutoiement D fallback
     BODY_LOOKUP_SCORING: int = 500       # body slice pour scoring B
 
-    # Garde closing renforcée
+    # Gardes greeting/closing
     CLOSING_MAX_LEN: int = 40            # closing > 40 chars = pollution signature
+    MIN_NAME_LEN_FOR_GUARD: int = 3      # user_last/user_first ≥3 chars pour activer la garde anti-inversion (évite "Li" qui matcherait des mots courts)
+    HUMOR_EXAMPLES_MAX: int = 2          # max d'exemples humour cités dans bloc D enrichi
 
-    # Skip D2 (refonte N6.2 audit MAJEUR-4 — constantes distinctes du tier full
-    # pour éviter couplage sémantique. Valeurs alignées aujourd'hui sur TIER_FULL
-    # et INTERACTION_FRESH_DAYS, mais conceptuellement indépendantes : si Yvan
-    # change la richesse du prompt D (TIER_FULL), le skip D2 ne doit pas bouger.)
+    # Skip D2 — seuils distincts de TIER_FULL/INTERACTION_FRESH_DAYS pour
+    # éviter le couplage sémantique : si on change la richesse du prompt D
+    # (TIER_FULL), le skip D2 ne doit pas bouger.
     D2_SKIP_CONFIDENCE_THRESHOLD: int = 70  # profil ≥ X% → skip D2 si corrections intégrées
     D2_SKIP_MAX_AGE_DAYS: int = 30          # last_analysis < X jours → skip D2
 
@@ -182,18 +184,27 @@ _PROMPT_CFG = _PromptConfig()
 
 
 # =============================================================================
-# Refonte N6.2 — Helper unique parsing date flexible
+# Helper unique parsing date flexible
 # =============================================================================
-# Élimine ~6 doublons de `try: datetime.fromisoformat(...) except: ...`
-# dispersés dans `_build_prompt` (lignes 818, 837, 1334, 1339, 1354, 1397...).
+# Source de vérité unique pour parser toutes les dates qui transitent dans
+# `_build_prompt` (profils, sender_history, conversation_history, corrections).
+# Centralisé pour éviter les variantes inline `try: fromisoformat / except:
+# strptime` qui ont historiquement divergé entre helpers.
 
 def _parse_flexible_datetime(value):
-    """Parse une date string en datetime naïf, fail-open.
+    """Parse une valeur date en datetime naïf, fail-open.
 
-    Accepte 3 formats vus en pratique dans le code :
-      - ISO 8601 avec timezone ("2026-05-12T07:30:00+00:00" ou "...Z")
-      - ISO 8601 sans timezone ("2026-05-12T07:30:00")
-      - SQLite legacy ("2026-05-12 07:30:00")
+    Formats acceptés :
+      - timestamp epoch int/float (utilisé par les corrections persistées)
+      - ISO 8601 avec timezone (`"2026-05-12T07:30:00+00:00"` ou `"...Z"`)
+      - ISO 8601 sans timezone (`"2026-05-12T07:30:00"`)
+      - SQLite legacy (`"2026-05-12 07:30:00"`)
+      - Date seule (`"2026-05-12"`)
+
+    Parameters
+    ----------
+    value : str | int | float | None
+        Valeur à parser. Tout autre type → None.
 
     Returns
     -------
@@ -201,15 +212,55 @@ def _parse_flexible_datetime(value):
         datetime naïf (sans tzinfo) si parsing OK, None sinon.
         Fail-open : ne propage jamais d'exception au caller.
     """
-    if not value or not isinstance(value, str):
+    if value is None or value == '':
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(value))
+        except (OverflowError, OSError, ValueError):
+            return None
+    if not isinstance(value, str):
         return None
     try:
         if 'T' in value:
             dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
-            return dt.replace(tzinfo=None)
-        return datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
+            return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
+        # SQLite legacy 'YYYY-MM-DD HH:MM:SS' (essai exact)
+        try:
+            return datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            pass
+        # Date seule (tolère aussi 'YYYY-MM-DD ...' tronqué : le caller
+        # `_apply_decay` historiquement faisait `value[:10]` pour gérer les
+        # variantes courtes type 'YYYY-MM-DD HH:MM').
+        try:
+            return datetime.strptime(value[:10], '%Y-%m-%d')
+        except ValueError:
+            return None
     except Exception:
         return None
+
+
+def _parse_correction_timestamp(correction):
+    """Extrait et parse le timestamp d'une correction (D2).
+
+    Cherche dans l'ordre : `timestamp`, `created_at`, `date`. Délègue le
+    parsing à `_parse_flexible_datetime` (epoch numérique, ISO 8601, SQLite,
+    date seule).
+
+    Parameters
+    ----------
+    correction : dict
+        Dict de correction avec potentiellement `timestamp` / `created_at` /
+        `date`.
+
+    Returns
+    -------
+    Optional[datetime]
+        datetime naïf si parsable, None sinon.
+    """
+    ts = correction.get('timestamp') or correction.get('created_at') or correction.get('date') or ''
+    return _parse_flexible_datetime(ts)
 
 
 # =============================================================================
@@ -796,50 +847,41 @@ def _apply_decay(raw_confidence, updated_at, sender_history, now=None):
     -------
     tuple[float, float, int, bool]
         (confidence_decayée, decay_appliqué, days_since, had_recent_interaction).
-        - decay_appliqué=0.0 si skipped (interaction <30j) ou pas de updated_at
-          parsable.
+        - decay_appliqué=0.0 si skipped (interaction récente) ou pas de
+          updated_at parsable.
         - days_since=-1 si updated_at manquant ou parsing échoué.
         - had_recent_interaction=True si interaction fresh détectée (decay
           court-circuité).
-        Le tuple à 4 éléments permet au caller de logger précisément (cf
-        observabilité opérationnelle audit N6.2 PRÉ-commit MAJEUR-1).
+        Le tuple à 4 éléments permet au caller de logger précisément (skip vs
+        decay appliqué — observabilité opérationnelle préservée).
     """
     if not updated_at:
         return raw_confidence, 0.0, -1, False
     if now is None:
         now = datetime.now()
-    try:
-        _updated = datetime.fromisoformat(updated_at.replace('Z', '+00:00')) if 'T' in updated_at else datetime.strptime(updated_at, '%Y-%m-%d %H:%M:%S')
-        days_since = (now - _updated.replace(tzinfo=None)).days
-        # Détecter interaction récente (≤ 30 jours) dans sender_history.
-        has_recent = False
-        if sender_history:
-            for _m in sender_history:
-                _d = (_m.get('date', '') or '').strip()
-                if not _d:
-                    continue
-                _body_check = (_m.get('body_snippet', '') or _m.get('body', '') or '').strip()
-                if len(_body_check) < _PROMPT_CFG.INTERACTION_MIN_BODY_LEN:
-                    continue
-                try:
-                    if 'T' in _d:
-                        _md = datetime.fromisoformat(_d.replace('Z', '+00:00'))
-                        if _md.tzinfo is not None:
-                            _md = _md.replace(tzinfo=None)
-                    else:
-                        _md = datetime.strptime(_d[:10], '%Y-%m-%d')
-                    if (now - _md).days <= _PROMPT_CFG.INTERACTION_FRESH_DAYS:
-                        has_recent = True
-                        break
-                except Exception:
-                    continue
-        if has_recent:
-            return raw_confidence, 0.0, days_since, True
-        decay = max(0, days_since // _PROMPT_CFG.DECAY_DAYS_INTERVAL) * _PROMPT_CFG.DECAY_PCT_PER_QUARTER
-        decayed = max(0.05, raw_confidence - decay)
-        return decayed, decay, days_since, False
-    except Exception:
+    _updated = _parse_flexible_datetime(updated_at)
+    if _updated is None:
         return raw_confidence, 0.0, -1, False
+    days_since = (now - _updated).days
+    # Détecter interaction récente (≤ INTERACTION_FRESH_DAYS jours) dans
+    # sender_history. Anti-gaming P4-UX-A3 : body ≥20 chars requis.
+    has_recent = False
+    if sender_history:
+        for _m in sender_history:
+            _body_check = (_m.get('body_snippet') or _m.get('body') or '').strip()
+            if len(_body_check) < _PROMPT_CFG.INTERACTION_MIN_BODY_LEN:
+                continue
+            _md = _parse_flexible_datetime((_m.get('date') or '').strip())
+            if _md is None:
+                continue
+            if (now - _md).days <= _PROMPT_CFG.INTERACTION_FRESH_DAYS:
+                has_recent = True
+                break
+    if has_recent:
+        return raw_confidence, 0.0, days_since, True
+    decay = max(0, days_since // _PROMPT_CFG.DECAY_DAYS_INTERVAL) * _PROMPT_CFG.DECAY_PCT_PER_QUARTER
+    decayed = max(_PROMPT_CFG.MIN_CONFIDENCE_FLOOR, raw_confidence - decay)
+    return decayed, decay, days_since, False
 
 
 def _compute_tier(confidence_pct):
@@ -960,11 +1002,12 @@ def _apply_greeting_guards(greeting, from_name, contact_first, contact_display, 
     # --- GARDE GREETING RENFORCEE ---
     _greeting_lower = greeting.lower()
     _needs_fix = False
+    _min_len = _PROMPT_CFG.MIN_NAME_LEN_FOR_GUARD
     # Cas 1 : greeting contient le nom/prénom de l'utilisateur → inversé
-    if user_last and len(user_last) > 2 and user_last in _greeting_lower:
+    if user_last and len(user_last) >= _min_len and user_last in _greeting_lower:
         _needs_fix = True
         logger.debug(f"[prompt] GARDE greeting: contient nom utilisateur '{user_last}' → inversé")
-    elif user_first and len(user_first) > 2 and user_first in _greeting_lower and contact_first.lower() != user_first:
+    elif user_first and len(user_first) >= _min_len and user_first in _greeting_lower and contact_first.lower() != user_first:
         _needs_fix = True
         logger.debug(f"[prompt] GARDE greeting: contient prénom utilisateur '{user_first}' → inversé")
     # Cas 2 : greeting contient une adresse email
@@ -1009,7 +1052,7 @@ def _apply_closing_guards(closing, user_last):
     """
     _closing_lower = closing.lower()
     _closing_fix = False
-    if user_last and len(user_last) > 2 and user_last in _closing_lower:
+    if user_last and len(user_last) >= _PROMPT_CFG.MIN_NAME_LEN_FOR_GUARD and user_last in _closing_lower:
         _closing_fix = True
         logger.debug(f"[prompt] GARDE closing: contient nom utilisateur → pollué par signature")
     if '@' in closing:
@@ -1093,16 +1136,19 @@ def _build_block_B(sender_history, ctx):
     """
     if not sender_history:
         return None
-    # Refonte N6.2 (12/05/2026) — `_MAIL_TYPES` sorti en constante
-    # module-level + helper `_get_mail_types_for_user` (Q7 Yvan :
-    # FR seulement aujourd'hui, multi-langue à l'onboarding plus tard).
-    _MAIL_TYPES = _get_mail_types_for_user()
+    # `mail_types` est résolu via le helper Q7 (FR seulement aujourd'hui,
+    # prêt pour onboarding multilingue cf PLUS_TARD_VF #26).
+    mail_types = _get_mail_types_for_user()
 
-    # Detecter le type du mail entrant (sujet + body)
-    _ie = ctx.incoming_email or {}
-    incoming_text = ((_ie.get('subject', '') or '') + ' ' + (_ie.get('body', '') or '')[:_PROMPT_CFG.BODY_LOOKUP_SCORING]).lower()
+    # Detecter le type du mail entrant (sujet + body). `ctx.incoming_email`
+    # est garanti dict par le constructeur (jamais None).
+    incoming_text = (
+        (ctx.incoming_email.get('subject', '') or '')
+        + ' '
+        + (ctx.incoming_email.get('body', '') or '')[:_PROMPT_CFG.BODY_LOOKUP_SCORING]
+    ).lower()
     incoming_types = {}
-    for mtype, keywords in _MAIL_TYPES.items():
+    for mtype, keywords in mail_types.items():
         score = sum(1 for kw in keywords if kw in incoming_text)
         if score > 0:
             incoming_types[mtype] = score
@@ -1124,7 +1170,7 @@ def _build_block_B(sender_history, ctx):
             mail_text = ((m.get('subject', '') or '') + ' ' + (body or '')).lower()
             similarity = 0
             for mtype, kw_score in incoming_types.items():
-                keywords = _MAIL_TYPES[mtype]
+                keywords = mail_types[mtype]
                 match = sum(1 for kw in keywords if kw in mail_text)
                 if match > 0:
                     similarity += match * kw_score  # boost si même type
@@ -1182,12 +1228,10 @@ def _build_block_A(conversation_history, ctx):
     str | None
         Bloc A formaté, ou None si conversation_history vide après dédup.
     """
-    # Phase 2.1 — dédup A vs Mail reçu
-    _current_imid = ''
-    _current_id = ''
-    if ctx.incoming_email:
-        _current_imid = (ctx.incoming_email.get('internet_message_id') or '').strip()
-        _current_id = (ctx.incoming_email.get('id') or '').strip()
+    # Dédup A vs Mail reçu : si l'IMID/id du mail courant est dans
+    # conversation_history, on le retire (sera rendu dans `## Mail recu`).
+    _current_imid = (ctx.incoming_email.get('internet_message_id') or '').strip()
+    _current_id = (ctx.incoming_email.get('id') or '').strip()
     _dedup_filtered = False
     if conversation_history and (_current_imid or _current_id):
         _filtered_history = []
@@ -1275,10 +1319,9 @@ def _build_block_C(keyword_context, subject, contact_profile, sender_history, ct
     if not keyword_context:
         return None
 
-    # Phase 3.2 — skip si sujet trop générique.
-    _c_subject_for_check = subject or (
-        (ctx.incoming_email or {}).get('subject', '') if ctx.incoming_email else ''
-    )
+    # Skip si sujet trop générique (les sujets courts/stopword-only produisent
+    # des résultats keyword bruyants qui n'aident pas Claude).
+    _c_subject_for_check = subject or ctx.incoming_email.get('subject', '') or ''
     if _subject_is_too_generic(_c_subject_for_check):
         logger.info(
             "[prompt-skip-c] sujet trop generique (len=%d) → bloc C skip pour %d items",
@@ -1291,7 +1334,7 @@ def _build_block_C(keyword_context, subject, contact_profile, sender_history, ct
     _is_recurrent = bool(sender_history)
     if not _is_known and not _is_recurrent:
         _correspondent = (
-            ((ctx.incoming_email or {}).get('from', '') or '').strip().lower()
+            (ctx.incoming_email.get('from', '') or '').strip().lower()
             or (ctx.to_email or '').strip().lower()
         )
         _correspondent_domain = ''
@@ -1330,6 +1373,63 @@ def _build_block_C(keyword_context, subject, contact_profile, sender_history, ct
     return "## C — Contexte lie au sujet :\n\n" + "\n\n---\n\n".join(lines)
 
 
+def _should_skip_d2_as_integrated(recent_corrections, contact_profile):
+    """Décide si D2 doit être skippé car corrections déjà intégrées au profil.
+
+    Conditions (audit P3-A5) :
+    1. Profil enrichi présent + confidence ≥ D2_SKIP_CONFIDENCE_THRESHOLD
+    2. Dernière analyse profil < D2_SKIP_MAX_AGE_DAYS jours
+    3. TOUTES les corrections ont un timestamp parsable ≤ updated_at du profil
+       (i.e. corrections antérieures ou contemporaines de la dernière analyse —
+       donc présumées intégrées dans `profile_text`)
+
+    Si une seule correction est postérieure à updated_at OU sans timestamp
+    parsable → on garde D2 (conservatif). Si conditions 1 ou 2 KO → on garde D2.
+
+    Parameters
+    ----------
+    recent_corrections : list[dict] | None
+        Corrections candidates.
+    contact_profile : dict | None
+        Profil brut (lit confidence + updated_at).
+
+    Returns
+    -------
+    bool
+        True si on skip D2 (le caller doit retourner None).
+    """
+    if not recent_corrections:
+        return False
+    if not contact_profile or not contact_profile.get('profile_text'):
+        return False
+    _raw_conf = contact_profile.get('confidence', 0) or 0
+    _conf_pct = int(_raw_conf * 100)
+    if _conf_pct < _PROMPT_CFG.D2_SKIP_CONFIDENCE_THRESHOLD:
+        return False
+    _profile_dt = _parse_flexible_datetime(contact_profile.get('updated_at', ''))
+    if _profile_dt is None:
+        return False
+    _days_since_analysis = (datetime.now() - _profile_dt).days
+    if _days_since_analysis >= _PROMPT_CFG.D2_SKIP_MAX_AGE_DAYS:
+        return False
+    # Vérification finale : toutes les corrections doivent être antérieures à
+    # updated_at (sinon postérieures = pas encore intégrées → on garde).
+    for c in recent_corrections:
+        _c_dt = _parse_correction_timestamp(c)
+        if _c_dt is None or _c_dt > _profile_dt:
+            logger.debug(
+                "[prompt-keep-d2] profil récent mais correction "
+                "postérieure à updated_at → D2 maintenu"
+            )
+            return False
+    logger.info(
+        "[prompt-skip-d2] profil confiant + récent + corrections "
+        "intégrées (conf=%d%%, %dj depuis MAJ) → skip %d corrections",
+        _conf_pct, _days_since_analysis, len(recent_corrections),
+    )
+    return True
+
+
 def _build_block_D2(recent_corrections, contact_profile):
     """Construit le bloc D2 (corrections récentes de l'utilisateur), avec skip intelligent.
 
@@ -1350,56 +1450,9 @@ def _build_block_D2(recent_corrections, contact_profile):
     str | None
         Bloc D2 formaté, ou None si pas de corrections (ou skippées).
     """
-    # Phase 3.3 + P3-A5 — skip si toutes corrections intégrées au profil récent
-    if recent_corrections and contact_profile and contact_profile.get('profile_text'):
-        _raw_conf = contact_profile.get('confidence', 0)
-        _updated_at = contact_profile.get('updated_at', '')
-        try:
-            _conf_pct = int((_raw_conf or 0) * 100)
-            if _conf_pct >= _PROMPT_CFG.D2_SKIP_CONFIDENCE_THRESHOLD and _updated_at:
-                if 'T' in _updated_at:
-                    _u = datetime.fromisoformat(_updated_at.replace('Z', '+00:00'))
-                    if _u.tzinfo is not None:
-                        _u = _u.replace(tzinfo=None)
-                else:
-                    _u = datetime.strptime(_updated_at, '%Y-%m-%d %H:%M:%S')
-                _days_since_analysis = (datetime.now() - _u).days
-                if _days_since_analysis < _PROMPT_CFG.D2_SKIP_MAX_AGE_DAYS:
-                    _all_integrated = True
-                    for c in recent_corrections:
-                        _ts = c.get('timestamp') or c.get('created_at') or c.get('date') or ''
-                        if not _ts:
-                            _all_integrated = False
-                            break
-                        try:
-                            if isinstance(_ts, (int, float)):
-                                _c_dt = datetime.fromtimestamp(float(_ts))
-                            elif 'T' in str(_ts):
-                                _c_dt = datetime.fromisoformat(str(_ts).replace('Z', '+00:00'))
-                                if _c_dt.tzinfo is not None:
-                                    _c_dt = _c_dt.replace(tzinfo=None)
-                            else:
-                                _c_dt = datetime.strptime(str(_ts), '%Y-%m-%d %H:%M:%S')
-                            if _c_dt > _u:
-                                _all_integrated = False
-                                break
-                        except Exception:
-                            _all_integrated = False  # par prudence
-                            break
-                    if _all_integrated:
-                        logger.info(
-                            "[prompt-skip-d2] profil confiant + récent + corrections "
-                            "intégrées (conf=%d%%, %dj depuis MAJ) → skip %d corrections",
-                            _conf_pct, _days_since_analysis, len(recent_corrections),
-                        )
-                        return None
-                    else:
-                        logger.debug(
-                            "[prompt-keep-d2] profil récent mais correction "
-                            "postérieure à updated_at → D2 maintenu"
-                        )
-        except Exception:
-            pass
+    # Skip si toutes corrections déjà intégrées au profil récent (audit P3-A5).
+    if _should_skip_d2_as_integrated(recent_corrections, contact_profile):
+        return None
 
     if not recent_corrections:
         return None
@@ -1413,34 +1466,23 @@ def _build_block_D2(recent_corrections, contact_profile):
 
         # Date relative depuis le timestamp de la correction.
         _rel_date = ''
-        _ts = c.get('timestamp') or c.get('created_at') or c.get('date') or ''
-        if _ts:
-            try:
-                if isinstance(_ts, (int, float)):
-                    _dt = datetime.fromtimestamp(float(_ts))
-                elif 'T' in str(_ts):
-                    _dt = datetime.fromisoformat(str(_ts).replace('Z', '+00:00'))
-                    if _dt.tzinfo is not None:
-                        _dt = _dt.replace(tzinfo=None)
-                else:
-                    _dt = datetime.strptime(str(_ts), '%Y-%m-%d %H:%M:%S')
-                _days = (_now - _dt).days
-                if _days < 0:
-                    # Audit fix P2-A6 — timestamp futur = clock skew
-                    # ou serialization broken. Warning pour détection.
-                    logger.warning(
-                        "[D2-timestamp] futur (%dj) ts=%r → affiché 'aujourd''hui'",
-                        _days, _ts,
-                    )
-                    _rel_date = " (aujourd'hui)"
-                elif _days == 0:
-                    _rel_date = " (aujourd'hui)"
-                elif _days == 1:
-                    _rel_date = " (hier)"
-                else:
-                    _rel_date = f" (il y a {_days} jours)"
-            except Exception:
-                _rel_date = ''
+        _dt = _parse_correction_timestamp(c)
+        if _dt is not None:
+            _days = (_now - _dt).days
+            if _days < 0:
+                # Timestamp futur = clock skew ou serialization broken.
+                # Warning pour détection en prod.
+                logger.warning(
+                    "[D2-timestamp] futur (%dj) ts=%r → affiché 'aujourd''hui'",
+                    _days, _dt,
+                )
+                _rel_date = " (aujourd'hui)"
+            elif _days == 0:
+                _rel_date = " (aujourd'hui)"
+            elif _days == 1:
+                _rel_date = " (hier)"
+            else:
+                _rel_date = f" (il y a {_days} jours)"
 
         if analysis:
             # Analyse Claude disponible — plus utile que les catégories
@@ -1559,22 +1601,22 @@ def _resolve_contact_display(contact_profile, to_email):
     return "correspondant"
 
 
-def _observe_subject_trap(incoming_email, ctx):
-    """Logge un warning si le subject contient un pattern d'injection.
+def _observe_subject_trap(ctx):
+    """Logge un warning si le subject du mail entrant contient un pattern d'injection.
 
-    Phase 6.1 audit remediation — pure observabilité : SECURITY_GUARD instruit
-    déjà Claude d'ignorer. Permet de mesurer le taux d'attaques tentées par
-    subject. Audit angle 3 P6-Leak-A1 — l'attaquant peut placer de la PII dans
-    son subject piégé → redact AVANT log.
+    Pure observabilité : `_SECURITY_GUARD` instruit déjà Claude d'ignorer ces
+    pseudo-instructions. Permet de mesurer le taux d'attaques tentées par
+    subject. La PII éventuelle dans le subject piégé est redactée AVANT log
+    (l'attaquant peut placer de la PII dans son leurre).
 
     Parameters
     ----------
-    incoming_email : dict | None
-        Mail entrant. On lit `subject`.
     ctx : BuildContext
-        Pour la redaction PII (correspondent_for_redaction).
+        État partagé — on lit `ctx.incoming_email['subject']` et
+        `ctx.correspondent_for_redaction`. Counter local `{}` (la PII ici n'est
+        pas comptée dans le bilan PII normal).
     """
-    _incoming_subject = ((incoming_email or {}).get('subject', '') or '').strip()
+    _incoming_subject = (ctx.incoming_email.get('subject', '') or '').strip()
     if _incoming_subject and _RE_SUBJECT_TRAP.search(_incoming_subject):
         _subject_safe_for_log = _redact_pii_in_text(
             _incoming_subject[:_PROMPT_CFG.LOG_SUBJECT_TRUNCATE],
@@ -1639,8 +1681,8 @@ def _detect_register_from_sender_history(sender_history):
     _tu_total = 0
     _vous_total = 0
     for _m in _sent_mails:
-        # body_snippet fallback (mails DB ont typiquement body_snippet rempli,
-        # body vide — bug pré-existant fixé en N6.2 phase 2).
+        # body_snippet en priorité : mails persistés en DB ont typiquement
+        # body_snippet rempli (résumé court) et body vide.
         _body = (_m.get('body_snippet') or _m.get('body') or '')[:_PROMPT_CFG.BODY_LOOKUP_DECAY]
         _tu_total += len(_RE_TU_MARKERS_LONG.findall(_body))
         _vous_total += len(_RE_VOUS_MARKERS_LONG.findall(_body))
@@ -1711,7 +1753,7 @@ def _build_block_D_enriched(cp, tier, confidence_pct, contact_display, to_email,
     _humor_block = ""
     if tier == 'full' and _humor == 'oui':
         _humor_examples = cp.get('humor_examples', [])
-        _humor_ex = f" (exemples : {', '.join(_humor_examples[:2])})" if _humor_examples else ""
+        _humor_ex = f" (exemples : {', '.join(_humor_examples[:_PROMPT_CFG.HUMOR_EXAMPLES_MAX])})" if _humor_examples else ""
         _humor_block = (
             f"\nHumour : **oui** — reproduire les traits d'humour du style "
             f"de l'utilisateur avec ce correspondant{_humor_ex}. "
@@ -2118,11 +2160,14 @@ def _normalize_contact_profile(contact_profile, sender_history, to_email):
     if not contact_profile or not contact_profile.get('profile_text'):
         return None, 'none', 0
 
-    cp = dict(contact_profile)  # ne pas muter le dict original (cache RAM)
-    cp['confidence'] = _coerce_confidence(cp.get('confidence', 0))
-    # Decay temporel (Q4 Yvan : 5%/trim, skip si interaction <30j)
+    # Copy + coerce confidence (défense input-shape : DB peut stocker
+    # string/None) — pas de mutation du dict original (cache RAM).
+    cp = dict(contact_profile)
+    _coerced_confidence = _coerce_confidence(cp.get('confidence', 0))
+
+    # Decay temporel (Q4 Yvan : 5%/trim, skip si interaction récente).
     raw_confidence, _decay, _days_since, _had_recent = _apply_decay(
-        cp.get('confidence', 0), cp.get('updated_at', ''), sender_history,
+        _coerced_confidence, cp.get('updated_at', ''), sender_history,
     )
     if _had_recent:
         logger.debug(
@@ -2135,10 +2180,9 @@ def _normalize_contact_profile(contact_profile, sender_history, to_email):
             f"[prompt] Confidence decay: {_days_since}j depuis MAJ "
             f"→ -{_decay:.0%} → {raw_confidence:.0%}"
         )
-    confidence_pct = int(raw_confidence * 100)
-    # Important : on met à jour cp['confidence'] avec la valeur post-decay
-    # pour que les helpers downstream voient la confidence correcte.
+    # Une seule mutation : cp['confidence'] = valeur finale (post-coerce + post-decay).
     cp['confidence'] = raw_confidence
+    confidence_pct = int(raw_confidence * 100)
 
     # Tier (4 niveaux) + éventuelle promotion 'none' → 'light'
     tier = _compute_tier(confidence_pct)
@@ -2447,7 +2491,7 @@ class ClaudeAssistant:
 
         # 3. Observabilité pure : warning si subject piégé (SECURITY_GUARD
         # instruit déjà Claude d'ignorer).
-        _observe_subject_trap(incoming_email, ctx)
+        _observe_subject_trap(ctx)
 
         # 4. Bloc D — normalisation cp + tier + rendu enrichi ou fallback.
         # Ordre du prompt final : D -> B -> A -> C -> D2.
@@ -2559,16 +2603,25 @@ class ClaudeAssistant:
             raise last_error
 
     def _build_refine_prompt(self, current_reply, instruction, email=None, contact_profile=None):
-        """Construit le prompt de refinement (partage entre refine et refine_stream)."""
+        """Construit le prompt de refinement (partage entre refine et refine_stream).
+
+        Refonte N6.2 : utilise les MÊMES gardes greeting/closing que `_build_prompt`
+        (`_apply_greeting_guards` + `_apply_closing_guards`) pour éviter une
+        divergence subtile entre génération initiale et refinement. Détecte aussi
+        le registre RÉEL du `current_reply` (priorité sur le profil — l'utilisateur
+        a pu corriger entre temps).
+        """
         context = ""
         if email:
-            context = f"\nMail original auquel on repond :\nDe: {email.get('from_name','')} <{email.get('from','')}>\nObjet: {email.get('subject','')}\n{email.get('body','')[:1500]}\n"
+            context = f"\nMail original auquel on repond :\nDe: {email.get('from_name','')} <{email.get('from','')}>\nObjet: {email.get('subject','')}\n{email.get('body','')[:_PROMPT_CFG.BODY_LOOKUP_DECAY]}\n"
 
         style_reminder = ""
         if contact_profile and contact_profile.get('profile_text'):
             cp = contact_profile
             register = cp.get('register', 'vouvoiement')
-            # Détecter le registre RÉEL du current_reply (priorité sur le profil)
+            # Override registre si current_reply montre clairement l'autre
+            # (l'utilisateur peut avoir corrigé entre la génération initiale et
+            # le refine, et le ghost-writer doit respecter son choix actuel).
             _cr_lower = current_reply.lower()
             _tu_count = len(_RE_TU_MARKERS_SHORT.findall(_cr_lower))
             _vous_count = len(_RE_VOUS_MARKERS_SHORT.findall(_cr_lower))
@@ -2576,16 +2629,27 @@ class ClaudeAssistant:
                 register = 'tutoiement'
             elif _vous_count > _tu_count and _vous_count >= 2:
                 register = 'vouvoiement'
-            # Appliquer les mêmes gardes greeting/closing que dans _build_prompt
-            _r_greeting = (cp.get('greeting') or 'Bonjour,').strip()
-            _r_closing = (cp.get('closing') or 'Cordialement,').strip()
-            _user_last_r = (self.user_name or '').split()[-1].lower() if self.user_name else ''
-            if _user_last_r and len(_user_last_r) >= 3 and _user_last_r in _r_greeting.lower():
-                _prenom = cp.get('display_name', '').split()[0] if cp.get('display_name') else ''
-                _r_greeting = f"Bonjour {_prenom}," if _prenom else "Bonjour,"
-            if cp.get('language', 'fr') == 'fr' and any(_r_greeting.lower().startswith(x) for x in ('hello', 'hi ', 'hey ')):
-                _prenom = cp.get('display_name', '').split()[0] if cp.get('display_name') else ''
-                _r_greeting = f"Bonjour {_prenom}," if _prenom else "Bonjour,"
+
+            # Gardes greeting/closing partagées avec `_build_prompt` (anti
+            # divergence des règles entre génération initiale et refinement).
+            _user_last = self.user_name.split()[-1].lower() if self.user_name else ''
+            _user_first = (self.user_first_name or '').lower()
+            _contact_first = (cp.get('display_name', '') or '').split()[0] if cp.get('display_name') else ''
+            _from_name = (email or {}).get('from_name', '') or ''
+            _r_greeting = _apply_greeting_guards(
+                (cp.get('greeting') or 'Bonjour,').strip(),
+                from_name=_from_name,
+                contact_first=_contact_first,
+                contact_display=cp.get('display_name', '') or '',
+                user_first=_user_first,
+                user_last=_user_last,
+                language=cp.get('language', 'fr'),
+                is_forward=False,
+            )
+            _r_closing = _apply_closing_guards(
+                (cp.get('closing') or 'Cordialement,').strip(),
+                user_last=_user_last,
+            )
             style_reminder = (f"\nPROFIL DU CORRESPONDANT — OBLIGATOIRE :"
                             f"\nRegistre : **{register}** (DÉTECTÉ DANS LE MAIL ACTUEL — NE PAS CHANGER sauf instruction explicite)"
                             f"\nTon : {cp.get('tone', 'professionnel')}"

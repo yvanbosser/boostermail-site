@@ -316,6 +316,64 @@ def _build_scenarios():
             user_name="Pierre BOSSER",
             contact_profile=profile_full,  # greeting "Salut Pierre,"
         ),
+
+        # === Snapshots phase 4 audit (branches helpers non couvertes) ===
+
+        # D2 SKIP : profil tier=full + récent (updated_at=today) + correction
+        # ancienne (1 an avant today) → toutes intégrées → bloc D2 retourne None.
+        # Le snapshot doit NE PAS contenir "## D2 —".
+        _scenario(
+            'block_d2_skip_integrated',
+            contact_profile=profile_full,  # confidence 0.85 >= 70%, updated_at=today
+            recent_corrections=[
+                {'proposed': 'Bonjour Monsieur Dupont,',
+                 'sent': 'Salut Pierre,',
+                 'analysis': 'Correction registre vouvoiement → tutoiement',
+                 'timestamp': (FROZEN_NOW - timedelta(days=365)).isoformat()},
+            ],
+        ),
+
+        # D2 TIMESTAMP EPOCH : correction avec timestamp epoch int (numeric)
+        # — exerce la branche `isinstance(_ts, (int, float))` de
+        # `_parse_correction_timestamp`. Pas de skip car correction récente.
+        _scenario(
+            'block_d2_timestamp_epoch',
+            contact_profile=None,  # pas de skip path (pas de profil)
+            recent_corrections=[
+                {'proposed': 'Cordialement,',
+                 'sent': 'A bientôt,',
+                 'analysis': 'Closing plus chaleureux',
+                 # Epoch correspondant à FROZEN_NOW - 2 jours
+                 'timestamp': (FROZEN_NOW - timedelta(days=2)).timestamp()},
+            ],
+        ),
+
+        # DECAY HAD RECENT INTERACTION : profil ancien (180j) MAIS sender_history
+        # contient un échange récent (today) avec body ≥20 chars → decay skippé,
+        # confidence préservée (audit Phase 4.3).
+        _scenario(
+            'decay_skip_had_recent_interaction',
+            contact_profile=profile_old,  # 180j ancien, conf 0.75
+            sender_history=[
+                {'direction': 'sent', 'date': today_iso[:10],
+                 'subject': 'Re: Projet',
+                 'body_snippet': 'Salut Pierre, je te confirme pour demain comme convenu, on se retrouve à 14h.',
+                 'from_name': 'Yvan'},
+            ],
+        ),
+
+        # PII REDACTION : sender_history contient SIRET + numéro de téléphone
+        # → redaction effective dans bloc B + log [pii-redacted] count>0.
+        _scenario(
+            'pii_redaction_effective',
+            contact_profile=profile_full,
+            sender_history=[
+                {'direction': 'sent', 'date': today_iso[:10],
+                 'subject': 'Coordonnées banque',
+                 'body_snippet': 'Le SIRET de notre fournisseur est 73282932000074 et son téléphone est 06 12 34 56 78.',
+                 'from_name': 'Yvan'},
+            ],
+        ),
     ]
 
 
@@ -333,6 +391,11 @@ def _capture_snapshot(name, kwargs):
         mock_dt.now.return_value = FROZEN_NOW
         mock_dt.fromisoformat = datetime.fromisoformat
         mock_dt.strptime = datetime.strptime
+        # Refonte N6.2 phase 4 : `_parse_flexible_datetime` accepte epoch
+        # int/float et utilise `datetime.fromtimestamp(...)`. Sans ce mock,
+        # un scénario avec timestamp epoch dans recent_corrections crasherait
+        # silencieusement (AttributeError caught par fail-open).
+        mock_dt.fromtimestamp = datetime.fromtimestamp
         try:
             prompt = assistant._build_prompt(**kwargs)
         except Exception as e:
