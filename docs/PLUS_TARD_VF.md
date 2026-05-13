@@ -1003,6 +1003,58 @@ partageront un mail (newsletter commune, mailing-list, alias générique).
 
 ---
 
+### 33. Tier 1bis mail « nom PJ en dernier recours » — N8 13/05/2026
+
+**Origine** : Refonte Niveau 8 (« Règles classement Mail », spec §5.2). Le Tier 1bis mail score actuellement sur sujet → fallback body. La spec prévoit un **troisième recours** : nom de la PJ. Pas implémenté dans le moteur N8.
+
+**Pourquoi pas livré N8** : le nom PJ peut être trompeur (« Bail_Le_Cardo.pdf » attaché à un mail sur South Garden — exemple spec §5.2). Le risque de faux positif dépasse le bénéfice tant qu'on n'a pas mesuré le taux d'erreur sur des données réelles. À mesurer en beta.
+
+**Effort estimé** : ~10 lignes dans `_compute_classement_suggestions` (passer `attachment_names` au moteur mail, le matcher contre les keywords du sujet via `_filename_keywords`).
+
+**Priorité** : 🟢 basse — gain marginal, risque non chiffré.
+
+---
+
+### 32. Top 3 IA pour PJ — `suggest_pj_folder` ne retourne qu'1 suggestion — N8 13/05/2026
+
+**Origine** : Refonte Niveau 8, cartographie. `claude_ai.py:suggest_pj_folder` retourne `{folder_path, confidence, reason, suggested_names: {old: new}}` — pas de `_suggestions: [3 items]` comme `suggest_folder` (mail). Donc le commis Haiku unifié N6.1 produit toujours 1 suggestion PJ, jamais un top 3 IA pour les PJ.
+
+**Conséquence** : la popup PJ a au maximum 3 suggestions des tiers DB ; quand DB vide, IA ne propose qu'1 dossier.
+
+**Effort estimé** : ~30 lignes dans `claude_ai.py:suggest_pj_folder` (prompt JSON tableau au lieu de single dict) + adaptation côté `_persist_commis_results` pour reconstituer `_suggestions`.
+
+**Priorité** : 🟡 moyenne — améliore UX popup PJ, mais Tiers DB couvrent déjà la majorité des cas après quelques semaines d'usage.
+
+---
+
+### 31. Momentum TTL : 30 min spec vs 2 h code — N8 13/05/2026
+
+**Origine** : Refonte Niveau 8. Spec §5.6 dit « momentum = dossier le plus utilisé dans les 30 dernières minutes ». Le code (`app_plugin.py:_MOMENTUM_TTL_SECONDS = 7200`) garde 2 h depuis le patch O2 du 08/05 (signal Yvan : sessions de tri matinales avec pause café 35-45 min).
+
+**Tension à résoudre** : 30 min (spec) trop strict pour usage réel observé ; 2 h (code) potentiellement trop laxe (mauvaise suggestion si l'user change de contexte après la pause).
+
+**À mesurer en beta** : `_classify_momentum` produit-il des suggestions correctes ? Si % de correction user élevé sur source=momentum → réduire TTL. Sinon → garder 2 h.
+
+**Effort estimé** : ~5 lignes (changer la constante + ajuster test). Le travail est la **mesure**, pas le code.
+
+**Priorité** : 🟢 basse — UX correcte aujourd'hui, instrumentation à prévoir.
+
+---
+
+### 30. Auto-désactivation règles Tier 3a/3b à 30 % corrections — N8 13/05/2026
+
+**Origine** : Refonte Niveau 8. Spec §5.4-5.5 prévoit qu'une règle domaine (Tier 3a) ou sujet cross-contact (Tier 3b) soit **désactivée automatiquement** si plus de 30 % de ses suggestions sont corrigées par l'user (min 5 classifications avant évaluation, signe d'un domaine trop varié).
+
+**Pourquoi pas implémenté N8** : nécessite des **tables physiques** `domain_rules` et `subject_rules` (avec colonnes `hit_count`, `correction_count`, `is_active`). Aujourd'hui ces règles sont calculées à la volée (GROUP BY domain HAVING count(distinct contact)≥3 — `database.py:1013`). Pas de persistance, donc pas de mémoire pour l'auto-désactivation.
+
+**Q3 = B validé par Yvan le 13/05** : pas de tables. On garde le calcul à la volée pour cette refonte. L'auto-désactivation reste un nice-to-have non bloquant.
+
+**Effort estimé** : ~150 lignes (2 nouvelles tables + 4 fonctions DB + hook dans `/api/classify_email` pour incrémenter `correction_count` + check `is_active` dans les Tiers 3a/3b du moteur).
+
+**Priorité** : 🟢 basse — bénéfice apparait sur des comportements pathologiques (domaine `consulting.com` qui groupe 50 sociétés différentes). Pas urgent.
+
+---
+
 ### 29. Étendre `_reply_cache_cohesion_refresh` aux 4 autres frigos — N7-bis 13/05/2026
 
 **Origine** : Audit rétrospectif N7 (P2). Le loop `_reply_cache_cohesion_refresh` (10 min, `app_plugin.py:4087`) compare `_reply_cache` aux mails actuellement dans l'inbox et purge les orphelins (mails supprimés côté Outlook Web sans webhook, mails déplacés hors inbox, etc.). **Asymétrie volontaire mais imparfaite** : ce loop ne nettoie QUE `_reply_cache`. Les 4 autres frigos (`_prefetch_cache`, `_mail_preview_cache` slots `classement`/`pj_classement`/`echeance`, 4 tables DB par-message) restent stale jusqu'au TTL 72h RAM ou au webhook Graph `deleted` (best-effort).

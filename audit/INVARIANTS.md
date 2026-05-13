@@ -993,6 +993,45 @@ Pour les BG loops qui dépendent de l'usage user (post_send_learning, recalibrag
 
 ---
 
+## Catégorie 17 — Classement Mail/PJ (ajout 13/05/2026 N8)
+
+### I-CLASS-N8-01 : Moteur unique pour les tiers DB de classement
+
+Les 7 tiers DB du spec classement (`docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md`) sont implémentés **uniquement** dans `_compute_classement_suggestions` (mail) et `_compute_pj_classement_suggestions` (PJ) dans `V2/app_plugin.py`. Aucun pipeline inline ailleurs.
+- **Test** : `tests/test_n8_classement.py::test_invariant_n8_01_one_engine_grep` — grep statique : `_prewarm_classement_for_mail` et `_prewarm_pj_classement_for_mail` doivent être ABSENTS du source (supprimés en N8). Aucun wrapper rétro-compat (signal démolisseur v2 P2-3).
+- **Pourquoi** : avant N8 trois pipelines parallèles (BG / API à la demande / compose) calculaient le classement différemment → divergences masquées par le cache DB partagé. N8 unifie → 1 source de vérité.
+- **Action si violé** : un nouveau pipeline inline a été ajouté ailleurs. Le factoriser dans le moteur unique.
+
+### I-CLASS-N8-02 : Ordre tier respecté (Tier 0 prime Tier 1 prime ... prime Tier 4)
+
+Le moteur applique les tiers dans l'ordre du spec §2 et préempte dès que le top 3 est plein. Tier 0 (thread) prime sur Tier 1 (mono-dossier) prime sur Tier 1bis (keywords) etc.
+- **Test** : `tests/test_n8_classement.py::test_tier_order_preemption` — mail avec keywords overlap 100% avec un classement minoritaire (Tier 0 candidate) doit produire suggestion #1 source=`thread`, pas `rule` même si rule serait plus fréquent.
+- **Pourquoi** : règle d'or spec §2 (« règles spécifiques priment toujours sur règles générales »).
+- **Action si violé** : revoir l'ordre des blocs `if len(suggestions) < max:` dans le moteur.
+
+### I-CLASS-N8-03 : Tier 1bis PJ priorité nom de fichier
+
+Pour le chapitre B (PJ), le moteur consulte `_db.get_pj_folder_by_filename_keywords` **AVANT** `_db.get_pj_folder_by_keywords` (sujet). Spec §5.2.
+- **Test** : `tests/test_n8_classement.py::test_pj_tier1bis_filename_priorite` — mail avec sujet "South Garden" + PJ "Bail_Le_Cardo.pdf" → suggestion PJ #1 = CARDO (source=`filename_keywords`).
+- **Pourquoi** : « Bail_Le_Cardo.pdf » désambiguïse de lui-même, plus fidèle que le sujet du mail.
+- **Action si violé** : inverser l'ordre dans `_compute_pj_classement_suggestions`.
+
+### I-CLASS-N8-04 : 4 raisons `none_*` produites par le BG (mail ET PJ)
+
+Quand le moteur retourne des suggestions vides côté BG (`_persist_commis_results`), la source persistée doit être l'une des 4 raisons UI : `none_unknown_domain` / `none_new_sender` / `none_low_signal` / `none`. Plus jamais `unified_none` générique. **S'applique aux deux chemins mail et PJ** (symétrie corrigée post-regard-frais P0-2).
+- **Test** : `tests/test_n8_classement.py::test_invariant_n8_04_none_reasons_in_bg` — couvre comportementalement les 4 cas (A=tout inconnu, B=nouveau sender, C=signal court, D=signal normal) + invariant code « `unified_none` absent du source » + « `_classify_none_reason` appelé ≥ 2 fois (mail + PJ) ».
+- **Pourquoi** : Q5 validé par Yvan le 13/05 (wording UI). Avant N8, le BG produisait `unified_none` (trou — démolisseur v2 P2-8). Le regard frais PRÉ-commit a détecté que la branche PJ avait été oubliée à la 1ʳᵉ implémentation.
+- **Action si violé** : l'appel à `_classify_none_reason` a été retiré de `_persist_commis_results` (mail ou PJ) ou un nouveau pipeline contourne ce helper.
+
+### I-CLASS-N8-05 : Tier 0 mail→PJ lit `folder_classifications` (historique user)
+
+Le Tier 0 PJ « cohérence mail→PJ » consulte la table `folder_classifications` (classements user effectifs) via `_db.get_contact_folder_stats`. **Jamais** `mail_classement_cache` (suggestion non confirmée par user).
+- **Test** : `tests/test_n8_classement.py::test_invariant_n8_05_tier0_pj_source` — grep statique : `_compute_pj_classement_suggestions` contient `get_contact_folder_stats(`, ne contient PAS `get_mail_classement(`.
+- **Pourquoi** : `mail_classement_cache` contient la SUGGESTION proposée par le BG (peut être fausse), pas le CHOIX user. Lire la suggestion = corréler une erreur avec une autre. Signal démolisseur v2 P0-1 (re-cadrage du Tier 0 PJ).
+- **Action si violé** : remplacer la lecture incorrecte par `_db.get_contact_folder_stats(contact_email)`.
+
+---
+
 ## Mise à jour
 
 Ajouter un invariant ici **uniquement si** :

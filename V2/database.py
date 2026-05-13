@@ -518,6 +518,12 @@ class Database:
         # 29/04 PM audit DB — pj_classifications.domain utilisé en WHERE l. 809+855
         # mais l'index manquait (folder_classifications.domain a son index l. 297).
         c.execute("CREATE INDEX IF NOT EXISTS idx_pj_class_domain ON pj_classifications(domain)")
+        # N8 — Tier 1bis PJ inversé : matching sur original_filename. Sans
+        # index, full table scan à chaque mail BG → 100-300ms × N mails au
+        # batch (signal démolisseur v2 P0-6). LIKE '%kw%' = no index utile,
+        # mais l'index accélère le filtre WHERE contact_email=? AND user_id=?
+        # qui précède le matching Python (cf get_pj_folder_by_filename_keywords).
+        c.execute("CREATE INDEX IF NOT EXISTS idx_pj_class_filename ON pj_classifications(original_filename)")
 
         # Cache emails — affichage instantané sans COM
         c.execute("""
@@ -1030,6 +1036,71 @@ class Database:
         if row:
             return {'folder_path': row[0], 'folder_id': row[1] or '', 'contact_count': row[2]}
         return None
+
+    def get_pj_folder_by_filename_keywords(self, contact_email, current_filename_keywords):
+        """Tier 1 bis PJ — priorité nom fichier (spec §3 / §5.2).
+
+        Matching sur `original_filename` historique du même contact. Le nom du
+        fichier prime sur le sujet pour le chapitre B (« Bail_Le_Cardo.pdf »
+        parle de Le Cardo plus fidèlement que le sujet du mail).
+
+        Retourne {'dest_folder', 'count', 'score'} ou None (mêmes gardes
+        score≥2, ratio 2x que `get_pj_folder_by_keywords`).
+
+        N8 (signal Yvan Q4=A) : avant cette fonction, le tier 1bis PJ scorait
+        sur subject_keywords uniquement — inversion spec §5.2 corrigée.
+        """
+        if not contact_email or not current_filename_keywords:
+            return None
+        uid = self._uid()
+        c = self._conn().cursor()
+        c.execute("""
+            SELECT dest_folder, original_filename
+            FROM pj_classifications WHERE contact_email = ? AND user_id = ?
+        """, (contact_email, uid))
+        rows = c.fetchall()
+        if not rows:
+            return None
+        current_words = set(w for w in current_filename_keywords.lower().split()
+                           if not _is_date_token(w))
+        if not current_words:
+            return None
+        folder_scores = {}
+        for row in rows:
+            fp = row[0]
+            stored_fname = row[1] or ''
+            # Tokenisation du nom de fichier historique : strip extension,
+            # split sur _ - . espaces, lowercase, filtre date tokens.
+            import os as _os
+            stored_base = _os.path.splitext(stored_fname)[0]
+            import re as _re
+            stored_words = set(
+                w.lower() for w in _re.split(r'[\s\-_.]+', stored_base)
+                if w and len(w) >= 3 and not _is_date_token(w.lower())
+            )
+            overlap = len(current_words & stored_words)
+            if overlap == 0:
+                continue
+            if fp not in folder_scores:
+                folder_scores[fp] = {'score': 0, 'count': 0}
+            folder_scores[fp]['score'] += overlap
+            folder_scores[fp]['count'] += 1
+        if not folder_scores:
+            return None
+        ranked = sorted(folder_scores.items(), key=lambda x: x[1]['score'], reverse=True)
+        best_path, best_data = ranked[0]
+        # Seuil score ≥ 1 (Q7 validé par Yvan) — asymétrie volontaire avec
+        # Tier 1bis sujet/body (qui exige ≥2) : le nom de fichier est un
+        # signal fort (« Bail_Le_Cardo.pdf » désambiguïse de lui-même).
+        # Risque sample-of-one mitigé par la garde ratio 2x ci-dessous +
+        # fallback Tier 4 IA si le moteur reste sans suggestion.
+        if best_data['score'] < 1:
+            return None
+        if len(ranked) >= 2:
+            second_score = ranked[1][1]['score']
+            if second_score > 0 and best_data['score'] / second_score < 2:
+                return None
+        return {'dest_folder': best_path, 'count': best_data['count'], 'score': best_data['score']}
 
     def get_pj_folder_by_keywords(self, contact_email, current_keywords):
         """Tier 1 bis PJ : trouve le dossier Windows qui matche le mieux les mots-clés du sujet

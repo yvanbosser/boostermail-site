@@ -3017,317 +3017,535 @@ def _get_outlook_folders_cached() -> list:
         return cache.get('list', [])
 
 
-def _prewarm_classement_for_mail(mid, mail_data):
-    """Suggestion classement pour un mail. Stocke dans cache DB persistant
-    (mail_classement_cache) + cache RAM.
+# =============================================================================
+# Helpers classement (N8 — refonte 12-13/05/2026)
+# =============================================================================
+# Factorisation des 5 helpers purs utilisés par les moteurs
+# `_compute_classement_suggestions` (mail) et `_compute_pj_classement_suggestions`
+# (PJ). Anciennement éparpillés dans :
+#   - `_prewarm_classement_for_mail` (chemin compose)
+#   - `api_suggest_folder` (chemin à la demande, 7 tiers)
+#   - `api_post_generation_analyze` (cascade Tier 0 compose-specific)
+# 3 pipelines parallèles → 1 moteur unique.
+# =============================================================================
 
-    Pipeline idempotent (P2+P3 — 25/04) :
-    1. Check DB → skip si déjà calculé (économie API 100%)
-    2. Règle DB (Tier 1 : contact + domaine + keywords)
-    3. Fallback Claude si aucune règle (Tier 6 — même pipeline que /api/classification/post_send)
-    4. Persist résultat (1-3 suggestions ou null) en DB + RAM
+# Domaines email publics — exclus de Tier 3a "règle domaine" (spec §5.4).
+# Un domaine public groupe tous les particuliers du monde, donc une "règle
+# domaine" basée sur 3+ classements y serait trompeuse.
+_PUBLIC_EMAIL_DOMAINS = frozenset({
+    'gmail.com', 'outlook.com', 'hotmail.com', 'hotmail.fr',
+    'yahoo.fr', 'yahoo.com', 'orange.fr', 'free.fr', 'sfr.fr',
+    'laposte.net', 'live.fr', 'wanadoo.fr',
+})
+
+# Mots-clés trop génériques exclus du Tier 2 "matching nom dossier dans body"
+# (spec §5.3). Un dossier nommé `Divers` qui matcherait dès qu'on parle de
+# "divers sujets" produirait des suggestions sans valeur.
+_GENERIC_FOLDER_NAMES = frozenset({
+    'divers', 'autre', 'autres', 'factures', 'facture', 'courrier',
+    'mail', 'mails', 'inbox', 'archive', 'archives', 'envoyés',
+    'envoyes', 'brouillons', 'admin', 'compta', 'bilan', 'travaux',
+    'devis', 'todo', 'note', 'notes', 'misc', 'general',
+    'boite de reception',
+})
+
+
+def _filter_public_domain(domain) -> bool:
+    """True si le domaine doit être ignoré pour Tier 3a (spec §5.4)."""
+    return bool(domain) and domain.lower() in _PUBLIC_EMAIL_DOMAINS
+
+
+def _filename_keywords(filename: str) -> str:
+    """Mots significatifs d'un nom de fichier pour Tier 1bis PJ (spec §3,
+    priorité nom fichier).
+
+    `Bail_Le_Cardo_2024.pdf` → "bail cardo" (strip extension, split _- .,
+    filtre mots <3 chars + date tokens + stopwords, dédup, max 6).
+    """
+    if not filename:
+        return ''
+    base = filename.rsplit('.', 1)[0] if '.' in filename else filename
+    _DATE_RE = re.compile(r'^\d{4}$|^\d{1,2}[-/]\d{1,2}([-/]\d{2,4})?$')
+    _STOP = {'le', 'la', 'les', 'de', 'du', 'des', 'et', 'pour', 'sur', 'avec'}
+    tokens = [t.lower() for t in re.split(r'[\s\-_.]+', base) if t]
+    tokens = [t for t in tokens if len(t) >= 3 and t not in _STOP
+              and not _DATE_RE.match(t)]
+    seen = set()
+    uniq = [t for t in tokens if not (t in seen or seen.add(t))]
+    return ' '.join(uniq[:6])
+
+
+def _classify_none_reason(contact_email: str, domain: str,
+                          signal_len: int) -> str:
+    """Classifie la raison d'une suggestion vide (Q5 wording UI — 4 raisons).
+
+    Anciennement dans `_prewarm_classement_for_mail:3143-3169`. Branché aussi
+    en BG via les moteurs (signal démolisseur v2 P2-8 — le BG ne produisait
+    que `unified_none` générique).
     """
     try:
-        # [1] Cache DB : check idempotent
+        n_contact = _db.count_classifications_for_contact(contact_email)
+        n_domain = _db.count_classifications_for_domain(domain) if domain else 0
+        has_profile = False
         try:
-            cached = _db.get_mail_classement(mid)
-            if cached is not None:
-                _sugg = cached.get('suggestion')
-                _slist = (_sugg.get('_suggestions', [_sugg])
-                          if isinstance(_sugg, dict) and '_suggestions' in _sugg
-                          else ([_sugg] if _sugg else []))
-                _set_mail_preview(mid, 'classement', 'done', {
-                    'suggestion': _sugg,
-                    'suggestions': _slist,
-                    'source': cached.get('source', 'none'),
-                })
-                logger.debug(f"[prewarm-cls] cache DB HIT pour {mid[:30]} "
-                             f"(source={cached.get('source')})")
-                return
-        except Exception as _e:
-            logger.debug(f"[prewarm-cls] check DB erreur : {_e}")
-
-        # [2] Pipeline règle DB (Tier 1 + domaine)
-        contact_email = (mail_data.get('from_email', '') or '').lower()
-        subject = mail_data.get('subject', '')
-        domain = _extract_email_domain(contact_email)
-
-        # [2 bis] Skip si mail de l'utilisateur à lui-même (Fix 2 — 25/04)
-        # Classer un mail envoyé par soi-même n'a pas de sens.
-        _user_email = _normalize_email(_db.get_setting('auth_user_email'))
-        if _user_email and contact_email == _user_email:
-            try:
-                _db.save_mail_classement(mid, None, 'self')
-            except Exception:
-                pass
-            _set_mail_preview(mid, 'classement', 'done', {
-                'suggestion': None, 'suggestions': [], 'source': 'self',
-            })
-            return
-
-        # [2 ter] Détection mail automatique AVANT Claude (PLUS_TARD_VF #4 — 28/04)
-        # Pour les expéditeurs noreply / donotreply / mailer-daemon / etc., Claude
-        # rendra presque toujours none. On économise l'appel API et on stocke
-        # directement la raison qui sera traduite côté UI en wording explicite.
-        # Refonte N1 (11/05) : utilisation de la liste unique _AUTO_EMAIL_PATTERNS
-        # via le helper _is_auto_email (centralisation des 3 anciennes listes).
-        if contact_email and _is_auto_email(contact_email):
-            try:
-                _db.save_mail_classement(mid, None, 'none_auto_email')
-            except Exception as _e:
-                logger.debug(f"[prewarm-cls] save none_auto_email : {_e}")
-            _set_mail_preview(mid, 'classement', 'done', {
-                'suggestion': None, 'suggestions': [], 'source': 'none_auto_email',
-            })
-            logger.debug(f"[prewarm-cls] mail automatique detecte ({contact_email}) → skip Claude")
-            return
-
-        try:
-            subject_kw = _extract_subject_keywords(subject)
+            has_profile = bool(_db.get_contact_profile(contact_email))
         except Exception:
-            subject_kw = subject
-        try:
-            suggestion = _db.get_folder_suggestion(contact_email, domain, subject_kw)
-        except Exception:
-            suggestion = None
-
-        if suggestion:
-            try:
-                _db.save_mail_classement(mid, suggestion, 'rule')
-            except Exception as _e:
-                logger.debug(f"[prewarm-cls] save DB rule : {_e}")
-            _set_mail_preview(mid, 'classement', 'done', {
-                'suggestion': suggestion,
-                'suggestions': [suggestion],
-                'source': 'rule',
-            })
-            logger.debug(f"[prewarm-cls] règle DB matche pour {mid[:30]}")
-            return
-
-        # [3] Fallback Claude si aucune règle DB (P2 — 25/04)
-        # Même pipeline que route /api/classification/post_send, Tier 6 (IA)
-        # Utilise le cache partagé pour éviter les 429 Graph (Fix — 25/04)
-        builder = _get_prompt_builder()
-        if builder:
-            folders = _get_outlook_folders_cached()
-            if folders:
-                try:
-                    body_snippet = (mail_data.get('body_preview')
-                                    or (mail_data.get('body') or '')[:500])
-                    _contact_profile = _db.get_contact_profile(contact_email)
-                    _recent = _db.get_recent_classifications(
-                        contact_email, domain, limit=10)
-                    result = builder.suggest_folder(
-                        contact_email, subject, body_snippet, folders,
-                        recent_classifications=_recent,
-                        contact_profile=_contact_profile,
-                    )
-                    if result and result.get('folder_id'):
-                        suggestions = result.get('_suggestions', [result])
-                        try:
-                            _db.save_mail_classement(mid, result, 'ai')
-                        except Exception as _e:
-                            logger.debug(f"[prewarm-cls] save DB ai : {_e}")
-                        _set_mail_preview(mid, 'classement', 'done', {
-                            'suggestion': result,
-                            'suggestions': suggestions,
-                            'source': 'ai',
-                        })
-                        logger.info(
-                            f"[prewarm-cls] Claude → {result.get('folder_path')} "
-                            f"({len(suggestions)} suggestion(s)) pour {mid[:30]}")
-                        return
-                except Exception as _e:
-                    logger.debug(f"[prewarm-cls] Claude fallback : {_e}")
-
-        # [4] Aucune suggestion → classifier la raison (PLUS_TARD_VF #4 — 28/04)
-        # Au lieu d'un 'none' générique, on tente d'identifier la raison du
-        # vide pour donner un wording explicite côté UI. Idempotent (next call
-        # = cache HIT direct, pas de recompute).
-        _none_source = 'none'  # fallback générique
-        try:
-            n_contact = _db.count_classifications_for_contact(contact_email)
-            n_domain = _db.count_classifications_for_domain(domain) if domain else 0
-            _has_profile = False
-            try:
-                _has_profile = bool(_db.get_contact_profile(contact_email))
-            except Exception:
-                pass
-            # Cas 1 : contact + domaine inconnus du carnet de classement → "domaine inconnu"
-            if n_contact == 0 and n_domain == 0 and not _has_profile:
-                _none_source = 'none_unknown_domain'
-            # Cas 2 : contact inconnu mais domaine déjà classé → "nouvel expéditeur"
-            elif n_contact == 0 and n_domain > 0:
-                _none_source = 'none_new_sender'
-            # Cas 3 : contact connu (profil ou historique) mais signal trop faible
-            else:
-                _body_len = len((mail_data.get('body_preview') or
-                                 (mail_data.get('body') or '')[:500]).strip())
-                _subject_len = len((subject or '').strip())
-                if _body_len + _subject_len < 100:
-                    _none_source = 'none_low_signal'
-                # Sinon : 'none' générique (signal présent mais Claude n'a rien suggéré)
-        except Exception as _e:
-            logger.debug(f"[prewarm-cls] classify none reason : {_e}")
-
-        try:
-            _db.save_mail_classement(mid, None, _none_source)
-        except Exception as _e:
-            logger.debug(f"[prewarm-cls] save {_none_source} : {_e}")
-        _set_mail_preview(mid, 'classement', 'done', {
-            'suggestion': None,
-            'suggestions': [],
-            'source': _none_source,
-        })
-    except Exception as e:
-        logger.debug(f"[prewarm-cls] {e}")
-        _set_mail_preview(mid, 'classement', 'error', None)
+            pass
+        if n_contact == 0 and n_domain == 0 and not has_profile:
+            return 'none_unknown_domain'
+        if n_contact == 0 and n_domain > 0:
+            return 'none_new_sender'
+        if signal_len < 100:
+            return 'none_low_signal'
+        return 'none'
+    except Exception:
+        return 'none'
 
 
-def _prewarm_pj_classement_for_mail(mid, mail_data):
-    """Suggestion classement PJ pour un mail. Stocke dans cache DB
-    (mail_pj_classement_cache) + cache RAM.
+def _match_folder_name_in_text(text: str, folders: list) -> list:
+    """Tier 2 (spec §5.3) — feuilles dont le nom (≥4 chars, hors génériques)
+    apparaît comme mot complet dans le texte.
 
-    Pipeline idempotent (P2+P3 — 25/04) :
-    1. Check DB → skip si HIT
-    2. Mail sans PJ → save 'no_pj' (idempotent, plus jamais re-scanné)
-    3. Règle DB (Tier 1 contact + keywords)
-    4. Fallback Claude si aucune règle (Tier 3 — même pipeline que /api/suggest_pj_folder)
-    5. Persist résultat en DB + RAM
+    Retourne `[{folder_id, folder_name, folder_path}, ...]` triée par ordre
+    d'apparition (max non plafonné côté helper — l'appelant tronque).
+    Extrait de `api_suggest_folder:8419-8469`.
     """
-    try:
-        # [1] Cache DB : check idempotent
-        try:
-            cached = _db.get_mail_pj_classement(mid)
-            if cached is not None:
-                # Fix 02/05/2026 (signal Yvan mail Dufau, cf.
-                # _fetch_single_preview_plate) : si cache dit no_pj mais
-                # mail_data a maintenant des attachments → invalider et
-                # continuer le pipeline. Évite les 80% de no_pj erronés
-                # observés sur OVH au warmup initial.
-                if cached.get('source') == 'no_pj':
-                    _live_has_pj = bool(
-                        mail_data.get('has_attachments')
-                        or (mail_data.get('attachments') or [])
-                    )
-                    if _live_has_pj:
-                        logger.info(
-                            f"[prewarm-pj] cache no_pj invalide pour "
-                            f"{mid[:30]}... (attachments live) → re-calcul"
-                        )
-                        cached = None  # fall through au pipeline
-                if cached is not None:
-                    _sugg = _normalize_pj_suggestion(cached.get('suggestion'))
-                    # 02/05 PM tardif — reconstitution top 3 si _suggestions présent
-                    _pj_slist = (_sugg.get('_suggestions', [_sugg])
-                                 if isinstance(_sugg, dict) and '_suggestions' in _sugg
-                                 else ([_sugg] if _sugg else []))
-                    _set_mail_preview(mid, 'pj_classement', 'done', {
-                        'suggestion': _sugg,
-                        'suggestions': _pj_slist,
-                        'source': cached.get('source', 'none'),
-                    })
-                    return
-        except Exception as _e:
-            logger.debug(f"[prewarm-pj] check DB : {_e}")
-
-        # [2] Mail sans PJ → save no_pj (skip au prochain cycle)
-        has_attach = bool(mail_data.get('has_attachments'))
-        attachments = mail_data.get('attachments') or []
-        if not has_attach and not attachments:
-            try:
-                _db.save_mail_pj_classement(mid, None, 'no_pj')
-            except Exception as _e:
-                logger.debug(f"[prewarm-pj] save no_pj : {_e}")
-            _set_mail_preview(mid, 'pj_classement', 'done', {
-                'suggestion': None, 'suggestions': [], 'source': 'no_pj',
+    if not text or not folders:
+        return []
+    matches = []
+    search_norm = unicodedata.normalize('NFD', text.lower())
+    search_norm = ''.join(c for c in search_norm if unicodedata.category(c) != 'Mn')
+    parent_ids = {f.get('parentFolderId') for f in folders if f.get('parentFolderId')}
+    for f in folders:
+        is_leaf = f.get('id') not in parent_ids
+        if not is_leaf:
+            continue
+        name = f.get('name', '')
+        clean_name = re.sub(r'^\d+[\.\-\s_]+\s*', '', name).strip()
+        if len(clean_name) < 4:
+            continue
+        if clean_name.lower() in _GENERIC_FOLDER_NAMES:
+            continue
+        name_norm = unicodedata.normalize('NFD', clean_name.lower())
+        name_norm = ''.join(c for c in name_norm if unicodedata.category(c) != 'Mn')
+        name_for_match = re.sub(r'[\-_]+', ' ', name_norm).strip()
+        if not name_for_match:
+            continue
+        pattern = r'\b' + re.escape(name_for_match) + r'\b'
+        if re.search(pattern, search_norm):
+            matches.append({
+                'folder_id': f.get('id', ''),
+                'folder_name': name,
+                'folder_path': f.get('path', name),
             })
-            return
+    return matches
 
-        # [3] Pipeline règle DB (Tier 1 contact + keywords)
-        contact_email = (mail_data.get('from_email', '') or '').lower()
-        subject = mail_data.get('subject', '')
-        domain = _extract_email_domain(contact_email)
+
+def _resolve_folder_id_cascade(target_path: str, folders: list,
+                               body_text: str = '') -> tuple:
+    """Résout un `target_path` (path stocké en DB) vers un `folder_id` live
+    Outlook via cascade 5 stratégies.
+
+    Retourne `(folder_id, match_strategy, resolved_path)`. `folder_id=''` si
+    rien (matcher live). Si `folders=None/[]` (BG sans accès live), seul
+    `exact` peut matcher (signal démolisseur v2 P0-4 / P1-6).
+
+    Cascade :
+      1. `exact` — path lowercase identique
+      2. `no_inbox_prefix` — après strip "boîte de réception/" / "inbox/"
+      3. `suffix` — endswith croisé
+      4. `last_segment` — name live == dernier segment du target
+      5. `fuzzy_word` — mot ≥4 chars du dernier segment matche un name live,
+         MAIS le mail courant doit contenir ce mot (fix Yvan 07/05 anti
+         faux-positifs Bim-Pop / Phiwest).
+    """
+    if not target_path:
+        return ('', 'none', '')
+    folders = folders or []
+
+    def _norm(p):
+        return (p or '').lower().strip().replace('\\', '/')
+
+    target_norm = _norm(target_path)
+    target_no_inbox = target_norm
+    for prefix in ('boîte de réception/', 'boite de reception/', 'inbox/'):
+        if target_no_inbox.startswith(prefix):
+            target_no_inbox = target_no_inbox[len(prefix):]
+            break
+    last_seg = target_norm.rstrip('/').split('/')[-1]
+
+    for f in folders:
+        if _norm(f.get('path')) == target_norm:
+            return (f.get('id', ''), 'exact', f.get('path', target_path))
+
+    if target_no_inbox != target_norm:
+        for f in folders:
+            fp = _norm(f.get('path'))
+            if fp == target_no_inbox or fp.endswith('/' + target_no_inbox):
+                return (f.get('id', ''), 'no_inbox_prefix',
+                        f.get('path', target_path))
+
+    for f in folders:
+        fp = _norm(f.get('path'))
+        if fp.endswith('/' + target_norm) or target_norm.endswith('/' + fp):
+            return (f.get('id', ''), 'suffix', f.get('path', target_path))
+
+    if last_seg:
+        for f in folders:
+            if (f.get('name') or '').lower().strip() == last_seg:
+                return (f.get('id', ''), 'last_segment',
+                        f.get('path', target_path))
+
+    if body_text:
+        body_lower = body_text.lower()
+        seg_words = [w for w in last_seg.replace('-', ' ').split() if len(w) >= 4]
+        for word in seg_words:
+            if word not in body_lower:
+                continue  # garde Yvan 07/05 : mot du folder absent du mail
+            for f in folders:
+                fn = (f.get('name') or '').lower()
+                if word in fn:
+                    return (f.get('id', ''), f'fuzzy_word({word})',
+                            f.get('path', target_path))
+
+    return ('', 'none', '')
+
+
+# =============================================================================
+# Moteurs classement (N8) — pipelines des 7 tiers, sans appel IA
+# =============================================================================
+# Le Tier 4 IA reste à l'appelant :
+#   - BG (`_prewarm_unified_for_mail`) : commis Haiku unifié N6.1
+#     (`analyze_one_mail_stream`) qui produit folder_mail + folder_pj en
+#     1 seul appel — préservé (Option α validée Yvan 13/05).
+#   - API à la demande (`api_suggest_folder`) : fallback `suggest_folder`
+#     uniquement si tiers DB vides.
+# =============================================================================
+
+
+def _compute_classement_suggestions(contact_email, subject, body_snippet, *,
+                                    folders=None, domain=None,
+                                    subject_keywords=None, body_keywords=None,
+                                    momentum_state=None, compose_mode=False,
+                                    max_suggestions=3):
+    """Moteur classement mail — tiers DB du spec §2 (chapitre A).
+
+    Retourne `{'suggestions': [...], 'source_primary': str}`. Pas d'appel IA
+    (laissé à l'appelant — voir docstring de bloc).
+
+    Pipeline (préemption ordonnée, max 3) :
+      Tier 0   thread — `_db.get_folder_by_thread`
+      Tier 1   contact mono-dossier — `_db.get_folder_suggestion`
+               (en mode `compose_mode=True` : aussi fallback ≥1 via
+               `get_contact_classification_history` + cascade `_resolve_folder_id_cascade`)
+      Tier 1bis keywords sujet → fallback body — `_db.get_folder_by_keywords`
+      Tier 2   matching nom dossier dans subject+body — `_match_folder_name_in_text`
+      Tier 3a  règle domaine séparée (avec filtre _PUBLIC) — `_db.get_domain_folder_suggestion`
+      Tier 3b  cross-contact — `_db.get_cross_contact_folder`
+      Tier 5   momentum (boost #1 si ambigu, remplit #2/#3) — `momentum_state`
+
+    Args :
+      momentum_state : snapshot `{folder_id, folder_name, ts}` de
+        `_classify_momentum` capturé AVANT le spawn BG par l'appelant.
+        None → tier 5 skip (signal démolisseur v2 P0-3 race condition).
+      folders : liste folders live Outlook (peut être None en BG → Tier 2
+        + cascade compose désactivés).
+      compose_mode : True en mode new (cas C2 spec §4) — abaisse Tier 1 à ≥1
+        + active la cascade résolution path.
+    """
+    suggestions = []
+    seen_paths = set()
+    seen_ids = set()
+
+    def _add(sug, source, reason='', confidence=None):
+        if not sug:
+            return
+        fp = sug.get('folder_path') or sug.get('dest_folder') or ''
+        fid = sug.get('folder_id') or ''
+        # Dedupe sur folder_path normalisé OU folder_id (signal démolisseur v2 P2-7)
+        key_path = fp.lower().strip().replace('\\', '/')
+        if (key_path and key_path in seen_paths) or (fid and fid in seen_ids):
+            return
+        if key_path:
+            seen_paths.add(key_path)
+        if fid:
+            seen_ids.add(fid)
+        item = dict(sug)
+        item['folder_path'] = fp
+        item['source'] = source
+        if reason:
+            item['reason'] = reason
+        if confidence is not None and 'confidence' not in item:
+            item['confidence'] = confidence
+        suggestions.append(item)
+
+    # Normalisation inputs
+    if domain is None:
+        domain = _extract_email_domain(contact_email or '')
+    if subject_keywords is None:
         try:
-            subject_kw = _extract_subject_keywords(subject)
+            subject_keywords = _extract_subject_keywords(subject or '')
         except Exception:
-            subject_kw = subject
+            subject_keywords = subject or ''
+    if body_keywords is None and body_snippet:
         try:
-            suggestion = _db.get_pj_folder_suggestion(
-                contact_email, domain, subject_keywords=subject_kw)
+            body_keywords = _extract_subject_keywords(body_snippet)
         except Exception:
-            suggestion = None
-        if not suggestion:
+            body_keywords = ''
+
+    # ---- Tier 0 : thread (même fil)
+    if len(suggestions) < max_suggestions:
+        try:
+            thread_match = _db.get_folder_by_thread(contact_email, subject_keywords)
+        except Exception:
+            thread_match = None
+        if thread_match:
+            _add(thread_match, 'thread', reason='Même fil de discussion',
+                 confidence=0.95)
+
+    # ---- Tier 1 : contact mono-dossier (+ fallback compose seuil ≥1)
+    if len(suggestions) < max_suggestions:
+        try:
+            rule = _db.get_folder_suggestion(contact_email, domain,
+                                             subject_keywords=subject_keywords)
+        except Exception:
+            rule = None
+        if rule:
+            _add(rule, 'rule',
+                 reason=f"Règle auto ({rule.get('count', '?')} classements)",
+                 confidence=1.0)
+        elif compose_mode:
+            # Cas C2 spec §4 : seuil ≥1 + cascade résolution path live.
+            # Compose Tier 0 (ne pas confondre avec thread) — sert quand
+            # `get_folder_suggestion` échoue car contact a 1-2 classements
+            # seulement (< 3 seuil par défaut).
             try:
-                suggestion = _db.get_pj_folder_by_keywords(contact_email, subject_kw)
+                recent = _db.get_recent_classifications(
+                    contact_email, None, limit=50)
             except Exception:
-                suggestion = None
+                recent = []
+            if recent:
+                from collections import Counter as _Counter
+                cnt = _Counter(r.get('folder_path', '') for r in recent
+                               if r.get('folder_path'))
+                if cnt:
+                    top_path, top_count = cnt.most_common(1)[0]
+                    if top_count >= 1:
+                        fid, strategy, resolved = _resolve_folder_id_cascade(
+                            top_path, folders, body_text=(subject or '') + ' ' + (body_snippet or ''))
+                        _add({'folder_path': resolved or top_path,
+                              'folder_id': fid,
+                              'count': top_count}, 'rule_compose',
+                             reason=f"Dossier habituel ({top_count} classements)",
+                             confidence=0.85)
 
-        if suggestion:
-            suggestion = _normalize_pj_suggestion(suggestion)
-            try:
-                _db.save_mail_pj_classement(mid, suggestion, 'rule')
-            except Exception as _e:
-                logger.debug(f"[prewarm-pj] save DB rule : {_e}")
-            _set_mail_preview(mid, 'pj_classement', 'done', {
-                'suggestion': suggestion,
-                'suggestions': [suggestion],
-                'source': 'rule',
-            })
-            logger.debug(f"[prewarm-pj] règle DB matche pour {mid[:30]}")
-            return
-
-        # [4] Fallback Claude si aucune règle DB et PJ présentes (P2 — 25/04)
-        # Même pipeline que route /api/suggest_pj_folder, Tier 3 (IA)
-        pj_names = [a.get('name', '') for a in attachments if a.get('name')]
-        if pj_names:
-            builder = _get_prompt_builder()
-            if builder:
-                try:
-                    folders = _get_windows_folders_cached()
-                    if folders:
-                        pj_history = _db.get_pj_classification_history(
-                            contact_email, limit=20)
-                        recent = _db.get_recent_pj_classifications(
-                            contact_email, domain, limit=10)
-                        cp = _db.get_contact_profile(contact_email)
-                        body_snippet = (mail_data.get('body_preview')
-                                        or (mail_data.get('body') or '')[:500])
-                        result = builder.suggest_pj_folder(
-                            contact_email, subject, pj_names, folders,
-                            recent_pj_classifications=recent,
-                            contact_profile=cp,
-                            pj_history=pj_history,
-                            body_snippet=body_snippet,
-                        )
-                        if result and result.get('folder_path'):
-                            try:
-                                _db.save_mail_pj_classement(mid, result, 'ai')
-                            except Exception as _e:
-                                logger.debug(f"[prewarm-pj] save DB ai : {_e}")
-                            _set_mail_preview(mid, 'pj_classement', 'done', {
-                                'suggestion': result,
-                                'suggestions': [result],
-                                'source': 'ai',
-                            })
-                            logger.info(
-                                f"[prewarm-pj] Claude → {result.get('folder_path')} "
-                                f"pour {mid[:30]}")
-                            return
-                except Exception as _e:
-                    logger.debug(f"[prewarm-pj] Claude fallback : {_e}")
-
-        # [5] Aucune suggestion → save 'none' (idempotent)
+    # ---- Tier 1bis : keywords sujet → body
+    if len(suggestions) < max_suggestions and subject_keywords:
         try:
-            _db.save_mail_pj_classement(mid, None, 'none')
-        except Exception as _e:
-            logger.debug(f"[prewarm-pj] save none : {_e}")
-        _set_mail_preview(mid, 'pj_classement', 'done', {
-            'suggestion': None, 'suggestions': [], 'source': 'none',
-        })
-    except Exception as e:
-        logger.debug(f"[prewarm-pj] {e}")
-        _set_mail_preview(mid, 'pj_classement', 'error', None)
+            kw = _db.get_folder_by_keywords(contact_email, subject_keywords)
+        except Exception:
+            kw = None
+        if not kw and body_keywords:
+            try:
+                kw = _db.get_folder_by_keywords(contact_email, body_keywords)
+            except Exception:
+                kw = None
+        if kw:
+            _add(kw, 'keywords',
+                 reason=f"Contact + sujet ({kw.get('count', '?')} similaires)",
+                 confidence=0.9)
+
+    # ---- Tier 2 : matching nom dossier dans sujet + body
+    if len(suggestions) < max_suggestions and folders:
+        search_text = f"{subject or ''} {body_snippet or ''}"
+        for m in _match_folder_name_in_text(search_text, folders):
+            _add(m, 'folder_name',
+                 reason='Nom du dossier détecté dans le mail',
+                 confidence=0.8)
+            if len(suggestions) >= max_suggestions:
+                break
+
+    # ---- Tier 3a : règle domaine (filtre _PUBLIC)
+    if len(suggestions) < max_suggestions and domain and not _filter_public_domain(domain):
+        try:
+            dom_rule = _db.get_domain_folder_suggestion(domain)
+        except Exception:
+            dom_rule = None
+        if dom_rule:
+            _add(dom_rule, 'domain',
+                 reason=f"Domaine {domain} ({dom_rule.get('contact_count', '?')} contacts)",
+                 confidence=0.6)
+
+    # ---- Tier 3b : cross-contact (sujet ou body)
+    if len(suggestions) < max_suggestions:
+        try:
+            cross = _db.get_cross_contact_folder(subject_keywords or body_keywords or '')
+        except Exception:
+            cross = None
+        if cross:
+            _add(cross, 'cross_contact',
+                 reason=f"Sujet similaire ({cross.get('contact_count', '?')} contacts)",
+                 confidence=0.7)
+
+    # ---- Tier 5 : momentum (remplit #2/#3 quand suggestions < max)
+    # NB : `momentum_state` doit être un snapshot immutable capturé par
+    # l'appelant AVANT _spawn_bg (signal démolisseur v2 P0-3).
+    if len(suggestions) < max_suggestions and momentum_state:
+        ts = momentum_state.get('ts', 0)
+        if ts and (time.time() - ts) < _MOMENTUM_TTL_SECONDS:
+            mom_sug = {
+                'folder_id': momentum_state.get('folder_id', ''),
+                'folder_path': momentum_state.get('folder_name', ''),
+            }
+            if mom_sug['folder_id']:
+                _add(mom_sug, 'momentum',
+                     reason='Dossier récent', confidence=0.5)
+
+    source_primary = suggestions[0]['source'] if suggestions else 'none'
+    return {'suggestions': suggestions, 'source_primary': source_primary}
+
+
+def _compute_pj_classement_suggestions(contact_email, subject, body_snippet,
+                                       attachment_names=None, *,
+                                       folders_pj=None, domain=None,
+                                       subject_keywords=None,
+                                       max_suggestions=3):
+    """Moteur classement PJ — tiers DB du spec §3 (chapitre B).
+
+    Pipeline (préemption ordonnée, max 3) :
+      Tier 0   cohérence mail→PJ — historique `folder_classifications` du
+               contact : si N classements vers `IMMOBILIER/SCI/Le Cardo`,
+               fuzzy-match last_segment sur folders_pj contenant « cardo »
+               (re-cadrage démolisseur v2 P0-1 : on lit l'historique, pas
+               l'entry_id du mail courant).
+      Tier 1bis (filename) — NOUVEAU spec §5.2 priorité nom fichier
+      Tier 1   contact mono-dossier PJ — `_db.get_pj_folder_suggestion`
+      Tier 1bis (sujet) — `_db.get_pj_folder_by_keywords` (sujet → body)
+
+    Pas d'IA ici (Tier 4 = appelant). Retourne `{'suggestions', 'source_primary'}`.
+    """
+    suggestions = []
+    seen_paths = set()
+
+    def _add(sug, source, reason='', confidence=None):
+        if not sug:
+            return
+        sug = _normalize_pj_suggestion(sug)
+        fp = sug.get('folder_path') or sug.get('dest_folder') or ''
+        key = fp.lower().strip().replace('\\', '/')
+        if not key or key in seen_paths:
+            return
+        seen_paths.add(key)
+        item = dict(sug)
+        item['folder_path'] = fp
+        item['source'] = source
+        if reason:
+            item['reason'] = reason
+        if confidence is not None and 'confidence' not in item:
+            item['confidence'] = confidence
+        suggestions.append(item)
+
+    if domain is None:
+        domain = _extract_email_domain(contact_email or '')
+    if subject_keywords is None:
+        try:
+            subject_keywords = _extract_subject_keywords(subject or '')
+        except Exception:
+            subject_keywords = subject or ''
+
+    # ---- Tier 0 : cohérence mail→PJ via historique contact
+    # Lit le dossier mail le plus fréquent pour ce contact dans
+    # `folder_classifications`, cherche un folder_pj dont le name contient
+    # le dernier segment (fuzzy_word). Spec §3 : « Le Cardo (mail) → Le Cardo
+    # (PJ) ». Marche en BG dès le 1er mail si historique présent.
+    if len(suggestions) < max_suggestions and folders_pj and contact_email:
+        try:
+            history = _db.get_contact_folder_stats(contact_email)
+        except Exception:
+            history = []
+        if history:
+            top_mail_path = history[0].get('folder_path', '')
+            if top_mail_path:
+                last_seg = (top_mail_path.lower().strip()
+                            .replace('\\', '/').rstrip('/').split('/')[-1])
+                # mots ≥4 chars pour matcher folders PJ (ex « cardo », « phiwest »)
+                seg_words = [w for w in re.split(r'[\s\-_]+', last_seg)
+                             if len(w) >= 4]
+                for word in seg_words:
+                    for f_pj in folders_pj:
+                        fname_pj = (f_pj.get('name')
+                                    or f_pj.get('folder_name')
+                                    or '').lower()
+                        if word in fname_pj:
+                            _add({'folder_path': f_pj.get('path')
+                                                or f_pj.get('dest_folder')
+                                                or fname_pj,
+                                  'dest_folder': f_pj.get('path')
+                                                or f_pj.get('dest_folder')
+                                                or fname_pj},
+                                 'mail_pj_coherence',
+                                 reason=f'Cohérence avec dossier mail « {last_seg} »',
+                                 confidence=0.9)
+                            break
+                    if suggestions:
+                        break
+
+    # ---- Tier 1bis filename (PRIORITAIRE sur sujet — spec §5.2)
+    if len(suggestions) < max_suggestions and attachment_names:
+        # Concatène les keywords de tous les fichiers (« Bail_X.pdf », « Devis.pdf »)
+        fname_kw = ' '.join(
+            _filename_keywords(fn) for fn in attachment_names if fn).strip()
+        if fname_kw:
+            try:
+                fkw = _db.get_pj_folder_by_filename_keywords(
+                    contact_email, fname_kw)
+            except Exception:
+                fkw = None
+            if fkw:
+                _add(fkw, 'filename_keywords',
+                     reason=f"Nom fichier ({fkw.get('count', '?')} similaires)",
+                     confidence=0.92)
+
+    # ---- Tier 1 : contact mono-dossier PJ
+    if len(suggestions) < max_suggestions:
+        try:
+            rule = _db.get_pj_folder_suggestion(
+                contact_email, domain, subject_keywords=subject_keywords)
+        except Exception:
+            rule = None
+        if rule:
+            _add(rule, 'rule',
+                 reason=f"Règle auto PJ ({rule.get('contact_count', rule.get('count', '?'))} classements)",
+                 confidence=0.88)
+
+    # ---- Tier 1bis sujet (secondaire, sous filename)
+    if len(suggestions) < max_suggestions and subject_keywords:
+        try:
+            kw = _db.get_pj_folder_by_keywords(contact_email, subject_keywords)
+        except Exception:
+            kw = None
+        if kw:
+            _add(kw, 'keywords',
+                 reason=f"Contact + sujet ({kw.get('count', '?')} similaires)",
+                 confidence=0.8)
+
+    source_primary = suggestions[0]['source'] if suggestions else 'none'
+    return {'suggestions': suggestions, 'source_primary': source_primary}
+
+
+# =============================================================================
+# Constantes momentum TTL — N8 conserve la valeur 2h (PLUS_TARD_VF #31 pour
+# trancher vs spec 30min après mesure empirique).
+# =============================================================================
+_MOMENTUM_TTL_SECONDS = 7200
+
+
+# N8 (13/05/2026) — `_prewarm_classement_for_mail` et `_prewarm_pj_classement_for_mail`
+# supprimés. Avant N6.1 (12/05) ils alimentaient le BG ; depuis N6.1 ils
+# n'étaient plus appelés que par `/api/post_generation_analyze` qui délègue
+# désormais au moteur unique `_compute_classement_suggestions(compose_mode=True)`
+# et `_compute_pj_classement_suggestions`. 310 lignes supprimées
+# (signal démolisseur v2 P2-3 : pas de wrapper rétro-compat).
 
 
 def _extract_attachment_text_inmem(filename, content_bytes):
@@ -3560,11 +3778,20 @@ def _persist_commis_results(*, mid, mail_data, points, actions, mail_suggestions
         except Exception as _e:
             logger.debug(f"[unified] save classement: {_e}")
     else:
-        cls_data = {'suggestion': None, 'suggestions': [], 'source': 'unified_none'}
+        # N8 (Q5 — démolisseur v2 P2-8) : ne plus persister `unified_none`
+        # générique, classifier la raison parmi les 4 cas pour wording UI :
+        # `none_unknown_domain` / `none_new_sender` / `none_low_signal` / `none`.
+        _from = (mail_data.get('from_email', '') or '').lower()
+        _dom = _extract_email_domain(_from)
+        _signal = len((mail_data.get('subject') or '').strip()) + \
+                  len(((mail_data.get('body_preview')
+                        or (mail_data.get('body') or ''))[:500]).strip())
+        none_src = _classify_none_reason(_from, _dom, _signal)
+        cls_data = {'suggestion': None, 'suggestions': [], 'source': none_src}
         try:
-            _db.save_mail_classement(mid, None, 'unified_none')
+            _db.save_mail_classement(mid, None, none_src)
         except Exception as _e:
-            logger.debug(f"[unified] save classement unified_none: {_e}")
+            logger.debug(f"[unified] save classement {none_src}: {_e}")
     _set_mail_preview(mid, 'classement', 'done', cls_data)
 
     # 4. Classement PJ — top 3
@@ -3589,11 +3816,21 @@ def _persist_commis_results(*, mid, mail_data, points, actions, mail_suggestions
         except Exception as _e:
             logger.debug(f"[unified] save pj classement: {_e}")
     else:
-        pj_data = {'suggestion': None, 'suggestions': [], 'source': 'unified_none'}
+        # N8 P0-2 (regard frais) — symétrie avec mail : pas de `unified_none`
+        # générique. Le contexte PJ partage les mêmes raisons que mail (le
+        # signal de classement vient du contact + sujet + body — pas du
+        # contenu PJ qu'on n'a pas encore extrait à ce stade).
+        _from = (mail_data.get('from_email', '') or '').lower()
+        _dom = _extract_email_domain(_from)
+        _signal = len((mail_data.get('subject') or '').strip()) + \
+                  len(((mail_data.get('body_preview')
+                        or (mail_data.get('body') or ''))[:500]).strip())
+        none_src_pj = _classify_none_reason(_from, _dom, _signal)
+        pj_data = {'suggestion': None, 'suggestions': [], 'source': none_src_pj}
         try:
-            _db.save_mail_pj_classement(mid, None, 'unified_none')
+            _db.save_mail_pj_classement(mid, None, none_src_pj)
         except Exception as _e:
-            logger.debug(f"[unified] save pj_classement unified_none: {_e}")
+            logger.debug(f"[unified] save pj_classement {none_src_pj}: {_e}")
     _set_mail_preview(mid, 'pj_classement', 'done', pj_data)
 
 
@@ -3724,75 +3961,64 @@ def _prewarm_unified_for_mail(mid, mail_data):
         if has_pj:
             pj_text = _get_pj_text_for_unified_analyze(mid)
 
-        # === 5. Pré-calcul Top 3 via règles DB (tiers) ===
-        # Désambiguïsation : règles DB d'historique tranchent via l'ID Graph
-        # cryptique exact (le commis ne peut pas distinguer 100 dossiers
-        # "Administratif" dans 100 SCI différentes). Top 3 cumulé sans doublons
-        # (par folder_path) à travers tous les tiers + sortie commis.
+        # === 5. Pré-calcul Top 3 via moteur unique N8 ===
+        # Refonte N8 (13/05) : 3 pipelines parallèles (BG / API / compose)
+        # remplacés par 1 moteur unique `_compute_classement_suggestions`
+        # (mail) + `_compute_pj_classement_suggestions` (PJ).
         # Spec : docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md.
+        # Les sorties IA du commis (folder_mail/folder_pj produites par
+        # `analyze_one_mail_stream`) sont fusionnées en aval dans
+        # `_persist_commis_results` (Option α — commis N6.1 préservé).
         try:
             subject_kw = _extract_subject_keywords(mail_data.get('subject', ''))
         except Exception:
             subject_kw = mail_data.get('subject', '')
 
-        _TIER_REASONS = {
-            'thread': 'thread déjà classé',
-            'rule': 'classement habituel pour ce contact',
-            'keywords': 'mots-clés du sujet',
-            'domain': 'domaine récurrent',
-            'cross_contact': 'sujet récurrent',
-        }
-        mail_suggestions, _seen_mail = [], set()
-        def _add_mail_sug(sug, source):
-            if not sug or not isinstance(sug, dict):
-                return
-            fp = sug.get('folder_path', '')
-            if not fp or fp in _seen_mail or len(mail_suggestions) >= 3:
-                return
-            s = dict(sug)
-            s['source'] = source
-            if not s.get('reason') and source in _TIER_REASONS:
-                s['reason'] = _TIER_REASONS[source]
-            mail_suggestions.append(s)
-            _seen_mail.add(fp)
+        body_snippet_kw = (mail_data.get('body_preview')
+                           or (mail_data.get('body') or '')[:500])
+        try:
+            body_kw = _extract_subject_keywords(body_snippet_kw)
+        except Exception:
+            body_kw = ''
+
+        # Snapshot momentum AVANT calcul (signal démolisseur v2 P0-3 :
+        # immutable dict copy pour éviter race conditions sur clear()+update()
+        # côté `/api/classify_email`). UserScopedDict propage déjà user_id
+        # via `_spawn_bg`, donc on lit la bonne instance utilisateur.
+        try:
+            momentum_snapshot = dict(_classify_momentum) if _classify_momentum else None
+        except Exception:
+            momentum_snapshot = None
+
+        folders_outlook = _get_outlook_folders_cached() or []
 
         try:
-            _add_mail_sug(_db.get_folder_by_thread(contact_email, subject_kw), 'thread')
-            _add_mail_sug(_db.get_folder_suggestion(contact_email, domain, subject_kw), 'rule')
-            if subject_kw:
-                _add_mail_sug(_db.get_folder_by_keywords(contact_email, subject_kw), 'keywords')
-            _add_mail_sug(_db.get_domain_folder_suggestion(domain), 'domain')
-            if subject_kw:
-                _add_mail_sug(_db.get_cross_contact_folder(subject_kw), 'cross_contact')
+            _mail_engine = _compute_classement_suggestions(
+                contact_email, mail_data.get('subject', ''), body_snippet_kw,
+                folders=folders_outlook, domain=domain,
+                subject_keywords=subject_kw, body_keywords=body_kw,
+                momentum_state=momentum_snapshot, compose_mode=False,
+            )
+            mail_suggestions = _mail_engine['suggestions']
         except Exception as _e:
-            logger.debug(f"[unified] Tier DB mail: {_e}")
+            logger.debug(f"[unified] moteur mail : {_e}")
+            mail_suggestions = []
 
-        _TIER_PJ_REASONS = {
-            'rule': 'classement PJ habituel',
-            'keywords': 'mots-clés du sujet',
-        }
-        pj_suggestions, _seen_pj = [], set()
-        def _add_pj_sug(sug, source):
-            if not sug or not isinstance(sug, dict):
-                return
-            s = dict(_normalize_pj_suggestion(sug))
-            fp = s.get('folder_path', '')
-            if not fp or fp in _seen_pj or len(pj_suggestions) >= 3:
-                return
-            s['source'] = source
-            if not s.get('reason') and source in _TIER_PJ_REASONS:
-                s['reason'] = _TIER_PJ_REASONS[source]
-            pj_suggestions.append(s)
-            _seen_pj.add(fp)
-
+        pj_suggestions = []
         if has_pj:
             try:
-                _add_pj_sug(_db.get_pj_folder_suggestion(
-                    contact_email, domain, subject_keywords=subject_kw), 'rule')
-                if subject_kw:
-                    _add_pj_sug(_db.get_pj_folder_by_keywords(contact_email, subject_kw), 'keywords')
+                folders_pj = _get_windows_folders_cached() or []
+                _pj_names = [a.get('name', '') for a in (mail_data.get('attachments') or [])
+                             if a.get('name')]
+                _pj_engine = _compute_pj_classement_suggestions(
+                    contact_email, mail_data.get('subject', ''), body_snippet_kw,
+                    attachment_names=_pj_names,
+                    folders_pj=folders_pj, domain=domain,
+                    subject_keywords=subject_kw,
+                )
+                pj_suggestions = _pj_engine['suggestions']
             except Exception as _e:
-                logger.debug(f"[unified] Tier DB pj: {_e}")
+                logger.debug(f"[unified] moteur PJ : {_e}")
 
         # === 6. Body length filter (refonte N6.1) ===
         # Notification ultra-courte ("OK", "RDV confirmé"...) → skip Haiku.
@@ -3839,22 +4065,29 @@ def _prewarm_unified_for_mail(mid, mail_data):
             raise Exception('No end event from analyze_one_mail_stream')
 
         # === 8. Compléter Top 3 avec sortie commis si pas plein ===
+        # Le moteur N8 fait déjà les tiers DB. Le commis ajoute la sortie
+        # IA en complément quand la liste DB n'a pas plein 3.
+        def _seen_paths(items):
+            return {(i.get('folder_path') or '').lower().strip().replace('\\', '/')
+                    for i in items}
         fm = result.get('folder_mail')
         if fm and fm.get('folder_id') and len(mail_suggestions) < 3:
             fm_path = fm.get('folder_path', '')
-            if fm_path and fm_path not in _seen_mail:
+            fm_key = fm_path.lower().strip().replace('\\', '/')
+            if fm_path and fm_key not in _seen_paths(mail_suggestions):
                 s = dict(fm)
-                s.setdefault('source', 'unified')
+                s.setdefault('source', 'ai')
+                s.setdefault('reason', 'Suggestion IA')
                 mail_suggestions.append(s)
-                _seen_mail.add(fm_path)
         fpj = result.get('folder_pj')
         if has_pj and fpj and fpj.get('folder_path') and len(pj_suggestions) < 3:
             fpj_path = fpj.get('folder_path', '')
-            if fpj_path and fpj_path not in _seen_pj:
+            fpj_key = fpj_path.lower().strip().replace('\\', '/')
+            if fpj_path and fpj_key not in _seen_paths(pj_suggestions):
                 s = dict(fpj)
-                s.setdefault('source', 'unified')
+                s.setdefault('source', 'ai')
+                s.setdefault('reason', 'Suggestion IA')
                 pj_suggestions.append(s)
-                _seen_pj.add(fpj_path)
 
         # === 9. Persister les 4 frigos ===
         _persist_commis_results(
@@ -8361,11 +8594,12 @@ def _extract_subject_keywords(subject):
 
 @app.route('/api/suggest_folder/<path:message_id>')
 def api_suggest_folder(message_id):
-    """
-    Suggestion hybride de dossier — 8 tiers.
-    Tier 0: Thread matching / Tier 1: règle contact / Tier 1bis: keywords /
-    Tier 2: folder name matching / Tier 3: domaine / Tier 4: cross-contact /
-    Tier 5: momentum / Tier 6: IA top 3
+    """Suggestion classement à la demande — wrapper sur le moteur unique N8.
+
+    Refonte N8 (13/05) : 175 lignes de pipeline 6+1 tiers remplacées par 1
+    appel à `_compute_classement_suggestions` + fallback Tier 4 IA si tiers
+    DB vides. Mêmes 7 tiers que le BG (`_prewarm_unified_for_mail`), garantie
+    de cohérence (Q1=A : un seul GPS).
     """
     graph = get_graph()
     if not graph:
@@ -8377,154 +8611,53 @@ def api_suggest_folder(message_id):
             return jsonify({"error": "Email introuvable"}), 404
 
         contact_email = email.get('from_email', '')
-        domain = _extract_email_domain(contact_email)
         subject = email.get('subject', '')
         body_preview = email.get('body_preview', '')[:300]
-        _subj_kw = _extract_subject_keywords(subject)
-        _body_kw = _extract_subject_keywords(body_preview) if body_preview else ''
-
-        _suggestions = []
-        _existing_ids = set()
-
-        def _add(s):
-            if s and s.get('folder_id') and s['folder_id'] not in _existing_ids:
-                _suggestions.append(s)
-                _existing_ids.add(s['folder_id'])
-
-        # Tier 0 : Thread matching
-        thread_match = _db.get_folder_by_thread(contact_email, _subj_kw)
-        if thread_match:
-            _add({'source': 'thread', 'folder_id': thread_match['folder_id'],
-                  'folder_name': thread_match.get('folder_path', ''), 'confidence': 0.95,
-                  'reason': 'Même fil de discussion'})
-
-        # Tier 1 : Règle contact mono-dossier
-        if len(_suggestions) < 3:
-            rule = _db.get_folder_suggestion(contact_email, domain, subject_keywords=_subj_kw)
-            if rule:
-                _add({'source': 'rule', 'folder_id': rule['folder_id'],
-                      'folder_name': rule.get('folder_path', ''), 'confidence': 1.0,
-                      'reason': f"Règle auto ({rule.get('count', '?')} classements)"})
-
-        # Tier 1 bis : Keywords sujet (puis body fallback)
-        if len(_suggestions) < 3 and _subj_kw:
-            kw_match = _db.get_folder_by_keywords(contact_email, _subj_kw)
-            if not kw_match and _body_kw:
-                kw_match = _db.get_folder_by_keywords(contact_email, _body_kw)
-            if kw_match:
-                _add({'source': 'keywords', 'folder_id': kw_match['folder_id'],
-                      'folder_name': kw_match.get('folder_path', ''), 'confidence': 0.9,
-                      'reason': f"Contact + sujet ({kw_match.get('count','?')} similaires)"})
-
-        # Tier 2 : Nom de dossier dans sujet/body
-        # 07/05 fix F1 (signal Yvan) — la garde précédente
-        # `len(clean_name) <= 5 or ' ' not in clean_name` rejetait tous les
-        # dossiers à 1 seul mot, ce qui bloquait Tier 2 sur l'essentiel de
-        # son arbo (Cardo, Greenpark, Kpla, RBUS, Météor, anna chu, …).
-        # Nouvelle garde : ≥ 4 chars (au lieu de > 5) + filtre _COMMON
-        # (mots trop génériques) + matching sur mot complet (\b…\b) pour
-        # éviter qu'un nom court matche une sous-chaîne d'un mot plus long
-        # (ex: « kpla » dans un autre contexte).
-        if len(_suggestions) < 3:
-            try:
-                folders = graph.get_all_folders()
-                _COMMON = {'divers', 'autre', 'autres', 'factures', 'facture',
-                           'courrier', 'mail', 'mails', 'inbox', 'archive',
-                           'archives', 'envoyés', 'envoyes', 'brouillons',
-                           'admin', 'compta', 'bilan', 'travaux', 'devis',
-                           'todo', 'note', 'notes', 'misc', 'general',
-                           'boite de reception'}
-                _search_text = f"{subject} {body_preview}".lower()
-                _search_norm = unicodedata.normalize('NFD', _search_text)
-                _search_norm = ''.join(c for c in _search_norm if unicodedata.category(c) != 'Mn')
-                # Identifier les feuilles (dossiers sans enfants)
-                parent_ids = {f.get('parentFolderId') for f in folders if f.get('parentFolderId')}
-                for f in folders:
-                    is_leaf = f.get('id') not in parent_ids
-                    if not is_leaf:
-                        continue
-                    name = f.get('name', '')
-                    # Strip préfixe numérique (« 23---anna---chu » → « anna---chu »
-                    # ou « 10--Le-Cardo » → « Le-Cardo »)
-                    clean_name = re.sub(r'^\d+[\.\-\s_]+\s*', '', name).strip()
-                    if len(clean_name) < 4:
-                        continue
-                    if clean_name.lower() in _COMMON:
-                        continue
-                    _name_norm = unicodedata.normalize('NFD', clean_name.lower())
-                    _name_norm = ''.join(c for c in _name_norm if unicodedata.category(c) != 'Mn')
-                    # Match mot complet : « cardo » match « le cardo » mais pas
-                    # « cardomètre ». Tirets et underscores convertis en espaces.
-                    _name_for_match = re.sub(r'[\-_]+', ' ', _name_norm).strip()
-                    if not _name_for_match:
-                        continue
-                    pattern = r'\b' + re.escape(_name_for_match) + r'\b'
-                    if re.search(pattern, _search_norm):
-                        _add({'source': 'folder_name', 'folder_id': f['id'],
-                              'folder_name': name, 'confidence': 0.8,
-                              'reason': 'Nom du dossier détecté dans le mail'})
-                    if len(_suggestions) >= 3:
-                        break
-            except Exception as e:
-                logger.warning(f"suggest_folder tier2: {e}")
-
-        # Tier 3 : Règle domaine (domaines publics exclus)
-        if len(_suggestions) < 3 and domain:
-            _PUBLIC = {'gmail.com','outlook.com','hotmail.com','hotmail.fr','yahoo.fr','yahoo.com',
-                       'orange.fr','free.fr','sfr.fr','laposte.net','live.fr','wanadoo.fr'}
-            if domain not in _PUBLIC:
-                domain_rule = _db.get_domain_folder_suggestion(domain)
-                if domain_rule:
-                    _add({'source': 'domain', 'folder_id': domain_rule['folder_id'],
-                          'folder_name': domain_rule.get('folder_path', ''), 'confidence': 0.6,
-                          'reason': f"Domaine {domain} ({domain_rule.get('contact_count','?')} contacts)"})
-
-        # Tier 4 : Cross-contact keywords
-        if len(_suggestions) < 3:
-            cross = _db.get_cross_contact_folder(_subj_kw or _body_kw)
-            if cross:
-                _add({'source': 'cross_contact', 'folder_id': cross['folder_id'],
-                      'folder_name': cross.get('folder_path', ''), 'confidence': 0.7,
-                      'reason': f"Sujet similaire ({cross.get('contact_count','?')} contacts)"})
-
-        # Tier 5 : Momentum (dernier classement dans les 2h — O2 08/05)
-        # Avant : 30 min. Étendu pour couvrir les sessions de tri matinales
-        # où l'utilisateur peut prendre une pause café (35-45 min) entre 2
-        # classements de même thématique.
-        if len(_suggestions) < 3 and _classify_momentum:
-            _mom = _classify_momentum
-            if _mom.get('folder_id') and (time.time() - _mom.get('ts', 0)) < 7200:
-                _add({'source': 'momentum', 'folder_id': _mom['folder_id'],
-                      'folder_name': _mom.get('folder_name', ''), 'confidence': 0.5,
-                      'reason': 'Dossier récent'})
-
-        # Si on a des suggestions → retourner directement
-        if _suggestions:
-            return jsonify({
-                "suggestion": _suggestions[0],
-                "suggestions": _suggestions,
-                "source": _suggestions[0]['source'],
-            })
-
-        # Tier 6 : IA fallback — ClaudeAssistant.suggest_folder() (pas AIProvider)
-        _builder = _get_prompt_builder()
-        if not _builder:
-            return jsonify({"suggestion": None, "suggestions": [], "source": "none"})
-
         try:
             folders = graph.get_all_folders()
         except Exception:
             folders = []
+
+        # Snapshot momentum (signal démolisseur v2 P0-3)
+        try:
+            momentum_snapshot = dict(_classify_momentum) if _classify_momentum else None
+        except Exception:
+            momentum_snapshot = None
+
+        engine = _compute_classement_suggestions(
+            contact_email, subject, body_preview,
+            folders=folders,
+            momentum_state=momentum_snapshot,
+            compose_mode=False,
+        )
+        suggestions = engine['suggestions']
+
+        if suggestions:
+            return jsonify({
+                "suggestion": suggestions[0],
+                "suggestions": suggestions,
+                "source": suggestions[0].get('source', engine['source_primary']),
+            })
+
+        # Fallback Tier 4 IA : tiers DB tous vides → 1 appel Claude
+        # (équivalence avec BG via le commis Haiku — Option α).
+        _builder = _get_prompt_builder()
+        if not _builder:
+            return jsonify({"suggestion": None, "suggestions": [], "source": "none"})
+
+        domain = _extract_email_domain(contact_email)
         _contact_profile = _db.get_contact_profile(contact_email)
         _recent = _db.get_recent_classifications(contact_email, domain, limit=10)
-
-        result = _builder.suggest_folder(contact_email, subject, body_preview, folders,
-                                         recent_classifications=_recent,
-                                         contact_profile=_contact_profile)
+        result = _builder.suggest_folder(
+            contact_email, subject, body_preview, folders,
+            recent_classifications=_recent,
+            contact_profile=_contact_profile,
+        )
         if result and result.get('folder_id'):
+            ai_list = result.get('_suggestions', [result])
             return jsonify({
                 "suggestion": result,
-                "suggestions": [result],
+                "suggestions": ai_list,
                 "source": "ai",
             })
         return jsonify({"suggestion": None, "suggestions": [], "source": "none"})
@@ -9752,9 +9885,17 @@ def _fetch_single_preview_plate(message_id, plate):
                         logger.debug(f"[preview-pj] no_pj recheck : {_e}")
             if db_row is not None:
                 _sp = db_row.get('suggestion')
+                # N8 (démolisseur v2 P0-3) — désérialiser le top 3 PJ
+                # nesté dans `_suggestions` comme le fait déjà le chemin
+                # mail (9847-9849). Avant : `pj_data['suggestions']` était
+                # toujours `[_sp]` (1 seule entrée) même si le commis avait
+                # produit un top 3 → bug UI popup PJ.
+                _spl = (_sp.get('_suggestions', [_sp])
+                        if isinstance(_sp, dict) and '_suggestions' in _sp
+                        else ([_sp] if _sp else []))
                 pj_data = {
                     'suggestion': _sp,
-                    'suggestions': [_sp] if _sp else [],
+                    'suggestions': _spl,
                     'source': db_row.get('source', 'none'),
                 }
                 _set_mail_preview(message_id, 'pj_classement', 'done', pj_data)
@@ -13663,138 +13804,74 @@ def api_post_generation_analyze():
     logger.info(f"[post_gen_analyze] mid={mid[:30]} to={to[:40]} subj={subject[:40]} "
                 f"body_len={len(body)} pj={len(pj_names)}")
 
-    # Tier 0 compose-specific (SPEC §4 cas C2 — 06/05 v83) :
-    # "Contact connu + objet vide → Dossier habituel du contact"
-    # Si destinataire a un historique de classement, suggère le folder le
-    # plus utilisé AVANT d'appeler le prewarm (qui exige >=3 classifications
-    # pour Tier 1 — trop strict pour le mode compose).
-    compose_tier0_suggestion = None
+    # Refonte N8 (13/05) : 120 lignes de Tier 0 compose-specific +
+    # double prewarm remplacés par 1 appel au moteur unique avec
+    # `compose_mode=True`. La cascade résolution path (5 niveaux dont
+    # fuzzy_word avec garde Yvan 07/05) est dans `_resolve_folder_id_cascade`.
     folders_outlook = _get_outlook_folders_cached() or []
+    folders_pj = _get_windows_folders_cached() or []
+    domain = _extract_email_domain(to)
     try:
-        contact_recent = _db.get_recent_classifications(to, None, limit=50)
-        if contact_recent:
-            from collections import Counter
-            counts = Counter()
-            for r in contact_recent:
-                fp = r.get('folder_path')
-                if fp:
-                    counts[fp] += 1
-            if counts:
-                top_folder, top_count = counts.most_common(1)[0]
-                # Lookup folder_id depuis la liste des folders Outlook.
-                # Stratégie cascade (DB stocke souvent "Boîte de réception/X/Y"
-                # mais live folders peuvent être "X/Y" ou "Inbox/X/Y") :
-                #   1. Match exact path (lowercase)
-                #   2. Match en strippant le préfixe "Boîte de réception/" ou "Inbox/"
-                #   3. Match suffix (le path live se termine par le path DB)
-                #   4. Match dernier segment (le name)
-                def _norm_path(p):
-                    return (p or '').lower().strip().replace('\\', '/')
-                top_norm = _norm_path(top_folder)
-                top_no_inbox = top_norm
-                for prefix in ('boîte de réception/', 'boite de reception/', 'inbox/'):
-                    if top_no_inbox.startswith(prefix):
-                        top_no_inbox = top_no_inbox[len(prefix):]
-                        break
-                last_seg = top_norm.rstrip('/').split('/')[-1]
-                folder_id = ''
-                match_strategy = 'none'
-                for f in folders_outlook:
-                    fp = _norm_path(f.get('path'))
-                    if fp == top_norm:
-                        folder_id = f.get('id', '')
-                        match_strategy = 'exact'
-                        break
-                if not folder_id and top_no_inbox != top_norm:
-                    for f in folders_outlook:
-                        fp = _norm_path(f.get('path'))
-                        if fp == top_no_inbox or fp.endswith('/' + top_no_inbox):
-                            folder_id = f.get('id', '')
-                            match_strategy = 'no_inbox_prefix'
-                            break
-                if not folder_id:
-                    for f in folders_outlook:
-                        fp = _norm_path(f.get('path'))
-                        if fp.endswith('/' + top_norm) or top_norm.endswith('/' + fp):
-                            folder_id = f.get('id', '')
-                            match_strategy = 'suffix'
-                            break
-                if not folder_id and last_seg:
-                    for f in folders_outlook:
-                        if (f.get('name') or '').lower().strip() == last_seg:
-                            folder_id = f.get('id', '')
-                            match_strategy = 'last_segment'
-                            break
-                if not folder_id:
-                    # Match plus tolérant : extraire les mots-clés du dernier segment
-                    # et chercher un folder dont le name contient un de ces mots
-                    # (ex: "Phiwest-vesta partner" → cherche "phiwest" ou "vesta")
-                    #
-                    # 07/05 fix Yvan : ne plus déclencher cette stratégie si le
-                    # mail actuel (subject + body) ne contient AUCUN des mots-clés.
-                    # Avant : un contact dont 11 mails passés étaient classés dans
-                    # "BIM-Pop/ouverture-compte-bancaire" voyait son nouveau mail
-                    # "Pouvez-vous me confirmer pour le déjeuner ?" matcher
-                    # fuzzy_word(compte) → suggestion absurde. Désormais, fuzzy
-                    # exige au moins 1 mot commun entre le folder candidat et le
-                    # contenu actuel — sinon on laisse l'IA décider.
-                    seg_words = [w for w in last_seg.replace('-', ' ').split() if len(w) >= 4]
-                    current_text = (subject + ' ' + body).lower()
-                    for word in seg_words:
-                        if word not in current_text:
-                            continue  # mot du folder absent du mail courant → skip
-                        for f in folders_outlook:
-                            fn = (f.get('name') or '').lower()
-                            if word in fn:
-                                folder_id = f.get('id', '')
-                                match_strategy = f'fuzzy_word({word})'
-                                # Mettre à jour le folder_path à celui live
-                                compose_tier0_suggestion_path_override = f.get('path')
-                                top_folder = f.get('path') or top_folder
-                                break
-                        if folder_id:
-                            break
-                if not folder_id:
-                    # Diagnostic : log les paths live qui contiennent le dernier segment ou un mot
-                    seg_words_dbg = [w for w in last_seg.replace('-', ' ').split() if len(w) >= 4]
-                    related = []
-                    for f in folders_outlook:
-                        fp = (f.get('path', '') or '').lower()
-                        fn = (f.get('name', '') or '').lower()
-                        if last_seg in fp or any(w in fp or w in fn for w in seg_words_dbg):
-                            related.append(f.get('path', ''))
-                            if len(related) >= 5: break
-                    logger.warning(f"[post_gen_analyze] Tier 0 lookup ECHEC pour "
-                                   f"top={top_folder!r} | last_seg={last_seg!r} | "
-                                   f"seg_words={seg_words_dbg} | "
-                                   f"related_live_paths={related}")
-                compose_tier0_suggestion = {
-                    'folder_path': top_folder,
-                    'folder_id': folder_id,
-                    'count': top_count,
-                }
-                logger.info(f"[post_gen_analyze] Tier 0 compose → {top_folder} "
-                            f"(contact_history count={top_count}, folder_id={match_strategy if folder_id else 'NONE'})")
-                # Pré-charge le cache pour que le prewarm skip et renvoie ce résultat
-                _set_mail_preview(mid, 'classement', 'done', {
-                    'suggestion': compose_tier0_suggestion,
-                    'suggestions': [compose_tier0_suggestion],
-                    'source': 'rule_compose',
-                })
-    except Exception as e:
-        logger.warning(f"[post_gen_analyze] Tier 0 compose erreur: {e}")
+        subject_kw = _extract_subject_keywords(subject)
+    except Exception:
+        subject_kw = subject
+    try:
+        body_kw = _extract_subject_keywords(body[:500])
+    except Exception:
+        body_kw = ''
 
-    # Délégation pure aux helpers existants (mêmes 7 tiers que mode reply)
-    # Si Tier 0 compose a déjà rempli le cache, le prewarm le détectera et skipera.
-    if not compose_tier0_suggestion:
-        try:
-            _prewarm_classement_for_mail(mid, mail_data)
-        except Exception as e:
-            logger.warning(f"[post_gen_analyze] prewarm classement: {e}")
+    # Snapshot momentum (signal démolisseur v2 P0-3)
     try:
-        _prewarm_pj_classement_for_mail(mid, mail_data)
+        momentum_snapshot = dict(_classify_momentum) if _classify_momentum else None
+    except Exception:
+        momentum_snapshot = None
+
+    cls_data = {'suggestion': None, 'suggestions': [], 'source': 'none'}
+    try:
+        engine_mail = _compute_classement_suggestions(
+            to, subject, body[:500],
+            folders=folders_outlook, domain=domain,
+            subject_keywords=subject_kw, body_keywords=body_kw,
+            momentum_state=momentum_snapshot, compose_mode=True,
+        )
+        m_sugs = engine_mail['suggestions']
+        if m_sugs:
+            primary = m_sugs[0]
+            cls_data = {
+                'suggestion': primary,
+                'suggestions': m_sugs,
+                'source': primary.get('source', engine_mail['source_primary']),
+            }
+            logger.info(f"[post_gen_analyze] mail → {primary.get('folder_path')} "
+                        f"(source={primary.get('source')}, top={len(m_sugs)})")
     except Exception as e:
-        logger.warning(f"[post_gen_analyze] prewarm pj: {e}")
+        logger.warning(f"[post_gen_analyze] moteur mail: {e}")
+
+    pj_data = {'suggestion': None, 'suggestions': [], 'source': 'none'}
+    try:
+        engine_pj = _compute_pj_classement_suggestions(
+            to, subject, body[:500],
+            attachment_names=pj_names,
+            folders_pj=folders_pj, domain=domain,
+            subject_keywords=subject_kw,
+        )
+        p_sugs = engine_pj['suggestions']
+        if p_sugs:
+            primary = p_sugs[0]
+            pj_data = {
+                'suggestion': primary,
+                'suggestions': p_sugs,
+                'source': primary.get('source', engine_pj['source_primary']),
+            }
+    except Exception as e:
+        logger.warning(f"[post_gen_analyze] moteur pj: {e}")
+
+    # Persiste le résultat dans le cache RAM uniquement (cache UserScopedDict,
+    # TTL session). PAS de save DB : le mid synthétique `compose_<hash>` n'est
+    # pas un IMID canonique RFC 2822, persister dans `mail_classement_cache`
+    # polluerait la table — signal démolisseur v2 P0-5.
+    _set_mail_preview(mid, 'classement', 'done', cls_data)
+    _set_mail_preview(mid, 'pj_classement', 'done', pj_data)
 
     # Échéance via le commis (mail brouillon → échéance probable que le user prend)
     echeance_data = None
