@@ -663,19 +663,18 @@ def _normalize_reply_greeting_closing(contact_profile, correspondent_email, user
 
 
 def _purge_message_caches(message_id):
-    """Purge tous les caches contenant le message_id (thread-safe).
+    """Purge en cascade tous les caches (RAM + DB) liés à un message_id.
 
-    Audit Pass 9 : étendu pour couvrir _mail_preview_cache + _post_send_cache
-    (avant : seulement _reply_cache + _prefetch_cache → incohérence si user
-    supprime/classe un mail, les autres caches conservaient des données stale).
+    Couvre :
+      - `_reply_cache` + `_prefetch_cache` (génération réponse spéculative)
+      - `_mail_preview_cache` (RAM, résumé + classements + échéance pré-cuits)
+      - cache compose post-envoi (1 clé dict via `_compose_cache_key`)
+      - 4 tables DB par-message via `_db.purge_mail_caches` (mail_summaries,
+        mail_classement_cache, mail_pj_classement_cache, mail_echeance_cache)
 
-    Audit 08/05 fix #6 : étendu pour purger AUSSI les 4 tables DB persistantes
-    (mail_summaries, mail_classement_cache, mail_pj_classement_cache,
-    mail_echeance_cache). Avant : ces tables n'avaient AUCUN delete → fuite
-    long terme (~150 MB/an/user) + suggestions stale si IMID ré-utilisé.
-
-    Sites visés : api_classify_email, api_send_reply, _event_purge_mail.
-    Best-effort : ignore les caches non encore définis (lazy init au boot).
+    Sites visés : `api_classify_email`, `api_send_reply`, `_event_purge_mail`.
+    Best-effort : un cache non encore défini (boot précoce) est ignoré silencieusement.
+    Garantit l'absence de données stale si l'IMID est ré-utilisé.
     """
     if not message_id:
         return
@@ -689,21 +688,19 @@ def _purge_message_caches(message_id):
             _mail_preview_cache.pop(message_id, None)
     except NameError:
         pass  # cache pas encore défini (purge appelée tôt)
-    # Post-send cache (3 clés par message_id)
+    # Post-send cache compose (refonte N6.3-bis : 1 clé dict regroupant
+    # body+subject+from_email, plus 3 clés séparées préfixées).
     try:
         with _post_send_lock:
-            for _prefix in ('body_', 'subject_', 'from_'):
-                _post_send_cache.pop(_prefix + message_id, None)
-                _post_send_timestamps.pop(_prefix + message_id, None)
+            _compose_key = _compose_cache_key(message_id)
+            _post_send_cache.pop(_compose_key, None)
+            _post_send_timestamps.pop(_compose_key, None)
     except NameError:
         pass
-    # Audit 08/05 fix #6 : 4 tables DB persistantes (best-effort, ne pas
-    # bloquer l'event utilisateur sur un échec DB).
+    # Refonte N6.3-bis : 4 méthodes `purge_mail_*` factorisées en
+    # `purge_mail_caches(mid)` qui purge les 4 tables en 1 transaction.
     try:
-        _db.purge_mail_summary(message_id)
-        _db.purge_mail_classement(message_id)
-        _db.purge_mail_pj_classement(message_id)
-        _db.purge_mail_echeance(message_id)
+        _db.purge_mail_caches(message_id)
     except Exception as _e:
         logger.debug(f"[purge-msg-caches] DB purge err {message_id[:20]} : {_e}")
 
@@ -9293,7 +9290,7 @@ def api_classify_pj():
     contact_email = data.get('contact_email', '')
     # Fallback : récupérer le contact depuis le cache post-envoi si non fourni
     if not contact_email and message_id:
-        contact_email = _post_send_cache.get(f'from_{message_id}', '')
+        contact_email = _get_compose_cache(message_id)['from_email']
     domain = _extract_email_domain(contact_email)
 
     # --- Niveau 1 : Companion filesystem ---
@@ -10154,12 +10151,12 @@ else:
 # haut dans le fichier, trim par ts) est utilisée par _pj_text_cache.
 
 
-# === Helpers texte partagés (refonte N6.3) ============================
-# Extraits depuis 3 sites de matching divergents pour éliminer le copy-paste
-# inline. Le sous-helper `_extract_significant_words` factorise tokenisation
-# + filtres, les 3 helpers métier (`_match_for_cancel`, `_match_for_check_sender`,
-# `_db.echeance_exists`) gardent leur sémantique propre (seuils, longueurs
-# min, stop-words) — calibrés byte-identique sur les algos d'origine.
+# === Helpers texte partagés (scope échéances) =========================
+# Sous-helper `_extract_significant_words` (tokenisation + filtres) +
+# 2 wrappers métier `_match_for_cancel` (≥3 mots len≥4) et
+# `_match_for_check_sender` (≥2 mots len≥3) calibrés byte-identique sur les
+# algos d'origine. Source de vérité unique pour le matching
+# « réponse reçue ↔ échéance » du scope V1.
 
 _RE_REPLY_PREFIXES = re.compile(r'^(Re|Fw|Fwd|Tr)\s*:\s*', re.IGNORECASE)
 
@@ -10235,44 +10232,11 @@ def _match_for_check_sender(echeance, subject):
     return len(subject_words & desc_words) >= 2
 
 
-def _parse_db_date(date_str):
-    """Parse une date 'YYYY-MM-DD' stockée en DB (fail-open).
-
-    Centralise les 3 sites de parsing strict `datetime.strptime(s, '%Y-%m-%d')`
-    qui étaient enveloppés dans des try/except verbeux.
-
-    Parameters
-    ----------
-    date_str : str | None
-        Date au format `YYYY-MM-DD` ou valeur falsy.
-
-    Returns
-    -------
-    Optional[datetime]
-        datetime à minuit (jour entier) si parsing OK, None sinon. Le caller
-        choisit `.date()` ou comparaison avec `datetime.now()` selon besoin.
-    """
-    if not date_str:
-        return None
-    try:
-        return datetime.strptime(date_str, '%Y-%m-%d')
-    except (ValueError, TypeError):
-        return None
-
-
-# Mois FR pour formatage humain — utilisé par `/api/echeances/<id>/relance`
-# et tout autre site qui formate une date_echeance en français lisible.
-_MOIS_FR = (
-    'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
-    'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
-)
-
-
-def _format_date_fr(dt):
-    """Formate un datetime en 'jour mois année' français (ex: '15 mai 2026')."""
-    if dt is None:
-        return ''
-    return f"{dt.day} {_MOIS_FR[dt.month - 1]} {dt.year}"
+# Refonte N6.3-bis : `_parse_db_date` et `_format_date_fr` migrés vers
+# `V2/utils_date.py` (source de vérité unique partagée avec `claude_ai.py`,
+# évite les imports circulaires). Réexposition locale pour les call-sites
+# internes qui utilisaient déjà les noms underscored.
+from utils_date import parse_db_date as _parse_db_date, format_date_fr as _format_date_fr  # noqa: E402
 
 
 def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids=None):
@@ -13145,6 +13109,46 @@ def _cache_cleanup():
             _post_send_timestamps.pop(k, None)
 
 
+# === Cache compose (mail brouillon envoyé) — refonte N6.3-bis ============
+# Auparavant : 3 clés par message_id (body_<mid>, subject_<mid>, from_<mid>)
+# scattered en 6 sites de read/write. Désormais : 1 clé dict `compose_<mid>`
+# qui regroupe les 3 champs et garantit une écriture/lecture atomique sous
+# `_post_send_lock`.
+
+def _compose_cache_key(message_id):
+    return f'compose_{message_id}'
+
+
+def _set_compose_cache(message_id, body, subject, from_email):
+    """Stocke atomiquement (body, subject, from_email) du mail compose envoyé.
+
+    Utilise `_cache_set` (RLock + TTL tracking). Le TTL global de
+    `_cache_cleanup` (120s) s'applique tel quel sur la clé unique.
+    """
+    if not message_id:
+        return
+    _cache_set(
+        _compose_cache_key(message_id),
+        {'body': body, 'subject': subject, 'from_email': from_email},
+    )
+
+
+def _get_compose_cache(message_id):
+    """Retourne le dict {body, subject, from_email} ou un dict avec valeurs vides si miss.
+
+    Retourner un dict avec keys présentes (même vides) évite les `.get(...)`
+    redondants côté caller.
+    """
+    data = _post_send_cache.get(_compose_cache_key(message_id)) if message_id else None
+    if not isinstance(data, dict):
+        return {'body': '', 'subject': '', 'from_email': ''}
+    return {
+        'body': data.get('body', ''),
+        'subject': data.get('subject', ''),
+        'from_email': data.get('from_email', ''),
+    }
+
+
 @app.route('/api/echeances/post_send/<path:message_id>')
 def api_echeances_post_send(message_id):
     """Scan IA des échéances détectées dans la réponse envoyée par l'utilisateur.
@@ -13181,9 +13185,10 @@ def api_echeances_post_send(message_id):
 
                 # Récupérer la réponse envoyée par l'utilisateur (déposée
                 # dans le cache par /api/post_send au moment de l'envoi).
-                body = _post_send_cache.get(f'body_{message_id}', '')
-                subject = _post_send_cache.get(f'subject_{message_id}', '')
-                from_email = _post_send_cache.get(f'from_{message_id}', '')
+                _compose = _get_compose_cache(message_id)
+                body = _compose['body']
+                subject = _compose['subject']
+                from_email = _compose['from_email']
 
                 if not body and not subject:
                     _cache_set(cache_key, [])
@@ -13430,9 +13435,10 @@ def api_pj_classification_post_send(message_id):
                     _cache_set(cache_key, {'attachments': [], 'suggestion': None})
                     return
 
-                from_email = _post_send_cache.get(f'from_{message_id}', '')
+                _compose = _get_compose_cache(message_id)
+                from_email = _compose['from_email']
                 domain = _extract_email_domain(from_email)
-                subject = _post_send_cache.get(f'subject_{message_id}', '')
+                subject = _compose['subject']
 
                 # Suggestion de dossier PJ (DB d'abord)
                 pj_suggestion = _db.get_pj_folder_suggestion(from_email, domain, subject)
@@ -13720,16 +13726,16 @@ def api_post_send():
     _cache_cleanup()
 
     # Stocker les données du mail pour les workflows post-envoi (12i).
-    # Utiliser _cache_set() pour acquérir le lock + tracker le timestamp TTL
-    # (sinon ces 3 entrées échappent au cleanup _cache_cleanup()).
-    # 07/05 — body_{mid} = la RÉPONSE ENVOYÉE par le user (pas le mail reçu).
-    # Scope V1 échéances = sortants only : api_echeances_post_send scanne
-    # ce body avec direction='sent' pour détecter les engagements pris par
-    # le user dans son mail envoyé (cf SPEC_ECHEANCES_BOOSTERMAIL.md §2).
-    if message_id:
-        _cache_set(f'body_{message_id}', body[:2000] or final_reply[:2000])
-        _cache_set(f'subject_{message_id}', subject)
-        _cache_set(f'from_{message_id}', from_email)
+    # Stockage atomique (body, subject, from_email) du mail compose envoyé
+    # — réutilisé par `/api/echeances/post_send/<mid>` pour scanner les
+    # engagements pris par le user (scope V1 sortants only, cf
+    # SPEC_ECHEANCES_BOOSTERMAIL.md §2). TTL 120s via `_cache_cleanup`.
+    _set_compose_cache(
+        message_id,
+        body=body[:2000] or final_reply[:2000],
+        subject=subject,
+        from_email=from_email,
+    )
 
     errors = []
 

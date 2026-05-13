@@ -78,19 +78,27 @@ def critere_strip_reply_prefixes():
 def critere_extract_significant_words():
     print("\n=== _extract_significant_words ===")
     f = ap._extract_significant_words
+    # Cas critiques : exercer la BORNE min_len exactement (audit P3.1).
+    # Si l'impl utilisait `> min_len` au lieu de `>= min_len`, le test 'mort'
+    # à min=4 (len=4 → inclus avec `>=`, exclu avec `>`) détecterait la
+    # régression.
     cases = [
-        # (text, min_len, expected_set)
-        ("Bonjour Monsieur Dupont", 4, {'bonjour', 'monsieur', 'dupont'}),
-        ("Bonjour Monsieur Dupont", 5, {'bonjour', 'monsieur', 'dupont'}),  # tous >=5? bonjour=7, monsieur=8, dupont=6 → tous
-        ("le chat est noir", 4, {'chat', 'noir'}),  # le, est = trop courts
-        ("ABC abc Abc", 3, {'abc'}),  # dedup lowercase
+        # 'mort' len=4 = BORNE EXACTE à min=4 → DOIT être inclus (si l'impl
+        # utilisait `> min_len` au lieu de `>= min_len`, 'mort' serait exclus).
+        ("le chat mort beige", 4, {'chat', 'mort', 'beige'}),
+        # 'beige' len=5 = BORNE EXACTE à min=5 → DOIT être inclus.
+        # 'chat'/'mort' len=4 < 5 → exclus.
+        ("le chat mort beige", 5, {'beige'}),
+        # dedup lowercase : 3 variantes de 'abc' → 1 seul après lowercase.
+        ("ABC abc Abc", 3, {'abc'}),
+        # input vide / None → set vide.
         ("", 4, set()),
     ]
     ok_count = 0
     for inp, min_len, expected in cases:
         result = f(inp, min_len=min_len)
         ok = result == expected
-        ok_count += log_test(f"{inp!r}, min={min_len} -> {sorted(result)}", ok)
+        ok_count += log_test(f"{inp!r}, min={min_len} -> {sorted(result)}", ok, f"expected={sorted(expected)}")
     return ok_count, len(cases)
 
 
@@ -209,24 +217,34 @@ def critere_format_date_fr():
 # =============================================================================
 
 def invariant_no_pre_scan_route():
+    """Vérifie que la route POST /api/echeances/pre_scan + son handler + son cache
+    sont bien absents.
+
+    Audit P3.2 : ancien test lisait le source en string et matchait
+    `def api_echeances_pre_scan(`. Vulnérable aux faux positifs (docstring
+    mentionnant le nom) et faux négatifs (commentaire de la `@app.route` qui
+    laisse la fonction active).
+
+    Nouveau test :
+      - `hasattr(ap, 'api_echeances_pre_scan')` (le handler n'est plus attaché
+        au module),
+      - `not any(r.endpoint == 'api_echeances_pre_scan' ...)` (la route n'est
+        plus enregistrée dans Flask),
+      - `not hasattr(ap, '_echeance_pre_scan_cache')` (le cache n'existe plus).
+    """
     print("\n=== Invariant : route pre_scan supprimée ===")
-    with open(ap.__file__, 'r', encoding='utf-8') as f:
-        src = f.read()
-    # La route ne doit plus exister
-    has_route = (
-        "@app.route('/api/echeances/pre_scan'" in src
-        or '@app.route("/api/echeances/pre_scan"' in src
-    )
-    # Le handler ne doit plus exister
-    has_handler = "def api_echeances_pre_scan(" in src
-    # Le cache ne doit plus exister
-    has_cache = (
-        "_echeance_pre_scan_cache = " in src
-        or "_echeance_pre_scan_lock = " in src
+    has_handler = hasattr(ap, 'api_echeances_pre_scan')
+    has_cache = hasattr(ap, '_echeance_pre_scan_cache')
+    has_lock = hasattr(ap, '_echeance_pre_scan_lock')
+    has_route_in_url_map = any(
+        r.endpoint == 'api_echeances_pre_scan'
+        for r in ap.app.url_map.iter_rules()
     )
     ok = log_test(
-        f"Route + handler + cache pre_scan absents ({'route' if has_route else ''}{'+handler' if has_handler else ''}{'+cache' if has_cache else ''} = '' attendu)",
-        not (has_route or has_handler or has_cache)
+        f"Route + handler + cache pre_scan absents "
+        f"(hasattr handler={has_handler}, cache={has_cache}, lock={has_lock}, "
+        f"in url_map={has_route_in_url_map})",
+        not (has_handler or has_cache or has_lock or has_route_in_url_map)
     )
     return (1 if ok else 0), 1
 
@@ -236,17 +254,15 @@ def invariant_no_pre_scan_route():
 # =============================================================================
 
 def invariant_no_has_echeance_pattern():
+    """Vérifie via `hasattr` (pas grep source) que les 4 symboles N6.3 sont absents."""
     print("\n=== Invariant : _has_echeance_pattern + regex supprimés ===")
-    with open(ap.__file__, 'r', encoding='utf-8') as f:
-        src = f.read()
-    # Helper supprimé (au moins son def)
-    has_helper = "def _has_echeance_pattern(" in src
-    # 3 regex supprimées (définitions)
-    has_date_pat = "_ECHEANCE_DATE_PATTERNS = re.compile(" in src
-    has_ref_pat = "_ECHEANCE_REFERENCE_WORDS = re.compile(" in src
-    has_eng_pat = "_ECHEANCE_ENGAGEMENT_WORDS = re.compile(" in src
+    has_helper = hasattr(ap, '_has_echeance_pattern')
+    has_date_pat = hasattr(ap, '_ECHEANCE_DATE_PATTERNS')
+    has_ref_pat = hasattr(ap, '_ECHEANCE_REFERENCE_WORDS')
+    has_eng_pat = hasattr(ap, '_ECHEANCE_ENGAGEMENT_WORDS')
     ok = log_test(
-        f"4 symboles supprimés (helper + 3 regex)",
+        f"4 symboles supprimés (helper={has_helper}, date_pat={has_date_pat}, "
+        f"ref_pat={has_ref_pat}, eng_pat={has_eng_pat})",
         not (has_helper or has_date_pat or has_ref_pat or has_eng_pat)
     )
     return (1 if ok else 0), 1
@@ -255,6 +271,45 @@ def invariant_no_has_echeance_pattern():
 # =============================================================================
 # Invariant : analyze_one_mail_stream a `scan_echeance` en param kw-able
 # =============================================================================
+
+def invariant_routes_echeances_present():
+    """Smoke test mécanique : les 10 routes API échéance actives sont enregistrées
+    avec le bon endpoint + la bonne méthode HTTP. Ne lance pas Flask test client.
+    Contrat API préservé byte-identique (refonte N6.3-bis).
+    """
+    print("\n=== Invariant : 10 routes API échéances actives ===")
+    # endpoint_name → set des méthodes HTTP attendues
+    expected = {
+        'api_echeances': {'GET'},
+        'api_echeances_urgent': {'GET'},
+        'api_update_echeance': {'PUT'},
+        'api_echeance_single': {'GET'},
+        'api_echeances_purge_archives': {'POST'},
+        'api_echeances_search_relance_mail': {'GET'},
+        'api_echeances_check_sender': {'GET'},
+        'api_echeances_post_send': {'POST', 'GET'},  # peut être les 2
+        'api_echeance_relance': {'GET'},
+        'api_echeance_mail': {'GET'},
+    }
+    found = {}
+    for r in ap.app.url_map.iter_rules():
+        if r.endpoint in expected:
+            # iter_rules.methods inclut HEAD + OPTIONS — filtrer
+            found.setdefault(r.endpoint, set()).update(
+                m for m in (r.methods or set()) if m in {'GET', 'POST', 'PUT', 'DELETE'}
+            )
+    ok_count = 0
+    total = len(expected)
+    for endpoint, expected_methods in expected.items():
+        got = found.get(endpoint, set())
+        # Intersection non-vide suffit (api_echeances_post_send peut être l'un OU l'autre)
+        ok = bool(got & expected_methods)
+        ok_count += log_test(
+            f"{endpoint} : methods={sorted(got)} ∩ {sorted(expected_methods)} non vide",
+            ok
+        )
+    return ok_count, total
+
 
 def invariant_scan_echeance_param():
     print("\n=== Invariant : analyze_one_mail_stream(scan_echeance=...) ===")
@@ -306,6 +361,7 @@ def main():
         invariant_no_pre_scan_route,
         invariant_no_has_echeance_pattern,
         invariant_scan_echeance_param,
+        invariant_routes_echeances_present,
     ):
         ok, n = fn()
         total_ok += ok

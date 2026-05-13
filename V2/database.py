@@ -2584,27 +2584,13 @@ class Database:
         conn.execute(f"UPDATE echeances SET {', '.join(sets)} WHERE id = ? AND user_id = ?", params)
         conn.commit()
 
-    def echeance_exists(self, correspondant, description_keywords):
-        """Verifie si une echeance similaire existe deja (deduplication)."""
-        uid = self._uid()
-        c = self._conn().cursor()
-        c.execute("""
-            SELECT description FROM echeances
-            WHERE correspondant = ? AND statut = 'active' AND user_id = ?
-        """, (correspondant, uid))
-        existing = [(r[0] or '').lower() for r in c.fetchall()]
-        kw_lower = description_keywords.lower()
-        _STOP_WORDS = {'le', 'la', 'les', 'de', 'du', 'des', 'un', 'une', 'et', 'ou', 'en', 'au', 'aux', 'à', 'a', 'pour', 'par', 'sur', 'dans', 'avec', 'que', 'qui', 'est', 'son', 'sa', 'ses', 'ce', 'cette', 'il', 'elle', 'nous', 'vous', 'ils', 'doit', 'devez', 'vers'}
-        for desc in existing:
-            words_new = set(kw_lower.split()) - _STOP_WORDS
-            if not words_new:
-                if kw_lower.strip() in desc:
-                    return True
-                continue
-            words_existing = set(desc.split()) - _STOP_WORDS
-            if len(words_new & words_existing) >= len(words_new) * 0.6:
-                return True
-        return False
+    # Note N6.3-bis : `echeance_exists` supprimé — fonction morte, zéro caller
+    # en production (audit `git grep echeance_exists V2/` 2 hits = la définition
+    # + un commentaire de défense). La dédup création d'échéance est désormais
+    # de facto gérée en amont par `_match_for_cancel`/`_match_for_check_sender`
+    # côté `app_plugin.py`. Si un besoin de dédup à la création se réveille,
+    # ré-introduire un helper module-level (pas méthode `Database`) qui
+    # réutilise `_extract_significant_words` pour rester cohérent.
 
     def get_echeances_for_contact(self, correspondant):
         """Retourne les echeances actives pour un correspondant (pour le Bloc F)."""
@@ -2909,65 +2895,41 @@ class Database:
     # Après : 4 méthodes appelées par _purge_message_caches (V2/app_plugin.py)
     # à chaque event terminal (classement, send, delete, archive).
 
-    def purge_mail_summary(self, message_id):
-        """Supprime l'entrée mail_summaries pour ce message_id (idempotent)."""
-        if not message_id:
-            return
-        uid = self._uid()
-        conn = self._conn()
-        try:
-            conn.execute(
-                "DELETE FROM mail_summaries WHERE message_id = ? AND user_id = ?",
-                (message_id, uid)
-            )
-            conn.commit()
-        except Exception as _e:
-            logger.debug(f"[purge_mail_summary] echec mid={message_id}: {_e}")
+    # Whitelist des tables purgeables — verrou anti SQL-injection (table est
+    # un identifiant non-bindable). Toute nouvelle table cache par-message
+    # à purger doit être ajoutée explicitement ici.
+    _PURGEABLE_MAIL_TABLES = (
+        'mail_summaries',
+        'mail_classement_cache',
+        'mail_pj_classement_cache',
+        'mail_echeance_cache',
+    )
 
-    def purge_mail_classement(self, message_id):
-        """Supprime l'entrée mail_classement_cache pour ce message_id."""
-        if not message_id:
-            return
-        uid = self._uid()
-        conn = self._conn()
-        try:
-            conn.execute(
-                "DELETE FROM mail_classement_cache WHERE message_id = ? AND user_id = ?",
-                (message_id, uid)
-            )
-            conn.commit()
-        except Exception as _e:
-            logger.debug(f"[purge_mail_classement] echec mid={message_id}: {_e}")
+    def purge_mail_caches(self, message_id):
+        """Purge en une transaction les 4 caches DB par-message pour message_id.
 
-    def purge_mail_pj_classement(self, message_id):
-        """Supprime l'entrée mail_pj_classement_cache pour ce message_id."""
+        Refonte N6.3-bis : remplace 4 méthodes individuelles quasi-identiques.
+        Source de vérité unique via _PURGEABLE_MAIL_TABLES (whitelist =
+        verrou anti SQL-injection sur l identifiant table non-bindable).
+        Best-effort : un échec sur une table est loggé et n empêche pas les
+        autres. Commit unique en fin pour atomicité.
+        """
         if not message_id:
             return
         uid = self._uid()
         conn = self._conn()
+        for table in self._PURGEABLE_MAIL_TABLES:
+            try:
+                conn.execute(
+                    f"DELETE FROM {table} WHERE message_id = ? AND user_id = ?",
+                    (message_id, uid),
+                )
+            except Exception as _e:
+                logger.debug(f"[purge_mail_caches] echec table={table} mid={message_id}: {_e}")
         try:
-            conn.execute(
-                "DELETE FROM mail_pj_classement_cache WHERE message_id = ? AND user_id = ?",
-                (message_id, uid)
-            )
             conn.commit()
         except Exception as _e:
-            logger.debug(f"[purge_mail_pj_classement] echec mid={message_id}: {_e}")
-
-    def purge_mail_echeance(self, message_id):
-        """Supprime l'entrée mail_echeance_cache pour ce message_id."""
-        if not message_id:
-            return
-        uid = self._uid()
-        conn = self._conn()
-        try:
-            conn.execute(
-                "DELETE FROM mail_echeance_cache WHERE message_id = ? AND user_id = ?",
-                (message_id, uid)
-            )
-            conn.commit()
-        except Exception as _e:
-            logger.debug(f"[purge_mail_echeance] echec mid={message_id}: {_e}")
+            logger.debug(f"[purge_mail_caches] commit échoué mid={message_id}: {_e}")
 
     # --- MÉTRIQUES ---------------------------------------------------------
 

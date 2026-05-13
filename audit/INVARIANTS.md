@@ -533,6 +533,54 @@ Le commis Haiku (`_prewarm_unified_for_mail`) produit P/A/F/J en 1 seul appel `a
 - **Pourquoi** : avant N6.1, ~25 patches accumulés depuis 02/05 (vision Cuisinier+Commis), 4 caches DB séparés sans helper unifié, fallback 3 sub-prewarms en cascade (3× coût Haiku en panne), résumé P+A produit puis jeté (doublonné par `summarize_mails_batch`), commentaire d'ordre des règles mensonger.
 - **Historique** : refonte 12/05/2026 N6.1 (branche `feat/yvan/frontend`).
 
+### I-ECHEANCE-N63bis-01 : Refonte N6.3-bis — Finition scope Échéances (13/05/2026)
+Suite de N6.3 après audit rétrospectif qui a démasqué : "5 patches résolus sur 25, métriques du commit message inexactes". Cette refonte clôt les 20 patches résiduels identifiés.
+
+- **Code mort supprimé** :
+  - `_db.echeance_exists` (database.py:2587-2607) confirmé 0 caller en prod (`git grep` : 2 hits = définition + commentaire de défense). Supprimé.
+  - Commentaire de défense erroné dans `app_plugin.py` qui prétendait défendre la non-unification en pointant ce code mort : corrigé.
+- **Nouveau module partagé `V2/utils_date.py`** (130 lignes, autonome, zéro import V2 interne) :
+  - `_MOIS_FR_LOOKUP` (dict nom→numéro, variantes accents tolérées)
+  - `_MOIS_FR_TUPLE` (formatage ordonné)
+  - `parse_db_date(s)` (strict YYYY-MM-DD fail-open)
+  - `format_date_fr(dt)` (ex: '15 mai 2026')
+  - `extract_fr_dates(text, year)` (regex "jour + mois FR" dans texte libre)
+  - Évite l'import circulaire `claude_ai ↔ app_plugin` qui aurait été nécessaire si on mettait ces helpers dans l'un ou l'autre.
+- **`_validate_echeance_date` (claude_ai.py) refondu** : de 70 lignes inline avec dict `_months` hardcodé + regex inline → 30 lignes propres utilisant `utils_date.extract_fr_dates` + `parse_db_date`. Logique métier préservée byte-identique (delta ≤ 15j, plus proche).
+- **Dataclass `_EcheanceConfig` frozen (claude_ai.py:196)** centralise les magic numbers du scope échéances :
+  - `BODY_SCAN_TRUNCATE = 1500`, `CALENDAR_LOOKAHEAD_DAYS = 30`,
+    `DATE_CORRECTION_WINDOW_DAYS = 15`, `SCAN_MAX_TOKENS = 2000`,
+    `EXTRAIT_MAIL_MAX_CHARS = 100`.
+  - Substitué dans `_build_scan_echeances_prompt`, `_validate_echeance_date`, et le prompt lui-même (mention "max 100 chars" interpolée).
+- **Helper `_build_scan_echeances_prompt(mails_batch, today_str, now)` extrait au module-level** (claude_ai.py:2358) — pure, testable par snapshot. `scan_echeances_batch` n'est plus qu'un orchestrateur appel API.
+- **5 snapshots byte-identique** (`V2/tests/snapshots/n6_3/*.txt` : `simple_deadline`, `reference_passee`, `delai_relatif`, `batch_mixed`, `body_long`) — capture baseline AVANT externalisation magic numbers + re-vérif APRÈS → byte-identique préservé (les externalisations gardent les mêmes valeurs).
+- **4 méthodes `purge_mail_*` factorisées** (database.py:2898+) en 1 méthode `purge_mail_caches(mid)` + whitelist `_PURGEABLE_MAIL_TABLES` (verrou anti SQL-injection sur identifiant non-bindable). Caller `_purge_message_caches` simplifié.
+- **`_post_send_cache` compose factorisé** : 3 clés préfixées (`body_<mid>`, `subject_<mid>`, `from_<mid>`) → 1 clé dict `compose_<mid>`. Helpers `_set_compose_cache(mid, body, subject, from_email)` + `_get_compose_cache(mid)` (retourne toujours dict avec keys présentes, évite `.get(...)` côté caller). 6 sites scattered → 2 helpers + 4 call-sites factorisés.
+- **Doublons `_parse_db_date` / `_format_date_fr` éliminés** : `app_plugin.py` ré-exporte `from utils_date import parse_db_date as _parse_db_date, format_date_fr as _format_date_fr`. Source de vérité unique.
+- **Tests faibles corrigés** (audit P3.1 + P3.2) :
+  - `critere_extract_significant_words` : cas BORNE EXACTE `('le chat mort beige', 4, {chat, mort, beige})` + min=5 isolant `beige` len=5 (au lieu de "tous mots ≥5" trivial).
+  - `invariant_no_pre_scan_route` : remplacé `inspect.getsource` string-match par `hasattr(ap, 'api_echeances_pre_scan')` + `ap.app.url_map.iter_rules()` (immune aux faux positifs docstring).
+- **Smoke test des 10 routes API actives** : nouvel `invariant_routes_echeances_present` via `url_map.iter_rules()` (endpoint name + méthodes HTTP).
+- **Métriques HONNÊTES** (anti-récidive du commit N6.3 qui annonçait `-140` faux) :
+  - Prod modifiée (app_plugin + claude_ai + database) : **net -9 lignes**.
+  - Nouveau module `utils_date.py` : **+130 lignes** (gain qualitatif, source unique partagée).
+  - Tests + snapshots : **+836 lignes**.
+  - Le gain est **qualitatif** (DRY, testabilité), pas quantitatif. À ne pas mentir.
+- **Patches identifiés par l'audit rétrospectif et NON traités** (transparence) :
+  - `rappel_jours` reste dead-write column (database.py:393, 2447, 2459, 2574). Hors scope explicite — flagger pour N6.4 si besoin.
+  - 254 marqueurs "Phase X/Audit fix" prédits par l'audit rétrospectif : seulement **3 marqueurs purgés** dans les 3 fichiers prod (le chiffre 254 incluait JS/HTML/templates hors scope). Pas un nettoyage massif assumé.
+- **Tests régression N6.3-bis** : **145 tests verts** sans aucune régression :
+  - `test_n6_3_echeances.py` : 47/47 (4 critères + 5 invariants nouveaux)
+  - `test_n6_3_scan_echeances_snapshots.py` : 5/5 byte-identique
+  - `test_n6_2_blocs_prompt.py` : 17/17
+  - `test_n6_2_prompt_snapshots.py` : 24/24 byte-identique
+  - `test_n6_1_commis_haiku.py` : 24/24
+  - `test_n5_filtre_2.py` : 28/28
+- **Méthodo respectée intégralement** : Phase A audit rétrospectif → Phase C plan + démolisseur (qui a fait SKIP D.6 + créer utils_date.py + D.7 en 2 phases) → Phase D refonte → Phase F sub-agent regard frais (1 mineur sur métriques traité avant commit).
+- **Historique** : refonte 13/05/2026 N6.3-bis (branche `feat/yvan/frontend`), 1 commit suite à `1a0cb1c` N6.3 initial.
+
+---
+
 ### I-ECHEANCE-N63-01 : Refonte N6.3 — Échéances scope Python (13/05/2026)
 Refonte du scope échéances dans `V2/app_plugin.py`, `V2/claude_ai.py`, `V2/database.py`. Spec source de vérité : `docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md` (consolidée 05/05/2026). Scope V1 = engagements **sortants only** + auto-annulation déclenchée par réponse reçue.
 
