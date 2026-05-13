@@ -117,16 +117,36 @@ def critere_mail_types_fr():
 
 
 def invariant_no_bloc_e():
-    """Le bloc E est supprimé du prompt (Q5 Yvan)."""
+    """Le bloc E est supprimé du prompt (Q5 Yvan).
+
+    Refonte N6.2 phase 3 : tous les templates de bloc sont dans des helpers
+    module-level (`_build_block_*`, `_format_*_envelope`). On scanne TOUS les
+    helpers + `_build_prompt` pour s'assurer qu'aucun ne réintroduit '## E —'.
+    """
     print("\n=== Invariant : bloc E supprimé ===")
-    src = inspect.getsource(claude_ai.ClaudeAssistant._build_prompt)
-    # On cherche les patterns qui auraient introduit le bloc E
+    # Scan exhaustif : _build_prompt + tous les helpers module-level qui produisent
+    # du texte de prompt (templates de blocs + envelopes).
+    helper_names = (
+        '_build_block_A', '_build_block_B', '_build_block_C', '_build_block_D2',
+        '_build_block_D_enriched', '_build_block_D_fallback',
+        '_build_block_D_for_cp', '_normalize_contact_profile',
+        '_format_first_mail_envelope', '_format_forward_envelope',
+        '_format_reply_envelope', '_build_brief_block',
+    )
+    combined = inspect.getsource(claude_ai.ClaudeAssistant._build_prompt)
+    for name in helper_names:
+        helper = getattr(claude_ai, name, None)
+        if helper is not None:
+            combined += inspect.getsource(helper)
+    # Patterns qui auraient introduit le bloc E
     has_bloc_e = (
-        '## E — Points d' in src
-        or 'blocks.append(f"## E' in src
+        '## E — Points d' in combined
+        or 'blocks.append(f"## E' in combined
+        or '## E —' in combined  # forme générique
     )
     ok = log_test(
-        f"Aucune génération '## E —' dans _build_prompt ({'présent' if has_bloc_e else 'absent'})",
+        f"Aucun '## E —' dans `_build_prompt` + 12 helpers texte "
+        f"({'présent' if has_bloc_e else 'absent'})",
         not has_bloc_e
     )
     return (1 if ok else 0), 1
@@ -146,13 +166,23 @@ def invariant_no_learning_priorities():
 
 
 def invariant_security_guard_correct():
-    """`_SECURITY_GUARD` mentionne correctement A, B, C, D, D2 (B3 audit)."""
+    """`_SECURITY_GUARD` mentionne correctement A, B, C, D, D2 (B3 audit).
+
+    Refonte N6.2 phase 3 : `_SECURITY_GUARD` + `_SECURITY_REMINDER` sont sortis
+    au module-level (constantes immuables réutilisables). On vérifie le contenu
+    directement sur les constantes, pas sur le source du `_build_prompt`.
+    """
     print("\n=== Invariant : _SECURITY_GUARD corrigé (B3) ===")
-    src = inspect.getsource(claude_ai.ClaudeAssistant._build_prompt)
+    guard = claude_ai._SECURITY_GUARD
+    reminder = claude_ai._SECURITY_REMINDER
     # Doit mentionner "A, B, C, D, D2" (D ajouté en B3)
-    has_correct_list = 'blocs A, B, C, D, D2' in src
-    # Ne doit plus mentionner E
-    has_no_e = 'A, B, C, D2, E' not in src and 'blocs de contexte (A/B/C/D2/E)' not in src
+    has_correct_list = 'blocs A, B, C, D, D2' in guard
+    # Ne doit plus mentionner E (dans guard ni reminder)
+    has_no_e = (
+        'A, B, C, D2, E' not in guard
+        and 'blocs de contexte (A/B/C/D2/E)' not in reminder
+        and '## E —' not in inspect.getsource(claude_ai.ClaudeAssistant._build_prompt)
+    )
     ok1 = log_test(
         f"_SECURITY_GUARD liste 'A, B, C, D, D2' ({'présent' if has_correct_list else 'absent'})",
         has_correct_list

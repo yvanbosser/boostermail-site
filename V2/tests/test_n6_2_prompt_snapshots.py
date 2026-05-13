@@ -35,23 +35,46 @@ os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
 FROZEN_NOW = datetime(2026, 5, 12, 10, 0, 0)
 
 
-def _build_assistant():
-    """Crée une instance ClaudeAssistant minimale pour les tests."""
-    class _FakeAssistant:
-        user_name = "Yvan BOSSER"
-        user_first_name = "Yvan"
-        user_last_name = "BOSSER"
+def _build_assistant(user_name="Yvan BOSSER"):
+    """Crée une instance ClaudeAssistant minimale pour les tests.
 
-    # Bind la vraie méthode _build_prompt sur l'instance fake
+    Parameters
+    ----------
+    user_name : str
+        Nom complet utilisateur (utilisé par les gardes greeting anti-inversion).
+        Défaut "Yvan BOSSER" pour les snapshots historiques. Override pour les
+        scénarios multi-user (audit MAJEUR-5 phase 3).
+    """
+    class _FakeAssistant:
+        pass
+
+    _FakeAssistant.user_name = user_name
+    _FakeAssistant.user_first_name = user_name.split()[0] if user_name else ""
+    _FakeAssistant.user_last_name = user_name.split()[-1] if user_name else ""
+
+    # Bind la vraie méthode _build_prompt sur l'instance fake.
+    # Refonte N6.2 phase 3 : `_build_prompt` est désormais la SEULE méthode
+    # class du scope N6.2 — toute la logique métier est dans des helpers
+    # module-level (testables directement sans _FakeAssistant).
     _FakeAssistant._build_prompt = claude_ai.ClaudeAssistant._build_prompt
     return _FakeAssistant()
 
 
-def _scenario(name, **kwargs):
+def _scenario(name, user_name=None, **kwargs):
     """Construit un scenario nommé avec les params attendus par _build_prompt.
 
     Note : `updated_at` est mis à FROZEN_NOW pour neutraliser le decay
     (Option B Q8 Yvan). Sauf cas dédiés `decay_*` où on simule un profil ancien.
+
+    Parameters
+    ----------
+    name : str
+        Nom du snapshot.
+    user_name : str | None
+        Override du `user_name` de l'assistant (audit MAJEUR-5 phase 3).
+        Si None, défaut "Yvan BOSSER" via `_build_assistant`.
+    **kwargs : dict
+        Params transmis à `_build_prompt`.
     """
     defaults = {
         'incoming_email': {
@@ -75,6 +98,11 @@ def _scenario(name, **kwargs):
         'recent_corrections': None,
     }
     defaults.update(kwargs)
+    # On stocke `user_name` (override pour l'assistant) dans kwargs avec une
+    # clé underscore — sera extraite par `_capture_snapshot` avant de passer
+    # les autres kwargs à `_build_prompt`.
+    if user_name is not None:
+        defaults['_user_name'] = user_name
     return name, defaults
 
 
@@ -268,6 +296,26 @@ def _build_scenarios():
                  'from_email': 'marc@otherdomain.com'},  # domaine ≠ stranger
             ],
         ),
+
+        # === Snapshots MAJEUR-5 audit phase 3 (multi-user) ===
+
+        # User vide ("") — pas de gardes anti-inversion possibles. Vérifier
+        # que les branches `if user_last and len(...) > 2` skip correctement
+        # et qu'aucun reset abusif du greeting ne se produit.
+        _scenario(
+            'multi_user_empty_user_name',
+            user_name="",
+            contact_profile=profile_full,
+        ),
+
+        # User dont le nom de famille MATCHE le prénom du contact
+        # (collision Pierre BOSSER / contact Pierre Dupont) — vérifier que la
+        # garde "user_last in greeting" ne fait PAS de reset abusif.
+        _scenario(
+            'multi_user_collision_user_last_eq_contact_first',
+            user_name="Pierre BOSSER",
+            contact_profile=profile_full,  # greeting "Salut Pierre,"
+        ),
     ]
 
 
@@ -277,7 +325,10 @@ def _build_scenarios():
 
 def _capture_snapshot(name, kwargs):
     """Génère le prompt pour un scénario et l'écrit dans le snapshot."""
-    assistant = _build_assistant()
+    # Extract `_user_name` override (audit MAJEUR-5 phase 3) avant d'appeler
+    # `_build_prompt` qui n'accepte pas ce kwarg.
+    user_name = kwargs.pop('_user_name', "Yvan BOSSER")
+    assistant = _build_assistant(user_name=user_name)
     with patch('claude_ai.datetime') as mock_dt:
         mock_dt.now.return_value = FROZEN_NOW
         mock_dt.fromisoformat = datetime.fromisoformat

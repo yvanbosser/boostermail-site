@@ -561,7 +561,37 @@ Refonte de `_build_prompt` dans `V2/claude_ai.py` selon arbitrages Yvan Q1-Q8 du
   - `tests/test_n6_2_blocs_prompt.py` (17/17) — invariants source + helpers
   - `tests/test_n6_2_prompt_snapshots.py` (18 snapshots byte-identique) — `FROZEN_NOW = 2026-05-12T10:00:00`. Couvre : 5 tier (full/medium/light/promoted/no_profile) + forward + first_mail + sender_history + conversation_history + brief + decay 180j + 3 guards (greeting anglicisme/inversion, closing pollution) + 4 blocs (B scoring, A dédup IMID, C skip generic, C skip stranger).
 - **Bug régression fixé (e8a4f1c → 13/05)** : `clean_brief` orphan reference (PJ chaîne magique parsing supprimé en phase 1 sans nettoyer les références aval) → remplacé par `brief` direct.
-- **Historique** : refonte 12-13/05/2026 N6.2 (branche `feat/yvan/frontend`), 2 commits (e8a4f1c phase 1, suivi de l'extraction structurelle).
+
+- **Phase 3 extraction finale (13/05/2026)** : `_build_prompt` passe de 528 → **111 lignes** (-89% total depuis 1002). Devient un pur orchestrateur. Tous les inlines restants extraits :
+  - `_only_dicts_list`, `_coerce_incoming_email` : sanitization input-shape
+  - `_resolve_contact_display` : résolution display_name (profil → email parsé → "correspondant")
+  - `_observe_subject_trap` : log warning si subject piégé
+  - `_coerce_confidence` : float + bornes [0, 1] + warning si non-float
+  - `_detect_register_from_sender_history` : détection tutoiement/vouvoiement pour D fallback
+  - `_normalize_contact_profile` : enchaîne coerce + decay + tier + promote, retourne `(cp | None, tier, confidence_pct)` — **fonction module-level** (pas méthode class, l'audit MAJEUR-1 a forcé l'extraction)
+  - `_build_block_D_for_cp` : wrapper autour de `_build_block_D_enriched` avec gardes greeting/closing pré-appliquées — **fonction module-level** avec `user_first` / `user_last` en kwargs (audit MAJEUR-2)
+  - `_build_block_D_enriched` : 3 paliers tier full/medium/light
+  - `_build_block_D_fallback` : 2 templates (tutoiement détecté / nouveau corresp)
+  - `_detect_creneaux` : détection mots-clés créneaux → warning ou ""
+  - `_log_pii_redactions` : observabilité PII
+  - `_log_prompt_size` : observabilité taille + alerte > seuil
+  - `_build_brief_block` : bloc user_brief avec sanitization
+  - `_format_first_mail_envelope`, `_format_forward_envelope`, `_format_reply_envelope` : 3 envelopes return
+- **`_SECURITY_GUARD` + `_SECURITY_REMINDER` constantes module-level** (sortis de `_build_prompt` car immuables, réutilisables par les envelopes). Test invariant ajusté pour lire `claude_ai._SECURITY_GUARD` au lieu du source.
+- **`_CRENEAU_KEYWORDS` constante module-level** (Finding-7) — cohérence avec `_MAIL_TYPES_FR` et `_SERVICE_PREFIXES`, prêt pour onboarding multilingue.
+- **`_PromptConfig.LOG_SUBJECT_TRUNCATE = 80`** (Finding-8) — magic number subject trap log substitué.
+- **Audit MAJEURS PRÉ-commit phase 3 (sub-agent regard frais)** :
+  - MAJEUR-1 + MAJEUR-2 : 2 méthodes class `_normalize_contact_profile` et `_build_block_D_for_cp` qui n'utilisaient pas vraiment `self` (faux design) → extraites au module-level. **`_build_prompt` est désormais la SEULE méthode class du scope N6.2**, et `_FakeAssistant` du test bind 1 méthode au lieu de 3.
+  - MAJEUR-3 : mutation `cp['_confidence_pct']` (canal latéral pour passer le pct au caller) supprimée. `_normalize_contact_profile` retourne maintenant un triple `(cp, tier, confidence_pct)`. `cp['confidence']` reflète la valeur post-decay.
+  - MAJEUR-4 : `invariant_no_bloc_e` devenu trivialement vrai (orchestrateur n'a aucun template) → maintenant scan TOUS les helpers texte (`_build_block_*` + `_format_*_envelope` + `_build_brief_block`).
+  - MAJEUR-5 : 2 snapshots multi-user ajoutés (`multi_user_empty_user_name`, `multi_user_collision_user_last_eq_contact_first`) — vérifie pas de reset abusif quand user_first == contact_first.
+- **Tests régression phase 3** :
+  - `tests/test_n6_2_blocs_prompt.py` : 17/17 OK (invariant E re-renforcé sur 12 helpers).
+  - `tests/test_n6_2_prompt_snapshots.py` : **20 snapshots** byte-identique. `_FakeAssistant` accepte `user_name` override par scénario (kwarg `_user_name` extrait avant appel `_build_prompt`).
+- **Historique** : refonte 12-13/05/2026 N6.2 (branche `feat/yvan/frontend`), 3 commits :
+  - `e8a4f1c` phase 1 (décisions Q1-Q8 + helpers `_PromptConfig` / `_parse_flexible_datetime`)
+  - `0344241` phase 2 (10 helpers métier extraits, `_build_prompt` 1002→528)
+  - phase 3 (extraction complète orchestrateur, `_build_prompt` 528→111, audit sub-agent 4 MAJEURS + 2 MINEURS traités)
 
 ### I-DB-CONN-01 : Une seule Database() instance par db_path par TID (latent fix 12/05/2026)
 Le tracker class-level `Database._all_conns[tid] = conn` est keyé par thread_id seul. **Ne JAMAIS instancier plusieurs `Database(db_path)` simultanément dans le même thread** : la seconde instance, via `_conn()`, kicke et ferme la conn de la première (assumée zombie), provoquant `ProgrammingError: Cannot operate on a closed database` downstream.
