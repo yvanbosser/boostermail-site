@@ -295,17 +295,22 @@ def critere_is_discarded_global():
 # ---------------------------------------------------------------------------
 
 def critere_should_speculate_after_n5():
-    """`_should_speculate` doit valider Filtre 1 ET Filtre 2 VIP (refonte N5 12/05).
+    """Dispatcher 3 branches doit aiguiller correctement (refonte N11 14/05).
 
-    Avant N5 : `_should_speculate = not _is_discarded` (thin wrapper).
-    Après N5 : `_should_speculate = (not Filtre 1) AND Filtre 2 VIP`.
+    Évolution historique :
+      - Avant N5 : `_should_speculate = not _is_discarded` (thin wrapper).
+      - Post N5 : `_should_speculate = (not Filtre 1) AND Filtre 2 VIP`.
+      - Post N11 : `_should_speculate` SUPPRIMÉ, remplacé par
+        `_classify_mail_branch(mail_data) → {'branch': 'discarded'|'partial'|'vip', 'reason': str}`.
+        Sémantique équivalente exposée via dict.
 
     Cas testés :
-      - Mail écarté par Filtre 1 → spec False, raison = règle Filtre 1
-      - Mail OK Filtre 1 mais Filtre 2 PARTIEL → spec False, raison Filtre 2
-      - Input pourri → spec False, raison fail-open
+      - Mail écarté par Filtre 1 → branch='discarded', reason=règle Filtre 1
+      - Mail OK Filtre 1 mais Filtre 2 PARTIEL → branch='partial', reason Filtre 2
+      - Mail VIP légitime → branch='vip', reason=''
+      - Input pourri → branch='partial' fail-open (Filtre 1 fail-open + Filtre 2 fail-open)
     """
-    print("\n=== _should_speculate (combinateur Filtre 1 ET Filtre 2 VIP, post-N5) ===")
+    print("\n=== _classify_mail_branch (dispatcher 3 branches post-N11) ===")
     now = datetime.datetime.now()
     recent = (now - datetime.timedelta(days=5)).isoformat()
     # Mock _filter_2_is_vip pour rendre le test déterministe sans setup DB
@@ -313,37 +318,39 @@ def critere_should_speculate_after_n5():
     ap._filter_2_is_vip = lambda email: (True, '') if email == 'vip@x.com' else (False, 'pas_de_fiche')
     try:
         cases = [
-            # (description, mail_data, expected_spec, expected_reason_substring)
+            # (description, mail_data, expected_branch, expected_reason_substring)
             ("mail VIP légitime",
              {"from_email": "vip@x.com", "body": "Bonjour, long body normal.", "date": recent},
-             True, ''),
+             'vip', ''),
             ("mail PARTIEL (contact pas en base)",
              {"from_email": "inconnu@x.com", "body": "Bonjour, long body normal.", "date": recent},
-             False, 'pas_de_fiche'),
+             'partial', 'pas_de_fiche'),
             ("mail écarté Filtre 1 (no-reply)",
              {"from_email": "noreply@x.com", "body": "Bonjour, long body normal.", "date": recent},
-             False, 'expéditeur automatique'),
+             'discarded', 'expéditeur automatique'),
             ("mail écarté Filtre 1 (body court)",
              {"from_email": "vip@x.com", "body": "Ok", "date": recent},
-             False, 'body trop court'),
-            # Inputs pourris : on vérifie juste que ça ne plante pas + spec=False
-            # (la raison exacte dépend du mock _filter_2_is_vip, peu importe pour la robustesse)
-            ("input None → fail-open spec=False",
-             None, False, ''),
-            ("input str pourri → fail-open spec=False",
-             "pas un dict", False, ''),
+             'discarded', 'body trop court'),
+            # Inputs pourris : Filtre 1 fail-open retourne (False, '') donc non-discarded ;
+            # puis Filtre 2 (sur from_email vide → 'email_invalide') → 'partial'
+            ("input None → fail-open branch='partial'",
+             None, 'partial', ''),
+            ("input str pourri → fail-open branch='partial'",
+             "pas un dict", 'partial', ''),
         ]
         ok_count = 0
-        for desc, md, expected_spec, expected_reason in cases:
-            s, sr = ap._should_speculate(md)
+        for desc, md, expected_branch, expected_reason in cases:
+            _info = ap._classify_mail_branch(md)
+            s = _info['branch']
+            sr = _info['reason']
             # Si expected_reason vide : on accepte n'importe quelle raison (cas
             # inputs pourris où la raison exacte importe peu)
             if expected_reason:
-                ok = (s == expected_spec) and (expected_reason in sr)
+                ok = (s == expected_branch) and (expected_reason in sr)
             else:
-                ok = (s == expected_spec)
+                ok = (s == expected_branch)
             ok_count += log_test(
-                f"{desc} → spec=({s}, {sr!r})",
+                f"{desc} → branch=({s}, {sr!r})",
                 ok
             )
         return ok_count, len(cases)

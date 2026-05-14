@@ -263,12 +263,13 @@ def invariant_i_filtre_2_01():
 
 # ---------------------------------------------------------------------------
 # Invariant : pas de wrapper try/except inutile aux call sites
-# (leçon N4 — `_is_discarded` et `_should_speculate` sont fail-open par contrat)
+# (leçon N4 — `_is_discarded` et `_classify_mail_branch` sont fail-open par contrat)
+# Post-N11 : `_should_speculate` supprimé, remplacé par `_classify_mail_branch`.
 # ---------------------------------------------------------------------------
 
 def invariant_no_redundant_wrappers():
     """Vérifie qu'on n'a pas réintroduit des try/except: pass autour de
-    `_is_discarded`/`_should_speculate` (qui sont déjà fail-open par contrat).
+    `_is_discarded`/`_classify_mail_branch` (fail-open par contrat).
     """
     print("\n=== Invariant : pas de wrapper try/except inutile autour des filtres ===")
     repo_v2 = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -277,15 +278,16 @@ def invariant_no_redundant_wrappers():
         src = f.read()
 
     # Pattern : `try:` suivi à courte distance par `_is_discarded` ou
-    # `_should_speculate` puis un `except: pass` ou équivalent
+    # `_classify_mail_branch` puis un `except: pass` ou équivalent
     # Heuristique simple : chercher les sous-séquences problématiques
     problematic = re.findall(
-        r'try:\s*\n\s*(?:_discarded|ok_spec)\s*,\s*\w+\s*=\s*(?:_is_discarded|_should_speculate)'
+        r'try:\s*\n\s*(?:_discarded|_branch_info|_info)\s*[,=]\s*\w*\s*=?\s*'
+        r'(?:_is_discarded|_classify_mail_branch)'
         r'\([^)]*\)\s*\n[^\n]*\n\s*except\s+Exception:\s*\n\s*pass',
         src
     )
     ok = log_test(
-        f"0 wrapper try/except: pass autour de _is_discarded/_should_speculate ({len(problematic)})",
+        f"0 wrapper try/except: pass autour de _is_discarded/_classify_mail_branch ({len(problematic)})",
         len(problematic) == 0
     )
     return (1 if ok else 0), 1

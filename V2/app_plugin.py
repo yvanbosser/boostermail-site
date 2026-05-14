@@ -1632,10 +1632,12 @@ def _continuous_speculation_loop():
     Plan 2 Phase 6 — Spéculation BG continue.
 
     Toutes les 45 s (configurable), scanne l'inbox courante (_warmup_cache)
-    et relance `_run_prefetch` pour les TIER 1 non couverts. Le filtre
-    Smart Speculative `_should_speculate` (Phase 2.B) s'applique en aval :
-    il bloque la génération Claude mais garde le prefetch A/B/C. La purge
-    événementielle (Phase 2.A) retire les entrées des mails traités.
+    et relance `_run_prefetch` pour les TIER 1 non couverts. Le dispatcher
+    unique `_classify_mail_branch` (refonte N11 14/05) s'applique en amont :
+    seuls les mails 'vip' (Filtre 1 OK + Filtre 2 OK) lancent la spéculation
+    Sonnet ; les 'discarded' et 'partial' sont skip + marqués via
+    `_mark_filtered_in_cache`. La purge événementielle (Phase 2.A) retire
+    les entrées des mails traités.
 
     Interruptible : respecte _preload_pause (activité user).
     Priorité : TIER 1 (contacts connus) en premier, puis chronologique.
@@ -6135,10 +6137,12 @@ def summarize_mails_to_db(mails, chunk_size=10):
             # est ré-summarisé à chaque cycle BG (coût Claude répété).
             # Maintenant : log debug pour traçabilité sans casser le flow.
             logger.debug(f"[summary] has_mail_summary({msg_id[:30]}) DB fail : {_e_dup}")
-        # Refonte N4 (12/05/2026) — `_should_speculate` est thin wrapper sur
-        # `_is_discarded` qui est déjà fail-open par contrat. Pas de wrapper.
-        ok_spec, _reason = _should_speculate(m)
-        if not ok_spec:
+        # Refonte N11 (14/05/2026) — dispatcher unique `_classify_mail_branch`.
+        # Cont-spec ne traite que les mails VIP (cascade Sonnet). Les PARTIEL
+        # sont traités par le commis Haiku en parallèle via _prewarm_mail_preview.
+        # `_classify_mail_branch` est fail-open (les sous-helpers le sont).
+        _branch_info = _classify_mail_branch(m)
+        if _branch_info['branch'] != 'vip':
             skipped_filtered += 1
             continue
         # Fix audit 22/04 : skipper les mails sans body complet (body_preview
@@ -6232,27 +6236,27 @@ def _run_prefetch(mail_data):
         logger.debug(f"[prefetch] skip mail sans IMID canonique : "
                      f"subject={subject[:40]}")
         return
-    # Refonte N4 (12/05/2026) — Filtre 1 unifié : `_is_discarded` est
-    # fail-open par contrat. PAS de wrapper try/except (cf I-FILTRE-01).
-    _discarded, _reason = _is_discarded(mail_data)
-    if _discarded:
-        logger.debug(f"[prefetch] skip écarté ({_reason}) : "
+    # Refonte N11 (14/05/2026) — Dispatcher UNIQUE `_classify_mail_branch`
+    # remplace les 2 appels successifs `_is_discarded` puis `_filter_2_is_vip`
+    # (et l'appel `_should_speculate` plus bas dans la même fonction qui
+    # refaisait le calcul). Une seule décision propagée dans la fonction.
+    # `_run_prefetch` charge les contextes A/B/C uniquement utiles au chef
+    # Sonnet (branche VIP). PARTIEL / ÉCARTÉ → skip Graph batch (~1s / 3 KB
+    # par mail filtré, gain boot 10-30s). Le commis Haiku (résumé + classement)
+    # tourne séparément via `_prewarm_unified_for_mail` (chemin indépendant),
+    # donc PARTIEL reçoit quand même ses 3 plats.
+    _branch_info = _classify_mail_branch(mail_data)
+    _branch = _branch_info['branch']
+    if _branch == 'discarded':
+        logger.debug(f"[prefetch] skip écarté ({_branch_info['reason']}) : "
                      f"subject={subject[:40]}")
         return
-
-    # Refonte N5 (12/05/2026) — Filtre 2 (VIP ?) AVANT le batch Graph lourd.
-    # `_run_prefetch` charge les contextes A/B/C uniquement utiles au chef
-    # Sonnet (réponse VIP). Si le mail est PARTIEL, ces contextes ne servent
-    # à rien → on évite ~1 sec de Graph + 3 KB par mail filtré (gain boot
-    # 10-30 sec selon le carnet). Le commis Haiku (résumé + classement) est
-    # appelé séparément via `_prewarm_unified_for_mail` (chemin indépendant
-    # de `_run_prefetch`), donc le PARTIEL aura quand même ses 3 plats.
-    _is_vip, _vip_reason = _filter_2_is_vip(from_email)
-    if not _is_vip:
-        logger.debug(f"[prefetch] skip PARTIEL ({_vip_reason}) : "
+    if _branch == 'partial':
+        logger.debug(f"[prefetch] skip PARTIEL ({_branch_info['reason']}) : "
                      f"subject={subject[:40]} — Graph batch évité")
-        _mark_filtered_in_cache(message_id, _vip_reason)
+        _mark_filtered_in_cache(message_id, _branch_info['reason'])
         return
+    # _branch == 'vip' → continue avec cascade Sonnet
 
     # Clé de cache = IMID canonique (pas de fallback from+subject)
     cache_key = message_id
@@ -6281,25 +6285,22 @@ def _run_prefetch(mail_data):
         _ev_done['c_context_ready'].set()
         # Fix root-cause I-CX-01 (24/04 P5) : prefetch 'done' ≠ draft généré.
         # La boucle BG envoie ces mails ici car _reply_cache ne les a pas.
-        # Refonte N5 (12/05) : `_should_speculate` combine Filtre 1 + Filtre 2 VIP
-        # ET gère le cas from_email vide (retourne 'email_invalide'). Le helper
-        # `_mark_filtered_in_cache` factorise l'anti-resubmission (avant : 3
-        # patchs Fix C / FIX P14 / Fix C bis dupliqués entre 2 branches).
+        # Refonte N11 (14/05) : grâce au dispatcher unique en début de
+        # `_run_prefetch`, on sait que `_branch == 'vip'` arrivé ici. Le
+        # re-calcul `_classify_mail_branch` (anciennement `_should_speculate`)
+        # est supprimé — c'était une double exécution. Renforce aussi la
+        # décision N5 « pas de réveil PARTIAL→VIP » (le seul moyen d'arriver
+        # ici est d'avoir été VIP au calcul initial).
         if message_id:
-            ok_spec, skip_reason = _should_speculate(mail_data)
-            if ok_spec:
-                def _speculate_ws_done(md):
-                    acq = _ai_speculative_semaphore.acquire(blocking=True, timeout=TIMEOUT_SEMAPHORE_SPECULATE)
-                    if not acq:
-                        return
-                    try:
-                        _start_speculative(md)
-                    finally:
-                        _ai_speculative_semaphore.release()
-                _spawn_bg(_speculate_ws_done, args=(mail_data,))
-            else:
-                logger.debug(f"[spec-done] Skip ({skip_reason}) {message_id[:20]}")
-                _mark_filtered_in_cache(message_id, skip_reason)
+            def _speculate_ws_done(md):
+                acq = _ai_speculative_semaphore.acquire(blocking=True, timeout=TIMEOUT_SEMAPHORE_SPECULATE)
+                if not acq:
+                    return
+                try:
+                    _start_speculative(md)
+                finally:
+                    _ai_speculative_semaphore.release()
+            _spawn_bg(_speculate_ws_done, args=(mail_data,))
         return
     if existing_status == 'running':
         return
@@ -6469,36 +6470,32 @@ def _run_prefetch(mail_data):
 
         _broadcast_sse('prefetch_progress', {'status': 'done', 'a': len(context_a), 'b': len(context_b), 'c': len(context_c)})
 
-        # Refonte N5 (12/05) — Lancer la spéculation Sonnet si Filtre 1 OK ET
-        # Filtre 2 VIP. `_should_speculate` combine les deux (cf docstring).
-        # Le helper `_mark_filtered_in_cache` factorise l'anti-resubmission
-        # (avant : 3 patchs Fix C / FIX P14 / Fix C bis dupliqués ici + branche done).
+        # Refonte N11 (14/05) — Grâce au dispatcher unique en début de
+        # `_run_prefetch`, on sait que `_branch == 'vip'` arrivé ici. Le
+        # re-calcul `_should_speculate` (supprimé) est éliminé — pas de
+        # double exécution. Renforce aussi la décision N5 « pas de réveil
+        # PARTIAL→VIP ».
         if message_id:
-            ok_spec, skip_reason = _should_speculate(mail_data)
-            if ok_spec:
-                # Option A (24/04) — Sémaphore LLM : max 4 spéculations
-                # parallèles. Bloquant timeout 120s (évite de perdre une
-                # spéculation quand prefetch déjà 'done' → pas retenté).
-                def _speculate_with_semaphore(md):
-                    acquired = _ai_speculative_semaphore.acquire(
-                        blocking=True, timeout=TIMEOUT_SEMAPHORE_SPECULATE)
-                    if not acquired:
-                        logger.warning(
-                            f"[speculative] Skip sémaphore saturé >120s "
-                            f"pour {md.get('message_id','')[:30]}")
-                        return
-                    try:
-                        _start_speculative(md)
-                    finally:
-                        _ai_speculative_semaphore.release()
-                threading.Thread(
-                    target=_speculate_with_semaphore,
-                    args=(mail_data,),
-                    daemon=True
-                ).start()
-            else:
-                logger.debug(f"[speculative] Skip ({skip_reason}) pour {message_id[:20]}")
-                _mark_filtered_in_cache(message_id, skip_reason)
+            # Option A (24/04) — Sémaphore LLM : max 4 spéculations
+            # parallèles. Bloquant timeout 120s (évite de perdre une
+            # spéculation quand prefetch déjà 'done' → pas retenté).
+            def _speculate_with_semaphore(md):
+                acquired = _ai_speculative_semaphore.acquire(
+                    blocking=True, timeout=TIMEOUT_SEMAPHORE_SPECULATE)
+                if not acquired:
+                    logger.warning(
+                        f"[speculative] Skip sémaphore saturé >120s "
+                        f"pour {md.get('message_id','')[:30]}")
+                    return
+                try:
+                    _start_speculative(md)
+                finally:
+                    _ai_speculative_semaphore.release()
+            threading.Thread(
+                target=_speculate_with_semaphore,
+                args=(mail_data,),
+                daemon=True
+            ).start()
 
     except Exception as e:
         logger.error(f"Prefetch error: {e}")
@@ -7304,36 +7301,46 @@ def _mark_filtered_in_cache(message_id, reason):
         }
 
 
-def _should_speculate(mail_data):
-    """Décision « doit-on lancer le chef Sonnet pour ce mail ? » = Filtre 1 ET Filtre 2 VIP.
+def _classify_mail_branch(mail_data):
+    """Aiguillage UNIQUE 3 branches de l'arbre décisionnel (spec slide 4 + 5).
 
     Returns
     -------
-    Tuple[bool, str]
-        (True, '')        → mail légitime ET VIP, on peut spéculer Sonnet
-        (False, 'raison') → skip spéculation, raison = (a) règle Filtre 1
-                            qui a écarté le mail OU (b) raison Filtre 2 PARTIEL
+    dict {'branch': str, 'reason': str}
+        branch ∈ {'discarded', 'partial', 'vip'} :
+          - 'discarded' : Filtre 1 a fired → AUCUN plat préparé.
+                          reason = nom de la règle Filtre 1
+                          (expéditeur automatique, mail > 30 jours, …)
+          - 'partial'   : Filtre 1 = NON, Filtre 2 = NON →
+                          commis Haiku unifié seul (3 plats : résumé +
+                          classement mail + classement PJ).
+                          reason = raison Filtre 2 KO
+                          (pas_de_fiche, fiche_vide, db_fail, …)
+          - 'vip'       : Filtre 1 = NON, Filtre 2 = OUI →
+                          cascade Sonnet + Haiku (5 plats slide 4).
+                          reason = '' (succès complet)
 
-    Refonte N5 (12/05/2026) — La promesse de la docstring précédente est
-    tenue : `_should_speculate` combine désormais Filtre 1 (écartage) ET
-    Filtre 2 (VIP). Avant N5 c'était un thin wrapper qui ne reflétait que
-    le Filtre 1.
+    Refonte N11 (14/05/2026) — Dispatcher unique remplaçant `_should_speculate`
+    (supprimé). Le pipeline pré-N11 avait 5 sites de décision dispersés et une
+    double exécution Filtre 1+2 dans `_run_prefetch`. Désormais : 1 appel,
+    1 décision, propagée via le dict retour.
 
-    La métrique production `template.miss.*` (`_log_template_metric` ~10878)
-    continue de fonctionner : la raison agrégée distinguera désormais les
-    règles Filtre 1 (`expéditeur automatique`, `mail > 30 jours`, etc.) ET
-    les raisons Filtre 2 (`pas_de_fiche`, `fiche_vide`, `db_fail`, etc.).
+    Compat lecture : pour les call sites qui consommaient `_should_speculate`
+    (ok_spec, skip_reason) = équivalent maintenant via :
+        info = _classify_mail_branch(md)
+        ok_spec = (info['branch'] == 'vip')
+        skip_reason = info['reason']
     """
-    # Étape 1 : Filtre 1 (écarté ?). Si écarté → on ne spécule pas, raison Filtre 1.
+    # Étape 1 : Filtre 1 (écarté ?). Si écarté → branche 'discarded'.
     discarded, reason = _is_discarded(mail_data)
     if discarded:
-        return False, reason
-    # Étape 2 : Filtre 2 (VIP ?). Si non-VIP → PARTIEL, raison Filtre 2.
+        return {'branch': 'discarded', 'reason': reason}
+    # Étape 2 : Filtre 2 (VIP ?). Si non-VIP → branche 'partial'.
     from_email = (mail_data.get('from_email', '') or '').lower() if isinstance(mail_data, dict) else ''
     is_vip, vip_reason = _filter_2_is_vip(from_email)
     if not is_vip:
-        return False, vip_reason
-    return True, ''
+        return {'branch': 'partial', 'reason': vip_reason}
+    return {'branch': 'vip', 'reason': ''}
 
 
 def _start_speculative(mail_data):
@@ -11507,9 +11514,10 @@ def api_instant_reply():
                             'to': cached_email.get('to', ''),
                             'cc': cached_email.get('cc', ''),
                         }
-                        ok, reason = _should_speculate(_md)
-                        if not ok:
-                            miss_reason = f'filtre Smart Speculative : {reason}'
+                        _branch_diag = _classify_mail_branch(_md)
+                        if _branch_diag['branch'] != 'vip':
+                            miss_reason = (f"branche {_branch_diag['branch']} : "
+                                           f"{_branch_diag['reason']}")
                 except Exception:
                     pass
         except Exception:
