@@ -1,4 +1,4 @@
-# Journal de la refonte BoosterMail SaaS — Niveaux 1 à 9
+# Journal de la refonte BoosterMail SaaS — Niveaux 1 à 10
 
 > **Période** : 11/05/2026 → 14/05/2026 (3 jours intensifs)
 > **Branche** : `feat/yvan/frontend`
@@ -9,8 +9,8 @@
 
 ## 1. Le pacte fondateur
 
-> *« Supprimer les patches sur patch sur patch pour avoir un code parfaitement propre, robuste, pertinent qui se substitue aux patches. »*
-> — Yvan Bosser, principe rappelé à chaque niveau
+> *« Supprimer les patches sur patch sur patch pour avoir un code parfaitement propre, robuste, pertinent, efficace et rapide qui se substitue aux patches. »*
+> — Yvan Bosser, principe rappelé à chaque niveau (avec « efficace et rapide » ajoutés au démarrage de N10)
 
 Concrètement, ce que ce pacte exclut :
 
@@ -102,6 +102,7 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 | **N7** | 13/05/2026 15:22 | `24a57d1` | `aaf0408` | `test_n7_frigos.py` (77 tests) |
 | **N8** | 13/05/2026 19:55 | `9fbd97d` | `7939f7e` | `test_n8_classement.py` (15 tests) |
 | **N9** | 14/05/2026 08:15 | `1d8fd5d` | `0e59c18` | `test_n9_classement_reciprocal.py` (10 tests) |
+| **N10** | 14/05/2026 09:21 | `657d022` | `c1c4fcd` | `test_n10_contacts.py` (13 tests) |
 
 **Total : 13 niveaux livrés** (N1-N9 + 4 -bis correctifs). Tous les tests passent (somme cumulée des suites de tests N1-N9 = 200+ tests verts).
 
@@ -383,6 +384,54 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 
 ---
 
+### N10 + N10-bis — Gestion des contacts : squelette + purge UPDATE-blank + 2 helpers (14/05)
+
+**Objectif** : slide 8 PPTX « Gestion des contacts — création & purge ». Création progressive (squelette dès le 1er mail, profil enrichi à 2 reçus OU 1 envoyé), purge automatique 24 mois, préservation conditions.
+
+**Cartographie initiale — incident** : sub-agent Plan a cartographié le **proto** (`OneDrive\Desktop\EasyMail` = obsolète) au lieu de V2 SaaS. Piège memory `project_racine_repo` activé. Cartographie refaite manuellement sur `C:\EasyMail\V2\`. Leçon : sub-agents doivent recevoir le chemin V2 explicite dans le prompt.
+
+**Démolisseur v1** : **5 P0 + 5 P1 trouvés** incluant un **bug critique en prod** :
+- **P0-1** : la purge auto 24 mois EXISTE DÉJÀ (`database.py:2187` `purge_inactive_contact_profiles` + thread BG `app_plugin.py:4583` `_periodic_contacts_purge_loop` depuis O6 08/05). Plan v1 voulait recréer ce qui existe.
+- **P0-3** : **fuite cross-tenant** dans la purge actuelle — `DELETE FROM contact_profiles` sans `WHERE user_id = ?`. Un mail récent du user A protégeait le profil contact du user B portant le même email. Bug en prod !
+- **P0-4** : pas besoin de nouvelles colonnes `is_skeleton` / `last_activity_at` (`sample_count == 0` et `threads.created_at` font déjà l'affaire).
+- **P0-5** : hook envoi mauvaise cible (le bon point est `_db.save_to_thread` qui couvre les 2 directions en 1 seul appel).
+
+**Décisions produit Yvan (A/A/A/A/A)** : scope complet (squelette + purge auto + préservation stricte + refonte dispatcher en 3 helpers + cadence quotidienne existante). « Efficace et rapide » ajoutés au pacte.
+
+**N10** (`657d022`) :
+- **Hook unique** dans `save_to_thread` (database.py:1854) → `create_contact_skeleton(correspondent)` idempotent AVANT INSERT thread. Couvre les 2 directions (sent/received) en 1 seul point. Avant N10, 3 call sites séparés auraient été nécessaires.
+- **Purge réécrite** : `DELETE` → `UPDATE-blank` sélectif des 16 champs enrichis. Squelette (email + display_name) CONSERVÉ → les règles 1/2/3 du pipeline classement (basées sur `folder_classifications` séparé) continuent à fonctionner après purge. **Fix bug cross-tenant** : boucle `SELECT DISTINCT user_id` + `WHERE user_id = ?` dans UPDATE ET sub-SELECT.
+- **Dispatcher refondu** : 8 patches accumulés (RC1/RC2/RC3 audit 03/05, O1 08/05, Fix 30/04 PM signature, Fix 30/04 PM limit 25→50, N1 `_is_auto_email`, N3 `_check_analysis_cooldown`) → **2 helpers décideurs purs** (`_should_enrich_profile`, `_should_reanalyze_profile`) + orchestrateur léger. Les 8 patches sont sémantiquement préservés dans les helpers.
+- **Filtre frontend** : `get_all_contact_profiles(include_skeletons=False)` par défaut → carnet UI ne montre que les profils enrichis. 3 call sites identifiés par regard frais pré-commit passés à `include_skeletons=True` : `/api/contact_search` (autocomplete), `/gdpr/export` (RGPD), recalibrate batch.
+- **Helpers paramétrés extraits** : `_apply_register_guard` (garde tu/vous post-IA, hérité dispatcher pré-N10).
+
+**Regard frais pré-commit** : 4 P1 fixés AVANT commit :
+- P1-1 : `_should_create_skeleton` (3e helper du plan v2) **supprimé** (0 caller prod, anti-pattern 5)
+- P1-2/3/4 : 3 call sites avec `include_skeletons=True` (autocomplete + RGPD + batch)
+
+**Audit rétrospectif post-N10** : 3 récidives + 1 faux positif.
+
+**N10-bis** (`c1c4fcd`) — **3 corrections** :
+1. **A-1 Docstring stale** `tests/test_n10_contacts.py:10` : mentionnait `_should_create_skeleton` (supprimé). Récidive directe N9-bis. Corrigée.
+2. **A-2 Paramètre mort** `bypass_cooldown` dans `_should_reanalyze_profile` (jamais utilisé, admis par la docstring). Récidive directe N9-bis (variable `strategy`). Supprimé.
+3. **A-3 Test cooldown actif manquant** : tous les tests passaient `bypass_cooldown=True`, donc le chemin « cooldown actif → False » n'était jamais exercé. Test ajouté.
+
+**Faux positif identifié** : l'audit a soupçonné une régression silencieuse warmup (`_continuous_speculation` BG). Vérification : pré-N10 aussi, la fonction return None si `get_threads_with_contact` ne trouvait aucun sent_mail (check `if not sent_mails: return`). Donc pas de régression réelle.
+
+**Tests** : `test_n10_contacts.py` — **13/13 verts**.
+
+**Métriques HONNÊTES** :
+- N10 : `+137/-89 app_plugin (+48)` + `+123/-29 database (+94)` = **+142 prod net** (vs « -20 net » plan v2 — écart honnêtement reconnu dans le commit message)
+- N10-bis : `+8/-8 app_plugin (-2 net !) + 36/-2 tests` — **-2 prod net** (vrai gain net négatif)
+
+**Leçons N10** :
+- **Démolisseur sauve un bug critique en prod** (fuite cross-tenant que personne n'avait vu en 1 semaine). Confirme la valeur méthodologique du sub-agent.
+- **Piège chemin V2 vs proto** : les sub-agents doivent recevoir le chemin V2 explicite dans le prompt — la confusion `OneDrive\Desktop` reste un risque latent.
+- **« Refonte propre » ≠ « net négatif »** : N10 ajoute +142 prod parce que la spec exige des nouvelles fonctionnalités (squelette + purge UPDATE-blank verbose). La valeur est qualitative (bug fix critique, helpers testables), pas numérique. **Honnêteté > marketing**.
+- Le **-bis correctif court** (-2 prod !) prouve que les récidives détectées étaient minimes mais réelles. Pattern stable.
+
+---
+
 ## 5. Méthodes & invariants livrés (vue système)
 
 ### Tables DB schéma augmenté en N1-N9
@@ -424,6 +473,7 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 | I-THREADS-N7-01 | N7 | Pas de purge `threads` table |
 | I-CLASS-N8-01 → 05 | N8 + bis | Moteur classement mail unifié |
 | I-CLASS-N9-01 → 03 | N9 + bis | Moteur commun + R1 réciproque + 3 portes PJ |
+| I-CONTACT-N10-01 → 03 | N10 + bis | Dispatcher orchestrateur · squelette via save_to_thread · purge UPDATE-blank multi-tenant |
 | I-SESS-06 | (avant) | Branche `dev/master/main` interdite |
 
 ---
@@ -442,16 +492,15 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 ✅ N7 + bis — 5 frigos & nettoyage                                   (13/05)
 ✅ N8 + bis — Règles classement mail/PJ                              (13-14/05)
 ✅ N9 + bis — Moteur commun mail/PJ + R1 réciproque + 3 portes PJ    (14/05)
-⏳ N10..N12 — à enchaîner
+✅ N10 + bis — Gestion contacts : squelette + purge UPDATE-blank      (14/05)
+⏳ N11..N12 — à enchaîner
 ```
-
-**Hypothèse N10** : slide 8 PPTX « Gestion des contacts — création & purge » (carnet d'adresses enrichi progressivement + purge auto à 24 mois sans échange).
 
 **Hypothèse N11** : slide 9 PPTX « Comportement à l'usage — 3 commandes » (Répondre / Classer rapide / Voir résumé) — qualification des cas VIP / PARTIEL / ÉCARTÉ.
 
 **Hypothèse N12** : tests d'intégration finale ou refonte d'une zone non encore identifiée.
 
-À déterminer avec Yvan en début de la session N10.
+À déterminer avec Yvan en début de la session N11.
 
 ---
 
@@ -459,16 +508,17 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 
 | | Chiffre |
 |---|---|
-| Niveaux livrés | 9 (+ 4 -bis correctifs) |
+| Niveaux livrés | 10 (+ 5 -bis correctifs) |
 | Durée | 3 jours (11/05 → 14/05/2026) |
-| Commits refonte | 24 |
-| Tests fichiers créés | 12 (test_n2..test_n9_classement_reciprocal) |
-| Tests verts (somme cumulée des suites) | 200+ |
+| Commits refonte | 26 |
+| Tests fichiers créés | 13 (test_n2..test_n10_contacts) |
+| Tests verts (somme cumulée des suites) | 220+ |
 | Anti-patterns codifiés | 8 |
-| Démolisseurs lancés | ~20 (sub-agents pré-impl) |
-| Regards frais lancés | ~15 (sub-agents pré-commit) |
-| Audits rétrospectifs | 9 (1 par niveau) |
-| -bis correctifs | 4 (N6.3, N7, N8, N9) |
+| Démolisseurs lancés | ~22 (sub-agents pré-impl) |
+| Regards frais lancés | ~17 (sub-agents pré-commit) |
+| Audits rétrospectifs | 10 (1 par niveau) |
+| -bis correctifs | 5 (N6.3, N7, N8, N9, N10) |
+| Bugs critiques en prod corrigés | 1 (fuite cross-tenant purge contacts — N10) |
 
 ---
 
@@ -508,4 +558,4 @@ Quand le spec dit « 7 tiers identiques » mais que certains sont techniquement 
 
 ---
 
-*Document généré le 14/05/2026 (clôture niveau N9-bis). Maintenir à jour à chaque nouveau niveau ou -bis correctif.*
+*Document généré le 14/05/2026, mis à jour à clôture N10-bis. Maintenir à jour à chaque nouveau niveau ou -bis correctif.*
