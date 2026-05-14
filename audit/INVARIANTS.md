@@ -1085,6 +1085,47 @@ Tout enregistrement de mail dans la table `threads` (toutes directions) déclenc
 - **Pourquoi** : avant N10, purge globale sans filtre `user_id` → (a) perte totale du squelette + des règles de classement préservées, (b) fuite cross-tenant. Corrigé en double.
 - **Action si violé** : restaurer le UPDATE-blank et la boucle multi-tenant.
 
+### I-BRANCHES-N11-OPTION-A : `scan_echeance` activé uniquement en VIP entrants
+
+`_prewarm_unified_for_mail` calcule `_scan_echeance_active = (_branch_info_unified['branch'] == 'vip')` (app_plugin.py:4254) et propage la valeur au commis Haiku via `scan_echeance=_scan_echeance_active` (4264). Conséquence directe : **branche VIP → 5 frigos pleins (incl. échéance) ; branche PARTIAL → 3 frigos pleins (sans échéance)** — spec slide 4 PPTX respectée. Décision Yvan 14/05 PM (Option A) : fin du suspendu produit, échéances VIP entrantes désormais pré-cuites en BG.
+- **Preuve comportementale** : `tests/test_integration_N0_N11.py::test_C3_vip_scan_echeance_active` — mock builder reçoit `scan_echeance=True` ET échéance détectée persistée dans `mail_echeance_cache`. `::test_B6_partial_echeance_non_precuite` — branche PARTIAL → échéance persistée `[]` (idempotence) sans appel scan.
+- **Régression statique** : `tests/test_n11_branches.py::test_option_a_scan_echeance_conditional` — le source de `_prewarm_unified_for_mail` contient le pattern `scan_echeance = (.+branch.+vip)`.
+- **Sémantique tri-état** : `_persist_commis_results(echeances=None)` distingue 3 cas — `None` = scan pas effectué (PARTIAL skip), `[]` = scan effectué + 0 trouvé (VIP avec mail sans deadline), `[dict]` = scan effectué + détection.
+- **Pourquoi** : conflit pré-Option A entre slide 4 PPTX (« 5 frigos pleins en VIP » = échéance incluse) et SPEC_ECHEANCES V1 du 05/05 (« sortants only, out-of-scope les entrants »). Yvan a tranché 14/05 : Option A active, scope étendu aux VIP entrants. Mémoire utilisateur `feature_echeances_scope.md` à mettre à jour manuellement.
+- **Action si violé** : un développeur a (a) supprimé la conditionnelle `scan_echeance = (branch == 'vip')` pour passer la valeur en dur, (b) introduit une asymétrie où PARTIAL appelle le scan ou VIP ne l'appelle pas. Restaurer le pattern conditionnel exact.
+
+---
+
+## Observations honnêtes post-batterie d'intégration N0-N11 (14/05/2026 soir)
+
+Les 3 observations ci-dessous **ne sont PAS des invariants au sens strict** (pas testables comme « code conforme »), mais des **signaux remontés honnêtement** par la batterie E2E + audit sub-agent post-batterie. Elles sont **à traiter en priorité dans la session N12**.
+
+### Obs-F6 : TOCTOU possible sur idempotence `_prewarm_unified_for_mail`
+
+Sous 2 threads concurrents sur le même `mid`, le check `get_all_dishes_for_mail` au début de `_prewarm_unified_for_mail` **n'est pas atomique** avec l'appel builder qui suit. Conséquence observée : le builder a été appelé **2× au lieu de 1× idéal** dans le test `test_F6_concurrence_double_call`. Last-write-wins → frigos cohérents en fin, mais ~2× coût Haiku en cas de race.
+- **Impact** : faible (concurrence sur même mid = rare en prod, frigos cohérents en fin).
+- **Couverture test** : `tests/test_integration_N0_N11.py::test_F6_concurrence_double_call` — accepte ≤ 2 appels builder, donc le test passe avec 2 appels actuellement. Devrait être resserré à `== 1` après fix.
+- **Fix possible (hors scope cette session)** : wrap le check + l'appel builder sous un lock par-mid (`threading.Lock()` dans un dict `_mid_locks`), ou utiliser un sentinel atomique dans `_prefetch_cache`.
+
+### Obs-F8 : Test tautologique (defense de code mort)
+
+Le test `test_F8_echeance_format_pourri` mocke un retour `'echeance': "2026-12-01"` (string brute) que la vraie méthode `analyze_one_mail_stream` (claude_ai.py:3580) **ne peut structurellement jamais produire** — le parser maison `_parse_line` (3787) construit toujours un dict `{description, date}` à partir de la ligne `E:` reçue, ou rien. Le test valide donc une robustesse contre un bug fictif.
+- **Anti-patterns concernés** : « defense de code mort » + « test tautologique » (cf. liste 8 anti-patterns codifiés N6→N9).
+- **Vraies bourdes Haiku possibles (non couvertes)** :
+  - Date non-ISO : `E: livrable | 15 décembre 2026` → parser produit `{description: 'livrable', date: ''}` → persisté tel quel (description sans date).
+  - Description vide : `E: | 2026-12-01` → `{description: '', date: '2026-12-01'}` → persisté avec description vide.
+  - Date pas parseable : `E: livrable | demain` → `{description: 'livrable', date: ''}`.
+  - Date passée : `E: livrable | 2025-01-01` → persisté tel quel (pas filtré par le code, alors que le prompt dit « date FUTURE uniquement »).
+- **Action recommandée session N12** : **réécrire** F8 (pas étendre) avec 4-5 sous-cas couvrant les vraies bourdes. Direction d'impl à arbitrer entre Direction 1 (prompt renforcé) + Direction 3 (validateur unique `_validate_echeance_payload`) OU Direction 2 (structured output `tool_use` Anthropic — garantie structurelle).
+
+### Obs-F10 : Asymétrie mécanisme `scan_echeance` entre entrants VIP et compose sortants
+
+- **Entrants VIP** (`_prewarm_unified_for_mail:4264`) : appel explicite `scan_echeance=_scan_echeance_active` (conditionnel à `branch == 'vip'`).
+- **Compose sortants** (`api_post_generation_analyze:14114`) : **pas de kwarg `scan_echeance`** passé au builder — comportement par défaut implicite, le code se contente d'écouter `kind == 'echeance'` dans le stream.
+- **Conséquence** : tout changement futur de la politique scan échéance (ex. « ne plus scanner les mails au comptable » ou « scanner aussi les PARTIAL ») demande de toucher **2 endroits différents** avec **2 mécanismes différents**.
+- **Anti-pattern concerné** : « patches dispersés » — risque de récidive de patch sur patch.
+- **Action recommandée session N12** : factoriser la décision dans un helper unique (par exemple `_should_scan_echeance(mail_data, mode)` avec mode ∈ {'incoming', 'compose'}) et l'appeler explicitement aux 2 sites. Cohérent avec l'esprit du dispatcher unique N11.
+
 ---
 
 ## Mise à jour

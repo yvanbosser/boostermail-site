@@ -472,6 +472,67 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 - **Travail en autonomie 2h respecté** : règles d'autonomie tenues — décision la plus robuste à chaque hésitation (suppression vs wrapper, RAM vs DB colonne, fix vs suspendu). Blocage produit (Échéance VIP) renseigné dans todo + commit + marker code pour reprise.
 - **6 -bis sur 11 niveaux = taux 55%** — le pattern méthodologique est maintenant statistiquement stable.
 
+### N11 Option A — Réactivation Échéance VIP entrants (14/05 après-midi, fin du suspendu)
+
+**Objectif** : lever le blocage produit identifié en N11 (slide 4 PPTX OUI vs SPEC_ECHEANCES 05/05 NON) et activer le 5ᵉ frigo VIP entrants (échéances pré-cuites par Haiku).
+
+**Décision Yvan 14/05** : réactivation activée. La nouvelle politique :
+- **Mails entrants VIP** : `scan_echeance=True` propagé au commis Haiku via le pattern conditionnel `_scan_echeance_active = (branch == 'vip')` dans `_prewarm_unified_for_mail:4254`.
+- **Mails entrants PARTIEL** : `scan_echeance=False` conservé (économie tokens, pas d'engagement produit envers un contact non-connu).
+- **Mails entrants ÉCARTÉS** : pas applicable (commis pas appelé).
+- **Mails sortants compose** : reste sur le comportement par défaut implicite (Haiku scanne — voir observation F10 ci-dessous).
+
+**N11 Option A** (`8c377d7`) :
+- Suppression du marker SUSPENDU à `app_plugin.py:4244` (introduit en N11-bis).
+- `_persist_commis_results` accepte un nouveau paramètre `echeances=None` avec sémantique tri-état documentée (`None` = pas de scan effectué / `[]` = scan + 0 trouvé / `[dict]` = scan + détection).
+- Adaptation tests N6.1 : `invariant_e_ignored_for_entrants` → renommé `invariant_e_scope_v1`, adapté au pattern conditionnel.
+- Mise à jour `SPEC_ECHEANCES_BOOSTERMAIL.md` §2 : in-scope étendu « VIP entrants » + tableau récap.
+- Mise à jour `SPEC_ARBRE_DECISIONNEL.md` §6 : « Suspendu » → « Option A active ».
+
+**À retenir** : la mémoire utilisateur `feature_echeances_scope.md` (datée du 05/05 « sortants uniquement ») reste **techniquement obsolète** côté code. Yvan doit la mettre à jour manuellement (la mémoire est sa propriété, je ne l'écris pas).
+
+### Validation finale — Batterie d'intégration N0 → N11 (48 scénarios, 14/05 soir)
+
+**Objectif** : avant clôture de la phase « cuisine » (N1-N11) et bascule vers « la salle » (N12), prouver par une batterie E2E exhaustive que les 11 niveaux livrés forment un pipeline cohérent (pas de doublons, bonnes routes, bons frigos, bons étiquetages).
+
+**Approche** : pas d'appel IA réel (mock `_get_prompt_builder` + `_MockBuilder.analyze_one_mail_stream` yieldant des payloads contrôlés), DB locale réelle avec cleanup systématique (préfixe `int-test-`).
+
+**Batterie initiale** (`9171736` — 38 scénarios) :
+- **Famille A** (ÉCARTÉ — 8 tests) : 5 règles Filtre 1 atomiques + 0 frigo BG rempli + 2 routes user.
+- **Famille B** (PARTIEL — 9 tests) : 3 frigos pleins, pas body Sonnet, échéance non pré-cuite, 3 routes user.
+- **Famille C** (VIP — 7 tests) : 5 frigos pleins, scan_echeance Option A actif, 4 routes user.
+- **Famille D** (transitions/cohérence cross-niveau — 9 tests) : squelette, no double classify, no bypass dispatcher, purge multi-tenant safe, IMID canonique.
+- **Cas spéciaux E** (5 tests) : mail à soi-même, PJ, sujet vide, HTML strip, mailer-daemon.
+
+**3 échecs initiaux, tous test issues (pas bugs code)** :
+- A3 (user en CC) : `_get_my_email()` lit Graph API (indispo en test) → fail-open. Fix test : monkeypatch.
+- C3 (scan_echeance VIP) : body 58 chars < seuil 100 → court-circuit Haiku. Fix test : body > 100.
+- D4 (idempotence) : pattern attendu `has_mail_summary` séparé, réel = `get_all_dishes_for_mail` unifié. Fix test : ajuster pattern.
+
+**Extension Famille F** (`cbde1d0` — 10 scénarios cuisine avancée) :
+- F1 idempotence fonctionnelle (call 2× → builder 1×)
+- F2 panne Haiku : `_commis_retry_count` incrémenté, atomicité respectée
+- F3 MAX_RETRIES atteint : abandon propre (early-return sans builder)
+- F4 enrichissement progressif : sample=0 PARTIAL → sample=2 VIP (mail suivant)
+- F5 pas de réveil rétroactif : cache HIT idempotent même après enrichissement
+- F6 concurrence 2 threads sur même mid : aucun crash, frigos cohérents
+- F7 body boundary exact : 99 chars skip, 100 chars cuisson
+- F8 échéance format pourri : string ignorée, frigo `[]`, pas de crash
+- F9 mail sans IMID : skip propre, pas de crash
+- F10 compose post_generation_analyze : route sortants V1 (SPEC_ECHEANCES) couverte
+
+**Résultat final : 48/48 scénarios verts.**
+
+### Observations honnêtes post-batterie (à traiter en sessions suivantes)
+
+**Observation #1 — F6 TOCTOU possible** : sous 2 threads concurrents sur le même `mid`, le builder est appelé **2× au lieu de 1× idéal**. Le check `get_all_dishes_for_mail` au début de `_prewarm_unified_for_mail` n'est pas atomique avec l'appel builder qui suit. **Impact** : faible (≤ 2× coût Haiku rare, last-write-wins → frigos cohérents). **Pas un bug critique**, mais signal observé honnêtement pour audit futur.
+
+**Observation #2 — F8 test tautologique** (révélé par sub-agent démolisseur post-batterie) : le mock initial simulait un retour `echeance="2026-12-01"` (string) que la méthode `analyze_one_mail_stream` ne peut **structurellement jamais produire** (le parser maison `_parse_line` construit toujours un dict). Le test validait une robustesse contre un bug fictif. Les vraies bourdes possibles de Haiku (date non-ISO, description vide, date passée, format `demain`) **ne sont pas couvertes**.
+
+**Observation #3 — F10 incohérence prompt entrants vs sortants** : la route `/api/post_generation_analyze` (compose sortants) appelle `analyze_one_mail_stream` SANS `scan_echeance=True` explicite — elle écoute juste l'event `kind == 'echeance'` du builder (comportement implicite). C'est différent de `_prewarm_unified_for_mail` qui passe `scan_echeance=_scan_echeance_active` explicitement. **Asymétrie de mécanisme** entre les 2 portes d'entrée, qui rendra coûteux toute modification future de la politique scan_echeance (faut toucher 2 endroits différents).
+
+**Prochaine session démarrera par le traitement de ces 3 observations** (F8 et F10 prioritaires, F6 selon arbitrage). Voir prompt session N12 préparé en fin de session.
+
 ---
 
 ## 5. Méthodes & invariants livrés (vue système)
@@ -538,33 +599,40 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 ✅ N9 + bis — Moteur commun mail/PJ + R1 réciproque + 3 portes PJ    (14/05)
 ✅ N10 + bis — Gestion contacts : squelette + purge UPDATE-blank      (14/05)
 ✅ N11 + bis — Dispatcher unique 3 branches (ÉCARTÉ/PARTIEL/VIP)      (14/05)
-⏳ N12 — à enchaîner
+✅ N11 Option A — Réactivation Échéance VIP entrants                  (14/05 PM)
+✅ Validation finale — Batterie d'intégration N0→N11 (48 scénarios)  (14/05 soir)
+⏳ N12 — La SALLE (routes user — slide 9 PPTX)
 ```
 
-**Hypothèse N12** : tests d'intégration finale OU mise à jour spec ECHEANCES + décision Yvan sur scope sortants vs VIP entrants OU autre zone à définir.
+**SUSPENDU N11 résolu** : Option A active (14/05 PM). Le marker code `app_plugin.py:4244` a été supprimé.
 
-**SUSPENDU N11** : décision Yvan sur la réactivation Échéance VIP entrants. Conflit slide 4 PPTX vs SPEC_ECHEANCES 05/05 + memory `feature_echeances_scope` (« sortants only, out-of-scope les entrants »). Marker dans le code à `app_plugin.py:4244` pour traçabilité.
+**Mission N12 — La SALLE** : tester fonctionnellement (Flask test_client) les 3 routes user × 3 branches = matrice 9 cas (slide 9 PPTX) :
+- Répondre × {ÉCARTÉ → SSE Sonnet à la commande / PARTIEL → SSE Sonnet à la commande / VIP → cache HIT bg_speculation}
+- Classer rapide × {ÉCARTÉ → SSE Haiku / PARTIEL → cache HIT instantané / VIP → cache HIT instantané}
+- Voir résumé + échéance × {ÉCARTÉ → SSE Haiku / PARTIEL → cache HIT instant (échéance vide) / VIP → cache HIT instant (échéance précuite Option A)}
 
-À déterminer avec Yvan en début de la session N12.
+**Pré-requis N12** : la session démarrera par le traitement des 3 observations honnêtes documentées en §4 (F8 tautologique + F10 incohérence prompt entrants/sortants en priorité, F6 TOCTOU selon arbitrage). Voir prompt préparé en fin de session.
 
 ---
 
-## 7. Statistiques globales N1-N11
+## 7. Statistiques globales N1-N11 (+ Option A + Validation finale)
 
 | | Chiffre |
 |---|---|
-| Niveaux livrés | 11 (+ 6 -bis correctifs) |
-| Durée | 3 jours + 1 session autonomie 2h (11/05 → 14/05/2026) |
-| Commits refonte | 30 |
-| Tests fichiers créés | 14 (test_n2..test_n11_branches) |
-| Tests verts (somme cumulée des suites) | 233 (79+28+77+15+10+13+11) |
+| Niveaux livrés | 11 (+ 6 -bis correctifs + Option A + batterie d'intégration) |
+| Durée | 3 jours + 1 session autonomie 2h + 1 session validation (11/05 → 14/05/2026) |
+| Commits refonte | 33 (30 + Option A + batterie 38 + extension F1-F10) |
+| Tests fichiers créés | 15 (test_n2..test_n11_branches + test_integration_N0_N11) |
+| Tests verts (somme cumulée des suites + intégration) | 281 (233 unitaires + 48 intégration E2E) |
+| Tests E2E intégration | 48 (38 batterie initiale + 10 famille F cuisine avancée) |
 | Anti-patterns codifiés | 8 |
-| Démolisseurs lancés | ~24 (sub-agents pré-impl) |
+| Démolisseurs lancés | ~25 (sub-agents pré-impl) |
 | Regards frais lancés | ~18 (sub-agents pré-commit) |
-| Audits rétrospectifs | 11 (1 par niveau) |
+| Audits rétrospectifs | 12 (1 par niveau + 1 post-batterie F8 tautologique détecté) |
 | -bis correctifs | 6 (N6.3, N7, N8, N9, N10, N11) |
 | Bugs critiques en prod corrigés | 1 (fuite cross-tenant purge contacts — N10) |
-| Décisions produit suspendues | 1 (Échéance VIP entrants — conflit slide 4 vs spec ÉCHÉANCES 05/05) |
+| Décisions produit suspendues | 0 (toutes résolues à clôture — Option A activée 14/05 PM) |
+| Observations honnêtes documentées | 3 (F6 TOCTOU + F8 tautologique + F10 incohérence prompt) |
 
 ---
 
@@ -604,4 +672,14 @@ Quand le spec dit « 7 tiers identiques » mais que certains sont techniquement 
 
 ---
 
-*Document généré le 14/05/2026, mis à jour à clôture N10-bis. Maintenir à jour à chaque nouveau niveau ou -bis correctif.*
+### Leçon 9 — La validation E2E révèle les tests tautologiques résiduels
+
+La batterie d'intégration N0-N11 (48 scénarios) a fait remonter **2 lacunes méthodologiques** invisibles en tests unitaires :
+- **F8 tautologique** : un mock simulant un retour `echeance="2026-12-01"` (string) que la vraie chaîne Haiku ne peut **structurellement jamais produire** (parser maison `_parse_line` construit toujours un dict). Sub-agent démolisseur post-batterie a identifié ce faux confort. Les VRAIES bourdes possibles (date non-ISO, description vide, date passée) restent non couvertes — à traiter session suivante.
+- **F10 asymétrie de mécanisme** : la route `/api/post_generation_analyze` (compose sortants) appelle le builder SANS `scan_echeance=` explicite, alors que `_prewarm_unified_for_mail` (entrants) le passe explicitement. Asymétrie technique entre les 2 portes d'entrée commis Haiku → tout changement futur de politique scan échéance coûte double.
+
+À retenir : **les tests unitaires verts ne garantissent pas l'absence de tests tautologiques**. L'audit post-batterie (E2E + sub-agent) est une 5ᵉ défense méthodologique à formaliser.
+
+---
+
+*Document généré le 14/05/2026, mis à jour à clôture N11 + Option A + Validation finale (batterie d'intégration 48 scénarios). Maintenir à jour à chaque nouveau niveau ou -bis correctif. Prochaine MAJ attendue à clôture N12 (la SALLE — routes user slide 9 PPTX), après traitement des 3 observations honnêtes (F6 / F8 / F10).*
