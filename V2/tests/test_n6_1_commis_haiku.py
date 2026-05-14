@@ -259,15 +259,26 @@ def invariant_no_fallback_3_subprewarms():
 # Invariant : échéance E ignored côté entrants
 # ---------------------------------------------------------------------------
 
-def invariant_e_ignored_for_entrants():
-    """`_persist_commis_results` stocke toujours `[]` dans mail_echeance_cache (V1 scope)."""
-    print("\n=== Invariant : échéance ignored pour entrants ===")
+def invariant_e_scope_v1():
+    """`_persist_commis_results` persiste les échéances selon la branche
+    (N11 Option A 14/05) :
+      - VIP entrants : `echeances` passées en paramètre (peut être non-vide)
+      - PARTIAL / écarté / skip-short-body : `echeances=None` → stocké `[]`
+
+    Avant N11 Option A : `[]` forcé partout (V1 scope sortants only strict).
+    Après N11 Option A : `[]` quand pas de scan (None → []), sinon liste réelle.
+    """
+    print("\n=== Invariant : échéance scope conditionnel (N11 Option A) ===")
     src = inspect.getsource(ap._persist_commis_results)
-    # On cherche que la persistence d'échéance utilise bien `[]` vide
-    has_empty_save = '_db.save_mail_echeance(mid, [])' in src
+    # On cherche le pattern N11 Option A : conversion None → []
+    has_conditional = (
+        'echeances is None' in src
+        and '_db.save_mail_echeance(mid' in src
+    )
     ok = log_test(
-        "save_mail_echeance(mid, []) présent",
-        has_empty_save
+        "persistence conditionnelle `echeances` selon branche",
+        has_conditional,
+        "pattern N11 Option A manquant" if not has_conditional else ""
     )
     return (1 if ok else 0), 1
 
@@ -340,12 +351,16 @@ def critere_body_length_filter():
 # ---------------------------------------------------------------------------
 
 def invariant_persist_commis_signature():
-    """`_persist_commis_results` doit avoir signature kwargs documentée."""
+    """`_persist_commis_results` doit avoir signature kwargs documentée.
+
+    N11 Option A (14/05) : ajout du paramètre `echeances` (Optional[list[dict]])
+    pour persister les engagements détectés en VIP entrants.
+    """
     print("\n=== Signature _persist_commis_results ===")
     sig = inspect.signature(ap._persist_commis_results)
     params = set(sig.parameters.keys())
     expected = {'mid', 'mail_data', 'points', 'actions', 'mail_suggestions',
-                'pj_suggestions', 'has_pj', 'model'}
+                'pj_suggestions', 'has_pj', 'model', 'echeances'}
     ok = log_test(
         f"Paramètres attendus tous présents (trouvés : {sorted(params)})",
         expected == params
@@ -434,7 +449,7 @@ def main():
         invariant_4_caches_idempotence,
         invariant_save_summary_in_persist,
         invariant_no_fallback_3_subprewarms,
-        invariant_e_ignored_for_entrants,
+        invariant_e_scope_v1,
         critere_retry_policy,
         critere_body_length_filter,
         invariant_persist_commis_signature,

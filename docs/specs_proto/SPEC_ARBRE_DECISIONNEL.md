@@ -124,24 +124,25 @@ Voir document dédié : [`SPEC_CONTACTS_BOOSTERMAIL.md`](SPEC_CONTACTS_BOOSTERMA
 
 ---
 
-## 6. ⚠️ Suspendu Yvan — Échéance VIP entrants
+## 6. Échéance VIP entrants — Option A (14/05/2026)
 
-**Conflit produit non-résolu** identifié lors de l'audit N11 :
+**Décision Yvan 14/05** : `scan_echeance` activé pour les mails entrants **VIP uniquement** (Filtre 1 OK + Filtre 2 OK = contact connu avec fiche enrichie). Slide 4 PPTX « 5 frigos pleins en VIP » alignée. Pour PARTIAL / ÉCARTÉ, scan_echeance reste désactivé (cohérent avec spec ÉCHÉANCES 05/05 — risque faux positifs trop élevé sur contacts inconnus).
 
-- **Slide 4 PPTX** « Les 3 branches & leurs plats préparés » : VIP doit avoir Échéance pré-cuite (5 frigos pleins)
-- **`SPEC_ECHEANCES_BOOSTERMAIL.md` (05/05)** + memory `feature_echeances_scope` : **scope V1 = sortants only, out-of-scope les entrants** (faux positifs, ambiguïtés date, multilingue)
+**Implémentation (N11 Option A)** :
+- `_prewarm_unified_for_mail` (app_plugin.py:4239) calcule `_branch_info_unified = _classify_mail_branch(mail_data)` puis active `scan_echeance = (branch == 'vip')`.
+- `_persist_commis_results` (app_plugin.py:3911) accepte un nouveau paramètre `echeances=None` qui distingue 3 cas sémantiquement :
+  - `None` : scan non-actif (PARTIAL ou skip-short-body) → `[]` stocké pour idempotence
+  - `[]`   : scan actif (VIP) mais 0 engagement détecté
+  - `[dict]` : scan actif et engagements détectés, à persister
 
-**Code actuel** (statu quo jusqu'à décision Yvan explicite) :
-- `app_plugin.py:4244` : `scan_echeance=False` hardcodé (avec marker SUSPENDU N11-bis détaillé)
-- `app_plugin.py:3949, 3887` : `save_mail_echeance(mid, [])` forcé pour idempotence
+**Conséquence pratique** :
+- VIP entrant : 5 frigos pleins (Body Sonnet + Résumé + Classement Mail + Classement PJ + **Échéance**)
+- PARTIAL entrant : 3 frigos pleins (Résumé + Classement Mail + Classement PJ)
+- ÉCARTÉ : aucun frigo pré-cuit
 
-**Conséquence pratique** : un mail VIP entrant a **4 frigos pleins sur 5** (Body Sonnet + Résumé + Classement Mail + Classement PJ). L'échéance entrante reste à la commande.
-
-**Si Yvan réactive un jour** :
-1. Passer `scan_echeance=(branch == 'vip')` ligne 4244
-2. Adapter `save_mail_echeance(mid, [])` lignes 3949 et 3887 (ne pas forcer vide en VIP)
-3. Mettre à jour `SPEC_ECHEANCES_BOOSTERMAIL.md` (scope étendu aux entrants VIP)
-4. Tests d'intégration entrants vs sortants
+**Liens** :
+- Spec détaillée : [`SPEC_ECHEANCES_BOOSTERMAIL.md`](SPEC_ECHEANCES_BOOSTERMAIL.md) §2 (révision 14/05)
+- Test régression : `tests/test_n11_branches.py::test_option_a_scan_echeance_conditional` + `::test_option_a_persist_echeances_param`
 
 ---
 

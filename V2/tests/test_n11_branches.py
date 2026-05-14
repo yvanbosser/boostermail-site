@@ -205,6 +205,41 @@ def test_should_speculate_supprimé():
     return ok
 
 
+def test_option_a_scan_echeance_conditional():
+    """N11 Option A (14/05) — `_prewarm_unified_for_mail` calcule la branche
+    puis active `scan_echeance` uniquement en VIP.
+
+    Régression statique : on vérifie via inspect.getsource que le code source
+    contient bien le pattern conditionnel.
+    """
+    src = inspect.getsource(ap._prewarm_unified_for_mail)
+    # Pattern attendu : `scan_echeance` activé conditionnellement selon branche
+    ok = log_test("`_classify_mail_branch` appelé dans `_prewarm_unified_for_mail`",
+                  '_classify_mail_branch(mail_data)' in src)
+    ok &= log_test("`scan_echeance` activé conditionnellement (pas hardcoded False)",
+                   '_scan_echeance_active' in src and "scan_echeance=False" not in src,
+                   "scan_echeance toujours hardcoded False — Option A non appliquée"
+                   if "scan_echeance=False" in src else "")
+    ok &= log_test("`scan_echeance` actif si branche == 'vip'",
+                   "_branch_info_unified['branch'] == 'vip'" in src
+                   or "_branch_info_unified.get('branch') == 'vip'" in src)
+    return ok
+
+
+def test_option_a_persist_echeances_param():
+    """N11 Option A — `_persist_commis_results` accepte `echeances` (Optional)
+    et persiste conditionnellement (None → [] pour PARTIAL, liste pour VIP).
+    """
+    sig = inspect.signature(ap._persist_commis_results)
+    has_echeances = 'echeances' in sig.parameters
+    ok = log_test("Paramètre `echeances` présent dans signature",
+                  has_echeances)
+    src = inspect.getsource(ap._persist_commis_results)
+    ok &= log_test("Logique conditionnelle echeances is None → []",
+                   'echeances is None' in src)
+    return ok
+
+
 # =============================================================================
 # Section 3 — Régressions statiques (inspect.getsource)
 # =============================================================================
@@ -295,6 +330,9 @@ def main():
         ('test_branch_returns_dict_with_keys', test_branch_returns_dict_with_keys),
         ('test_filter1_fail_open_propagation', test_filter1_fail_open_propagation),
         ('test_should_speculate_supprime', test_should_speculate_supprimé),
+        # Option A (14/05) — réactivation Échéance VIP entrants
+        ('test_option_a_scan_echeance_conditional', test_option_a_scan_echeance_conditional),
+        ('test_option_a_persist_echeances_param', test_option_a_persist_echeances_param),
         # Section 3 — Régressions statiques
         ('test_regression_no_double_filter_in_prefetch', test_regression_no_double_filter_in_prefetch),
         ('test_regression_summarize_bg_uses_dispatcher', test_regression_summarize_bg_uses_dispatcher),

@@ -1,10 +1,12 @@
 ## SPEC ÉCHÉANCES — BoosterMail (consolidée)
 
-> **Dernière mise à jour** : 05/05/2026
+> **Dernière mise à jour** : 14/05/2026 (N11 Option A — extension VIP entrants)
 >
 > **Statut** : source de vérité unique pour la fonctionnalité « Échéance ». Remplace `SPEC_ECHEANCES_OPTIMISATION.md` (proto, 06/04/2026, à archiver avec bandeau).
 >
 > **Origine** : audit complet 05/05 — état V2 SaaS sous-estimé jusque-là (mémoires + analyses pointaient vers OneDrive obsolète). Découverte : la feature est implémentée à ~90 % en V2. Cette spec consolide l'existant V2 + les décisions Yvan + le gap restant.
+>
+> **Évolution 14/05** : décision Yvan Option A N11 — scope étendu aux **mails entrants VIP** (slide 4 PPTX « 5 frigos pleins en VIP »). Les entrants PARTIAL et ÉCARTÉ restent sans scan échéance (économie API + cohérence). Voir §2.
 
 ---
 
@@ -20,13 +22,21 @@
 
 ---
 
-## 2. Scope V1 (validé Yvan 05/05)
+## 2. Scope V1 (validé Yvan 05/05 + révision 14/05 Option A)
 
-✅ **In-scope** — Engagements **sortants** uniquement (l'utilisateur déclare/promet quelque chose dans un mail qu'il envoie).
+### In-scope
 
-❌ **Out-of-scope** — Détection automatique des deadlines dans les mails **reçus**. Trop complexe (faux positifs, ambiguïtés de date, multilingue). La landing `index.html` promet « Détection automatique des deadlines » — c'est du marketing en avance sur le scope produit, à ne pas prendre comme spec.
+✅ **Engagements sortants** : l'utilisateur déclare/promet quelque chose dans un mail qu'il envoie. Pipeline `_handle_post_send` + pré-scan BG.
 
-❌ **Out-of-scope** — Synchronisation avec Tâches Outlook natives (Yvan 05/05 : « sûrement pas »). On garde notre propre store + UI.
+✅ **Engagements entrants VIP** (révision 14/05) : un mail entrant VIP (Filtre 1 OK + Filtre 2 OK = contact connu avec fiche enrichie) déclenche `scan_echeance=True` dans le commis Haiku unifié N6.1. Justification : en VIP, le contact est qualifié (fiche enrichie via O1) → risque de faux positif réduit + slide 4 PPTX « 5 frigos pleins en VIP ». Implémentation : dispatcher `_classify_mail_branch` → `_prewarm_unified_for_mail` active `scan_echeance` conditionnellement.
+
+### Out-of-scope
+
+❌ **Mails entrants PARTIAL** : contacts inconnus ou fiches vides (`sample_count = 0`). Risque de faux positif trop élevé sur des démarcheurs ou inconnus. Le commis tourne sans directive E pour ces mails.
+
+❌ **Mails entrants ÉCARTÉS** : no-reply, > 30 jours, déjà répondu, body court, user en CC. Pas de scan IA du tout.
+
+❌ **Synchronisation avec Tâches Outlook natives** (Yvan 05/05 : « sûrement pas »). On garde notre propre store + UI.
 
 ❌ **Out-of-scope V1** — Multi-tenant strict (isolation DB par `user_id`). Travail en cours côté infra mais non bloquant pour la feature échéance MVP.
 

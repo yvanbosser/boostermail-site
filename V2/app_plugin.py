@@ -3909,12 +3909,11 @@ def _mark_mail_skipped(mid, source):
 
 
 def _persist_commis_results(*, mid, mail_data, points, actions, mail_suggestions,
-                             pj_suggestions, has_pj, model):
+                             pj_suggestions, has_pj, model, echeances=None):
     """Persiste les 4 frigos après production commis (ou skip body court).
 
     Refonte N6.1 — helper centralisé qui supprime la duplication de logique de
-    persistence entre les 2 chemins (commis OK / skip body court). Format
-    `_db.save_mail_summary` aligné sur `database.py:2618` (data dict).
+    persistence entre les 2 chemins (commis OK / skip body court).
 
     Args:
         mid: IMID canonique du mail
@@ -3925,6 +3924,14 @@ def _persist_commis_results(*, mid, mail_data, points, actions, mail_suggestions
         pj_suggestions: Top 3 classement PJ
         has_pj: bool présence pièces jointes
         model: identifiant modèle utilisé (`'commis-n6.1'` ou `'skip-short-body'`)
+        echeances: list[dict] échéances détectées par le commis (VIP entrants
+                   N11 Option A) OU None (PARTIAL / skip / scan désactivé).
+                   None et [] ont des sémantiques différentes :
+                     - None  : scan_echeance non actif → on stocke [] pour
+                               préserver l'idempotence (compat pré-Option A).
+                     - []    : scan_echeance actif mais 0 engagement détecté.
+                     - [dict] : 1+ engagement(s) détecté(s), à persister.
+                   Cf I-ECHEANCE-N63-01 et SPEC_ECHEANCES_BOOSTERMAIL.md §2.
     """
     # 1. Résumé — refonte N6.1, P+A produits par le commis désormais persistés
     try:
@@ -3941,18 +3948,20 @@ def _persist_commis_results(*, mid, mail_data, points, actions, mail_suggestions
     # Pas de _set_mail_preview pour 'summary' : ce plat n'a pas de slot RAM
     # (frontend lit la DB directement). Cf docstring de _prewarm_unified_for_mail.
 
-    # 2. Échéance — scope V1 = sortants only, donc entrants : on stocke [].
-    # Le commis Haiku entrants tourne avec `scan_echeance=False` (cf appel
-    # dans `_prewarm_mail_preview`) — la section E est absente du prompt,
-    # pas de yield('echeance'), `result['echeance']` reste None. Ce
-    # `save_mail_echeance(mid, [])` est OBLIGATOIRE pour l'idempotence
-    # (sinon `_prewarm_unified_for_mail` relance en boucle toutes les 45s
-    # car `has_mail_echeance(mid)` retournerait False).
+    # 2. Échéance — N11 Option A : persistence conditionnelle selon branche.
+    #   - VIP entrants : `echeances` = liste (peut être vide ou contenir des
+    #     engagements détectés par le commis Haiku via scan_echeance=True).
+    #   - PARTIAL / écarté / skip-short-body : `echeances=None`, on stocke
+    #     `[]` pour idempotence (sinon `_prewarm_unified_for_mail` boucle
+    #     à chaque cycle BG 45s car `has_mail_echeance(mid)` retournerait
+    #     False). Cohérent avec SPEC_ECHEANCES_BOOSTERMAIL.md (scope V1 =
+    #     sortants + VIP entrants depuis 14/05).
+    _echeances_persist = [] if echeances is None else echeances
     try:
-        _db.save_mail_echeance(mid, [])
+        _db.save_mail_echeance(mid, _echeances_persist)
     except Exception as _e:
         logger.debug(f"[unified] save echeance: {_e}")
-    _set_mail_preview(mid, 'echeance', 'done', [])
+    _set_mail_preview(mid, 'echeance', 'done', _echeances_persist)
 
     # 3. Classement Mail — top 3 (#1 principale + #2/#3 boulettes alternatives)
     if mail_suggestions:
@@ -4230,11 +4239,19 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
             return
 
         # === 7. Appel commis Haiku unifié ===
-        # `scan_echeance=False` : scope V1 = échéances sortantes uniquement,
-        # les entrants jettent toujours le résultat E (commit `[]` en DB à
-        # `_persist_commis_results`). Économise tokens + cohérence prompt.
+        # Décision Yvan 14/05 Option A : `scan_echeance` activé UNIQUEMENT en
+        # VIP entrants (slide 4 PPTX « 5 frigos pleins en VIP »). Les PARTIEL
+        # restent sans scan_echeance (économie tokens + spec V1 sortants only
+        # préservée pour ce cas). Le dispatcher unique N11
+        # `_classify_mail_branch` détermine la branche.
         # La route `/api/post_generation_analyze` (mails compose sortants)
-        # reste sur scan_echeance=True par défaut.
+        # reste sur scan_echeance=True par défaut (sortants).
+        try:
+            _branch_info_unified = _classify_mail_branch(mail_data)
+        except Exception as _e:
+            logger.debug(f"[unified] _classify_mail_branch erreur : {_e}")
+            _branch_info_unified = {'branch': 'partial', 'reason': 'classify_error'}
+        _scan_echeance_active = (_branch_info_unified['branch'] == 'vip')
         result = None
         for kind, payload in builder.analyze_one_mail_stream(
             mail=mail_data,
@@ -4244,18 +4261,7 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
             contact_profile=contact_profile,
             recent_classifications=recent_class,
             recent_pj_classifications=recent_pj,
-            # SUSPENDU N11 (14/05/2026) — `scan_echeance=False` forcé hardcodé.
-            # Conflit produit non-résolu :
-            #   - slide 4 PPTX : VIP doit avoir Échéance pré-cuite (5 frigos pleins)
-            #   - SPEC_ECHEANCES_BOOSTERMAIL.md (05/05) + memory
-            #     `feature_echeances_scope` : « sortants only, out-of-scope
-            #     les entrants » (faux positifs, ambiguïtés date, multilingue)
-            # Décision Yvan en attente. Si réactivation un jour :
-            #   1. Passer ici à `scan_echeance=(branch == 'vip')`
-            #   2. Adapter `save_mail_echeance(mid, [])` ligne 3949 et 3887
-            #   3. Mettre à jour SPEC_ECHEANCES_BOOSTERMAIL.md + slide 4 cohérence
-            #   4. Tests d'intégration entrants vs sortants
-            scan_echeance=False,
+            scan_echeance=_scan_echeance_active,
         ):
             if kind == 'end':
                 result = payload
@@ -4292,6 +4298,20 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
                 pj_suggestions.append(s)
 
         # === 9. Persister les 4 frigos ===
+        # Décision Yvan 14/05 Option A : on persiste l'échéance détectée
+        # quand le commis a scanné (VIP entrants). `result['echeance']` est
+        # un dict {description, date} ou None. On convertit en liste pour
+        # `save_mail_echeance` (qui attend une list[dict]).
+        _echeance_raw = result.get('echeance')
+        _echeances_to_persist = ([_echeance_raw]
+                                  if isinstance(_echeance_raw, dict)
+                                  else None)
+        # `None` ici signifie « pas de scan effectué » (PARTIAL ou erreur),
+        # `[]` signifie « scan effectué mais aucun engagement détecté »
+        # (VIP avec mail sans deadline). La distinction est utile pour
+        # l'idempotence dans `_persist_commis_results`.
+        if _scan_echeance_active and _echeances_to_persist is None:
+            _echeances_to_persist = []  # scan VIP fait, 0 échéance trouvée
         _persist_commis_results(
             mid=mid, mail_data=mail_data,
             points=result.get('points', []),
@@ -4299,6 +4319,7 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
             mail_suggestions=mail_suggestions,
             pj_suggestions=pj_suggestions,
             has_pj=has_pj,
+            echeances=_echeances_to_persist,
             model='commis-n6.1',
         )
 
