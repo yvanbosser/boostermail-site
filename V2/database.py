@@ -425,7 +425,9 @@ class Database:
         # Pattern idempotent aligné sur mail_summaries : check avant calc
         # → skip si déjà en cache. Évite les re-calculs et appels Claude
         # redondants au restart V2. Clé = internet_message_id (I-DATA-11).
-        # Peuplé par _prewarm_classement_for_mail au warmup + continuous_spec.
+        # Peuplé par _prewarm_unified_for_mail (commis Haiku N6.1, qui
+        # appelle le moteur unique N8 `_compute_classement_suggestions`)
+        # au warmup + continuous_spec.
         c.execute("""
             CREATE TABLE IF NOT EXISTS mail_classement_cache (
                 message_id TEXT PRIMARY KEY,

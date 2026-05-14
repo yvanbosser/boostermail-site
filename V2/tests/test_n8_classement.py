@@ -1,4 +1,4 @@
-"""Tests Niveau 8 — Règles classement Mail (8 tiers spec) + PJ.
+"""Tests Niveau 8 — Règles classement Mail (7 tiers spec) + PJ.
 
 Source de vérité : `docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md`
 (consolidée 02/05/2026) — 7 tiers spec : 0 thread / 1 contact / 1bis keywords /
@@ -9,16 +9,29 @@ Refonte N8 :
     `_compute_classement_suggestions` + `_compute_pj_classement_suggestions`.
   - Tier 0 « cohérence mail→PJ » branché (lecture historique
     `folder_classifications`).
-  - Tier 1bis PJ inversé : nom fichier prime sur sujet (`_db.get_pj_folder_by_filename_keywords`).
+  - Tier 1bis PJ inversé : nom fichier prime sur sujet
+    (`_db.get_pj_folder_by_filename_keywords`).
   - 4 raisons `none_*` branchées dans le BG (commis unifié N6.1 préservé,
     Option α).
-  - 6 helpers purs (`_match_folder_name_in_text`, `_classify_none_reason`,
-    `_filter_public_domain`, `_resolve_folder_id_cascade`, `_filename_keywords`,
-    `_is_persistable_mid`).
+  - 5 helpers purs : `_match_folder_name_in_text`, `_classify_none_reason`,
+    `_filter_public_domain`, `_resolve_folder_id_cascade`, `_filename_keywords`.
+
+Le moteur N8 N'APPELLE PAS l'IA (Tier 4 délégué à l'appelant : commis N6.1 en
+BG, `_builder.suggest_folder` côté `/api/suggest_folder`). Donc les tests
+couvrent uniquement les tiers DB et les helpers purs — pas de mock IA requis.
+
+Structure :
+  - Section 1 — helpers purs (vérifs unitaires)
+  - Section 2 — moteur mail (tiers 0/1/1bis/2/order/compose, comportemental)
+  - Section 3 — moteur PJ (Tier 0 mail→PJ + Tier 1bis filename, comportemental)
+  - Section 4 — invariants comportementaux + régressions statiques :
+      * I-CLASS-N8-04 : 4 raisons `none_*` produites par le BG (comportemental)
+      * Régression : anciennes fonctions supprimées + 3 callers utilisent le moteur
+        (grep statique légitime — vérifie l'absence de retour en arrière, pas
+        une équivalence circulaire avec l'implémentation)
 
 Tests avec **vrais writers/readers** (pas de mocks miroir-de-l'implémentation,
-anti-pattern P3 banni en N6.3-bis). L'IA est mockée pour tests d'équivalence
-(signal démolisseur v2 P0-7 — sinon tests flaky).
+anti-pattern P3 banni en N6.3-bis).
 
 Lancement : `python tests/test_n8_classement.py`
 """
@@ -362,43 +375,35 @@ def test_pj_tier1bis_filename_priorite():
 # Section 4 — Invariants comportementaux
 # =============================================================================
 
-def test_invariant_n8_01_one_engine_grep():
-    """I-CLASS-N8-01 : pas de pipeline tier inline en dehors des moteurs.
+def test_regression_old_pipelines_removed():
+    """Régression statique : les 2 anciennes fonctions de pipeline mail/PJ
+    ont bien été supprimées (anti-wrapper-rétro-compat N7).
 
-    Grep pour vérifier que les fonctions `_prewarm_classement_for_mail` et
-    `_prewarm_pj_classement_for_mail` ont bien été supprimées (signal
-    démolisseur v2 P2-3 anti-wrapper-rétro-compat).
+    Honnête : ce test ne prouve pas le « moteur unique » comportementalement
+    (cela est prouvé par les tests Tier 1/1bis/2/order/compose de la
+    section 2). Il garantit juste qu'aucun retour en arrière n'a réintroduit
+    les 2 anciennes fonctions.
     """
     src = inspect.getsource(ap)
     has_old_mail = 'def _prewarm_classement_for_mail(' in src
     has_old_pj = 'def _prewarm_pj_classement_for_mail(' in src
-    ok = log_test("I-CLASS-N8-01: _prewarm_classement_for_mail SUPPRIMÉ",
+    ok = log_test("Régression : _prewarm_classement_for_mail SUPPRIMÉ",
                   not has_old_mail,
                   "Encore présent" if has_old_mail else "")
-    ok &= log_test("I-CLASS-N8-01: _prewarm_pj_classement_for_mail SUPPRIMÉ",
+    ok &= log_test("Régression : _prewarm_pj_classement_for_mail SUPPRIMÉ",
                    not has_old_pj,
                    "Encore présent" if has_old_pj else "")
-    has_engine_mail = 'def _compute_classement_suggestions(' in src
-    has_engine_pj = 'def _compute_pj_classement_suggestions(' in src
-    ok &= log_test("I-CLASS-N8-01: _compute_classement_suggestions présent",
-                   has_engine_mail)
-    ok &= log_test("I-CLASS-N8-01: _compute_pj_classement_suggestions présent",
-                   has_engine_pj)
     return ok
 
 
-def test_invariant_n8_04_none_reasons_in_bg():
-    """I-CLASS-N8-04 : 4 raisons `none_*` produites par le BG, mail ET PJ.
+def test_invariant_n8_04_classify_none_reason():
+    """I-CLASS-N8-04 (comportemental) : `_classify_none_reason` produit les
+    4 raisons `none_*` selon le scénario.
 
-    Test comportemental (pas tautologique) :
     - Cas A: contact + domaine inconnus → `none_unknown_domain`
     - Cas B: contact inconnu mais domaine déjà classé → `none_new_sender`
     - Cas C: contact connu, signal court → `none_low_signal`
     - Cas D: contact connu, signal normal → `none` (générique)
-
-    Vérifie aussi que `_persist_commis_results` n'écrit plus `'unified_none'`
-    (signal regard frais P0-2 — avant N8 et même post-D6 il restait sur le
-    chemin PJ).
     """
     ok = True
 
@@ -411,7 +416,6 @@ def test_invariant_n8_04_none_reasons_in_bg():
 
     # Cas B : contact inconnu mais domaine connu (pré-peuple le domaine)
     domain_b = f'cas-b-{int(time.time())}.com'
-    # Crée 1 classement pour un AUTRE contact sur ce domaine
     seed_contact = f'seed-{int(time.time())}@{domain_b}'
     ap._db.save_classification(
         entry_id=f'<seed-{int(time.time())}@x>', folder_path='Seeded',
@@ -438,65 +442,55 @@ def test_invariant_n8_04_none_reasons_in_bg():
     ok &= log_test("none_reason cas D: contact connu + signal>=100 → none (générique)",
                    r4 == 'none', f"got={r4!r}")
     _cleanup_db(known_contact)
+    return ok
 
-    # Invariant code : _persist_commis_results ne doit plus écrire 'unified_none'
+
+def test_regression_persist_no_unified_none():
+    """Régression statique : `_persist_commis_results` n'écrit plus
+    `'unified_none'` (raison générique pré-N8) ET appelle bien
+    `_classify_none_reason` pour mail ET PJ (≥ 2 occurrences)."""
     src = inspect.getsource(ap._persist_commis_results)
     has_unified_none = "'unified_none'" in src or '"unified_none"' in src
-    ok &= log_test("I-CLASS-N8-04: _persist_commis_results n'écrit plus 'unified_none' (mail ET PJ)",
-                   not has_unified_none,
-                   "Encore présent — chemin mail ou PJ retombe sur générique" if has_unified_none else "")
-
-    # Appelle bien le helper pour les 2 chemins (mail + PJ)
+    ok = log_test("Régression : _persist_commis_results sans 'unified_none'",
+                  not has_unified_none,
+                  "Encore présent — chemin mail ou PJ retombe sur générique"
+                  if has_unified_none else "")
     count_calls = src.count('_classify_none_reason(')
-    ok &= log_test("I-CLASS-N8-04: _classify_none_reason appelé ≥ 2 fois (mail + PJ)",
+    ok &= log_test("Régression : _classify_none_reason appelé ≥ 2 fois (mail + PJ)",
                    count_calls >= 2, f"appels trouvés={count_calls}")
     return ok
 
 
-def test_invariant_n8_05_tier0_pj_source():
-    """I-CLASS-N8-05 : Tier 0 mail→PJ lit `folder_classifications` (pas `mail_classement_cache`).
+def test_regression_callers_use_engine():
+    """Régression statique : les 2 routes principales appellent bien le moteur
+    unique (pas un code-mort réintroduit).
 
-    Vérification statique : le code du moteur PJ utilise `get_contact_folder_stats`
-    (qui query `folder_classifications`).
+    Honnête : la preuve comportementale de l'invariant « moteur unique »
+    vient des tests Tier 1/1bis/2/order/compose qui exercent comportementalement
+    `_compute_classement_suggestions` via 1 chemin direct. Le présent test
+    garantit que les 2 callers prod n'ont pas régressé vers du code inline.
     """
-    src = inspect.getsource(ap._compute_pj_classement_suggestions)
-    uses_folder_class = 'get_contact_folder_stats(' in src
-    uses_mail_classement_cache = 'get_mail_classement(' in src
-    ok = log_test("I-CLASS-N8-05: Tier 0 mail→PJ lit folder_classifications",
-                  uses_folder_class)
-    ok &= log_test("I-CLASS-N8-05: Tier 0 mail→PJ ne lit PAS mail_classement_cache",
-                   not uses_mail_classement_cache,
-                   "Lit mail_classement_cache → cache stale risk")
-    return ok
+    # api_post_generation_analyze (compose) — délègue au moteur N8
+    src_compose = inspect.getsource(ap.api_post_generation_analyze)
+    has_engine = '_compute_classement_suggestions(' in src_compose
+    has_engine_pj = '_compute_pj_classement_suggestions(' in src_compose
+    has_old_compose_specific = ('_norm_path' in src_compose
+                                and 'compose_tier0_suggestion' in src_compose)
+    ok = log_test("Régression : api_post_generation_analyze appelle moteur mail",
+                  has_engine)
+    ok &= log_test("Régression : api_post_generation_analyze appelle moteur PJ",
+                   has_engine_pj)
+    ok &= log_test("Régression : ancien Tier 0 compose-specific (~120 lignes) supprimé",
+                   not has_old_compose_specific)
 
-
-def test_invariant_n8_compose_uses_engine():
-    """I-CLASS-N8-01 bonus : /api/post_generation_analyze appelle le moteur,
-    pas l'ancien chemin compose-specific 120 lignes."""
-    src = inspect.getsource(ap.api_post_generation_analyze)
-    uses_engine = '_compute_classement_suggestions(' in src
-    uses_engine_pj = '_compute_pj_classement_suggestions(' in src
-    # Ancien marqueur compose-specific
-    has_old_marker = '_norm_path' in src and 'compose_tier0_suggestion' in src
-    ok = log_test("api_post_generation_analyze: appelle _compute_classement_suggestions",
-                  uses_engine)
-    ok &= log_test("api_post_generation_analyze: appelle _compute_pj_classement_suggestions",
-                   uses_engine_pj)
-    ok &= log_test("api_post_generation_analyze: ancien Tier 0 compose-specific supprimé",
-                   not has_old_marker,
-                   "Reste de l'ancien code 120 lignes")
-    return ok
-
-
-def test_api_suggest_folder_uses_engine():
-    """`/api/suggest_folder` est un wrapper sur le moteur unique."""
-    src = inspect.getsource(ap.api_suggest_folder)
-    uses_engine = '_compute_classement_suggestions(' in src
-    # Vérif suppression du gros pipeline inline (8 tiers en dur)
-    has_inline_tier2 = 'parent_ids = {f.get' in src  # marker du Tier 2 inline
-    ok = log_test("api_suggest_folder: appelle _compute_classement_suggestions",
-                  uses_engine)
-    ok &= log_test("api_suggest_folder: pas de Tier 2 inline (logique dans helper)",
+    # api_suggest_folder — wrapper sur le moteur unique
+    src_api = inspect.getsource(ap.api_suggest_folder)
+    has_engine_api = '_compute_classement_suggestions(' in src_api
+    # Marqueur du Tier 2 inline pré-N8 (logique scan parent_ids/leaves)
+    has_inline_tier2 = 'parent_ids = {f.get' in src_api
+    ok &= log_test("Régression : api_suggest_folder appelle le moteur",
+                   has_engine_api)
+    ok &= log_test("Régression : pas de Tier 2 inline dans api_suggest_folder",
                    not has_inline_tier2)
     return ok
 
@@ -524,12 +518,11 @@ def main():
         # Section 3 — moteur PJ
         ('test_pj_tier0_mail_pj_coherence', test_pj_tier0_mail_pj_coherence),
         ('test_pj_tier1bis_filename_priorite', test_pj_tier1bis_filename_priorite),
-        # Section 4 — invariants
-        ('test_invariant_n8_01_one_engine_grep', test_invariant_n8_01_one_engine_grep),
-        ('test_invariant_n8_04_none_reasons_in_bg', test_invariant_n8_04_none_reasons_in_bg),
-        ('test_invariant_n8_05_tier0_pj_source', test_invariant_n8_05_tier0_pj_source),
-        ('test_invariant_n8_compose_uses_engine', test_invariant_n8_compose_uses_engine),
-        ('test_api_suggest_folder_uses_engine', test_api_suggest_folder_uses_engine),
+        # Section 4 — invariants comportementaux + régressions statiques
+        ('test_invariant_n8_04_classify_none_reason', test_invariant_n8_04_classify_none_reason),
+        ('test_regression_persist_no_unified_none', test_regression_persist_no_unified_none),
+        ('test_regression_old_pipelines_removed', test_regression_old_pipelines_removed),
+        ('test_regression_callers_use_engine', test_regression_callers_use_engine),
     ]
     passed = 0
     failed = []

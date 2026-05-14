@@ -3022,11 +3022,11 @@ def _get_outlook_folders_cached() -> list:
 # =============================================================================
 # Factorisation des 5 helpers purs utilisés par les moteurs
 # `_compute_classement_suggestions` (mail) et `_compute_pj_classement_suggestions`
-# (PJ). Anciennement éparpillés dans :
-#   - `_prewarm_classement_for_mail` (chemin compose)
-#   - `api_suggest_folder` (chemin à la demande, 7 tiers)
-#   - `api_post_generation_analyze` (cascade Tier 0 compose-specific)
-# 3 pipelines parallèles → 1 moteur unique.
+# (PJ). Avant N8 : logique éparpillée dans 3 pipelines parallèles (BG prewarm
+# `_prewarm_classement_for_mail`, à-la-demande `api_suggest_folder`, compose
+# `api_post_generation_analyze`). Désormais : 1 moteur unique appelé par
+# `_prewarm_unified_for_mail` (BG, commis N6.1), `api_suggest_folder`, et
+# `api_post_generation_analyze` (`compose_mode=True`).
 # =============================================================================
 
 # Domaines email publics — exclus de Tier 3a "règle domaine" (spec §5.4).
@@ -3237,7 +3237,7 @@ def _compute_classement_suggestions(contact_email, subject, body_snippet, *,
       Tier 0   thread — `_db.get_folder_by_thread`
       Tier 1   contact mono-dossier — `_db.get_folder_suggestion`
                (en mode `compose_mode=True` : aussi fallback ≥1 via
-               `get_contact_classification_history` + cascade `_resolve_folder_id_cascade`)
+               `_db.get_recent_classifications` + cascade `_resolve_folder_id_cascade`)
       Tier 1bis keywords sujet → fallback body — `_db.get_folder_by_keywords`
       Tier 2   matching nom dossier dans subject+body — `_match_folder_name_in_text`
       Tier 3a  règle domaine séparée (avec filtre _PUBLIC) — `_db.get_domain_folder_suggestion`
@@ -3331,7 +3331,7 @@ def _compute_classement_suggestions(contact_email, subject, body_snippet, *,
                 if cnt:
                     top_path, top_count = cnt.most_common(1)[0]
                     if top_count >= 1:
-                        fid, strategy, resolved = _resolve_folder_id_cascade(
+                        fid, _, resolved = _resolve_folder_id_cascade(
                             top_path, folders, body_text=(subject or '') + ' ' + (body_snippet or ''))
                         _add({'folder_path': resolved or top_path,
                               'folder_id': fid,
@@ -3834,8 +3834,14 @@ def _persist_commis_results(*, mid, mail_data, points, actions, mail_suggestions
     _set_mail_preview(mid, 'pj_classement', 'done', pj_data)
 
 
-def _prewarm_unified_for_mail(mid, mail_data):
+def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
     """Commis Haiku unifié — produit P/A/E/F/J en 1 appel et alimente les 4 frigos.
+
+    `momentum_snapshot` (dict immutable {folder_id, folder_name, ts}) est
+    capturé par l'appelant Flask AVANT `_spawn_bg` (signal démolisseur N8 P0-3 :
+    éviter race entre `clear()+update()` côté `/api/classify_email` et lecture
+    BG). None → Tier 5 momentum skip côté moteur.
+
 
     Refonte N6.1 (12/05/2026) — consolidation des patches accumulés (02/05
     « Cuisinier + Commis », Audit Fix A2/A3/A14, 08/05 fix #2+#4, Refonte N1
@@ -3981,15 +3987,8 @@ def _prewarm_unified_for_mail(mid, mail_data):
         except Exception:
             body_kw = ''
 
-        # Snapshot momentum AVANT calcul (signal démolisseur v2 P0-3 :
-        # immutable dict copy pour éviter race conditions sur clear()+update()
-        # côté `/api/classify_email`). UserScopedDict propage déjà user_id
-        # via `_spawn_bg`, donc on lit la bonne instance utilisateur.
-        try:
-            momentum_snapshot = dict(_classify_momentum) if _classify_momentum else None
-        except Exception:
-            momentum_snapshot = None
-
+        # Le snapshot momentum est fourni par l'appelant (capturé Flask main
+        # thread AVANT `_spawn_bg`) — None → Tier 5 skip dans le moteur.
         folders_outlook = _get_outlook_folders_cached() or []
 
         try:
@@ -4214,7 +4213,16 @@ def _prewarm_mail_preview(mail_data):
     # PAS de fallback 3 sub-prewarms (supprimé en N6.1, décision Yvan Q4).
     # Lancé si au moins 1 plat n'est pas déjà en cache running/done.
     if not (skip_ech and skip_cls and skip_pj):
-        _spawn_bg(_prewarm_unified_for_mail, args=(mid, mail_data), name='prewarm-unified')
+        # Snapshot momentum dans le thread Flask main AVANT spawn BG —
+        # évite race entre `clear()+update()` (route classify_email)
+        # et lecture côté BG (signal démolisseur N8 P0-3).
+        try:
+            _mom_snap = dict(_classify_momentum) if _classify_momentum else None
+        except Exception:
+            _mom_snap = None
+        _spawn_bg(_prewarm_unified_for_mail,
+                  args=(mid, mail_data, _mom_snap),
+                  name='prewarm-unified')
 
 
 def _prewarm_mail_previews_batch(mails):
@@ -13535,12 +13543,12 @@ def api_classification_post_send(message_id):
                 folders = _get_outlook_folders_cached() or []
             except Exception:
                 folders = []
-            # Étape 1' (02/05 PM) — Vision Yvan top 3 + popup pré-envoi.
-            # Le BG prewarm (_prewarm_classement_for_mail) calcule déjà le
-            # top 3 et le stocke dans _set_mail_preview('classement', 'done',
-            # {suggestion, suggestions, source}). Mais cette route n'exposait
-            # que la #1, perdant le top 3 entre BG et front. Ajout de
-            # `suggestions` à la réponse + fallback [#1] pour rétro-compat.
+            # Vision Yvan top 3 + popup pré-envoi (02/05).
+            # Le BG (`_prewarm_unified_for_mail` via le moteur N8) a déjà
+            # calculé le top 3 et l'a stocké dans `_set_mail_preview(
+            # 'classement', 'done', {suggestion, suggestions, source})`.
+            # Cette route le restitue tel quel (avec fallback [#1] pour
+            # les caches pré-N8 qui ne stockaient que la suggestion #1).
             _suggestions_top3 = plate_data.get('suggestions') or [plate_data.get('suggestion')]
             return jsonify({
                 "status": "done",
@@ -13772,11 +13780,11 @@ def _compose_synthetic_mid(to, subject, body):
 
 @app.route('/api/post_generation_analyze', methods=['POST'])
 def api_post_generation_analyze():
-    """Option C (gap 06/05 v81) — Analyse post-génération mode new.
-
-    Refactor v81 (consigne Yvan : "réutiliser exactement le même système")
-    → délègue à _prewarm_classement_for_mail / _prewarm_pj_classement_for_mail
-    avec un message_id synthétique. Aucune réinvention.
+    """Analyse post-génération mode new (cas C2 spec §4) — délègue au moteur
+    unique N8 (`_compute_classement_suggestions` + `_compute_pj_classement_suggestions`)
+    avec `compose_mode=True` et un message_id synthétique. Réutilise les
+    mêmes 7 tiers que le BG, abaisse Tier 1 à seuil ≥1 + cascade résolution
+    path live pour gérer les paths DB renommés.
 
     POST {to, subject, body, pj_names?} → {echeance, folder, pj_folder, folder_data, pj_folder_data}
     """
