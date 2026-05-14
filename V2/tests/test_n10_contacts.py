@@ -7,8 +7,10 @@ Refonte N10 (14/05/2026) :
   - Hook `save_to_thread` → `create_contact_skeleton` (1 seul point, 2 directions)
   - `purge_inactive_contact_profiles` : DELETE → UPDATE-blank multi-tenant
     + WHERE user_id = ? (fix bug fuite cross-tenant pré-N10)
-  - 3 helpers décideurs purs : `_should_create_skeleton`,
-    `_should_enrich_profile`, `_should_reanalyze_profile`
+  - 2 helpers décideurs purs : `_should_enrich_profile`,
+    `_should_reanalyze_profile` (le 3e helper hypothétique
+    `_should_create_skeleton` du plan v2 a été supprimé pré-commit faute
+    de caller prod — signal regard frais P1-1)
   - `_maybe_analyze_contact` refondu en orchestrateur léger (8 patches
     accumulés → 3 helpers + orchestrateur)
   - `get_all_contact_profiles(include_skeletons=False)` filtre par défaut
@@ -242,6 +244,37 @@ def test_should_enrich_profile_logic():
     return ok
 
 
+def test_should_enrich_profile_cooldown_active():
+    """N10-bis (audit rétrospectif) — `_should_enrich_profile` retourne False
+    quand cooldown 24h actif et bypass_cooldown=False (anti-boucle RC2).
+
+    Couverture manquante du commit N10 initial : tous les tests passaient
+    bypass_cooldown=True, donc le chemin « cooldown actif » n'était jamais
+    exercé via l'API publique du helper.
+    """
+    email = _make_email('cooldown-enr')
+    _cleanup_contact(email)
+    ap._db.create_contact_skeleton(email, display_name='Test')
+    existing = ap._db.get_contact_profile(email)
+    # Règle O1 atteinte (1 sent)
+    ap._db.save_to_thread(project='T', direction='sent',
+                           subject='S', body='B', correspondent=email)
+    # Marquer l'attempt → cooldown actif
+    ap._force_analysis_attempts[email] = time.time()
+    # Sans bypass → cooldown actif → False
+    r1 = ap._should_enrich_profile(email, existing, bypass_cooldown=False)
+    # Avec bypass → cooldown ignoré → True
+    r2 = ap._should_enrich_profile(email, existing, bypass_cooldown=True)
+    ok = log_test("cooldown actif + bypass_cooldown=False → False",
+                  r1 is False)
+    ok &= log_test("cooldown actif + bypass_cooldown=True → True",
+                   r2 is True)
+    # Cleanup state global
+    ap._force_analysis_attempts.pop(email, None)
+    _cleanup_contact(email)
+    return ok
+
+
 def test_should_reanalyze_profile_logic():
     """_should_reanalyze_profile : True si enrichi + mail_count dans schedule + sample_count < mail_count."""
     email = _make_email('helper-reanal')
@@ -365,6 +398,7 @@ def main():
         ('test_purge_preserves_recent_active', test_purge_preserves_recent_active),
         # Section 3 — Helpers décideurs (2 helpers comportementaux)
         ('test_should_enrich_profile_logic', test_should_enrich_profile_logic),
+        ('test_should_enrich_profile_cooldown_active', test_should_enrich_profile_cooldown_active),
         ('test_should_reanalyze_profile_logic', test_should_reanalyze_profile_logic),
         # Section 4 — Filtre squelettes
         ('test_get_all_contact_profiles_filters_skeletons', test_get_all_contact_profiles_filters_skeletons),

@@ -14614,8 +14614,7 @@ def _should_enrich_profile(contact_email, existing_profile, *,
     return _check_analysis_cooldown(contact_email, bypass_cooldown)
 
 
-def _should_reanalyze_profile(contact_email, existing_profile, mail_count, *,
-                              bypass_cooldown=False):
+def _should_reanalyze_profile(contact_email, existing_profile, mail_count):
     """N10 — Helper décideur : re-analyser un profil DÉJÀ enrichi ?
 
     Vrai si :
@@ -14626,9 +14625,9 @@ def _should_reanalyze_profile(contact_email, existing_profile, mail_count, *,
         évite de boucler à chaque cycle BG tant que mail_count n'a pas
         augmenté)
 
-    Note : pas de cooldown explicite ici — le schedule limite déjà
-    naturellement la fréquence (mail_count doit changer pour redéclencher).
-    `bypass_cooldown` est accepté pour cohérence d'API.
+    Pas de cooldown ici — le schedule limite naturellement la fréquence
+    (mail_count doit changer pour redéclencher). Le cooldown est l'affaire
+    de `_should_enrich_profile` uniquement (anti-boucle analyses échouées).
     """
     if not existing_profile or existing_profile.get('sample_count', 0) == 0:
         return False
@@ -14704,9 +14703,10 @@ def _maybe_analyze_contact(contact_email, bypass_cooldown=False):
             f"(mail #{mail_count}, squelette ou rattrapage)"
         )
     else:
-        # Profil enrichi → schedule de re-analyse (RC3 anti-boucle inclus)
-        if not _should_reanalyze_profile(contact_email, existing, mail_count,
-                                          bypass_cooldown=bypass_cooldown):
+        # Profil enrichi → schedule de re-analyse (RC3 anti-boucle inclus).
+        # Pas de bypass_cooldown ici : le schedule limite déjà la fréquence
+        # naturellement (cf docstring `_should_reanalyze_profile`).
+        if not _should_reanalyze_profile(contact_email, existing, mail_count):
             return
         logger.info(
             f"[learning] Re-analyse de {_hash_email_partial(contact_email)} "
