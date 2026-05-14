@@ -615,6 +615,78 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 
 ---
 
+## 6 bis. Préparation N12 — Phase 1 mails sortants (état préliminaire, pas encore d'impl)
+
+### Contexte produit (vision Yvan reformulée 14/05 soir)
+
+1. L'utilisateur rédige un mail sortant (nouveau OU réponse à un mail reçu).
+2. Le mail est scanné par le commis Haiku unifié N6.1 (route `/api/post_generation_analyze`).
+3. Des règles précises sont appliquées pour détecter une échéance.
+4. Soit aucune échéance détectée (silence). Soit une échéance détectée → traitée et confirmation demandée à l'utilisateur via dialog (« Échéance détectée — OK / Ignorer »).
+
+### Constat actuel sur la route compose pré-envoi
+
+`api_post_generation_analyze` (app_plugin.py:14006) appelle le commis Haiku via `analyze_one_mail_stream`, écoute `kind == 'echeance'`, puis sérialise tel quel dans la réponse JSON **sans aucune validation** structurelle ou métier. Si Haiku rend une fiche pourrie (description vide, date `15 décembre 2026` non-ISO, date passée malgré le prompt), le frontend reçoit la bourde et le dialog s'affiche cassé.
+
+### Le pipeline N6.3 supprimé (à NE PAS réinventer)
+
+La SPEC_ECHEANCES §3 décrit un pré-filtre regex `_has_echeance_pattern` + listes `_ECHEANCE_DATE_PATTERNS` / `_REFERENCE_WORDS` / `_ENGAGEMENT_WORDS` qui économisait ~70-80 % des appels IA. **Ce pré-filtre a été supprimé en N6.3** (commentaire app_plugin.py:10655 : « cache orphelin, post-send re-scanne via Claude »). Le pipeline N6.1 actuel appelle Haiku unifié direct sans pré-filtre regex. **Ne pas réintroduire ces patterns par mégarde en N12.**
+
+### 35 règles identifiées vs 3 vérifications minimales — diagnostic du bazar
+
+La consultation exhaustive de `SPEC_ECHEANCES_BOOSTERMAIL.md` + code a fait apparaître **35 règles** dispersées sur 9 catégories (périmètre, pipeline supprimé, format DB, validation IA, UI/UX, auto-annulation, rappels J-1, prompt Haiku, bugs observés F8). Yvan a justement remonté : « 35 règles c'est énorme, c'est un gros bazar ».
+
+**Diagnostic du bazar** : les règles vivent à 3 moments distincts dans la vie d'une échéance, et **ce ne sont pas les mêmes règles** :
+
+| Moment | Garde-fou | Couverture actuelle |
+|---|---|---|
+| **1. Prompt Haiku** (le commis cuisine) | « Date FUTURE uniquement », « Pas de mots vagues » | ✅ Présent mais Haiku peut désobéir |
+| **2. Backend pré-frontend** (la fiche sort de cuisine) | Validation structurelle + métier | ❌ **Trou unique** — c'est ici qu'il faut combler |
+| **3. Frontend popup modif** (l'user édite plus tard) | Blocage date passée dans popup `getRelanceLabel` | ✅ Présent mais protège un AUTRE popup (modif), pas le popup initial de détection |
+
+Conclusion : **le seul vrai trou se situe au Moment 2**, et il est unique. Les règles « gérées ailleurs » (prompt, popup modif) protègent d'autres moments, pas celui-là.
+
+### Plan préliminaire N12 — Phase 1 sortants (à valider en début de session)
+
+**3 vérifications minimales** à appliquer avant `jsonify(result)` dans `api_post_generation_analyze` :
+
+1. La fiche est un `dict`
+2. La fiche contient une `description` non vide (après strip)
+3. La fiche contient une `date` au format `YYYY-MM-DD` parseable ET dans le futur
+
+Si une seule vérification échoue → `echeance = None` dans la réponse → dialog ne s'affiche pas.
+
+**Effort estimé** : ~20 lignes (1 petite fonction + 1 appel) + 3 tests + 30-45 min.
+
+**Risque** : zéro côté entrants (on n'y touche pas), faible côté frontend (moins de fausses échéances, pas plus).
+
+### Découvertes utiles pour N12 (à NE PAS perdre, économise re-cartographie)
+
+- **`_validate_echeance_date()`** existe dans claude_ai.py:3212 — utilisée pour le pipeline Sonnet post-envoi (`scan_echeances_batch`), PAS pour le Haiku compose pré-envoi. Pourrait être réutilisée en N12 si on veut faire de la correction plutôt que du rejet. À évaluer.
+- **`utils_date.extract_fr_dates`** existe — extraction dates FR depuis du texte libre.
+- **Le pipeline post-envoi** (`/api/echeances/post_send/<message_id>`) reste séparé du compose pré-envoi — il appelle Sonnet, persiste dans la table `echeances` (≠ `mail_echeance_cache`). Pas dans le scope F8/F10.
+- **Sub-agent démolisseur** a déjà fait la cartographie complète des 3 call sites + des 4 vraies bourdes possibles non couvertes par F8 actuel (date non-ISO, description vide, date pas parseable, date passée). Ce travail n'a pas à être refait au début de N12.
+
+### Décisions explicites prises pendant la discussion 14/05 soir
+
+- **Phase 1 N12 ne touche QUE les sortants** (compose pré-envoi). Les entrants VIP (Phase 2) viendront ensuite, on évite la sur-ingénierie en Phase 1.
+- **Pas de helper « décideur unique » `_should_scan_echeance`** créé en Phase 1 — pour les sortants la décision est toujours OUI, créer un helper qui retourne True = code mort en germe. Il sera créé en Phase 2 quand il aura ≥ 2 call sites.
+- **Pas de modification du prompt Haiku** en Phase 1 (Acte 3 reporté Phase 2) — éviter d'élargir le scope. Le validateur attrape les bourdes en aval.
+- **Pas de réintroduction du pré-filtre regex N6.3 supprimé**.
+- **F8 actuel reste tautologique** (mocke un cas que la chaîne ne peut produire) jusqu'à Phase 2 → sera réécrit quand on étendra l'inspecteur aux entrants VIP.
+
+### Pacte respecté pour Phase 1 N12
+
+- **Propre** : 1 fonction de validation, 1 call site, scope chirurgical sortants
+- **Robuste** : 3 vérifs qui couvrent 4 bourdes connues sans usine à gaz
+- **Pertinent** : aligné spec §4 (format DB) + §5 (UI blocage date passée) + workflow user
+- **Rapide** : ~20 lignes, négligeable runtime
+- **Efficace** : élimine la classe de bug « dialog avec échéance bidon » dès Phase 1
+
+---
+
+---
+
 ## 7. Statistiques globales N1-N11 (+ Option A + Validation finale)
 
 | | Chiffre |
