@@ -1684,7 +1684,10 @@ def _continuous_speculation_loop():
                 fe = m.get('from_email', '')
                 if not fe:
                     continue
-                if _filter_2_is_vip(fe)[0]:
+                # N11-bis : dispatcher unique `_classify_mail_branch` au lieu
+                # de `_filter_2_is_vip` direct (bypass corrigé). Cohérent avec
+                # I-BRANCHES-N11-01 « un seul aiguillage 3 branches ».
+                if _classify_mail_branch(m)['branch'] == 'vip':
                     tier1.append(m)
                 else:
                     tier2.append(m)
@@ -4241,6 +4244,17 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
             contact_profile=contact_profile,
             recent_classifications=recent_class,
             recent_pj_classifications=recent_pj,
+            # SUSPENDU N11 (14/05/2026) — `scan_echeance=False` forcé hardcodé.
+            # Conflit produit non-résolu :
+            #   - slide 4 PPTX : VIP doit avoir Échéance pré-cuite (5 frigos pleins)
+            #   - SPEC_ECHEANCES_BOOSTERMAIL.md (05/05) + memory
+            #     `feature_echeances_scope` : « sortants only, out-of-scope
+            #     les entrants » (faux positifs, ambiguïtés date, multilingue)
+            # Décision Yvan en attente. Si réactivation un jour :
+            #   1. Passer ici à `scan_echeance=(branch == 'vip')`
+            #   2. Adapter `save_mail_echeance(mid, [])` ligne 3949 et 3887
+            #   3. Mettre à jour SPEC_ECHEANCES_BOOSTERMAIL.md + slide 4 cohérence
+            #   4. Tests d'intégration entrants vs sortants
             scan_echeance=False,
         ):
             if kind == 'end':
@@ -4347,12 +4361,14 @@ def _prewarm_mail_preview(mail_data):
         logger.debug(f"[mail-preview] skip mail sans IMID canonique : "
                      f"subject={mail_data.get('subject', '')[:40]}")
         return
-    # Refonte N4 (12/05/2026) — Filtre 1 unifié : `_is_discarded` est
-    # fail-open par contrat (try/except autour de chaque règle interne).
-    # PAS de wrapper try/except ici : ce serait un patch sur le patch.
-    _discarded, _reason = _is_discarded(mail_data)
-    if _discarded:
-        logger.debug(f"[mail-preview] skip écarté ({_reason}) mid={mid[:30]}")
+    # N11-bis : dispatcher unique `_classify_mail_branch` (au lieu de
+    # `_is_discarded` direct en bypass). Le commis Haiku tourne pour
+    # PARTIAL + VIP (décision Q5 N6.1) — on ne skip que les ÉCARTÉS.
+    # Fail-open par construction (les sous-helpers le sont).
+    _branch_info = _classify_mail_branch(mail_data)
+    if _branch_info['branch'] == 'discarded':
+        logger.debug(f"[mail-preview] skip écarté ({_branch_info['reason']}) "
+                     f"mid={mid[:30]}")
         return
     now = time.time()
     with _mail_preview_lock:
@@ -7350,7 +7366,8 @@ def _start_speculative(mail_data):
     Attend (polling) que le prefetch de CE mail soit terminé, puis génère avec stream=False
     et stocke le résultat dans _reply_cache[message_id].
 
-    Appelé uniquement si `_filter_2_is_vip()` → True (= VIP, fiche bien remplie).
+    Appelé uniquement si `_classify_mail_branch(...)['branch'] == 'vip'`
+    (= Filtre 1 OK + Filtre 2 OK, fiche bien remplie).
     Le cache est nettoyé automatiquement après envoi / suppression / classement.
     """
     # Phase 1 (25/04 soir) — Étiquetage canonique strict : IMID seul.
@@ -7725,9 +7742,10 @@ def _run_preemptive_bg(inbox_mails):
         with _reply_lock:
             if msg_id in _reply_cache:
                 continue
-        # Refonte N5 (12/05) — `_filter_2_is_vip` au lieu de `_is_contact_known`
-        # (rejet fiches vides sample_count=0 — Q1 N5 décision Yvan)
-        if _filter_2_is_vip(from_email)[0]:
+        # N11-bis : dispatcher unique `_classify_mail_branch` au lieu de
+        # `_filter_2_is_vip` direct (bypass corrigé). Cohérent avec
+        # I-BRANCHES-N11-01 « un seul aiguillage 3 branches ».
+        if _classify_mail_branch(mail)['branch'] == 'vip':
             candidates.append(mail)
         if len(candidates) >= _PREEMPTIVE_TIER1_MAX_CANDIDATES:
             break
@@ -11480,46 +11498,44 @@ def api_instant_reply():
     miss_reason = 'inconnu'
     if message_id:
         try:
-            # Refonte N5 (12/05) — diagnostic miss_reason via le helper UNIQUE
-            # `_filter_2_is_vip` (pas de duplication de la logique VIP). Mapping
-            # raison technique → wording user lisible.
+            # N11-bis : diagnostic miss_reason via le dispatcher UNIQUE
+            # `_classify_mail_branch` (avant : double exécution Filtre 2 dans
+            # la même endpoint — `_filter_2_is_vip` haut + `_classify_mail_branch`
+            # bas). Un seul appel, propagé dans le reste de la logique.
+            # Reconstruction mail_data depuis email_cache une seule fois.
+            _md = None
+            _branch_info = None
             if from_email:
-                is_vip, vip_reason = _filter_2_is_vip(from_email)
-                if not is_vip:
+                try:
+                    cached_email = _db.get_cached_email(message_id)
+                except Exception:
+                    cached_email = None
+                _md = {
+                    'message_id': message_id,
+                    'from_email': from_email,
+                    'body': (cached_email or {}).get('body', '')[:2000],
+                    'date': (cached_email or {}).get('date', ''),
+                    'to': (cached_email or {}).get('to', ''),
+                    'cc': (cached_email or {}).get('cc', ''),
+                }
+                _branch_info = _classify_mail_branch(_md)
+                if _branch_info['branch'] == 'partial':
                     miss_reason = _MISS_REASON_FROM_F2.get(
-                        vip_reason, f'contact PARTIEL ({vip_reason})'
+                        _branch_info['reason'],
+                        f"contact PARTIEL ({_branch_info['reason']})"
                     )
+                elif _branch_info['branch'] == 'discarded':
+                    miss_reason = f"mail écarté ({_branch_info['reason']})"
             # BG pas encore exécuté ?
             with _reply_lock:
                 entry = _reply_cache.get(message_id, {})
             if not entry:
-                # BG loop n'a jamais touché ce mail
                 if miss_reason == 'inconnu':
                     miss_reason = 'BG non scanné (mail hors top 50 ou récent)'
             elif entry.get('status') == 'cancelled':
                 miss_reason = 'spéculation cancelled'
             elif entry.get('status') == 'error':
                 miss_reason = 'scan Claude erreur'
-            else:
-                # Mail a été filtré par Smart Speculative ? On check via
-                # reconstruction mail_data depuis email_cache (approximatif).
-                try:
-                    cached_email = _db.get_cached_email(message_id)
-                    if cached_email:
-                        _md = {
-                            'message_id': message_id,
-                            'from_email': from_email,
-                            'body': cached_email.get('body', '')[:2000],
-                            'date': cached_email.get('date', ''),
-                            'to': cached_email.get('to', ''),
-                            'cc': cached_email.get('cc', ''),
-                        }
-                        _branch_diag = _classify_mail_branch(_md)
-                        if _branch_diag['branch'] != 'vip':
-                            miss_reason = (f"branche {_branch_diag['branch']} : "
-                                           f"{_branch_diag['reason']}")
-                except Exception:
-                    pass
         except Exception:
             pass
     # PLUS_TARD_VF #2 (28/04) — track le code de la miss reason pour stats agrégées

@@ -239,16 +239,40 @@ def test_regression_summarize_bg_uses_dispatcher():
     return ok
 
 
-def test_regression_4_callers_migrated():
-    """Vérifie que les 4 anciens call sites de `_should_speculate` ont tous
-    migré vers `_classify_mail_branch` ou ont été simplifiés (cold cache guard
-    sait déjà que branch='vip' arrivé là)."""
+def test_regression_no_bypass_dispatcher():
+    """Vérifie qu'AUCUN call site n'appelle `_filter_2_is_vip` ou
+    `_is_discarded` directement en dehors :
+      - de la définition même des helpers (1 fois chacun)
+      - du dispatcher `_classify_mail_branch` (qui orchestre)
+
+    Renforcé en N11-bis suite à audit rétrospectif qui a détecté 3 sites
+    de bypass (`_continuous_speculation_loop:1687`, spéculation préemptive:7730,
+    `/api/instant_reply:11487`) où le dispatcher était court-circuité.
+
+    Le contrat I-BRANCHES-N11-01 « 1 seul aiguillage » exige que toute
+    décision Filtre 1 ou Filtre 2 passe par le dispatcher.
+    """
     src_full = inspect.getsource(ap)
-    # Aucun appel `_should_speculate(` ne doit subsister
-    n_calls = src_full.count('_should_speculate(')
-    ok = log_test(f"0 appel `_should_speculate(` dans tout app_plugin.py ({n_calls})",
-                  n_calls == 0,
-                  "des call sites manquent la migration" if n_calls else "")
+
+    # `_should_speculate` doit être totalement supprimé
+    n_calls_old = src_full.count('_should_speculate(')
+    ok = log_test(f"0 appel `_should_speculate(` dans tout app_plugin.py ({n_calls_old})",
+                  n_calls_old == 0)
+
+    # Compte les appels directs `_filter_2_is_vip(` et `_is_discarded(`.
+    # Tolérance : la définition même + l'appel dans `_classify_mail_branch`.
+    n_filter2 = src_full.count('_filter_2_is_vip(')
+    n_isdiscarded = src_full.count('_is_discarded(')
+    # Attendus : 1 def `_filter_2_is_vip(` + 1 appel dans `_classify_mail_branch`
+    #          + 0 ailleurs = 2
+    #          1 def `_is_discarded(` + 1 appel dans `_classify_mail_branch`
+    #          + 0 ailleurs = 2
+    ok &= log_test(f"`_filter_2_is_vip(` apparaît ≤ 2× (def + dispatcher) ({n_filter2})",
+                   n_filter2 <= 2,
+                   "bypass dispatcher détecté — voir N11-bis audit" if n_filter2 > 2 else "")
+    ok &= log_test(f"`_is_discarded(` apparaît ≤ 2× (def + dispatcher) ({n_isdiscarded})",
+                   n_isdiscarded <= 2,
+                   "bypass dispatcher détecté" if n_isdiscarded > 2 else "")
     return ok
 
 
@@ -274,7 +298,7 @@ def main():
         # Section 3 — Régressions statiques
         ('test_regression_no_double_filter_in_prefetch', test_regression_no_double_filter_in_prefetch),
         ('test_regression_summarize_bg_uses_dispatcher', test_regression_summarize_bg_uses_dispatcher),
-        ('test_regression_4_callers_migrated', test_regression_4_callers_migrated),
+        ('test_regression_no_bypass_dispatcher', test_regression_no_bypass_dispatcher),
     ]
     passed = 0
     failed = []
