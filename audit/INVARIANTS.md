@@ -1060,6 +1060,31 @@ Les 3 contextes de classement PJ (BG via `_prewarm_unified_for_mail` · à-la-de
 - **Pourquoi** : avant N9, 3 logiques 3-tiers inline distinctes côté PJ → divergences garanties dans le temps (fix Tier 1 PJ appliqué à 1 route sur 3). Symétrie avec le mail unifié en N8.
 - **Action si violé** : un développeur a remis du code inline dans `api_suggest_pj_folder` ou `api_smart_paperclip`. Restaurer le wrapper sur le moteur.
 
+### I-CONTACT-N10-01 : Dispatcher contact = 2 helpers décideurs purs + orchestrateur léger
+
+`_maybe_analyze_contact` (`V2/app_plugin.py`) orchestre l'analyse contact via 2 helpers purs : `_should_enrich_profile` (squelette OU rattrapage échec analyse) et `_should_reanalyze_profile` (schedule). Plus aucun code de décision inline dans l'orchestrateur — les 8 patches accumulés pré-N10 (RC1/RC2/RC3 audit 03/05, O1 08/05, Fix 30/04 PM signature, Fix 30/04 PM limit 25→50, N1 `_is_auto_email`, N3 `_check_analysis_cooldown`) sont déplacés et préservés sémantiquement dans les helpers.
+- **Preuve comportementale** : `tests/test_n10_contacts.py::test_should_enrich_profile_logic` (5 cas DB réels) + `::test_should_reanalyze_profile_logic` (5 cas in-memory dont anti-boucle RC3).
+- **Régression statique** : `::test_regression_dispatcher_uses_helpers` — orchestrateur contient `_should_enrich_profile(`, `_should_reanalyze_profile(`, `_is_auto_email(` et ne contient PLUS `"sample_count=0 anormal"` (marqueur Fix 30/04 PM inline).
+- **Pourquoi** : avant N10, dispatcher ~150 lignes avec 8 logiques empilées difficilement testables. Pacte « code propre robuste pertinent ».
+- **Action si violé** : un développeur a réintroduit du code de décision inline. Le re-extraire dans un helper.
+
+### I-CONTACT-N10-02 : Squelette créé dès le 1er mail E/R via hook unique `save_to_thread`
+
+Tout enregistrement de mail dans la table `threads` (toutes directions) déclenche un appel idempotent `_db.create_contact_skeleton(correspondent)`. Garantit la règle slide 8 « squelette créé dès le 1er mail E/R » sans avoir à hooker chaque call site indépendamment (3 sites en V2 : 14145, 14161, 15157).
+- **Preuve comportementale** : `::test_skeleton_created_on_received_thread` + `::test_skeleton_created_on_sent_thread` — `save_to_thread` crée bien un profil minimal (`sample_count=0`) pour les 2 directions.
+- **Idempotence** : `::test_create_contact_skeleton_idempotent` — appels répétés ne créent qu'1 ligne (1er True, 2e False).
+- **Régression statique** : `::test_regression_save_to_thread_creates_skeleton` — `save_to_thread` contient `create_contact_skeleton(`.
+- **Pourquoi** : avant N10, aucun contact en DB tant que règle O1 (2 reçus OU 1 envoyé) non atteinte → frustration UX (« j'ai déjà reçu un mail de ce contact, pourquoi rien ? »).
+- **Action si violé** : restaurer l'appel `create_contact_skeleton` dans `save_to_thread`.
+
+### I-CONTACT-N10-03 : Purge UPDATE-blank sélective + multi-tenant + préservation stricte
+
+`purge_inactive_contact_profiles(months=24)` blanche les champs enrichis des profils inactifs > 24 mois SANS supprimer le squelette. Préserve : `email`, `display_name`, `manually_edited=1` (jamais purgé), `folder_classifications` (table séparée). Scope strict par `user_id` (boucle sur `SELECT DISTINCT user_id`) — corrige un bug critique pré-N10 où l'ancienne version sans `WHERE user_id` provoquait une fuite cross-tenant en SaaS multi-tenant.
+- **Preuve comportementale** : `::test_purge_blanks_enriched_profile` (squelette conservé, sample_count=0), `::test_purge_preserves_manually_edited` (profil verrouillé intact), `::test_purge_preserves_recent_active` (profil avec mail récent intact).
+- **Régression statique** : `::test_regression_purge_is_update_not_delete` — fonction utilise `UPDATE contact_profiles` ET scope `WHERE user_id` ET garde `manually_edited`.
+- **Pourquoi** : avant N10, purge globale sans filtre `user_id` → (a) perte totale du squelette + des règles de classement préservées, (b) fuite cross-tenant. Corrigé en double.
+- **Action si violé** : restaurer le UPDATE-blank et la boucle multi-tenant.
+
 ---
 
 ## Mise à jour

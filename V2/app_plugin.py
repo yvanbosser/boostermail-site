@@ -8451,7 +8451,9 @@ def api_contact_search():
     # Pour ~100 contacts en DB (cas typique), filter Python est OK.
     # Si volume > 10k, passer a une query SQL WHERE name LIKE/email LIKE
     # avec index. Pas necessaire actuellement.
-    all_profiles = _db.get_all_contact_profiles()
+    # N10 (14/05) : include_skeletons=True — l'autocomplete doit matcher
+    # même les squelettes (1er mail E/R d'un contact, pas encore enrichi).
+    all_profiles = _db.get_all_contact_profiles(include_skeletons=True)
     matches = []
     for p in all_profiles:
         name = (p.get('display_name', '') or '').lower()
@@ -11672,9 +11674,10 @@ def api_gdpr_export():
         export_data = {}
         rows_total = 0
 
-        # 1) Profils contacts
+        # 1) Profils contacts (N10 : include_skeletons=True — RGPD = export
+        # complet, même les profils squelettes minimaux doivent être exportés)
         try:
-            profiles = _db.get_all_contact_profiles() or []
+            profiles = _db.get_all_contact_profiles(include_skeletons=True) or []
             export_data['contact_profiles'] = profiles
             rows_total += len(profiles)
         except Exception as e:
@@ -14581,88 +14584,148 @@ def _check_analysis_cooldown(contact_email, bypass_cooldown=False):
     return True
 
 
+def _should_enrich_profile(contact_email, existing_profile, *,
+                           bypass_cooldown=False):
+    """N10 — Helper décideur : enrichir un squelette (ou rattraper une
+    analyse échouée) ?
+
+    Couvre 2 cas (signal interne identique `sample_count == 0`) :
+      - vrai squelette (créé via `create_contact_skeleton` au 1er mail E/R)
+      - profil créé mais analyse Claude a échoué (Fix 30/04 PM rattrapage)
+
+    Vrai si :
+      - existing_profile présent ET sample_count == 0
+      - pas manually_edited
+      - règle O1 atteinte : received >= 2 OU sent >= 1 (08/05)
+      - cooldown 24h respecté (anti-boucle audit 03/05 RC2)
+    """
+    if not existing_profile or existing_profile.get('sample_count', 0) > 0:
+        return False
+    if existing_profile.get('manually_edited'):
+        return False
+    try:
+        counts = _db.count_mails_by_direction(contact_email)
+    except Exception:
+        counts = {'sent': 0, 'received': 0}
+    eligible = (counts.get('received', 0) >= 2
+                or counts.get('sent', 0) >= 1)
+    if not eligible:
+        return False
+    return _check_analysis_cooldown(contact_email, bypass_cooldown)
+
+
+def _should_reanalyze_profile(contact_email, existing_profile, mail_count, *,
+                              bypass_cooldown=False):
+    """N10 — Helper décideur : re-analyser un profil DÉJÀ enrichi ?
+
+    Vrai si :
+      - existing_profile.sample_count > 0 (profil enrichi)
+      - pas manually_edited
+      - mail_count dans `_CONTACT_ANALYSIS_SCHEDULE` (ou >200 multiple de 50)
+      - existing.sample_count < mail_count (anti-boucle RC3 audit 03/05 :
+        évite de boucler à chaque cycle BG tant que mail_count n'a pas
+        augmenté)
+
+    Note : pas de cooldown explicite ici — le schedule limite déjà
+    naturellement la fréquence (mail_count doit changer pour redéclencher).
+    `bypass_cooldown` est accepté pour cohérence d'API.
+    """
+    if not existing_profile or existing_profile.get('sample_count', 0) == 0:
+        return False
+    if existing_profile.get('manually_edited'):
+        return False
+    return _should_analyze_contact(mail_count, existing_profile.get('sample_count'))
+
+
+def _apply_register_guard(profile, sent_mails):
+    """N10 — Helper extrait : garde post-IA tu/vous vs mails envoyés réels.
+
+    Si l'IA dit 'tutoiement' mais aucun 'tu' dans les 15 derniers sent_mails
+    → corrige en 'vouvoiement'. Inversement, si 'vouvoiement' annoncé mais
+    'tu' largement majoritaire → corrige en 'tutoiement'. Pattern hérité
+    du dispatcher pré-N10 (validation Yvan 03/05).
+    """
+    ai_register = profile.get('register', 'vouvoiement')
+    tu_markers = re.compile(r'\b(tu |te |ton |ta |tes |toi\b|t\')', re.IGNORECASE)
+    vous_markers = re.compile(r'\b(vous |votre |vos |v\')', re.IGNORECASE)
+    tu_count = 0
+    vous_count = 0
+    for m in sent_mails[:15]:
+        body = m.get('body', '')[:2000]
+        tu_count += len(tu_markers.findall(body))
+        vous_count += len(vous_markers.findall(body))
+    if ai_register == 'tutoiement' and tu_count == 0:
+        profile['register'] = 'vouvoiement'
+    elif ai_register == 'tutoiement' and vous_count > tu_count * 3:
+        profile['register'] = 'vouvoiement'
+    elif ai_register == 'vouvoiement' and tu_count > vous_count * 3 and tu_count >= 5:
+        profile['register'] = 'tutoiement'
+    return profile
+
+
 def _maybe_analyze_contact(contact_email, bypass_cooldown=False):
-    """Vérifie si un profil de contact doit être (re)analysé et le fait si nécessaire.
+    """Orchestrateur N10 — délègue aux 3 helpers décideurs.
+
+    Refonte N10 (14/05) : 8 patches accumulés (RC1/RC2/RC3 audit 03/05, O1
+    08/05, Fix 30/04 PM signature, Fix 30/04 PM limit 25→50, N1 _is_auto_email
+    centralisé, N3 _check_analysis_cooldown factorisé) substitués par 3
+    helpers purs testables + cet orchestrateur.
 
     Args:
         contact_email : email du contact
-        bypass_cooldown : si True, ignore le cooldown 24h (audit 03/05 fix RC2).
-            Utilisé par les routes user explicites (recalibrate, analyze_contact,
-            post_send_learning) pour forcer une analyse immédiate. Le BG
-            `_continuous_speculation_loop` appelle SANS bypass (cooldown actif).
+        bypass_cooldown : si True, ignore le cooldown 24h. Utilisé par les
+            routes user explicites (recalibrate, analyze_contact,
+            post_send_learning).
     """
-    if not contact_email:
+    if not contact_email or _is_auto_email(contact_email):
         return
 
-    # Audit 03/05 fix RC1 : skip auto-emails (noreply, mailer-daemon, etc.)
-    # Refonte N1 (11/05) : utilisation du helper centralisé _is_auto_email
-    if _is_auto_email(contact_email):
-        return  # silencieux : pas de log, pas d'analyse, pas de save
+    existing = _db.get_contact_profile(contact_email)
+    if existing is None:
+        # Pas même un squelette — la création est faite par le hook DB
+        # `save_to_thread` au prochain mail E/R. Skip l'analyse ici.
+        return
+
+    if existing.get('manually_edited'):
+        return  # verrouillé par l'user, jamais ré-analysé
 
     mail_count = _db.count_mails_with_contact(contact_email)
     if mail_count < _CONTACT_MIN_MAILS:
         return
 
-    existing = _db.get_contact_profile(contact_email)
-    if existing:
-        if existing.get('manually_edited'):
+    sample_count = existing.get('sample_count', 0)
+    if sample_count == 0:
+        # Squelette OU analyse échouée → tenter enrichissement (règle O1)
+        if not _should_enrich_profile(contact_email, existing,
+                                       bypass_cooldown=bypass_cooldown):
             return
-        # Fix 30/04 PM (Yvan : signature Yvan BOSSER au lieu de spécifique
-        # pour Julien). sample_count=0 sur un profil existant est anormal —
-        # soit l'analyse précédente a silencieusement échoué, soit le profil
-        # a été créé par un autre path. Force re-analyse pour rattrapage.
-        # Audit 03/05 fix RC2 : cooldown 24h pour éviter la boucle infinie
-        # quand l'analyse forcée plante systématiquement (yvan@gmail observé
-        # 1 080 appels/jour). Si l'analyse échoue, on retente dans 24h, pas
-        # dans 80s. bypass_cooldown=True quand l'utilisateur force lui-même
-        # via api_recalibrate / api_analyze_contact / post_send_learning.
-        if existing.get('sample_count', 0) == 0:
-            if not _check_analysis_cooldown(contact_email, bypass_cooldown):
-                return  # silencieux : cooldown actif
-            logger.info(f"[learning] Re-analyse forcee de {_hash_email_partial(contact_email)} (sample_count=0 anormal, rattrapage)")
-        elif not _should_analyze_contact(mail_count, existing.get('sample_count')):
-            return
-        else:
-            logger.info(f"[learning] Re-analyse de {_hash_email_partial(contact_email)} (mail #{mail_count})")
+        logger.info(
+            f"[learning] Enrichissement de {_hash_email_partial(contact_email)} "
+            f"(mail #{mail_count}, squelette ou rattrapage)"
+        )
     else:
-        # O1 (08/05) — Création profil enrichi à 2 reçus OU 1 envoyé
-        # (au lieu de mail_count >= 3 avant). Un mail envoyé est un signal
-        # plus fort qu'un mail reçu (effort actif user) → suffit seul.
-        # 2 mails reçus filtre les démarcheurs ponctuels (1 mail isolé).
-        # Garde le _should_analyze_contact(mail_count) pour les seuils
-        # supérieurs du schedule (ré-analyses planifiées).
-        try:
-            counts = _db.count_mails_by_direction(contact_email)
-        except Exception:
-            counts = {'sent': 0, 'received': 0}
-        eligible_o1 = (counts.get('received', 0) >= 2 or counts.get('sent', 0) >= 1)
-        if not eligible_o1 and not _should_analyze_contact(mail_count):
+        # Profil enrichi → schedule de re-analyse (RC3 anti-boucle inclus)
+        if not _should_reanalyze_profile(contact_email, existing, mail_count,
+                                          bypass_cooldown=bypass_cooldown):
             return
-        if not _check_analysis_cooldown(contact_email, bypass_cooldown):
-            return  # silencieux : cooldown actif (Premiere analyse sans profil)
-        logger.info(f"[learning] Premiere analyse de {_hash_email_partial(contact_email)} (mail #{mail_count})")
+        logger.info(
+            f"[learning] Re-analyse de {_hash_email_partial(contact_email)} "
+            f"(mail #{mail_count})"
+        )
 
-    # Fix 30/04 PM (signal Yvan) : limit 25 → 50. Le sub-agent a montré que
-    # avec limit=25, certains contacts à forte volumétrie (Julien : 86 mails)
-    # n'ont parfois aucun mail ENVOYÉ dans les 25 derniers (asymétrie reçus/
-    # envoyés). Claude ne peut alors pas extraire user_signature_for_contact.
-    # Avec limit=50 on capture plus d'historique sans alourdir le prompt
-    # (Claude reçoit toujours sent_mails[:15] + received_mails[:10] côté
-    # claude_ai.analyze_contact_profile).
+    # Threads : limit 50 (asymétrie reçus/envoyés contacts forts volumes,
+    # ex. Julien 86 mails — sub-agent 30/04). Claude reçoit toujours
+    # sent_mails[:15] + received_mails[:10] côté analyze_contact_profile.
     threads = _db.get_threads_with_contact(contact_email, limit=50)
     sent_mails = [t for t in threads if t['direction'] == 'sent']
     received_mails = [t for t in threads if t['direction'] == 'received']
 
     if not sent_mails:
-        return
+        return  # claude_ai exige >= 1 envoyé pour extraire user_signature
 
     corrections = _db.get_corrections_for_contact(contact_email, limit=10)
-
-    display_name = ""
-    if existing:
-        display_name = existing.get('display_name', '')
-    if not display_name:
-        display_name = contact_email.split('@')[0].replace('.', ' ').title()
+    display_name = (existing.get('display_name')
+                    or contact_email.split('@')[0].replace('.', ' ').title())
 
     _pb_contact = _get_prompt_builder()
     if not _pb_contact:
@@ -14673,36 +14736,18 @@ def _maybe_analyze_contact(contact_email, bypass_cooldown=False):
         display_name=display_name,
         sent_mails=sent_mails,
         received_mails=received_mails,
-        corrections=corrections
+        corrections=corrections,
     )
 
     if profile:
-        # Garde post-IA : vérifier tutoiement/vouvoiement dans les mails envoyés
-        ai_register = profile.get('register', 'vouvoiement')
-        tu_markers = re.compile(r'\b(tu |te |ton |ta |tes |toi\b|t\')', re.IGNORECASE)
-        vous_markers = re.compile(r'\b(vous |votre |vos |v\')', re.IGNORECASE)
-        tu_count = 0
-        vous_count = 0
-        for m in sent_mails[:15]:
-            body = m.get('body', '')[:2000]
-            tu_count += len(tu_markers.findall(body))
-            vous_count += len(vous_markers.findall(body))
-        if ai_register == 'tutoiement' and tu_count == 0:
-            profile['register'] = 'vouvoiement'
-        elif ai_register == 'tutoiement' and vous_count > tu_count * 3:
-            profile['register'] = 'vouvoiement'
-        elif ai_register == 'vouvoiement' and tu_count > vous_count * 3 and tu_count >= 5:
-            profile['register'] = 'tutoiement'
-
-        is_new = not existing
+        profile = _apply_register_guard(profile, sent_mails)
+        is_new = (sample_count == 0)  # squelette → enrichi
         profile['email'] = contact_email
         _db.save_contact_profile(contact_email, profile)
-        logger.info(f"[learning] Profil sauvegarde: {_hash_email_partial(contact_email)} — {profile.get('category','?')}, {profile.get('register','?')}")
-
-        # Refonte N5 (12/05) — Pas de réveil des vieux mails PARTIEL (décision
-        # Yvan : « on garde en PARTIEL pour cette fois, VIP la prochaine fois »).
-        # Cf bloc commentaire au-dessus de `_filter_2_is_vip`.
-
+        logger.info(
+            f"[learning] Profil sauvegarde: {_hash_email_partial(contact_email)} "
+            f"— {profile.get('category','?')}, {profile.get('register','?')}"
+        )
         if is_new:
             global _new_profile_toast
             with _new_profile_toast_lock:
@@ -14867,7 +14912,10 @@ def api_recalibrate_contacts():
             if target_email:
                 emails = [target_email]
             else:
-                profiles = _db.get_all_contact_profiles()
+                # N10 (14/05) : include_skeletons=True — le batch user doit
+                # pouvoir amorcer l'enrichissement des squelettes (un squelette
+                # avec règle O1 atteinte = candidat à enrichissement immédiat).
+                profiles = _db.get_all_contact_profiles(include_skeletons=True)
                 emails = [p.get('email', '') for p in profiles if p.get('email')]
 
             _contacts_recalib_progress.update({

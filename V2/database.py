@@ -1852,6 +1852,15 @@ class Database:
             raise
 
     def save_to_thread(self, project, direction, subject, body, correspondent):
+        # N10 (14/05) — Hook squelette contact : 1 seul point d'entrée pour
+        # les 2 directions (sent/received). Idempotent : no-op si profil
+        # déjà existant. Garantit la règle slide 8 « squelette créé dès le
+        # 1er mail E/R » sans avoir à hooker chaque call site séparément.
+        if correspondent:
+            try:
+                self.create_contact_skeleton(correspondent)
+            except Exception:
+                pass  # best-effort, ne bloque pas le thread save
         uid = self._uid()
         conn = self._conn()
         conn.execute("""
@@ -2147,10 +2156,27 @@ class Database:
             conn.rollback()
             raise
 
-    def get_all_contact_profiles(self):
+    def get_all_contact_profiles(self, include_skeletons=False):
+        """Retourne les profils contact du user courant.
+
+        N10 (14/05) : par défaut `include_skeletons=False` filtre les profils
+        squelettes (`sample_count = 0`, donc pas encore enrichis ni purgés
+        post-inactivité). Le carnet d'adresses UI ne montre QUE les profils
+        avec contenu. Passer `include_skeletons=True` pour le debug/admin.
+        """
         uid = self._uid()
         c = self._conn().cursor()
-        c.execute("SELECT * FROM contact_profiles WHERE user_id = ? ORDER BY sample_count DESC, display_name ASC", (uid,))
+        if include_skeletons:
+            c.execute(
+                "SELECT * FROM contact_profiles WHERE user_id = ? "
+                "ORDER BY sample_count DESC, display_name ASC", (uid,)
+            )
+        else:
+            c.execute(
+                "SELECT * FROM contact_profiles WHERE user_id = ? "
+                "AND COALESCE(sample_count, 0) > 0 "
+                "ORDER BY sample_count DESC, display_name ASC", (uid,)
+            )
         return [dict(r) for r in c.fetchall()]
 
     def count_threads(self):
@@ -2185,42 +2211,110 @@ class Database:
         return result
 
     def purge_inactive_contact_profiles(self, months=24):
-        """O6 (08/05) — Purge auto des profils contact inactifs depuis N mois.
+        """Purge auto des profils contact inactifs depuis N mois.
+
+        Refonte N10 (14/05/2026) — corrections structurelles :
+          - Suppression complète remplacée par blanchiment sélectif des
+            champs enrichis (catégorie, registre, signature, vocabulaire,
+            etc.). Le squelette (email, display_name) est CONSERVÉ pour que
+            les règles 1/2/3 du pipeline classement (basées sur l'historique
+            `folder_classifications` séparé) continuent à fonctionner sans
+            re-création.
+          - Multi-tenant : boucle sur les `user_id` distincts. L'ancienne
+            version (O6 08/05) supprimait globalement sans filtre `user_id`
+            → fuite cross-tenant (un mail récent du user A protégeait le
+            profil contact du user B portant le même email). Bug critique
+            en SaaS multi-tenant, corrigé ici.
 
         Critère : aucun mail dans `threads` (envoyé OU reçu) avec ce contact
-        depuis `months` mois. Le squelette (juste l'email) n'a pas de profil
-        à purger ; cette méthode supprime uniquement les profils enrichis
-        (catégorie, registre, signature personnalisée, vocabulaire, etc.).
+        depuis `months` mois pour CE user.
 
-        Garde-fou : NE PAS purger les profils marqués `manually_edited = 1`
-        (verrouillés par l'utilisateur, représentent un investissement
-        manuel à conserver indéfiniment).
+        Garde-fous (préservation slide 8 PPTX) :
+          - `manually_edited = 1` → JAMAIS purgé (verrouillé par l'user)
+          - `sample_count = 0` → squelette pur, rien à blanchir, skip
+          - L'historique `folder_classifications` reste intact (table séparée)
+          - Le squelette (`email`, `display_name`, `created_at`) est conservé
+            pour permettre la réapparition naturelle du contact
 
-        L'historique de classifications (table `folder_classifications`)
-        reste intact même si le profil est purgé — au prochain mail du
-        contact purgé, les règles 1, 2, 3 du pipeline classement (basées
-        sur l'historique) restent fonctionnelles.
-
-        Retourne le nombre de profils supprimés.
+        Retourne le nombre total de profils blanchis (tous users confondus).
         """
         conn = self._conn()
         c = conn.cursor()
-        # SQLite : datetime('now', '-24 months') marche bien.
-        # On supprime les profils dont l'email N'A PAS de mail récent.
-        # Garde manually_edited=0 (ou NULL pour les profils anciens).
         cutoff_clause = f"datetime('now', '-{int(months)} months')"
-        c.execute(f"""
-            DELETE FROM contact_profiles
-            WHERE COALESCE(manually_edited, 0) = 0
-              AND email NOT IN (
-                  SELECT DISTINCT correspondent FROM threads
-                  WHERE created_at >= {cutoff_clause}
-                    AND correspondent IS NOT NULL
-              )
-        """)
-        deleted = c.rowcount
+        # Itère sur chaque user_id distinct pour scoper la purge correctement.
+        c.execute("SELECT DISTINCT user_id FROM contact_profiles")
+        user_ids = [row[0] for row in c.fetchall() if row[0]]
+        total_purged = 0
+        for uid in user_ids:
+            c.execute(f"""
+                UPDATE contact_profiles
+                SET organization = NULL,
+                    category = NULL,
+                    domain = NULL,
+                    register = NULL,
+                    tone = NULL,
+                    greeting = NULL,
+                    closing = NULL,
+                    typical_length = NULL,
+                    power_dynamic = NULL,
+                    language = NULL,
+                    profile_text = NULL,
+                    profile_json = NULL,
+                    sample_count = 0,
+                    confidence = 0.0,
+                    last_analysis = NULL,
+                    entry_ids = '[]',
+                    updated_at = datetime('now', 'localtime')
+                WHERE user_id = ?
+                  AND COALESCE(manually_edited, 0) = 0
+                  AND sample_count > 0
+                  AND email NOT IN (
+                      SELECT DISTINCT correspondent FROM threads
+                      WHERE user_id = ?
+                        AND created_at >= {cutoff_clause}
+                        AND correspondent IS NOT NULL
+                  )
+            """, (uid, uid))
+            total_purged += c.rowcount
         conn.commit()
-        return deleted
+        return total_purged
+
+    def create_contact_skeleton(self, email, display_name=None):
+        """Crée un squelette de profil contact (N10) — INSERT idempotent.
+
+        Le squelette = profil minimal `{email, display_name, sample_count=0,
+        confidence=0.0, is_skeleton implicite via sample_count==0}`. Tous les
+        autres champs enrichis sont NULL.
+
+        Idempotent : si un profil existe déjà pour ce contact (squelette OU
+        enrichi), retourne False sans modifier. Sinon insère et retourne True.
+
+        Appelé par `save_to_thread` AVANT l'insert thread (un seul point de
+        hook pour les 2 directions sent/received — spec slide 8 « squelette
+        dès le 1er mail E/R »).
+        """
+        if not email:
+            return False
+        uid = self._uid()
+        conn = self._conn()
+        c = conn.cursor()
+        c.execute(
+            "SELECT 1 FROM contact_profiles WHERE email = ? AND user_id = ?",
+            (email, uid)
+        )
+        if c.fetchone():
+            return False  # déjà présent (squelette ou enrichi)
+        try:
+            c.execute("""
+                INSERT INTO contact_profiles (email, display_name, sample_count, confidence, user_id)
+                VALUES (?, ?, 0, 0.0, ?)
+            """, (email, display_name or '', uid))
+            conn.commit()
+            return True
+        except Exception:
+            # Race : un autre thread a inséré entre-temps → idempotent silencieux
+            conn.rollback()
+            return False
 
     def get_threads_with_contact(self, email, limit=20):
         uid = self._uid()
