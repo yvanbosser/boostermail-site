@@ -1,3 +1,13 @@
+# [OBSOLÈTE — ARCHIVE HISTORIQUE]
+
+> ⚠️ **Ce document est ARCHIVÉ depuis le 14/05/2026 (clôture N10).**
+>
+> **Remplacé par** : [`SPEC_CONTACTS_BOOSTERMAIL.md`](SPEC_CONTACTS_BOOSTERMAIL.md) — source de vérité unique consolidée (création progressive + analyse adaptative + purge automatique 24 mois + invariants V2).
+>
+> Le contenu ci-dessous est conservé en archive pour traçabilité historique. **Ne PAS modifier**. Tout nouvel ajout sur la gestion contacts va uniquement dans `SPEC_CONTACTS_BOOSTERMAIL.md`.
+
+---
+
 # Spécifications — Analyse contacts : schedule fixe adaptatif
 
 > **Dernière mise à jour** : 12/04/2026 (git)
