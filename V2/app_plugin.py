@@ -3049,6 +3049,20 @@ _GENERIC_FOLDER_NAMES = frozenset({
     'boite de reception',
 })
 
+# Set étendu pour la R1 réciproque (N9-bis A-5). Inclut `_GENERIC_FOLDER_NAMES`
+# + des noms de dossiers structuraux très courants côté filesystem PJ qui
+# créeraient des faux positifs cross-domaine s'ils étaient propagés via la
+# R1 (« Documents », « Photos » sont des conteneurs Windows par défaut).
+# Note : on ne fusionne pas avec `_GENERIC_FOLDER_NAMES` car le Tier 2 mail
+# DOIT pouvoir matcher légitimement un dossier Outlook nommé « Documents »
+# s'il est trouvé dans le body — tandis que la R1 réciproque doit l'ignorer
+# (le signal source filesystem est trop vague pour propager côté Outlook).
+_RECIPROCAL_STOP_WORDS = _GENERIC_FOLDER_NAMES | frozenset({
+    'documents', 'document', 'photos', 'photo', 'images', 'image',
+    'fichiers', 'fichier', 'pieces', 'jointes', 'attachments',
+    'downloads', 'desktop', 'dossier', 'dossiers',
+})
+
 
 def _filter_public_domain(domain) -> bool:
     """True si le domaine doit être ignoré pour Tier 3a (spec §5.4)."""
@@ -3310,12 +3324,35 @@ def _apply_cross_contact_tier(keywords, *, get_fn):
         return None
 
 
+def _reciprocal_seg_words(path):
+    """Extrait les mots significatifs du last_segment d'un path pour
+    fuzzy-match R1 réciproque. Filtre :
+      - mots < 4 chars (trop courts pour discriminer)
+      - mots dans `_RECIPROCAL_STOP_WORDS` (« documents », « factures »,
+        « photos », « divers », etc. — sinon faux positifs sur tout
+        dossier générique contenant ces mots, signal audit rétro N9 A-5).
+
+    Retourne liste de mots filtrés (peut être vide). Côté appelant : si
+    vide → pas de R1 réciproque, on retombe sur Tier 0 thread ou suivants.
+    """
+    if not path:
+        return []
+    last_seg = path.lower().replace('\\', '/').rstrip('/').split('/')[-1]
+    return [w for w in re.split(r'[\s\-_]+', last_seg)
+            if len(w) >= 4 and w not in _RECIPROCAL_STOP_WORDS]
+
+
 def _apply_reciprocal_coherence_mail(contact_email, *, folders, max_age=None):
     """R1 réciproque PJ→mail (N9, NOUVEAU).
 
     Si le contact a une classification PJ récente (< 2h par défaut),
     cherche dans `folders` (Outlook) un dossier dont le last_segment fuzzy-match
     le dossier PJ. Retourne dict suggestion ou None.
+
+    Le fuzzy match ignore les mots génériques (`_GENERIC_FOLDER_NAMES`)
+    via `_reciprocal_seg_words` — sinon une PJ classée dans « Documents »
+    matcherait tout dossier Outlook contenant ce mot (signal audit rétro
+    N9 A-5).
 
     Cohérence avec le sens inverse (mail→PJ) déjà géré côté moteur PJ.
     """
@@ -3329,11 +3366,7 @@ def _apply_reciprocal_coherence_mail(contact_email, *, folders, max_age=None):
     if not last_pj:
         return None
     dest = (last_pj.get('dest_folder') or '').strip()
-    if not dest:
-        return None
-    # last segment du path filesystem (ex: "D:\PJ\Le Cardo" → "le cardo")
-    last_seg = dest.lower().replace('\\', '/').rstrip('/').split('/')[-1]
-    seg_words = [w for w in re.split(r'[\s\-_]+', last_seg) if len(w) >= 4]
+    seg_words = _reciprocal_seg_words(dest)
     if not seg_words:
         return None
     for word in seg_words:
@@ -3354,8 +3387,11 @@ def _apply_reciprocal_coherence_pj(contact_email, *, folders_pj, max_age=None):
     Si le contact a une classification mail récente (< 2h par défaut),
     cherche dans `folders_pj` un dossier dont le name fuzzy-match le
     last_segment du dossier mail. Plus précis que l'ancienne lecture
-    `get_contact_folder_stats` (qui retournait la fréquence cumulée et
-    ignorait la récence).
+    fréquence cumulée (qui ignorait la récence).
+
+    Filtre stop-words `_GENERIC_FOLDER_NAMES` via `_reciprocal_seg_words`
+    — un mail classé dans « Documents » ne propage pas un signal
+    exploitable côté PJ (signal audit rétro N9 A-5).
 
     Garde le helper séparé pour symétrie avec `_apply_reciprocal_coherence_mail`.
     """
@@ -3369,10 +3405,7 @@ def _apply_reciprocal_coherence_pj(contact_email, *, folders_pj, max_age=None):
     if not last_mail:
         return None
     src = (last_mail.get('folder_path') or '').strip()
-    if not src:
-        return None
-    last_seg = src.lower().replace('\\', '/').rstrip('/').split('/')[-1]
-    seg_words = [w for w in re.split(r'[\s\-_]+', last_seg) if len(w) >= 4]
+    seg_words = _reciprocal_seg_words(src)
     if not seg_words:
         return None
     for word in seg_words:
@@ -10410,7 +10443,9 @@ def api_suggest_pj_folder(email_id):
     relevant_pj = [a for a in attachments if not a.get('is_inline', False)]
     pj_names = [a['name'] for a in relevant_pj]
 
-    # Moteur unique PJ (N9) — 7 tiers DB pertinents pour le SaaS
+    # Moteur unique PJ (N9) — R1 réciproque + Tier 1bis filename +
+    # Tier 1 contact mono + Tier 1bis sujet→body (scope Q1=B SaaS débutant).
+    # Tier 5/6/7/8 PJ différés PLUS_TARD_VF #34.
     result = _compute_pj_classement_suggestions(
         from_email, subject, '', attachment_names=pj_names,
         folders_pj=folders)

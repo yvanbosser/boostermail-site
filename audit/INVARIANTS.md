@@ -1027,18 +1027,24 @@ Quand le moteur retourne des suggestions vides côté BG (`_persist_commis_resul
 
 ### I-CLASS-N8-05 : Tier 0 mail→PJ lit `folder_classifications` (historique user)
 
-Le Tier 0 PJ « cohérence mail→PJ » consulte la table `folder_classifications` (classements user effectifs) via `_db.get_contact_folder_stats`. **Jamais** `mail_classement_cache` (suggestion non confirmée par user).
-- **Preuve comportementale** : `tests/test_n8_classement.py::test_pj_tier0_mail_pj_coherence` — 3 fixtures `folder_classifications` créées avec `save_classification(folder_path='IMMOBILIER/SCI/Le Cardo', ...)`, suggestion PJ #1 doit contenir `cardo` et avoir `source='mail_pj_coherence'`. Si le moteur lisait `mail_classement_cache` (vide dans ce test), le Tier 0 ne déclencherait pas et le test échouerait.
+Le R1 réciproque mail→PJ (`_apply_reciprocal_coherence_pj`) consulte la table `folder_classifications` (classements user effectifs) via `_db.get_last_recent_classification`. **Jamais** `mail_classement_cache` (suggestion non confirmée par user).
+- **Preuve comportementale** : `tests/test_n8_classement.py::test_pj_tier0_mail_pj_coherence` + `tests/test_n9_classement_reciprocal.py::test_reciprocal_mail_to_pj_recent` — fixtures `folder_classifications` créées avec `save_classification(folder_path='IMMOBILIER/SCI/Le Cardo', ...)`, suggestion PJ #1 doit contenir `cardo` et avoir `source='mail_pj_coherence'`. Si le moteur lisait `mail_classement_cache` (vide dans ces tests), le R1 ne déclencherait pas.
 - **Pourquoi** : `mail_classement_cache` contient la SUGGESTION proposée par le BG (peut être fausse), pas le CHOIX user. Lire la suggestion = corréler une erreur avec une autre. Signal démolisseur v2 P0-1 (re-cadrage du Tier 0 PJ).
-- **Action si violé** : remplacer la lecture incorrecte par `_db.get_contact_folder_stats(contact_email)`.
+- **Évolution N9** : la lecture est passée de `_db.get_contact_folder_stats` (fréquence cumulée, retirée en N9-bis) à `_db.get_last_recent_classification` (dernière < 2h) — plus précis et symétrique avec le sens inverse PJ→mail.
+- **Action si violé** : remplacer la lecture incorrecte par `_db.get_last_recent_classification(contact_email)`.
 
-### I-CLASS-N9-01 : 4 helpers communs partagés mail↔PJ
+### I-CLASS-N9-01 : Helpers communs paramétrés pour les règles partagées
 
-Les 4 règles identiques entre mail et PJ (R3 contact+sujet, R4 contact mono, R6 domaine, R7 cross-contact) sont implémentées dans des **helpers paramétrés** par la fonction DB du chapitre : `_apply_contact_mono_tier`, `_apply_keywords_tier`, `_apply_domain_tier`, `_apply_cross_contact_tier`. Les 2 moteurs (mail et PJ) appellent ces helpers — aucune duplication de logique métier.
-- **Preuve comportementale** : `tests/test_n9_classement_reciprocal.py::test_apply_contact_mono_tier_mail_vs_pj` — même helper appelé avec `get_fn=_db.get_folder_suggestion` et `get_fn=_db.get_pj_folder_suggestion` produit la règle mail OU PJ correspondante sur fixtures équivalentes.
-- **Régression statique** : `test_regression_engines_use_common_helpers` — `_compute_classement_suggestions` et `_compute_pj_classement_suggestions` doivent contenir les appels aux 4 helpers.
+4 helpers paramétrés (`_apply_contact_mono_tier`, `_apply_keywords_tier`, `_apply_domain_tier`, `_apply_cross_contact_tier`) implémentent les règles potentiellement communes mail↔PJ. Honnêteté du périmètre N9 (Q1=B scope pragmatique) :
+- **2 helpers réellement communs aux 2 moteurs aujourd'hui** : `_apply_contact_mono_tier` et `_apply_keywords_tier` (appelés par le moteur mail ET le moteur PJ — R3 contact+sujet, R4 contact mono spec slide 7).
+- **2 helpers actuellement appelés uniquement par le moteur mail** : `_apply_domain_tier` et `_apply_cross_contact_tier` (R6 domaine, R7 cross-contact). Côté PJ : pas de fonction DB équivalente aujourd'hui (PLUS_TARD_VF #34 — `get_pj_domain_folder_suggestion` et `get_pj_cross_contact_folder` à créer si volumes justifient).
+
+Les helpers existent **prêts pour usage futur côté PJ** — quand on créera les 2 fonctions DB PJ, l'extension consistera à ajouter 2 lignes d'appel dans le moteur PJ, pas à refactor la structure.
+
+- **Preuve comportementale** : `tests/test_n9_classement_reciprocal.py::test_apply_contact_mono_tier_mail_vs_pj` — même helper appelé avec `get_fn=_db.get_folder_suggestion` et `get_fn=_db.get_pj_folder_suggestion` produit la règle mail OU PJ correspondante.
+- **Régression statique** : `test_regression_engines_use_common_helpers` — `_compute_classement_suggestions` appelle les 4 helpers ; `_compute_pj_classement_suggestions` appelle les 2 helpers actuellement applicables.
 - **Pourquoi** : avant N9, Tier 1/1bis/3a/3b code inline 4× dans le moteur mail + 2× dans le moteur PJ + 3× dans `api_suggest_pj_folder` + `api_smart_paperclip`. Vision Yvan 14/05 : « tronc commun + spécificités ».
-- **Action si violé** : un développeur a réintroduit du code inline. Le re-factoriser dans un helper.
+- **Action si violé** : un développeur a réintroduit du code inline pour une règle commune. Le re-factoriser via un helper.
 
 ### I-CLASS-N9-02 : R1 cohérence réciproque mail ↔ PJ
 

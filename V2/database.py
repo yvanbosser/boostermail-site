@@ -1172,20 +1172,6 @@ class Database:
         rows = c.fetchall()
         return [{'folder_path': r[0], 'subject': r[1] or '', 'keywords': r[2] or '', 'count': r[3], 'last_date': r[4]} for r in rows]
 
-    def get_contact_folder_stats(self, contact_email):
-        """Retourne les stats par dossier pour un contact (pour la règle automatique)."""
-        uid = self._uid()
-        c = self._conn().cursor()
-        c.execute("""
-            SELECT folder_path, folder_id, COUNT(*) as cnt
-            FROM folder_classifications
-            WHERE contact_email = ? AND user_id = ?
-            GROUP BY folder_path
-            ORDER BY cnt DESC
-        """, (contact_email, uid))
-        rows = c.fetchall()
-        return [{'folder_path': r[0], 'folder_id': r[1], 'count': r[2]} for r in rows]
-
     def get_last_recent_classification(self, contact_email, max_age_seconds=7200):
         """Retourne le dernier classement mail d'un contact si < max_age_seconds.
         Sert au Tier R1 réciproque PJ→mail (N9) : si une PJ vient d'être classée

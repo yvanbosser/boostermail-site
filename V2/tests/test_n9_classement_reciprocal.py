@@ -237,6 +237,57 @@ def test_db_get_last_recent_classification_max_age():
 
 
 # =============================================================================
+# Section 2bis — N9-bis filtre stop-words R1 réciproque (audit A-5)
+# =============================================================================
+
+def test_reciprocal_stopwords_filter():
+    """N9-bis A-5 — R1 réciproque ignore les mots génériques (« Documents »,
+    « Factures », etc.) pour éviter les faux positifs sur dossiers communs.
+
+    Une PJ classée dans `D:\\PJ\\Documents` NE doit PAS faire que R1 PJ→mail
+    propose tout dossier Outlook contenant le mot « documents ».
+    """
+    contact = f'stopw@n9bis-test-{int(time.time())}.com'
+    _cleanup_db(contact)
+    # PJ classée dans un dossier générique
+    ap._db.save_pj_classification(
+        original_filename='Doc.pdf', renamed_filename='r.pdf',
+        dest_folder='D:\\PJ\\Documents',  # générique
+        contact_email=contact, domain=contact.split('@')[1],
+        subject='S', subject_keywords='s')
+    # Folders Outlook contenant le mot "documents"
+    folders_outlook = [
+        {'id': 'd1', 'name': 'Documents administratifs',
+         'path': 'WORK/Documents administratifs'},
+        {'id': 'd2', 'name': 'Old documents',
+         'path': 'ARCHIVE/Old documents'},
+    ]
+    res = ap._apply_reciprocal_coherence_mail(contact, folders=folders_outlook)
+    ok = log_test("R1 stop-words : PJ dans 'Documents' générique → pas de match Outlook",
+                  res is None,
+                  f"faux positif : got={res!r}")
+
+    # Inverse : un mot non-générique doit toujours matcher
+    _cleanup_db(contact)
+    ap._db.save_pj_classification(
+        original_filename='Bail.pdf', renamed_filename='r.pdf',
+        dest_folder='D:\\PJ\\Le Cardo',
+        contact_email=contact, domain=contact.split('@')[1],
+        subject='S', subject_keywords='s')
+    folders_outlook2 = [
+        {'id': 'c1', 'name': 'Le Cardo', 'path': 'IMMOBILIER/SCI/Le Cardo'},
+    ]
+    res2 = ap._apply_reciprocal_coherence_mail(contact,
+                                                folders=folders_outlook2)
+    ok &= log_test("R1 stop-words : mot non-générique « cardo » matche toujours",
+                   res2 is not None
+                   and 'Cardo' in (res2.get('folder_path') or ''),
+                   f"got={res2!r}")
+    _cleanup_db(contact)
+    return ok
+
+
+# =============================================================================
 # Section 3 — 3 portes PJ unifiées sous le moteur
 # =============================================================================
 
@@ -313,6 +364,8 @@ def main():
         ('test_reciprocal_pj_to_mail', test_reciprocal_pj_to_mail),
         ('test_reciprocal_mail_to_pj_recent', test_reciprocal_mail_to_pj_recent),
         ('test_db_get_last_recent_classification_max_age', test_db_get_last_recent_classification_max_age),
+        # Section 2bis — N9-bis filtre stop-words (audit A-5)
+        ('test_reciprocal_stopwords_filter', test_reciprocal_stopwords_filter),
         # Section 3 — régressions statiques 3 portes PJ
         ('test_regression_smart_paperclip_uses_engine', test_regression_smart_paperclip_uses_engine),
         ('test_regression_suggest_pj_folder_uses_engine', test_regression_suggest_pj_folder_uses_engine),
