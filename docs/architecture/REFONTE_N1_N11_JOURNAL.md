@@ -1,6 +1,6 @@
-# Journal de la refonte BoosterMail SaaS — Niveaux 1 à 10
+# Journal de la refonte BoosterMail SaaS — Niveaux 1 à 11
 
-> **Période** : 11/05/2026 → 14/05/2026 (3 jours intensifs)
+> **Période** : 11/05/2026 → 14/05/2026 (3 jours intensifs + 1 session autonomie 2h)
 > **Branche** : `feat/yvan/frontend`
 > **Référence visuelle** : `docs/architecture/BoosterMail_Arbre_Decisionnel_v2.pptx`
 > **Source de vérité métier** : `docs/specs_proto/SPEC_*.md` (specs consolidées proto)
@@ -103,6 +103,7 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 | **N8** | 13/05/2026 19:55 | `9fbd97d` | `7939f7e` | `test_n8_classement.py` (15 tests) |
 | **N9** | 14/05/2026 08:15 | `1d8fd5d` | `0e59c18` | `test_n9_classement_reciprocal.py` (10 tests) |
 | **N10** | 14/05/2026 09:21 | `657d022` | `c1c4fcd` | `test_n10_contacts.py` (13 tests) |
+| **N11** | 14/05/2026 10:28 | `9853345` | `09aff3a` | `test_n11_branches.py` (11 tests) |
 
 **Total : 13 niveaux livrés** (N1-N9 + 4 -bis correctifs). Tous les tests passent (somme cumulée des suites de tests N1-N9 = 200+ tests verts).
 
@@ -432,11 +433,52 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 
 ---
 
+### N11 + N11-bis — Dispatcher unique 3 branches ÉCARTÉ/PARTIEL/VIP (14/05, session autonomie 2h)
+
+**Objectif** : slide 4 PPTX « Les 3 branches & leurs plats préparés » + slide 9 « Comportement à l'usage ». Pacte enrichi « propre + robuste + rapide + efficace ».
+
+**Cartographie initiale** : spec maîtresse `SPEC_ARBRE_DECISIONNEL.md` (08/05) trouvée — leçon N8/N9 appliquée. Spec partiellement obsolète sur les lignes pointées (post-N4/N5/N6.1).
+
+**Démolisseur v1 — 3 P0 critiques** :
+- **P0-1 Conflit produit Échéance VIP entrants** : slide 4 dit OUI (5 frigos pleins), `SPEC_ECHEANCES_BOOSTERMAIL.md` (05/05) + memory `feature_echeances_scope` disent NON (« sortants only, out-of-scope les entrants — trop complexe, faux positifs, ambiguïtés date, multilingue »). Conflit produit non-résolu → **suspendu Yvan** avec marker explicite dans le code (ligne 4244).
+- **P0-2 Colonne DB `branch_initial` multi-tenant unsafe** : `email_cache` n'a pas de `user_id` → ajouter une colonne aurait créé une fuite cross-tenant. Étape supprimée. Mécanisme `_mark_filtered_in_cache` + `UserScopedDict` fait déjà le job.
+- **P0-3 Bug fantôme PARTIAL→VIP** : `_mark_filtered_in_cache` + `_should_speculate:1709` bloque DÉJÀ la promotion silencieuse. L'étape « verrou DB » était sur-engineering.
+
+**Décisions Yvan (validées en autonomie selon règle « la plus robuste »)** : suppression de `_should_speculate` (refactor net, pas wrapper rétro-compat). Pas de nouvelle colonne DB. Pas de scope produit nouveau (suspendu Yvan).
+
+**N11** (`9853345`) :
+- **Nouveau dispatcher unique `_classify_mail_branch(mail_data)`** (`V2/app_plugin.py:7339`) — retourne `{'branch': 'discarded'|'partial'|'vip', 'reason': str}`. Logique : `_is_discarded` → `_filter_2_is_vip` → branche déduite. Fail-open par composition.
+- **`_should_speculate` SUPPRIMÉ** (wrapper qui combinait Filtre 1+2). 4 call sites migrés (`summarize_mails_to_db:6140`, `_run_prefetch` cold cache guard + post-prefetch simplifiés, `/api/instant_reply:11517` diagnostic).
+- **Élimination de la double exécution Filtre 1+2 dans `_run_prefetch`** : 3 calculs successifs (lignes 6237 + 6250 + 6289) → 1 seul calcul propagé en `_branch_info`. Les bloc `else` unreachable ont été supprimés (le branchement haut garantit que branch='vip' aux call sites downstream).
+- **Renforcement décision N5 « pas de réveil PARTIAL→VIP »** par construction : impossible désormais de reclassifier un PARTIAL en VIP au prochain passage de `_run_prefetch` (1 seul calcul en haut).
+- **Tests** : `test_n11_branches.py` 11/11 verts (5 comportementaux dispatcher + 2 contrat-API + 1 absence-symbole + 3 régression statique).
+
+**Audit rétrospectif post-N11** : 2 récidives + 1 zone grise. Profil identique aux -bis précédents.
+
+**N11-bis** (`09aff3a`) — **5 corrections** :
+- **A-1 Migration 4 sites bypass** : démolisseur initial n'avait identifié que les 4 sites `_should_speculate(`. L'audit rétrospectif a trouvé 4 sites SUPPLÉMENTAIRES qui appelaient `_filter_2_is_vip` ou `_is_discarded` directement (bypass du dispatcher) : `_continuous_speculation_loop:1687`, spéculation préemptive:7730, `/api/instant_reply:11487`, `_prewarm_mail_preview:4367`. Tous migrés.
+- **A-2 Test régression renforcé** : `test_regression_no_bypass_dispatcher` compte désormais aussi `_filter_2_is_vip(` et `_is_discarded(`. Exige ≤ 2 occurrences chacun (def + 1 dans dispatcher). Toute future tentative de bypass fait échouer le test. Cohérent avec invariant I-BRANCHES-N11-01.
+- **A-3 Marker SUSPENDU dans le code** : bloc commentaire détaillé au-dessus de `scan_echeance=False` ligne 4244 documentant le conflit produit + les 4 étapes à suivre si Yvan réactive. Évite l'oubli au prochain refactor.
+- **A-4 Diagnostic `/api/instant_reply` consolidé** : avant N11-bis, double exécution Filtre 2 dans la MÊME endpoint (line 11487 puis line 11517). Maintenant 1 seul appel `_classify_mail_branch(_md)` avec reconstruction `_md` faite une seule fois. Économie ~1 SQL get_cached_email + 1 get_contact_profile par requête.
+- **A-5 Docstring stale `_start_speculative`** : référence stale à `_filter_2_is_vip()` → MAJ vers `_classify_mail_branch(...)['branch'] == 'vip'`.
+
+**Métriques HONNÊTES** :
+- N11 : `+105/-97 app_plugin (+8 net)` + `+30/-23 test_n4 (+7)` + `+7/-5 test_n5 (+2)` + `+304 test_n11 nouveau` = **+8 prod net** (vs « -55 net » estimé plan v2 — écart honnêtement reconnu dans commit message)
+- N11-bis : `+37/-32 app_plugin (+5 net)` + `+21/-7 test_n11 (+14)` = **+5 prod net** (corrections ciblées)
+
+**Leçons N11** :
+- **Le démolisseur initial PEUT manquer des bypass** s'il cherche le mauvais marqueur. Le démolisseur cherchait `_should_speculate(` (4 sites). L'audit rétrospectif a trouvé qu'il fallait aussi chercher `_filter_2_is_vip(` et `_is_discarded(` (4 sites supplémentaires). Le test régression statique doit **enforcer l'invariant**, pas vérifier l'absence d'un nom historique.
+- **Suspendre une décision produit dans le code requiert un marker explicite** — sinon le futur dev retombe dessus aveuglément. Pattern à généraliser.
+- **Travail en autonomie 2h respecté** : règles d'autonomie tenues — décision la plus robuste à chaque hésitation (suppression vs wrapper, RAM vs DB colonne, fix vs suspendu). Blocage produit (Échéance VIP) renseigné dans todo + commit + marker code pour reprise.
+- **6 -bis sur 11 niveaux = taux 55%** — le pattern méthodologique est maintenant statistiquement stable.
+
+---
+
 ## 5. Méthodes & invariants livrés (vue système)
 
-### Tables DB schéma augmenté en N1-N9
+### Tables DB schéma augmenté en N1-N11
 
-| Table | Niveau d'origine | Ajouts N1-N9 |
+| Table | Niveau d'origine | Ajouts N1-N11 |
 |---|---|---|
 | `email_cache` | proto | Garde I-CANON-01 N2, migration N1 |
 | `mail_summaries` | proto | Persiste résumé commis N6.1, helper `get_all_dishes_for_mail` |
@@ -447,7 +489,7 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 | `pj_classifications` | proto | Moteur classement PJ N8, index filename `idx_pj_class_filename` |
 | `contact_profiles` | proto | Colonnes `polluted`, `last_audited_version` N3 |
 
-### Constantes module-level (N1-N9)
+### Constantes module-level (N1-N11)
 
 - `_AUTO_EMAIL_PATTERNS` (N1) — liste no-reply unique
 - `_FILTER_1_MAX_AGE_DAYS = 30`, `_FILTER_1_MIN_BODY_LEN = 10` (N4)
@@ -474,6 +516,8 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 | I-CLASS-N8-01 → 05 | N8 + bis | Moteur classement mail unifié |
 | I-CLASS-N9-01 → 03 | N9 + bis | Moteur commun + R1 réciproque + 3 portes PJ |
 | I-CONTACT-N10-01 → 03 | N10 + bis | Dispatcher orchestrateur · squelette via save_to_thread · purge UPDATE-blank multi-tenant |
+| **I-BRANCHES-N11-01** | **N11 + bis** | **Dispatcher unique 3 branches — aucun bypass `_is_discarded` ou `_filter_2_is_vip` hors `_classify_mail_branch`** |
+| **I-BRANCHES-N11-02** | **N11** | **Pas de réveil PARTIAL→VIP (renforcé par construction)** |
 | I-SESS-06 | (avant) | Branche `dev/master/main` interdite |
 
 ---
@@ -493,32 +537,34 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 ✅ N8 + bis — Règles classement mail/PJ                              (13-14/05)
 ✅ N9 + bis — Moteur commun mail/PJ + R1 réciproque + 3 portes PJ    (14/05)
 ✅ N10 + bis — Gestion contacts : squelette + purge UPDATE-blank      (14/05)
-⏳ N11..N12 — à enchaîner
+✅ N11 + bis — Dispatcher unique 3 branches (ÉCARTÉ/PARTIEL/VIP)      (14/05)
+⏳ N12 — à enchaîner
 ```
 
-**Hypothèse N11** : slide 9 PPTX « Comportement à l'usage — 3 commandes » (Répondre / Classer rapide / Voir résumé) — qualification des cas VIP / PARTIEL / ÉCARTÉ.
+**Hypothèse N12** : tests d'intégration finale OU mise à jour spec ECHEANCES + décision Yvan sur scope sortants vs VIP entrants OU autre zone à définir.
 
-**Hypothèse N12** : tests d'intégration finale ou refonte d'une zone non encore identifiée.
+**SUSPENDU N11** : décision Yvan sur la réactivation Échéance VIP entrants. Conflit slide 4 PPTX vs SPEC_ECHEANCES 05/05 + memory `feature_echeances_scope` (« sortants only, out-of-scope les entrants »). Marker dans le code à `app_plugin.py:4244` pour traçabilité.
 
-À déterminer avec Yvan en début de la session N11.
+À déterminer avec Yvan en début de la session N12.
 
 ---
 
-## 7. Statistiques globales N1-N9
+## 7. Statistiques globales N1-N11
 
 | | Chiffre |
 |---|---|
-| Niveaux livrés | 10 (+ 5 -bis correctifs) |
-| Durée | 3 jours (11/05 → 14/05/2026) |
-| Commits refonte | 26 |
-| Tests fichiers créés | 13 (test_n2..test_n10_contacts) |
-| Tests verts (somme cumulée des suites) | 220+ |
+| Niveaux livrés | 11 (+ 6 -bis correctifs) |
+| Durée | 3 jours + 1 session autonomie 2h (11/05 → 14/05/2026) |
+| Commits refonte | 30 |
+| Tests fichiers créés | 14 (test_n2..test_n11_branches) |
+| Tests verts (somme cumulée des suites) | 233 (79+28+77+15+10+13+11) |
 | Anti-patterns codifiés | 8 |
-| Démolisseurs lancés | ~22 (sub-agents pré-impl) |
-| Regards frais lancés | ~17 (sub-agents pré-commit) |
-| Audits rétrospectifs | 10 (1 par niveau) |
-| -bis correctifs | 5 (N6.3, N7, N8, N9, N10) |
+| Démolisseurs lancés | ~24 (sub-agents pré-impl) |
+| Regards frais lancés | ~18 (sub-agents pré-commit) |
+| Audits rétrospectifs | 11 (1 par niveau) |
+| -bis correctifs | 6 (N6.3, N7, N8, N9, N10, N11) |
 | Bugs critiques en prod corrigés | 1 (fuite cross-tenant purge contacts — N10) |
+| Décisions produit suspendues | 1 (Échéance VIP entrants — conflit slide 4 vs spec ÉCHÉANCES 05/05) |
 
 ---
 

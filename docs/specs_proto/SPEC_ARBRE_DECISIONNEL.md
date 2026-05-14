@@ -1,9 +1,16 @@
-# SPEC ARBRE DÉCISIONNEL — BoosterMail (consolidée 08/05/2026)
+# SPEC ARBRE DÉCISIONNEL — BoosterMail (consolidée post-N11)
 
-> **Statut** : source de vérité unique de l'arbre décisionnel BoosterMail.
-> **Origine** : revue d'architecture 08/05/2026 post-O5 (Yvan + Claude),
-> matérialisée par un PowerPoint + 2 rapports d'audit + ce SPEC.
-> **Représentation visuelle** : [`docs/architecture/BoosterMail_Arbre_Decisionnel.pptx`](../architecture/) (9 slides).
+> **Dernière mise à jour** : 14/05/2026 (clôture N11 + N11-bis)
+>
+> **Statut** : source de vérité unique de l'arbre décisionnel BoosterMail (niveaux 0 → 5).
+> Remplace la version 08/05/2026 (devenue obsolète après refontes N1→N11). Tous les niveaux livrés sont reflétés ici avec les bonnes références code V2.
+>
+> **Représentation visuelle** : [`docs/architecture/BoosterMail_Arbre_Decisionnel_v2.pptx`](../architecture/) (9 slides).
+>
+> **Documents liés** :
+> - `SPEC_CLASSEMENT_BOOSTERMAIL.md` (chapitres A/B/C — règles classement mail/PJ + joindre fichier)
+> - `SPEC_CONTACTS_BOOSTERMAIL.md` (création progressive + purge auto 24 mois)
+> - `SPEC_ECHEANCES_BOOSTERMAIL.md` (échéances scope V1 = sortants only — voir conflit suspendu N11 §6)
 
 ---
 
@@ -15,9 +22,10 @@ BoosterMail traite chaque mail entrant comme un client qui passe commande dans u
 |---|---|
 | 🛎️ **Sonnette webhook** | Microsoft Graph webhook `/api/webhooks/graph` → `_handle_graph_webhook_notifications` |
 | 👨‍🍳 **Chef Sonnet** | `claude_ai.generate_reply` (Anthropic Sonnet 4.6) — rédige les réponses |
-| 👨‍🍳 **Commis Haiku** | `claude_ai.analyze_one_mail_stream` (Anthropic Haiku 4.5) — résumé+échéance+classement |
+| 👨‍🍳 **Commis Haiku** | `claude_ai.analyze_one_mail_stream` (Anthropic Haiku 4.5) — résumé + classement |
 | 🥘 **5 frigos** | 5 caches : Réponse, Résumé, Classement Mail, Classement PJ, Échéance |
-| 📋 **Fiche de commande** | Le « prompt » envoyé à Claude (9 blocs A/B/C/D/D2/E/G/BRIEF/SECURITE) |
+| 📋 **Fiche de commande** | Le « prompt » envoyé à Claude (9 blocs A/B/C/D/D2/G/BRIEF/SECURITE — bloc E supprimé en N6.2) |
+| 🚦 **Dispatcher 3 branches** | `_classify_mail_branch(mail_data)` (N11) — aiguille vers ÉCARTÉ / PARTIEL / VIP |
 
 ---
 
@@ -27,182 +35,172 @@ BoosterMail traite chaque mail entrant comme un client qui passe commande dans u
 
 À chaque nouveau mail, Microsoft envoie une notification webhook. BoosterMail :
 
-1. **Stocke le mail brut** en `email_cache` DB (toujours fait — invariant I-DATA-11)
-2. **Crée ou met à jour** le profil contact (squelette dès le 1er mail, enrichi à 2 reçus OU 1 envoyé — règle O1 du 08/05)
-3. **Applique Filtre 1** pour décider si le mail doit être pré-cuisiné
+1. **Stocke le mail brut** en `email_cache` DB (toujours fait — invariant I-CANON-01 + R3 stockage brut, refonte N1)
+2. **Crée le squelette contact** dès le 1er mail via le hook `save_to_thread` → `create_contact_skeleton(email)` (refonte N10)
+3. **Appelle le dispatcher unique `_classify_mail_branch`** pour aiguiller vers ÉCARTÉ / PARTIEL / VIP (refonte N11)
 
 ### Niveau 1 — FILTRE 1 « écarter »
 
-Un mail est **écarté** (pas de plats préparés en BG) si AU MOINS UNE de ces conditions est vraie :
+Un mail est **écarté** (pas de plats préparés en BG) si AU MOINS UNE de ces conditions est vraie (5 règles atomiques, refonte N4 12/05) :
 
-1. **Expéditeur automatique** : no-reply, newsletter, postmaster, mailer-daemon, donotreply, nepasrepondre (et variantes — patterns canoniques dans `_SPEC_NOREPLY_PATTERNS`)
-2. **Mail de plus de 30 jours**
-3. **Mail déjà répondu par l'utilisateur** (check `_db.is_treated`)
-4. **Body de moins de 10 caractères sans point d'interrogation**
+1. **Expéditeur automatique** : no-reply, newsletter, postmaster, mailer-daemon, donotreply, nepasrepondre (patterns dans `_AUTO_EMAIL_PATTERNS` — liste unique post-N1)
+2. **Mail de plus de 30 jours** (`_FILTER_1_MAX_AGE_DAYS = 30`)
+3. **Utilisateur en CC seulement** (pas en TO) — règle ajoutée en N4 (issue du Filtre 2 pré-N4)
+4. **Body de moins de 10 caractères sans point d'interrogation** (`_FILTER_1_MIN_BODY_LEN = 10`)
+5. **Mail déjà traité par l'utilisateur** (check `_db.is_treated`)
 
-Implémentation : `_is_discarded(mail_data)` dans [V2/app_plugin.py:5860](../../V2/app_plugin.py:5860) (sous-ensemble strict des 4 premiers filtres de `_should_speculate`).
+Implémentation : `_is_discarded(mail_data) → (bool, raison)` dans `V2/app_plugin.py:7229`. Helper fail-open par contrat (chaque règle dans try/except). Tests : `V2/tests/test_n4_filtre_1.py` — **79/79 verts**.
 
 **Conséquence si écarté** : aucun plat préparé. Le mail brut reste en `email_cache`. Si l'user clique « Répondre » ultérieurement, cuisson à la commande en streaming (3-8 sec).
 
 ### Niveau 2 — FILTRE 2 « VIP ou partiel »
 
-Pour les mails non-écartés, BoosterMail collecte les blocs ABC (Graph API parallèle), met à jour le profil contact, puis évalue si le mail est **VIP** (cascade Sonnet+Haiku complète) ou **PARTIEL** (Haiku unifié seul).
+Pour les mails non-écartés, le mail est **VIP** si la fiche contact est bien remplie, sinon **PARTIEL** (refonte N5 12/05) :
 
-Un mail est **VIP** si TOUTES ces conditions sont vraies :
+- **VIP** : `sample_count >= 1 OR manually_edited = 1` (Q1 N5 décision Yvan)
+- **PARTIEL** : `sample_count = 0` AND `manually_edited != 1`
 
-1. **Contact connu** (`_is_contact_known(email)` = profil enrichi présent en `contact_profiles` DB)
-2. **L'utilisateur est destinataire principal (TO)**, pas seulement en copie (CC)
+Implémentation : `_filter_2_is_vip(email) → (bool, raison)` dans `V2/app_plugin.py:7026`. Helper fail-open total via `_safe_int` (refonte N5 « remise au propre » post-audit). 5 raisons retournées : `email_invalide`, `db_fail`, `pas_de_fiche`, `profile_corrupt`, `fiche_vide`. Tests : `V2/tests/test_n5_filtre_2.py` — **28/28 verts**.
 
-Sinon → **PARTIEL** (un seul échec sur ces 2 conditions suffit pour basculer).
+### Niveau 3 — Dispatcher unique 3 branches (N11)
 
-Implémentation : Filtres 5 (« 5 ouvertures sans réponse ») et 6 (« utilisateur en CC ») de `_should_speculate` dans [V2/app_plugin.py:5783](../../V2/app_plugin.py:5783) → si l'un fire, on bascule du Sonnet vers le Haiku unifié seul (mode PARTIEL).
+**1 seul aiguillage** appelé partout (par contraintes I-BRANCHES-N11-01 enforced par test) :
 
-### Niveau 3 — Les 3 branches
+```python
+_classify_mail_branch(mail_data) → {'branch': 'discarded'|'partial'|'vip', 'reason': str}
+```
+
+Implémentation : `V2/app_plugin.py:7339`. Logique : `_is_discarded` → `_filter_2_is_vip` → branche déduite. Fail-open par composition.
+
+**Avant N11** : 5 sites de décision dispersés + double exécution Filtre 1+2 dans `_run_prefetch`. `_should_speculate` (wrapper) coexistait avec les appels directs aux helpers atomiques.
+
+**Après N11** : 1 seul calcul par mail, propagé via variable locale `_branch_info`. `_should_speculate` SUPPRIMÉ. Aucun bypass possible (test régression statique `test_regression_no_bypass_dispatcher` détecte tout appel direct `_is_discarded(` ou `_filter_2_is_vip(` hors dispatcher).
 
 | Branche | Plats préparés | Coût typique |
 |---|---|---|
-| **ÉCARTÉ** | AUCUN (cuisson à la commande au clic) | $0 à la réception, $0.005 si user clique |
+| **ÉCARTÉ** | AUCUN (cuisson à la commande au clic) | $0 à la réception, ~$0.005 si user clique |
 | **PARTIEL** | 3 plats commis Haiku unifié : Résumé + Classement Mail + Classement PJ | ~$0.002/mail |
-| **VIP** | Cascade complète : Body Sonnet (avec analyse PJ + blocs ABC) + 4 plats commis Haiku | ~$0.005 + ~$0.002 = ~$0.007/mail |
+| **VIP** | Cascade : Body Sonnet (réponse + analyse PJ + blocs ABC) + 3 plats commis Haiku **(échéance VIP suspendue — voir §6)** | ~$0.005 + ~$0.002 = ~$0.007/mail |
 
-### Niveau 4 — Les 5 frigos
+### Niveau 4 — Les 5 frigos (refonte N7)
 
 | Frigo | Contenu | Source | Nettoyage |
 |---|---|---|---|
-| **Réponse** | Body Sonnet (texte HTML prêt à streamer) | `_reply_cache` RAM + `drafts_v2.json` disque | Vidé quand mail répondu / classé / supprimé |
-| **Résumé** | Points principaux + actions attendues (Haiku) | `mail_summaries` DB | Vidé quand mail supprimé |
-| **Classement Mail** | Suggestion top 1 + 2 alternatives (7 tiers + IA Haiku) | `mail_classement_cache` DB + `_mail_preview_cache` RAM | Vidé quand mail classé / supprimé |
-| **Classement PJ** | Suggestion dossier Windows + alternatives (Haiku) | `mail_pj_classement_cache` DB | Vidé quand mail classé / supprimé |
-| **Échéance** | Date + description engagement détecté (VIP only) | `mail_echeance_cache` DB | Purge auto : 30j après validation, 60j pending orphelin |
+| **Réponse** | Body Sonnet (texte HTML prêt à streamer) | `_reply_cache` RAM + `drafts_v2.json` disque | Dispatcher unique `_purge_frigos_for_action(mid, 'replied'|'classified'|'archived'|'deleted')` |
+| **Résumé** | Points principaux + actions attendues (Haiku) | `mail_summaries` DB | Idem (action 'archived' OU 'deleted' OU 'replied') |
+| **Classement Mail** | Top 3 suggestions (moteur N8 + R1 réciproque N9) | `mail_classement_cache` DB + `_mail_preview_cache` RAM | Idem (action 'replied' OU 'classified' OU 'archived' OU 'deleted') |
+| **Classement PJ** | Top 3 suggestions PJ (moteur N9 réciproque mail↔PJ) | `mail_pj_classement_cache` DB | Idem |
+| **Échéance** | Date + description engagement détecté (sortants only V1) | `mail_echeance_cache` DB | Purge auto : 30j après validation, 60j pending orphelin |
 
-**Mémoire vive (RAM)** : 24h pour les frigos courts. **Mémoire longue (DB)** : tant que le mail existe dans l'inbox.
+**Mémoire vive (RAM)** : 24h pour les frigos courts. **Mémoire longue (DB)** : tant que le mail existe dans l'inbox. Refonte N7 a unifié les 5 frigos sous une table de vérité explicite (action × frigo → purge OUI/NON).
 
-### Niveau 5 — Comportement à l'usage
+### Niveau 5 — Comportement à l'usage (slide 9 PPTX)
 
 Quand l'utilisateur clique sur une commande :
 
 | Commande | VIP | PARTIEL | ÉCARTÉ |
 |---|---|---|---|
-| **Répondre** | Instantané (300 ms) — 5 frigos pleins | 3 frigos pleins → instantané pour résumé/classement, **streaming Sonnet 3-8 sec pour body** | Streaming complet 5-8 sec |
+| **Répondre** | Instantané (300 ms) — 4 frigos pleins (5e échéance suspendue §6) | 3 frigos pleins → instantané pour résumé/classement, **streaming Sonnet 3-8 sec pour body** | Streaming complet 5-8 sec |
 | **Classer rapide** | Instantané (Haiku frigo plein) | Instantané (Haiku frigo plein) | Cuisson à la commande 1 appel Haiku 2-3 sec |
-| **Voir résumé / échéance** | Instantané | Instantané pour résumé. Échéance non pré-cuisinée (scope V1 = sortants only) | Cuisson à la commande 1-2 sec |
+| **Voir résumé / échéance** | Résumé instantané. **Échéance : voir §6 (suspendu Yvan)** | Résumé instantané. Échéance non pré-cuisinée (scope V1 = sortants only) | Cuisson à la commande 1-2 sec |
 
 ---
 
-## 3. Règles de classement Mail — 7 tiers
+## 3. Règles de classement Mail — 7 tiers (chapitre A spec)
 
-Le maître d'hôtel descend la liste et prend la première règle qui dit oui. Top 1 + 2 alternatives présentés à l'utilisateur.
-
-| Tier | Règle | Confiance | Coût |
-|---|---|---|---|
-| 1 | **Même fil** : ce contact + ce sujet déjà classé | 0.95 | $0 |
-| 2 | **Dossier habituel du contact** : 3+ mails classés tous au même endroit | 1.00 | $0 |
-| 3 | **Contact + mots de l'objet** : sujet (puis corps en fallback) match un classement passé | 0.90 | $0 |
-| 4 | **Nom de dossier dans le mail** : sujet/corps contient le nom d'un de tes dossiers (≥4 chars, mot complet) | 0.80 | $0 |
-| 5 | **Règle de domaine** : 3+ contacts du même domaine classent au même endroit (gmail/hotmail exclus) | 0.60 | $0 |
-| 6 | **Sujet cross-contact** : 3+ contacts différents écrivent sur le même sujet, classés au même endroit | 0.70 | $0 |
-| 7 | **Momentum** : tu viens de classer dans X dans les 2 dernières heures → propose le même | 0.50 | $0 |
-| 8 (fallback) | **IA Haiku** : le commis lit le mail + ton arbre + propose un top 3 | variable | ~$0.002 |
-
-**Règle d'or** : les règles spécifiques (1, 2, 3, 4) priment toujours sur les règles générales (5, 6).
-
-Source : `api_suggest_folder` dans [V2/app_plugin.py:7340](../../V2/app_plugin.py:7340).
+Voir document dédié : [`SPEC_CLASSEMENT_BOOSTERMAIL.md`](SPEC_CLASSEMENT_BOOSTERMAIL.md) §2 (consolidé 02/05). Refondu en moteur commun en N8 + R1 réciproque mail↔PJ en N9.
 
 ---
 
-## 4. Règles de classement PJ — 2 différences vs Mail
+## 4. Règles de classement PJ — chapitre B spec
 
-Mêmes 7 tiers que le mail, sauf pour les règles 1 et 3 :
-
-| Règle | Pour le MAIL | Pour la PJ |
-|---|---|---|
-| **#1 — Premier critère** | Même fil : ce contact + ce sujet déjà classé | **Cohérence mail→PJ** : si le mail va dans X (Outlook), cherche un dossier Windows correspondant |
-| **#3 — Mot-clé prioritaire** | Mots de l'objet du mail | **Nom du fichier** (puis sujet, puis corps) |
-
-Règles 2, 4, 5, 6, 7, 8 : strictement identiques au pipeline mail.
+Voir document dédié : [`SPEC_CLASSEMENT_BOOSTERMAIL.md`](SPEC_CLASSEMENT_BOOSTERMAIL.md) §3. Moteur commun avec mail + 2 différences (cohérence mail↔PJ + nom fichier prioritaire) — refonte N9.
 
 ---
 
 ## 5. Gestion des contacts
 
-### Création progressive
+Voir document dédié : [`SPEC_CONTACTS_BOOSTERMAIL.md`](SPEC_CONTACTS_BOOSTERMAIL.md) (consolidé 14/05). Création progressive (squelette dès le 1er mail E/R, profil enrichi à 2 reçus OU 1 envoyé) + purge auto 24 mois UPDATE-blank multi-tenant — refonte N10.
 
-| Étape | Critère | Champs créés |
+---
+
+## 6. ⚠️ Suspendu Yvan — Échéance VIP entrants
+
+**Conflit produit non-résolu** identifié lors de l'audit N11 :
+
+- **Slide 4 PPTX** « Les 3 branches & leurs plats préparés » : VIP doit avoir Échéance pré-cuite (5 frigos pleins)
+- **`SPEC_ECHEANCES_BOOSTERMAIL.md` (05/05)** + memory `feature_echeances_scope` : **scope V1 = sortants only, out-of-scope les entrants** (faux positifs, ambiguïtés date, multilingue)
+
+**Code actuel** (statu quo jusqu'à décision Yvan explicite) :
+- `app_plugin.py:4244` : `scan_echeance=False` hardcodé (avec marker SUSPENDU N11-bis détaillé)
+- `app_plugin.py:3949, 3887` : `save_mail_echeance(mid, [])` forcé pour idempotence
+
+**Conséquence pratique** : un mail VIP entrant a **4 frigos pleins sur 5** (Body Sonnet + Résumé + Classement Mail + Classement PJ). L'échéance entrante reste à la commande.
+
+**Si Yvan réactive un jour** :
+1. Passer `scan_echeance=(branch == 'vip')` ligne 4244
+2. Adapter `save_mail_echeance(mid, [])` lignes 3949 et 3887 (ne pas forcer vide en VIP)
+3. Mettre à jour `SPEC_ECHEANCES_BOOSTERMAIL.md` (scope étendu aux entrants VIP)
+4. Tests d'intégration entrants vs sortants
+
+---
+
+## 7. Invariants livrés (audit/INVARIANTS.md)
+
+| Code | Sujet | Niveau d'origine |
 |---|---|---|
-| **Squelette** | Dès le 1er mail échangé | email + display_name (table `threads`, pas dans `contact_profiles`) |
-| **Profil enrichi** | 2 mails reçus OU 1 envoyé (règle O1 du 08/05) | catégorie, registre tu/vous, signature personnalisée, vocabulaire, niveau de confiance |
-| **Re-analyse** | Quand le ratio mails échangés / sample_count atteint un seuil | Tous les champs rafraîchis (cooldown 24h) |
-
-### Purge automatique
-
-- **Critère** : aucun mail (envoyé OU reçu) avec ce contact depuis **24 mois**
-- **Ce qui est purgé** : profil enrichi (catégorie, registre, signature, vocabulaire)
-- **Ce qui est conservé** : squelette (email + display_name), historique des classifications passées (table `folder_classifications`), profils marqués `manually_edited = 1`
-- **Si le contact réapparaît** : squelette recréé via la règle 2 reçus / 1 envoyé, les règles 1, 2, 3 du classement fonctionnent toujours grâce à l'historique préservé, profil enrichi régénéré au 1er envoi
-
-Implémentation : `purge_inactive_contact_profiles(months=24)` dans [V2/database.py:1933](../../V2/database.py:1933).
-
----
-
-## 6. Optimisations validées 08/05/2026
-
-| Code | Description | Statut |
-|---|---|---|
-| **O1** | Création profil enrichi à 2 reçus OU 1 envoyé (au lieu de 3 mails) | ✅ Implémenté |
-| **O2** | Momentum classement étendu de 30 min → 2 h | ✅ Implémenté |
-| **O3** | Cohérence mail→PJ étendue dans le prompt Haiku unifié | ⏸️ Différé C4 |
-| **O4** | RAM `_mail_preview_cache` étendue de 1 h → 24 h | ✅ Implémenté |
-| **O5** | Mode PARTIEL au webhook (Haiku unifié seul, sans Sonnet) | ✅ Implémenté |
-| **O6** | Purge auto contacts inactifs 24 mois | ✅ Implémenté |
-| **O7** | Skip blocs ABC pour les mails écartés (`_is_discarded`) | ✅ Implémenté |
+| I-CANON-01 | Canonicalisation IMID systématique | N1 / N2 |
+| I-NOREPLY-01 | Liste no-reply unifiée `_AUTO_EMAIL_PATTERNS` | N1 |
+| I-FILTER1-* | 5 règles atomiques Filtre 1 | N4 |
+| I-FILTER2-* | VIP vs PARTIEL fail-open | N5 |
+| I-PROMPT-N62-01 | Prompt Sonnet structuré 8 blocs | N6.2 |
+| I-ECHEANCE-N63-01 | Échéances sortantes only | N6.3 |
+| I-ECHEANCE-N63bis-01 | 11 patches résiduels résolus | N6.3-bis |
+| I-FRIGO-N7-01 | Dispatcher unique frigo purge | N7 |
+| I-THREADS-N7-01 | Pas de purge `threads` table | N7 |
+| I-CLASS-N8-01 → 05 | Moteur classement mail unifié | N8 + bis |
+| I-CLASS-N9-01 → 03 | Moteur commun mail/PJ + R1 réciproque + 3 portes PJ | N9 + bis |
+| I-CONTACT-N10-01 → 03 | Dispatcher contact + squelette + purge UPDATE-blank multi-tenant | N10 + bis |
+| **I-BRANCHES-N11-01** | **Dispatcher unique 3 branches — aucun bypass `_is_discarded` ou `_filter_2_is_vip` hors `_classify_mail_branch`** | **N11 + bis** |
+| **I-BRANCHES-N11-02** | **Pas de réveil PARTIAL→VIP (renforcé par construction)** | **N11** |
+| I-SESS-06 | Branche `dev/master/main` interdite | (avant) |
 
 ---
 
-## 7. Anomalies corrigées 08/05/2026 (audit)
+## 8. Sources de code (V2 actuel)
 
-Voir le rapport détaillé : [`audit/rapports/2026-05-08_audit_arbre_decisionnel_complet.md`](../../audit/rapports/2026-05-08_audit_arbre_decisionnel_complet.md).
-
-9 anomalies identifiées et corrigées dans 3 commits :
-
-1. Webhook `mail_data` complété avec `to`/`cc`/`date` (CC = PARTIEL toujours)
-2. Patterns no-reply centralisés (3 listes → 1 superset canonique)
-3. Regex HTML strip harmonisée entre `_should_speculate` et `_is_discarded`
-4. Échéance non-stockée pour mails entrants (spec V1 = sortants only)
-5. Fallback `_prewarm_mail_preview` si `_start_speculative` rate
-6. 4 méthodes `purge_mail_*` DB + appel dans `_purge_message_caches`
-7. `_event_purge_mail` symétrique avec `_purge_message_caches`
-8. Webhook deletion `changeType=deleted` + lookup IMID via `email_cache`
-9. (Doc) Slide 6 du PowerPoint : règle 3 mail (suppression « nom PJ » qui était inexact)
+- `V2/app_plugin.py:5644` — `api_webhook_graph` (entrée webhook)
+- `V2/app_plugin.py:5773` — `_ingest_new_mail` (refonte N1, pipeline ingestion)
+- `V2/app_plugin.py:7229` — `_is_discarded` (Filtre 1, refonte N4)
+- `V2/app_plugin.py:7026` — `_filter_2_is_vip` (Filtre 2, refonte N5)
+- `V2/app_plugin.py:7339` — **`_classify_mail_branch` (Dispatcher unique N11)**
+- `V2/app_plugin.py:6222` — `_run_prefetch` (cascade VIP Sonnet, refacto N11)
+- `V2/app_plugin.py:4024` — `_prewarm_unified_for_mail` (commis Haiku unifié N6.1)
+- `V2/app_plugin.py:4353` — `_prewarm_mail_preview` (orchestrateur Haiku, post-N11-bis)
+- `V2/app_plugin.py:1630` — `_continuous_speculation_loop` (BG cont-spec, post-N11-bis)
+- `V2/database.py:1854` — `_db.save_to_thread` (hook squelette contact N10)
 
 ---
 
-## 8. Documents liés
+## 9. Sources consolidées
 
-| Sujet | Document |
-|---|---|
-| Représentation visuelle | [`docs/architecture/BoosterMail_Arbre_Decisionnel.pptx`](../architecture/) |
-| Audit anomalies arbre | [`audit/rapports/2026-05-08_audit_arbre_decisionnel_complet.md`](../../audit/rapports/2026-05-08_audit_arbre_decisionnel_complet.md) |
-| Audit blocs prompt Claude | [`audit/rapports/2026-05-08_audit_blocs_prompt_claude.md`](../../audit/rapports/2026-05-08_audit_blocs_prompt_claude.md) |
-| Plan d'intervention futur | [`audit/rapports/2026-05-08_audit_remediation_PLAN.md`](../../audit/rapports/2026-05-08_audit_remediation_PLAN.md) |
-| Spec warmup (filet de sécurité) | [`docs/specs_proto/SPEC_WARMUP.md`](SPEC_WARMUP.md) |
-| Spec Smart Speculative (6 filtres) | [`docs/specs_proto/SPEC_SMART_SPECULATIF.md`](SPEC_SMART_SPECULATIF.md) |
-| Spec classement mail+PJ | [`docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md`](SPEC_CLASSEMENT_BOOSTERMAIL.md) |
-| Spec échéances | [`docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md`](SPEC_ECHEANCES_BOOSTERMAIL.md) |
-| Spec contacts adaptatifs | [`docs/specs_proto/SPEC_CONTACTS_ADAPTATIF.md`](SPEC_CONTACTS_ADAPTATIF.md) |
+| Doc d'origine | Date | Statut | Action prise |
+|---|---|---|---|
+| `SPEC_ARBRE_DECISIONNEL.md` (08/05) | 08/05/2026 | Refondu | Cette version remplace, anciennes lignes pointées obsolètes |
+| `SPEC_SMART_SPECULATIF.md` (proto, 6 filtres) | 12/04/2026 | Référence historique | Lignes obsolètes vs V2 SaaS, non-modifiée |
+| `SPEC_WARMUP.md` (filet de sécurité) | 12/04/2026 | Référence historique | Idem |
 
 ---
 
-## 9. Sources de code
+## 10. Pour la prochaine session — comment lire ce doc
 
-- [V2/app_plugin.py:4544](../../V2/app_plugin.py:4544) — `_handle_graph_webhook_notifications` (entrée webhook)
-- [V2/app_plugin.py:4881](../../V2/app_plugin.py:4881) — `_run_prefetch` (collecte blocs ABC)
-- [V2/app_plugin.py:5860](../../V2/app_plugin.py:5860) — `_is_discarded` (Filtre 1)
-- [V2/app_plugin.py:5783](../../V2/app_plugin.py:5783) — `_should_speculate` (Filtre 2 + 4 autres filtres)
-- [V2/app_plugin.py:5912](../../V2/app_plugin.py:5912) — `_start_speculative` (cascade VIP Sonnet)
-- [V2/app_plugin.py:2874](../../V2/app_plugin.py:2874) — `_prewarm_unified_for_mail` (mode PARTIEL Haiku unifié)
-- [V2/app_plugin.py:7340](../../V2/app_plugin.py:7340) — `api_suggest_folder` (7 tiers classement mail)
-- [V2/app_plugin.py:574](../../V2/app_plugin.py:574) — `_purge_message_caches` (nettoyage 5 frigos)
+1. **Si tu codes une nouvelle règle de Filtre 1** : §2 Niveau 1 + helpers `_rule_*` ligne 7136-7208 + tests N4.
+2. **Si tu touches au critère VIP** : §2 Niveau 2 + `_filter_2_is_vip` + tests N5.
+3. **Si tu doutes du dispatcher** : §2 Niveau 3 + `_classify_mail_branch` ligne 7339 + invariant N11-01 + test `test_regression_no_bypass_dispatcher`.
+4. **Si tu veux réactiver Échéance VIP** : §6 — décision Yvan obligatoire avant tout code.
+5. **Si tu te demandes ce qui est pré-cuit selon la branche** : §2 Niveau 3 tableau + §2 Niveau 5 (à l'usage).
 
----
-
-**Dernière mise à jour** : 08/05/2026 fin de session (post-audit complet)
+**Ne JAMAIS** :
+- Appeler `_is_discarded` ou `_filter_2_is_vip` directement dans le code prod (test invariant détecte le bypass et fait échouer la régression).
+- Réintroduire `_should_speculate` (supprimé en N11, anti-pattern « wrapper rétro-compat »).
+- Ré-écrire `scan_echeance=` à la main sans avoir tranché §6 (marker SUSPENDU dans le code).
