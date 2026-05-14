@@ -1032,6 +1032,28 @@ Le Tier 0 PJ « cohérence mail→PJ » consulte la table `folder_classification
 - **Pourquoi** : `mail_classement_cache` contient la SUGGESTION proposée par le BG (peut être fausse), pas le CHOIX user. Lire la suggestion = corréler une erreur avec une autre. Signal démolisseur v2 P0-1 (re-cadrage du Tier 0 PJ).
 - **Action si violé** : remplacer la lecture incorrecte par `_db.get_contact_folder_stats(contact_email)`.
 
+### I-CLASS-N9-01 : 4 helpers communs partagés mail↔PJ
+
+Les 4 règles identiques entre mail et PJ (R3 contact+sujet, R4 contact mono, R6 domaine, R7 cross-contact) sont implémentées dans des **helpers paramétrés** par la fonction DB du chapitre : `_apply_contact_mono_tier`, `_apply_keywords_tier`, `_apply_domain_tier`, `_apply_cross_contact_tier`. Les 2 moteurs (mail et PJ) appellent ces helpers — aucune duplication de logique métier.
+- **Preuve comportementale** : `tests/test_n9_classement_reciprocal.py::test_apply_contact_mono_tier_mail_vs_pj` — même helper appelé avec `get_fn=_db.get_folder_suggestion` et `get_fn=_db.get_pj_folder_suggestion` produit la règle mail OU PJ correspondante sur fixtures équivalentes.
+- **Régression statique** : `test_regression_engines_use_common_helpers` — `_compute_classement_suggestions` et `_compute_pj_classement_suggestions` doivent contenir les appels aux 4 helpers.
+- **Pourquoi** : avant N9, Tier 1/1bis/3a/3b code inline 4× dans le moteur mail + 2× dans le moteur PJ + 3× dans `api_suggest_pj_folder` + `api_smart_paperclip`. Vision Yvan 14/05 : « tronc commun + spécificités ».
+- **Action si violé** : un développeur a réintroduit du code inline. Le re-factoriser dans un helper.
+
+### I-CLASS-N9-02 : R1 cohérence réciproque mail ↔ PJ
+
+Si l'utilisateur classe **le mail en premier**, le moteur PJ propose le dossier cohérent (R1 mail→PJ via `_apply_reciprocal_coherence_pj`). Si l'utilisateur classe **la PJ en premier**, le moteur mail propose le dossier cohérent (R1 PJ→mail via `_apply_reciprocal_coherence_mail`, **NOUVEAU N9**). Les 2 helpers lisent la **dernière classification < 2h** (`_db.get_last_recent_classification` ou `_db.get_last_recent_pj_classification`) et font un fuzzy-match `last_segment` entre dossiers Outlook et dossiers filesystem.
+- **Preuve comportementale** : `test_reciprocal_pj_to_mail` (sens PJ→mail) + `test_reciprocal_mail_to_pj_recent` (sens mail→PJ raffiné récent).
+- **Pourquoi** : symétrie cognitive — peu importe que l'user clique d'abord sur le mail ou sur la PJ, l'autre côté doit suivre. Avant N9, seul le sens mail→PJ existait, et il lisait la fréquence cumulée (`get_contact_folder_stats`) au lieu de la récence (signal user immédiat).
+- **Action si violé** : restaurer les 2 helpers et leur usage dans les 2 moteurs.
+
+### I-CLASS-N9-03 : 3 portes PJ unifiées sous le moteur unique
+
+Les 3 contextes de classement PJ (BG via `_prewarm_unified_for_mail` · à-la-demande via `api_suggest_pj_folder` · compose via `api_post_generation_analyze` et `api_smart_paperclip`) appellent tous le même moteur `_compute_pj_classement_suggestions`. Aucune logique de tier inline en dehors du moteur, sauf le Tier 4 IA fallback (commis N6.1 pour BG, `suggest_pj_folder` pour route à-la-demande).
+- **Régression statique** : `test_regression_smart_paperclip_uses_engine` + `test_regression_suggest_pj_folder_uses_engine` — les 2 routes appellent `_compute_pj_classement_suggestions` et ne contiennent plus les marqueurs anciens (`best_match`/`best_score` ou `Tier 1 : regle auto (historique 3+)`).
+- **Pourquoi** : avant N9, 3 logiques 3-tiers inline distinctes côté PJ → divergences garanties dans le temps (fix Tier 1 PJ appliqué à 1 route sur 3). Symétrie avec le mail unifié en N8.
+- **Action si violé** : un développeur a remis du code inline dans `api_suggest_pj_folder` ou `api_smart_paperclip`. Restaurer le wrapper sur le moteur.
+
 ---
 
 ## Mise à jour

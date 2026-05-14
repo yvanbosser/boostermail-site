@@ -1003,6 +1003,22 @@ partageront un mail (newsletter commune, mailing-list, alias générique).
 
 ---
 
+### 34. Tier 5/6/7/8 PJ (folder_name filesystem + cross-contact PJ + momentum PJ) — N9 14/05/2026
+
+**Origine** : Refonte Niveau 9. La spec slide 7 prévoit 7 tiers identiques mail↔PJ, mais en SaaS débutant les 4 derniers tiers côté PJ (Tier 4 nom dossier filesystem, Tier 5 domaine PJ, Tier 6 cross-contact PJ, Tier 7 momentum PJ) apportent peu de valeur :
+- **Tier 4 nom dossier filesystem** : `_match_folder_name_in_text` attend la structure Graph (`parentFolderId`+`id` pour identifier les feuilles). Les `folders_pj` filesystem n'ont pas ces champs → helper inadapté, faudrait `_match_folder_path_in_text` séparé. Et folders_pj est souvent quasi vide en SaaS débutant.
+- **Tier 5 domaine PJ** : nécessite `get_pj_domain_folder_suggestion` (fonction DB à créer). Doublonne en pratique avec le fallback domaine déjà intégré dans `get_pj_folder_suggestion`.
+- **Tier 6 cross-contact PJ** : nécessite `get_pj_cross_contact_folder` (fonction DB à créer). Sémantique floue (subject_keywords redondant avec mail, original_filename incohérent avec Tier 1bis filename déjà existant).
+- **Tier 7 momentum PJ** : structure folder_id du filesystem n'existe pas → garde `if folder_id` côté mail empêche l'activation côté PJ. Soit refondre la garde, soit drop.
+
+**Décision Yvan 14/05** : Q1=B — drop les 4 tiers PJ. Valeur trop faible en SaaS débutant, complications techniques réelles. Garder le scope pragmatique (Tier 0 mail↔PJ réciproque + Tier 1bis filename + Tier 1 contact mono + Tier 1bis sujet→body + Tier 4 IA via commis).
+
+**Si on relance un jour** : nécessite (a) `_match_folder_path_in_text` séparé adapté filesystem, (b) 2 nouvelles fonctions DB (`get_pj_domain_folder_suggestion`, `get_pj_cross_contact_folder`), (c) refonte momentum PJ avec format `{folder_path, ts}` sans folder_id + adaptation garde. Effort estimé : ~150 lignes prod + ~80 lignes tests.
+
+**Priorité** : 🟢 basse — à activer quand volumes le justifient (folders_pj riche + historique multi-mois).
+
+---
+
 ### 33. Tier 1bis mail « nom PJ en dernier recours » — N8 13/05/2026
 
 **Origine** : Refonte Niveau 8 (« Règles classement Mail », spec §5.2). Le Tier 1bis mail score actuellement sur sujet → fallback body. La spec prévoit un **troisième recours** : nom de la PJ. Pas implémenté dans le moteur N8.

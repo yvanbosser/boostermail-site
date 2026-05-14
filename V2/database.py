@@ -1186,6 +1186,55 @@ class Database:
         rows = c.fetchall()
         return [{'folder_path': r[0], 'folder_id': r[1], 'count': r[2]} for r in rows]
 
+    def get_last_recent_classification(self, contact_email, max_age_seconds=7200):
+        """Retourne le dernier classement mail d'un contact si < max_age_seconds.
+        Sert au Tier R1 réciproque PJ→mail (N9) : si une PJ vient d'être classée
+        pour ce contact, le moteur mail peut proposer le dossier cohérent.
+
+        Retourne `{folder_path, folder_id, age_seconds}` ou None.
+        """
+        if not contact_email:
+            return None
+        uid = self._uid()
+        c = self._conn().cursor()
+        c.execute("""
+            SELECT folder_path, folder_id,
+                   CAST((julianday('now', 'localtime') - julianday(created_at)) * 86400 AS INTEGER) as age
+            FROM folder_classifications
+            WHERE contact_email = ? AND user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (contact_email, uid))
+        row = c.fetchone()
+        if not row or row[2] is None or row[2] > max_age_seconds:
+            return None
+        return {'folder_path': row[0], 'folder_id': row[1] or '', 'age_seconds': row[2]}
+
+    def get_last_recent_pj_classification(self, contact_email, max_age_seconds=7200):
+        """Retourne le dernier classement PJ d'un contact si < max_age_seconds.
+        Sert au Tier R1 réciproque PJ→mail (N9) : si une PJ vient d'être classée,
+        le moteur mail propose le dossier Outlook correspondant (fuzzy match
+        last_segment côté appelant).
+
+        Retourne `{dest_folder, age_seconds}` ou None.
+        """
+        if not contact_email:
+            return None
+        uid = self._uid()
+        c = self._conn().cursor()
+        c.execute("""
+            SELECT dest_folder,
+                   CAST((julianday('now', 'localtime') - julianday(created_at)) * 86400 AS INTEGER) as age
+            FROM pj_classifications
+            WHERE contact_email = ? AND user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (contact_email, uid))
+        row = c.fetchone()
+        if not row or row[1] is None or row[1] > max_age_seconds:
+            return None
+        return {'dest_folder': row[0], 'age_seconds': row[1]}
+
     def get_recent_classifications(self, contact_email=None, domain=None, limit=10):
         """Retourne les N derniers classements pour un contact ou domaine (pour few-shot prompt)."""
         uid = self._uid()

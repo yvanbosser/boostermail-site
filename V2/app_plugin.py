@@ -3212,7 +3212,7 @@ def _resolve_folder_id_cascade(target_path: str, folders: list,
 
 
 # =============================================================================
-# Moteurs classement (N8) — pipelines des 7 tiers, sans appel IA
+# Moteurs classement (N8 + N9) — pipelines des règles DB, sans appel IA
 # =============================================================================
 # Le Tier 4 IA reste à l'appelant :
 #   - BG (`_prewarm_unified_for_mail`) : commis Haiku unifié N6.1
@@ -3220,7 +3220,177 @@ def _resolve_folder_id_cascade(target_path: str, folders: list,
 #     1 seul appel — préservé (Option α validée Yvan 13/05).
 #   - API à la demande (`api_suggest_folder`) : fallback `suggest_folder`
 #     uniquement si tiers DB vides.
+#
+# Architecture N9 (vision Yvan 14/05) :
+#   • 4 helpers communs paramétrés par la fonction DB du chapitre
+#     (R3 contact+sujet · R4 contact mono · R6 domaine · R7 cross-contact)
+#   • 2 moteurs (mail / PJ) qui les appellent + ajoutent leurs spécificités
+#   • R1 réciproque mail↔PJ : si l'user classe le mail en premier, le moteur
+#     PJ propose le dossier cohérent ; et vice-versa.
 # =============================================================================
+
+
+def _apply_contact_mono_tier(contact_email, domain, subject_keywords, *,
+                              get_fn):
+    """Helper commun R4 (spec slide 7) — contact mono-dossier.
+
+    `get_fn` est `_db.get_folder_suggestion` (mail) ou
+    `_db.get_pj_folder_suggestion` (PJ). Logique identique : 3+ classements
+    du contact vers le même dossier → règle auto.
+
+    Retourne le dict suggestion (avec clé `folder_path` ou `dest_folder`
+    selon le chapitre) ou None.
+    """
+    if not contact_email:
+        return None
+    try:
+        return get_fn(contact_email, domain or '',
+                      subject_keywords=subject_keywords or '')
+    except Exception:
+        return None
+
+
+def _apply_keywords_tier(contact_email, subject_keywords, body_keywords, *,
+                          get_fn):
+    """Helper commun R3 (spec slide 7) — contact + mots-clés sujet → fallback body.
+
+    `get_fn` est `_db.get_folder_by_keywords` (mail) ou
+    `_db.get_pj_folder_by_keywords` (PJ).
+
+    Tente d'abord les keywords sujet, fallback body si sujet retourne None
+    (spec §5.2). Retourne dict ou None.
+    """
+    if not contact_email:
+        return None
+    if subject_keywords:
+        try:
+            kw = get_fn(contact_email, subject_keywords)
+        except Exception:
+            kw = None
+        if kw:
+            return kw
+    if body_keywords:
+        try:
+            return get_fn(contact_email, body_keywords)
+        except Exception:
+            return None
+    return None
+
+
+def _apply_domain_tier(domain, *, get_fn, public_filter=True):
+    """Helper commun R6 (spec slide 7) — règle domaine.
+
+    `get_fn` est `_db.get_domain_folder_suggestion` (mail).
+    Côté PJ : pas de fonction DB équivalente aujourd'hui (PLUS_TARD_VF #34).
+
+    Applique `_filter_public_domain` quand `public_filter=True` (gmail,
+    orange, etc. exclus — spec §5.4).
+    """
+    if not domain:
+        return None
+    if public_filter and _filter_public_domain(domain):
+        return None
+    try:
+        return get_fn(domain)
+    except Exception:
+        return None
+
+
+def _apply_cross_contact_tier(keywords, *, get_fn):
+    """Helper commun R7 (spec slide 7) — cross-contact sujet.
+
+    `get_fn` est `_db.get_cross_contact_folder` (mail).
+    Côté PJ : pas de fonction DB équivalente aujourd'hui (PLUS_TARD_VF #34).
+    """
+    if not keywords:
+        return None
+    try:
+        return get_fn(keywords)
+    except Exception:
+        return None
+
+
+def _apply_reciprocal_coherence_mail(contact_email, *, folders, max_age=None):
+    """R1 réciproque PJ→mail (N9, NOUVEAU).
+
+    Si le contact a une classification PJ récente (< 2h par défaut),
+    cherche dans `folders` (Outlook) un dossier dont le last_segment fuzzy-match
+    le dossier PJ. Retourne dict suggestion ou None.
+
+    Cohérence avec le sens inverse (mail→PJ) déjà géré côté moteur PJ.
+    """
+    if not contact_email or not folders:
+        return None
+    max_age = max_age if max_age is not None else _MOMENTUM_TTL_SECONDS
+    try:
+        last_pj = _db.get_last_recent_pj_classification(contact_email, max_age)
+    except Exception:
+        return None
+    if not last_pj:
+        return None
+    dest = (last_pj.get('dest_folder') or '').strip()
+    if not dest:
+        return None
+    # last segment du path filesystem (ex: "D:\PJ\Le Cardo" → "le cardo")
+    last_seg = dest.lower().replace('\\', '/').rstrip('/').split('/')[-1]
+    seg_words = [w for w in re.split(r'[\s\-_]+', last_seg) if len(w) >= 4]
+    if not seg_words:
+        return None
+    for word in seg_words:
+        for f in folders:
+            fname = (f.get('name') or '').lower()
+            if word in fname:
+                return {
+                    'folder_path': f.get('path', f.get('name', '')),
+                    'folder_id': f.get('id', ''),
+                    'reciprocal_from_pj': dest,
+                }
+    return None
+
+
+def _apply_reciprocal_coherence_pj(contact_email, *, folders_pj, max_age=None):
+    """R1 mail→PJ (N9, raffinement de l'existant `mail_pj_coherence`).
+
+    Si le contact a une classification mail récente (< 2h par défaut),
+    cherche dans `folders_pj` un dossier dont le name fuzzy-match le
+    last_segment du dossier mail. Plus précis que l'ancienne lecture
+    `get_contact_folder_stats` (qui retournait la fréquence cumulée et
+    ignorait la récence).
+
+    Garde le helper séparé pour symétrie avec `_apply_reciprocal_coherence_mail`.
+    """
+    if not contact_email or not folders_pj:
+        return None
+    max_age = max_age if max_age is not None else _MOMENTUM_TTL_SECONDS
+    try:
+        last_mail = _db.get_last_recent_classification(contact_email, max_age)
+    except Exception:
+        return None
+    if not last_mail:
+        return None
+    src = (last_mail.get('folder_path') or '').strip()
+    if not src:
+        return None
+    last_seg = src.lower().replace('\\', '/').rstrip('/').split('/')[-1]
+    seg_words = [w for w in re.split(r'[\s\-_]+', last_seg) if len(w) >= 4]
+    if not seg_words:
+        return None
+    for word in seg_words:
+        for f_pj in folders_pj:
+            fname_pj = (f_pj.get('name')
+                        or f_pj.get('folder_name')
+                        or '').lower()
+            if word in fname_pj:
+                path = (f_pj.get('path')
+                        or f_pj.get('dest_folder')
+                        or fname_pj)
+                return {
+                    'folder_path': path,
+                    'dest_folder': path,
+                    'reciprocal_from_mail': src,
+                }
+    return None
+
 
 
 def _compute_classement_suggestions(contact_email, subject, body_snippet, *,
@@ -3234,22 +3404,32 @@ def _compute_classement_suggestions(contact_email, subject, body_snippet, *,
     (laissé à l'appelant — voir docstring de bloc).
 
     Pipeline (préemption ordonnée, max 3) :
+      R1 récip. PJ→mail (N9) — `_apply_reciprocal_coherence_mail`
+                              prime sur tout si PJ classée récemment
       Tier 0   thread — `_db.get_folder_by_thread`
-      Tier 1   contact mono-dossier — `_db.get_folder_suggestion`
-               (en mode `compose_mode=True` : aussi fallback ≥1 via
-               `_db.get_recent_classifications` + cascade `_resolve_folder_id_cascade`)
-      Tier 1bis keywords sujet → fallback body — `_db.get_folder_by_keywords`
-      Tier 2   matching nom dossier dans subject+body — `_match_folder_name_in_text`
-      Tier 3a  règle domaine séparée (avec filtre _PUBLIC) — `_db.get_domain_folder_suggestion`
-      Tier 3b  cross-contact — `_db.get_cross_contact_folder`
-      Tier 5   momentum (boost #1 si ambigu, remplit #2/#3) — `momentum_state`
+      Tier 1   contact mono-dossier — helper commun `_apply_contact_mono_tier`
+                                       (`_db.get_folder_suggestion`)
+                                       en `compose_mode` : fallback ≥1 via
+                                       `_db.get_recent_classifications` +
+                                       cascade `_resolve_folder_id_cascade`
+      Tier 1bis keywords sujet → fallback body — helper commun
+                                       `_apply_keywords_tier`
+                                       (`_db.get_folder_by_keywords`)
+      Tier 2   matching nom dossier dans subject+body — spécifique mail
+                                       (structure Graph) `_match_folder_name_in_text`
+      Tier 3a  règle domaine — helper commun `_apply_domain_tier`
+                                       (`_db.get_domain_folder_suggestion`,
+                                        filtre _PUBLIC)
+      Tier 3b  cross-contact — helper commun `_apply_cross_contact_tier`
+                                       (`_db.get_cross_contact_folder`)
+      Tier 5   momentum Outlook — spécifique mail (folder_id Graph)
 
     Args :
       momentum_state : snapshot `{folder_id, folder_name, ts}` de
         `_classify_momentum` capturé AVANT le spawn BG par l'appelant.
         None → tier 5 skip (signal démolisseur v2 P0-3 race condition).
       folders : liste folders live Outlook (peut être None en BG → Tier 2
-        + cascade compose désactivés).
+        + R1 réciproque + cascade compose désactivés).
       compose_mode : True en mode new (cas C2 spec §4) — abaisse Tier 1 à ≥1
         + active la cascade résolution path.
     """
@@ -3293,6 +3473,16 @@ def _compute_classement_suggestions(contact_email, subject, body_snippet, *,
         except Exception:
             body_keywords = ''
 
+    # ---- R1 réciproque PJ→mail (N9) : si une PJ vient d'être classée
+    # pour ce contact, propose le dossier Outlook cohérent. Prime sur tout
+    # car c'est un signal très récent et explicite du user.
+    if len(suggestions) < max_suggestions and folders:
+        recip = _apply_reciprocal_coherence_mail(contact_email, folders=folders)
+        if recip:
+            _add(recip, 'mail_pj_coherence',
+                 reason=f"Cohérence avec PJ récemment classée « {recip.get('reciprocal_from_pj', '')} »",
+                 confidence=0.95)
+
     # ---- Tier 0 : thread (même fil)
     if len(suggestions) < max_suggestions:
         try:
@@ -3303,22 +3493,18 @@ def _compute_classement_suggestions(contact_email, subject, body_snippet, *,
             _add(thread_match, 'thread', reason='Même fil de discussion',
                  confidence=0.95)
 
-    # ---- Tier 1 : contact mono-dossier (+ fallback compose seuil ≥1)
+    # ---- Tier 1 : contact mono-dossier (helper commun + fallback compose)
     if len(suggestions) < max_suggestions:
-        try:
-            rule = _db.get_folder_suggestion(contact_email, domain,
-                                             subject_keywords=subject_keywords)
-        except Exception:
-            rule = None
+        rule = _apply_contact_mono_tier(contact_email, domain, subject_keywords,
+                                         get_fn=_db.get_folder_suggestion)
         if rule:
             _add(rule, 'rule',
                  reason=f"Règle auto ({rule.get('count', '?')} classements)",
                  confidence=1.0)
         elif compose_mode:
             # Cas C2 spec §4 : seuil ≥1 + cascade résolution path live.
-            # Compose Tier 0 (ne pas confondre avec thread) — sert quand
-            # `get_folder_suggestion` échoue car contact a 1-2 classements
-            # seulement (< 3 seuil par défaut).
+            # Sert quand `get_folder_suggestion` échoue car contact a 1-2
+            # classements seulement (< 3 seuil par défaut).
             try:
                 recent = _db.get_recent_classifications(
                     contact_email, None, limit=50)
@@ -3339,23 +3525,16 @@ def _compute_classement_suggestions(contact_email, subject, body_snippet, *,
                              reason=f"Dossier habituel ({top_count} classements)",
                              confidence=0.85)
 
-    # ---- Tier 1bis : keywords sujet → body
-    if len(suggestions) < max_suggestions and subject_keywords:
-        try:
-            kw = _db.get_folder_by_keywords(contact_email, subject_keywords)
-        except Exception:
-            kw = None
-        if not kw and body_keywords:
-            try:
-                kw = _db.get_folder_by_keywords(contact_email, body_keywords)
-            except Exception:
-                kw = None
+    # ---- Tier 1bis : keywords sujet → body (helper commun)
+    if len(suggestions) < max_suggestions:
+        kw = _apply_keywords_tier(contact_email, subject_keywords, body_keywords,
+                                   get_fn=_db.get_folder_by_keywords)
         if kw:
             _add(kw, 'keywords',
                  reason=f"Contact + sujet ({kw.get('count', '?')} similaires)",
                  confidence=0.9)
 
-    # ---- Tier 2 : matching nom dossier dans sujet + body
+    # ---- Tier 2 : matching nom dossier dans sujet + body (spécifique mail)
     if len(suggestions) < max_suggestions and folders:
         search_text = f"{subject or ''} {body_snippet or ''}"
         for m in _match_folder_name_in_text(search_text, folders):
@@ -3365,23 +3544,19 @@ def _compute_classement_suggestions(contact_email, subject, body_snippet, *,
             if len(suggestions) >= max_suggestions:
                 break
 
-    # ---- Tier 3a : règle domaine (filtre _PUBLIC)
-    if len(suggestions) < max_suggestions and domain and not _filter_public_domain(domain):
-        try:
-            dom_rule = _db.get_domain_folder_suggestion(domain)
-        except Exception:
-            dom_rule = None
+    # ---- Tier 3a : règle domaine (helper commun, filtre _PUBLIC)
+    if len(suggestions) < max_suggestions:
+        dom_rule = _apply_domain_tier(domain,
+                                       get_fn=_db.get_domain_folder_suggestion)
         if dom_rule:
             _add(dom_rule, 'domain',
                  reason=f"Domaine {domain} ({dom_rule.get('contact_count', '?')} contacts)",
                  confidence=0.6)
 
-    # ---- Tier 3b : cross-contact (sujet ou body)
+    # ---- Tier 3b : cross-contact (helper commun)
     if len(suggestions) < max_suggestions:
-        try:
-            cross = _db.get_cross_contact_folder(subject_keywords or body_keywords or '')
-        except Exception:
-            cross = None
+        cross = _apply_cross_contact_tier(subject_keywords or body_keywords or '',
+                                           get_fn=_db.get_cross_contact_folder)
         if cross:
             _add(cross, 'cross_contact',
                  reason=f"Sujet similaire ({cross.get('contact_count', '?')} contacts)",
@@ -3409,18 +3584,24 @@ def _compute_pj_classement_suggestions(contact_email, subject, body_snippet,
                                        attachment_names=None, *,
                                        folders_pj=None, domain=None,
                                        subject_keywords=None,
+                                       body_keywords=None,
                                        max_suggestions=3):
     """Moteur classement PJ — tiers DB du spec §3 (chapitre B).
 
     Pipeline (préemption ordonnée, max 3) :
-      Tier 0   cohérence mail→PJ — historique `folder_classifications` du
-               contact : si N classements vers `IMMOBILIER/SCI/Le Cardo`,
-               fuzzy-match last_segment sur folders_pj contenant « cardo »
-               (re-cadrage démolisseur v2 P0-1 : on lit l'historique, pas
-               l'entry_id du mail courant).
-      Tier 1bis (filename) — NOUVEAU spec §5.2 priorité nom fichier
-      Tier 1   contact mono-dossier PJ — `_db.get_pj_folder_suggestion`
-      Tier 1bis (sujet) — `_db.get_pj_folder_by_keywords` (sujet → body)
+      R1 récip. mail→PJ (N9, raffiné) — `_apply_reciprocal_coherence_pj`
+                              si mail classé récemment, fuzzy-match dans
+                              `folders_pj`. Prime sur tout.
+      Tier 1bis filename — spec §5.2 priorité nom fichier (spécifique PJ)
+      Tier 1   contact mono-dossier PJ — helper commun `_apply_contact_mono_tier`
+                                          (`_db.get_pj_folder_suggestion`)
+      Tier 1bis sujet → fallback body (N9, Q2) — helper commun
+                                          `_apply_keywords_tier`
+                                          (`_db.get_pj_folder_by_keywords`)
+
+    Q1=B scope pragmatique : pas de Tier 2/3a/3b/5 côté PJ aujourd'hui
+    (PLUS_TARD_VF #34 : valeur faible en SaaS débutant + complications
+    techniques folders_pj filesystem sans folder_id).
 
     Pas d'IA ici (Tier 4 = appelant). Retourne `{'suggestions', 'source_primary'}`.
     """
@@ -3452,47 +3633,25 @@ def _compute_pj_classement_suggestions(contact_email, subject, body_snippet,
             subject_keywords = _extract_subject_keywords(subject or '')
         except Exception:
             subject_keywords = subject or ''
-
-    # ---- Tier 0 : cohérence mail→PJ via historique contact
-    # Lit le dossier mail le plus fréquent pour ce contact dans
-    # `folder_classifications`, cherche un folder_pj dont le name contient
-    # le dernier segment (fuzzy_word). Spec §3 : « Le Cardo (mail) → Le Cardo
-    # (PJ) ». Marche en BG dès le 1er mail si historique présent.
-    if len(suggestions) < max_suggestions and folders_pj and contact_email:
+    if body_keywords is None and body_snippet:
         try:
-            history = _db.get_contact_folder_stats(contact_email)
+            body_keywords = _extract_subject_keywords(body_snippet)
         except Exception:
-            history = []
-        if history:
-            top_mail_path = history[0].get('folder_path', '')
-            if top_mail_path:
-                last_seg = (top_mail_path.lower().strip()
-                            .replace('\\', '/').rstrip('/').split('/')[-1])
-                # mots ≥4 chars pour matcher folders PJ (ex « cardo », « phiwest »)
-                seg_words = [w for w in re.split(r'[\s\-_]+', last_seg)
-                             if len(w) >= 4]
-                for word in seg_words:
-                    for f_pj in folders_pj:
-                        fname_pj = (f_pj.get('name')
-                                    or f_pj.get('folder_name')
-                                    or '').lower()
-                        if word in fname_pj:
-                            _add({'folder_path': f_pj.get('path')
-                                                or f_pj.get('dest_folder')
-                                                or fname_pj,
-                                  'dest_folder': f_pj.get('path')
-                                                or f_pj.get('dest_folder')
-                                                or fname_pj},
-                                 'mail_pj_coherence',
-                                 reason=f'Cohérence avec dossier mail « {last_seg} »',
-                                 confidence=0.9)
-                            break
-                    if suggestions:
-                        break
+            body_keywords = ''
+
+    # ---- R1 réciproque mail→PJ (N9 raffiné) : lit le dernier classement
+    # mail récent (< 2h) plutôt que l'historique le plus fréquent. Colle
+    # à l'intuition « le mail vient d'être classé dans X, propose X aussi ».
+    if len(suggestions) < max_suggestions:
+        recip = _apply_reciprocal_coherence_pj(contact_email,
+                                                folders_pj=folders_pj)
+        if recip:
+            _add(recip, 'mail_pj_coherence',
+                 reason=f"Cohérence avec mail récemment classé « {recip.get('reciprocal_from_mail', '')} »",
+                 confidence=0.95)
 
     # ---- Tier 1bis filename (PRIORITAIRE sur sujet — spec §5.2)
     if len(suggestions) < max_suggestions and attachment_names:
-        # Concatène les keywords de tous les fichiers (« Bail_X.pdf », « Devis.pdf »)
         fname_kw = ' '.join(
             _filename_keywords(fn) for fn in attachment_names if fn).strip()
         if fname_kw:
@@ -3506,24 +3665,19 @@ def _compute_pj_classement_suggestions(contact_email, subject, body_snippet,
                      reason=f"Nom fichier ({fkw.get('count', '?')} similaires)",
                      confidence=0.92)
 
-    # ---- Tier 1 : contact mono-dossier PJ
+    # ---- Tier 1 : contact mono-dossier PJ (helper commun)
     if len(suggestions) < max_suggestions:
-        try:
-            rule = _db.get_pj_folder_suggestion(
-                contact_email, domain, subject_keywords=subject_keywords)
-        except Exception:
-            rule = None
+        rule = _apply_contact_mono_tier(contact_email, domain, subject_keywords,
+                                         get_fn=_db.get_pj_folder_suggestion)
         if rule:
             _add(rule, 'rule',
                  reason=f"Règle auto PJ ({rule.get('contact_count', rule.get('count', '?'))} classements)",
                  confidence=0.88)
 
-    # ---- Tier 1bis sujet (secondaire, sous filename)
-    if len(suggestions) < max_suggestions and subject_keywords:
-        try:
-            kw = _db.get_pj_folder_by_keywords(contact_email, subject_keywords)
-        except Exception:
-            kw = None
+    # ---- Tier 1bis sujet → fallback body (helper commun, N9 Q2 ajoute body)
+    if len(suggestions) < max_suggestions:
+        kw = _apply_keywords_tier(contact_email, subject_keywords, body_keywords,
+                                   get_fn=_db.get_pj_folder_by_keywords)
         if kw:
             _add(kw, 'keywords',
                  reason=f"Contact + sujet ({kw.get('count', '?')} similaires)",
@@ -10220,20 +10374,25 @@ def api_windows_folders_status():
 
 @app.route('/api/suggest_pj_folder/<path:email_id>')
 def api_suggest_pj_folder(email_id):
-    """Suggere le dossier Windows pour les PJ d'un mail (3 tiers + IA fallback)."""
+    """Suggère le dossier Windows pour les PJ d'un mail (wrapper N9 sur
+    moteur unique `_compute_pj_classement_suggestions` + fallback IA).
+
+    Refonte N9 : 3 portes PJ unifiées (BG / à-la-demande / compose) sous
+    le même moteur. Avant N9 cette route avait sa propre logique 3 tiers
+    inline — supprimée pour éviter divergence avec BG.
+    """
     graph = get_graph()
     if not graph:
         return jsonify({"status": "no_graph"})
 
     subject = request.args.get('subject', '')
     from_email = _normalize_email(request.args.get('from_email', ''))
-    domain = _extract_email_domain(from_email)
 
     folders = _get_windows_folders_cached()
     if not folders:
         return jsonify({"status": "no_folders", "attachments": [], "folders": []})
 
-    # Resolution IMID -> Graph Entry ID (idem fix 02/05/2026 sur autres routes)
+    # Résolution IMID → Graph Entry ID (fix 02/05/2026 répliqué sur cette route)
     real_id = email_id
     if email_id.startswith('<') and '@' in email_id and email_id.endswith('>'):
         try:
@@ -10244,110 +10403,93 @@ def api_suggest_pj_folder(email_id):
         if not real_id:
             return jsonify({"status": "no_attachments", "attachments": [], "folders": []})
 
-    # Recuperer les PJ depuis Graph
     try:
         attachments = graph.get_attachments(real_id)
     except Exception:
         attachments = []
-    # Cleanup 27/04 PM (audit kit #10) — _attachment_cache supprime (write-only,
-    # jamais lu nulle part dans le code). Le fetch Graph est fait directement.
     relevant_pj = [a for a in attachments if not a.get('is_inline', False)]
     pj_names = [a['name'] for a in relevant_pj]
 
-    _pj_subj_kw = _extract_subject_keywords(subject)
+    # Moteur unique PJ (N9) — 7 tiers DB pertinents pour le SaaS
+    result = _compute_pj_classement_suggestions(
+        from_email, subject, '', attachment_names=pj_names,
+        folders_pj=folders)
+    suggestions = result.get('suggestions') or []
 
-    # Tier 1 : regle auto (historique 3+)
-    rule = _db.get_pj_folder_suggestion(from_email, domain, subject_keywords=_pj_subj_kw)
-    if rule:
-        return jsonify({"status": "done", "source": "rule",
-            "folder_path": rule['dest_folder'], "confidence": 1.0,
-            "reason": f"Regle auto ({rule['count']} classements)",
-            "suggested_names": {}, "attachments": relevant_pj, "folders": folders})
+    if suggestions:
+        primary = suggestions[0]
+        return jsonify({
+            "status": "done",
+            "source": primary.get('source', 'rule'),
+            "folder_path": primary.get('folder_path') or primary.get('dest_folder', ''),
+            "confidence": primary.get('confidence', 0.8),
+            "reason": primary.get('reason', ''),
+            "suggested_names": {},
+            "attachments": relevant_pj,
+            "folders": folders,
+        })
 
-    # Tier 1 bis : keywords contact+sujet
-    if _pj_subj_kw:
-        kw_match = _db.get_pj_folder_by_keywords(from_email, _pj_subj_kw)
-        if kw_match:
-            return jsonify({"status": "done", "source": "rule",
-                "folder_path": kw_match['dest_folder'], "confidence": 0.9,
-                "reason": f"Contact + sujet ({kw_match['count']} classements similaires)",
-                "suggested_names": {}, "attachments": relevant_pj, "folders": folders})
-
-    # Tier 2 : correspondance mots-cles sujet → nom de dossier Windows
-    if subject:
-        _words = _pj_subj_kw.split() if _pj_subj_kw else []
-        best_match = None
-        best_score = 0
-        for f in folders:
-            fname = f['name'].lower()
-            fpath = f['path'].lower()
-            score = sum(1 for w in _words if w in fname)
-            path_score = sum(1 for w in _words if w in fpath)
-            total = score * 2 + path_score
-            if total > best_score and total >= 2:
-                best_score = total
-                best_match = f
-        if best_match:
-            return jsonify({"status": "done", "source": "match",
-                "folder_path": best_match['path'],
-                "confidence": min(best_score / 6, 1.0),
-                "reason": "Correspondance nom de dossier",
-                "suggested_names": {}, "attachments": relevant_pj, "folders": folders})
-
-    # Tier 3 : IA fallback (ClaudeAssistant.suggest_pj_folder)
+    # Fallback Tier 4 IA : suggest_pj_folder (commis non disponible côté route
+    # à-la-demande — c'est l'IA d'appel direct).
     if pj_names:
         try:
             _builder = _get_prompt_builder()
             if _builder:
+                domain = _extract_email_domain(from_email)
                 pj_history = _db.get_pj_classification_history(from_email, limit=20)
                 recent = _db.get_recent_pj_classifications(from_email, domain, limit=10)
                 cp = _db.get_contact_profile(from_email)
-                suggestion = _builder.suggest_pj_folder(from_email, subject, pj_names, folders,
-                                                         recent_pj_classifications=recent,
-                                                         contact_profile=cp,
-                                                         pj_history=pj_history)
+                suggestion = _builder.suggest_pj_folder(
+                    from_email, subject, pj_names, folders,
+                    recent_pj_classifications=recent,
+                    contact_profile=cp,
+                    pj_history=pj_history)
                 if suggestion and suggestion.get('folder_path'):
-                    return jsonify({"status": "done", "source": "ai", **suggestion,
-                        "attachments": relevant_pj, "folders": folders})
+                    return jsonify({
+                        "status": "done", "source": "ai", **suggestion,
+                        "attachments": relevant_pj, "folders": folders,
+                    })
         except Exception as e:
-            logger.warning(f"[classify_pj] Erreur suggest IA: {e}")
+            logger.warning(f"[suggest_pj_folder] Erreur suggest IA: {e}")
 
-    return jsonify({"status": "no_suggestion", "suggested_names": {}, "attachments": relevant_pj, "folders": folders})
+    return jsonify({
+        "status": "no_suggestion", "suggested_names": {},
+        "attachments": relevant_pj, "folders": folders,
+    })
 
 
 @app.route('/api/smart_paperclip')
 def api_smart_paperclip():
-    """Hint rapide : quel dossier Windows pour ce contact+sujet (sans liste PJ)."""
+    """Hint rapide compose : quel dossier Windows pour ce contact+sujet (cas C2
+    spec §4) — wrapper N9 sur moteur unique `_compute_pj_classement_suggestions`.
+
+    Refonte N9 : 3 portes PJ unifiées sous le même moteur. Avant N9 cette
+    route avait sa propre logique 3 tiers inline — supprimée.
+    """
     email_addr = _normalize_email(request.args.get('email', ''))
     subject = request.args.get('subject', '').strip()
-    domain = _extract_email_domain(email_addr)
-    _pj_subj_kw = _extract_subject_keywords(subject)
 
-    rule = _db.get_pj_folder_suggestion(email_addr, domain, subject_keywords=_pj_subj_kw)
-    if rule:
-        return jsonify({"folder_path": rule['dest_folder'], "source": "history"})
+    folders = _get_windows_folders_cached() or []
 
-    if _pj_subj_kw:
-        kw_match = _db.get_pj_folder_by_keywords(email_addr, _pj_subj_kw)
-        if kw_match:
-            return jsonify({"folder_path": kw_match['dest_folder'], "source": "history"})
+    # Moteur unique PJ (sans liste PJ ici — cas C2 compose, l'user n'a pas
+    # encore joint de fichier). Le moteur fait Tier R1 réciproque + R4 + R3,
+    # qui sont les tiers DB pertinents quand on n'a pas de filename.
+    result = _compute_pj_classement_suggestions(
+        email_addr, subject, '', attachment_names=None,
+        folders_pj=folders)
+    suggestions = result.get('suggestions') or []
 
-    folders = _get_windows_folders_cached()
-    if subject and folders:
-        _words = _pj_subj_kw.split() if _pj_subj_kw else []
-        best_match = None
-        best_score = 0
-        for f in folders:
-            fname = f['name'].lower()
-            fpath = f['path'].lower()
-            score = sum(1 for w in _words if w in fname)
-            path_score = sum(1 for w in _words if w in fpath)
-            total = score * 2 + path_score
-            if total > best_score and total >= 2:
-                best_score = total
-                best_match = f
-        if best_match:
-            return jsonify({"folder_path": best_match['path'], "source": "match"})
+    if suggestions:
+        primary = suggestions[0]
+        # Compat rétro : la route renvoyait historiquement `source="history"`
+        # quand suggestion via DB (Tier 1 + 1bis), `source="match"` quand
+        # via matching nom dossier (Tier 2). Le moteur PJ N9 (scope Q1=B)
+        # ne fait pas le Tier 2 PJ → toujours "history". À ré-élargir si
+        # PLUS_TARD_VF #34 réactive le Tier 2 PJ.
+        return jsonify({
+            "folder_path": primary.get('folder_path') or primary.get('dest_folder', ''),
+            "source": "history",
+        })
 
     return jsonify({"folder_path": None})
 
