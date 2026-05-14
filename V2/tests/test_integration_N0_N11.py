@@ -930,6 +930,453 @@ def test_E5_auto_email_subtil():
 
 
 # =============================================================================
+# Famille F — Cuisine avancée (10 tests : résilience, profil dynamique,
+#                                 concurrence, frontières, compose sortants)
+# =============================================================================
+
+def test_F1_idempotence_fonctionnelle():
+    """F1 — Appel `_prewarm_unified_for_mail(mid, md)` 2× consécutif : le builder
+    n'est appelé qu'UNE seule fois (le 2e rebondit sur `get_all_dishes_for_mail`)."""
+    email = f'f1-idem-{int(time.time())}@example.com'
+    _setup_partial_contact(email)
+    _long_body = ("Bonjour, mail de test avec body suffisamment long pour "
+                  "déclencher le commis Haiku. " * 3)
+    md = _make_mail_data(from_email=email, body=_long_body)
+    mid = md['internet_message_id']
+    _cleanup_mid(mid)
+
+    _orig_get_builder = ap._get_prompt_builder
+    call_count = {'value': 0}
+
+    class _MockBuilder:
+        def analyze_one_mail_stream(self, **kwargs):
+            call_count['value'] += 1
+            yield ('end', {'points': ['P'], 'actions': ['A'], 'echeance': None,
+                            'folder_mail': None, 'folder_pj': None})
+
+    ap._get_prompt_builder = lambda: _MockBuilder()
+    try:
+        ap._prewarm_unified_for_mail(mid, md, momentum_snapshot=None)
+        # 2e appel — doit hit le cache DB
+        ap._prewarm_unified_for_mail(mid, md, momentum_snapshot=None)
+    finally:
+        ap._get_prompt_builder = _orig_get_builder
+
+    ok = log_test(f"F1 idempotence : builder appelé 1× en 2 appels (got {call_count['value']})",
+                  call_count['value'] == 1)
+    _cleanup_mid(mid)
+    _cleanup_contact(email)
+    return ok
+
+
+def test_F2_haiku_panne_retry_count():
+    """F2 — Builder qui raise → `_commis_retry_count[mid]` incrémenté, pas de frigo rempli."""
+    email = f'f2-panne-{int(time.time())}@example.com'
+    _setup_partial_contact(email)
+    _long_body = "Body normal pour passer le filtre minimum de 100 chars. " * 3
+    md = _make_mail_data(from_email=email, body=_long_body)
+    mid = md['internet_message_id']
+    _cleanup_mid(mid)
+    # Reset retry counter
+    try:
+        ap._commis_retry_count.pop(mid, None)
+    except Exception:
+        pass
+
+    _orig_get_builder = ap._get_prompt_builder
+
+    class _CrashBuilder:
+        def analyze_one_mail_stream(self, **kwargs):
+            raise Exception("Haiku timeout simulated")
+            yield  # unreachable, required for generator
+
+    ap._get_prompt_builder = lambda: _CrashBuilder()
+    try:
+        ap._prewarm_unified_for_mail(mid, md, momentum_snapshot=None)
+    finally:
+        ap._get_prompt_builder = _orig_get_builder
+
+    retry_n = ap._commis_retry_count.get(mid, 0)
+    ok = log_test(f"F2 panne Haiku : _commis_retry_count incrémenté (got {retry_n})",
+                  retry_n >= 1)
+    has_summary = ap._db.has_mail_summary(mid)
+    ok &= log_test("F2 panne Haiku : pas de frigo Résumé rempli (cohérence atomicité)",
+                   not has_summary)
+    # Cleanup retry counter
+    try:
+        ap._commis_retry_count.pop(mid, None)
+    except Exception:
+        pass
+    _cleanup_mid(mid)
+    _cleanup_contact(email)
+    return ok
+
+
+def test_F3_max_retries_abandon():
+    """F3 — Si `_commis_retry_count[mid] >= MAX_RETRIES`, return immédiat sans
+    appeler le builder (marquage erreur permanent)."""
+    email = f'f3-maxret-{int(time.time())}@example.com'
+    _setup_partial_contact(email)
+    _long_body = "Body normal pour passer le filtre. " * 5
+    md = _make_mail_data(from_email=email, body=_long_body)
+    mid = md['internet_message_id']
+    _cleanup_mid(mid)
+    # Force retry counter à MAX
+    try:
+        ap._commis_retry_count[mid] = ap._COMMIS_MAX_RETRIES
+    except Exception:
+        pass
+
+    _orig_get_builder = ap._get_prompt_builder
+    call_count = {'value': 0}
+
+    class _MockBuilder:
+        def analyze_one_mail_stream(self, **kwargs):
+            call_count['value'] += 1
+            yield ('end', {'points': [], 'actions': [], 'echeance': None,
+                            'folder_mail': None, 'folder_pj': None})
+
+    ap._get_prompt_builder = lambda: _MockBuilder()
+    try:
+        ap._prewarm_unified_for_mail(mid, md, momentum_snapshot=None)
+    finally:
+        ap._get_prompt_builder = _orig_get_builder
+
+    ok = log_test(f"F3 MAX_RETRIES atteint : builder PAS appelé (got {call_count['value']})",
+                  call_count['value'] == 0)
+    # Cleanup
+    try:
+        ap._commis_retry_count.pop(mid, None)
+    except Exception:
+        pass
+    _cleanup_mid(mid)
+    _cleanup_contact(email)
+    return ok
+
+
+def test_F4_profil_enrichissement_progressif():
+    """F4 — Contact passe de PARTIAL (sample=0) à VIP (sample=2) entre 2 mails.
+    Le dispatcher voit le changement : 2e mail = VIP."""
+    email = f'f4-progress-{int(time.time())}@example.com'
+    _setup_partial_contact(email)
+    # 1er mail : doit être PARTIAL
+    md1 = _make_mail_data(from_email=email)
+    info1 = ap._classify_mail_branch(md1)
+    # Enrichir le profil
+    try:
+        ap._db.save_contact_profile(email, {
+            'email': email,
+            'display_name': email.split('@')[0],
+            'category': 'professionnel',
+            'register': 'vouvoiement',
+            'tone': 'cordial',
+            'sample_count': 2,
+            'confidence': 0.8,
+        })
+    except Exception as e:
+        return log_test(f"F4 setup KO: {e}", False)
+    # 2e mail : doit être VIP
+    md2 = _make_mail_data(from_email=email)
+    info2 = ap._classify_mail_branch(md2)
+
+    ok = log_test(f"F4 mail 1 (sample=0) → PARTIAL (got {info1['branch']})",
+                  info1['branch'] == 'partial')
+    ok &= log_test(f"F4 mail 2 (sample=2) → VIP (got {info2['branch']})",
+                   info2['branch'] == 'vip')
+    _cleanup_contact(email)
+    return ok
+
+
+def test_F5_pas_de_reveil_retroactif():
+    """F5 — Mail M1 traité PARTIAL → enrichissement profil → M1 re-call
+    `_prewarm_unified_for_mail` ne re-cuit PAS (cache HIT idempotent).
+
+    Même si la fiche s'est enrichie, M1 garde ses 3 frigos PARTIAL (pas de
+    réveil rétroactif vers cascade VIP)."""
+    email = f'f5-noretro-{int(time.time())}@example.com'
+    _setup_partial_contact(email)
+    _long_body = "Body normal pour passer le filtre minimum requis. " * 3
+    md = _make_mail_data(from_email=email, body=_long_body)
+    mid = md['internet_message_id']
+    _cleanup_mid(mid)
+
+    _orig_get_builder = ap._get_prompt_builder
+    call_count = {'value': 0}
+
+    class _MockBuilder:
+        def analyze_one_mail_stream(self, **kwargs):
+            call_count['value'] += 1
+            # Capture la branche au moment de l'appel (via scan_echeance)
+            yield ('end', {'points': ['P'], 'actions': ['A'], 'echeance': None,
+                            'folder_mail': None, 'folder_pj': None})
+
+    ap._get_prompt_builder = lambda: _MockBuilder()
+    try:
+        # 1er passage : PARTIAL
+        ap._prewarm_unified_for_mail(mid, md, momentum_snapshot=None)
+        # Enrichissement profil ENTRE LES DEUX
+        try:
+            ap._db.save_contact_profile(email, {
+                'email': email,
+                'display_name': email.split('@')[0],
+                'sample_count': 2,
+                'confidence': 0.8,
+            })
+        except Exception:
+            pass
+        # 2e passage : cache HIT, pas de re-cuisson
+        ap._prewarm_unified_for_mail(mid, md, momentum_snapshot=None)
+    finally:
+        ap._get_prompt_builder = _orig_get_builder
+
+    ok = log_test(f"F5 pas de réveil : builder appelé 1× même après enrichissement "
+                  f"(got {call_count['value']})", call_count['value'] == 1)
+    _cleanup_mid(mid)
+    _cleanup_contact(email)
+    return ok
+
+
+def test_F6_concurrence_double_call():
+    """F6 — 2 threads `_prewarm_unified_for_mail(mid, md)` en parallèle.
+    Le builder doit être appelé AU PLUS 2 fois (idéalement 1 si lock TOCTOU OK).
+    Aucun crash, frigos cohérents en fin."""
+    import threading
+    email = f'f6-concur-{int(time.time())}@example.com'
+    _setup_partial_contact(email)
+    _long_body = "Body normal pour passer le filtre minimum requis. " * 3
+    md = _make_mail_data(from_email=email, body=_long_body)
+    mid = md['internet_message_id']
+    _cleanup_mid(mid)
+
+    _orig_get_builder = ap._get_prompt_builder
+    call_count = {'value': 0}
+    call_lock = threading.Lock()
+
+    class _MockBuilder:
+        def analyze_one_mail_stream(self, **kwargs):
+            with call_lock:
+                call_count['value'] += 1
+            # petite latence pour augmenter la chance de race
+            time.sleep(0.05)
+            yield ('end', {'points': [], 'actions': [], 'echeance': None,
+                            'folder_mail': None, 'folder_pj': None})
+
+    ap._get_prompt_builder = lambda: _MockBuilder()
+    errors = []
+
+    def _run():
+        try:
+            ap._prewarm_unified_for_mail(mid, md, momentum_snapshot=None)
+        except Exception as e:
+            errors.append(str(e))
+
+    try:
+        t1 = threading.Thread(target=_run)
+        t2 = threading.Thread(target=_run)
+        t1.start()
+        t2.start()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+    finally:
+        ap._get_prompt_builder = _orig_get_builder
+
+    ok = log_test(f"F6 concurrence : aucun crash en 2 threads (got errors={errors})",
+                  not errors)
+    ok &= log_test(f"F6 concurrence : builder appelé ≤ 2× (got {call_count['value']})",
+                   call_count['value'] <= 2)
+    has_summary = ap._db.has_mail_summary(mid)
+    ok &= log_test("F6 concurrence : frigo Résumé cohérent (rempli en fin)",
+                   has_summary)
+    _cleanup_mid(mid)
+    _cleanup_contact(email)
+    return ok
+
+
+def test_F7_body_boundary_exact():
+    """F7 — Frontière `_COMMIS_MIN_BODY_LEN` (=100) :
+    - body 99 chars (après strip HTML) → builder PAS appelé, _persist_commis_results
+      court-circuit avec model='skip-short-body'.
+    - body 100 chars → builder appelé normalement."""
+    email = f'f7-bound-{int(time.time())}@example.com'
+    _setup_partial_contact(email)
+    threshold = ap._COMMIS_MIN_BODY_LEN
+    body_99 = 'A' * (threshold - 1)
+    body_100 = 'A' * threshold
+
+    _orig_get_builder = ap._get_prompt_builder
+    call_count_99 = {'value': 0}
+    call_count_100 = {'value': 0}
+
+    class _Mock99:
+        def analyze_one_mail_stream(self, **kwargs):
+            call_count_99['value'] += 1
+            yield ('end', {'points': [], 'actions': [], 'echeance': None,
+                            'folder_mail': None, 'folder_pj': None})
+
+    class _Mock100:
+        def analyze_one_mail_stream(self, **kwargs):
+            call_count_100['value'] += 1
+            yield ('end', {'points': [], 'actions': [], 'echeance': None,
+                            'folder_mail': None, 'folder_pj': None})
+
+    # Test 99 chars
+    md99 = _make_mail_data(from_email=email, body=body_99)
+    mid99 = md99['internet_message_id']
+    _cleanup_mid(mid99)
+    ap._get_prompt_builder = lambda: _Mock99()
+    try:
+        ap._prewarm_unified_for_mail(mid99, md99, momentum_snapshot=None)
+    finally:
+        ap._get_prompt_builder = _orig_get_builder
+
+    # Test 100 chars
+    md100 = _make_mail_data(from_email=email, body=body_100)
+    mid100 = md100['internet_message_id']
+    _cleanup_mid(mid100)
+    ap._get_prompt_builder = lambda: _Mock100()
+    try:
+        ap._prewarm_unified_for_mail(mid100, md100, momentum_snapshot=None)
+    finally:
+        ap._get_prompt_builder = _orig_get_builder
+
+    ok = log_test(f"F7 body 99 chars : builder PAS appelé (got {call_count_99['value']})",
+                  call_count_99['value'] == 0)
+    ok &= log_test(f"F7 body 100 chars : builder appelé (got {call_count_100['value']})",
+                   call_count_100['value'] == 1)
+    _cleanup_mid(mid99)
+    _cleanup_mid(mid100)
+    _cleanup_contact(email)
+    return ok
+
+
+def test_F8_echeance_format_pourri():
+    """F8 — Builder retourne `echeance="2026-12-01"` (string) au lieu d'un dict.
+    `_prewarm_unified_for_mail` doit gérer sans crash + ne pas polluer le frigo
+    avec une donnée non-dict."""
+    email = f'f8-pourri-{int(time.time())}@example.com'
+    _setup_vip_contact(email)
+    _long_body = "Body normal pour passer le filtre minimum requis. " * 3
+    md = _make_mail_data(from_email=email, body=_long_body)
+    mid = md['internet_message_id']
+    _cleanup_mid(mid)
+
+    _orig_get_builder = ap._get_prompt_builder
+
+    class _MockPourri:
+        def analyze_one_mail_stream(self, **kwargs):
+            # Retour pourri : string au lieu de dict
+            yield ('end', {'points': [], 'actions': [],
+                            'echeance': "2026-12-01",  # ← pourri (devrait être dict)
+                            'folder_mail': None, 'folder_pj': None})
+
+    ap._get_prompt_builder = lambda: _MockPourri()
+    crashed = False
+    try:
+        ap._prewarm_unified_for_mail(mid, md, momentum_snapshot=None)
+    except Exception as e:
+        crashed = True
+        crash_msg = str(e)
+    finally:
+        ap._get_prompt_builder = _orig_get_builder
+
+    ok = log_test(f"F8 échéance pourrie : pas de crash (crashed={crashed})",
+                  not crashed)
+    # Le frigo échéance doit contenir [] (scan VIP fait, format ignoré)
+    try:
+        ech_row = ap._db.get_mail_echeance(mid)
+        echeances = ech_row.get('echeances', []) if ech_row else []
+    except Exception:
+        echeances = None
+    ok &= log_test(f"F8 échéance pourrie : frigo = [] (string ignorée), got={echeances!r}",
+                   echeances == [])
+    _cleanup_mid(mid)
+    _cleanup_contact(email)
+    return ok
+
+
+def test_F9_mail_sans_imid():
+    """F9 — Mail avec `internet_message_id=''` : pas de clé canonique.
+    `_prewarm_unified_for_mail` doit skip propre (pas d'écriture frigo)."""
+    email = f'f9-noimid-{int(time.time())}@example.com'
+    _setup_partial_contact(email)
+    _long_body = "Body normal pour passer le filtre minimum requis. " * 3
+    md = _make_mail_data(from_email=email, body=_long_body)
+    md['internet_message_id'] = ''  # ← pas d'IMID
+    md['message_id'] = ''
+    mid = ''
+
+    _orig_get_builder = ap._get_prompt_builder
+    call_count = {'value': 0}
+
+    class _MockBuilder:
+        def analyze_one_mail_stream(self, **kwargs):
+            call_count['value'] += 1
+            yield ('end', {'points': [], 'actions': [], 'echeance': None,
+                            'folder_mail': None, 'folder_pj': None})
+
+    ap._get_prompt_builder = lambda: _MockBuilder()
+    crashed = False
+    try:
+        ap._prewarm_unified_for_mail(mid, md, momentum_snapshot=None)
+    except Exception:
+        crashed = True
+    finally:
+        ap._get_prompt_builder = _orig_get_builder
+
+    # Pas de crash, soit skip immédiat soit pas d'écriture frigo
+    ok = log_test(f"F9 mail sans IMID : pas de crash (crashed={crashed})",
+                  not crashed)
+    _cleanup_contact(email)
+    return ok
+
+
+def test_F10_compose_post_generation():
+    """F10 — Route `/api/post_generation_analyze` (compose sortants — scope V1
+    principal SPEC_ECHEANCES). Le builder reçoit le mail brouillon, retourne
+    une échéance, qui est intégrée dans la réponse JSON."""
+    # On utilise Flask test client
+    try:
+        client = ap.app.test_client()
+    except Exception as e:
+        return log_test(f"F10 setup Flask test_client KO: {e}", False)
+
+    _orig_get_builder = ap._get_prompt_builder
+    seen_call = {'value': False}
+
+    class _MockBuilder:
+        def analyze_one_mail_stream(self, *args, **kwargs):
+            seen_call['value'] = True
+            # Yield echeance event puis end
+            yield ('echeance', {'description': 'Livrable client',
+                                 'date': '2026-12-15'})
+            yield ('end', {})
+
+    ap._get_prompt_builder = lambda: _MockBuilder()
+    try:
+        resp = client.post('/api/post_generation_analyze', json={
+            'to': 'client@example.com',
+            'subject': 'Engagement projet',
+            'body': "Bonjour, je vous confirme la livraison du livrable client "
+                    "pour le 15 décembre 2026. Bien cordialement.",
+            'pj_names': [],
+        })
+        data = resp.get_json() or {}
+    except Exception as e:
+        ap._get_prompt_builder = _orig_get_builder
+        return log_test(f"F10 appel route KO: {e}", False)
+    finally:
+        ap._get_prompt_builder = _orig_get_builder
+
+    ok = log_test(f"F10 route /api/post_generation_analyze : status 200 (got {resp.status_code})",
+                  resp.status_code == 200)
+    ok &= log_test(f"F10 compose : builder appelé (got {seen_call['value']})",
+                   seen_call['value'] is True)
+    ok &= log_test(f"F10 compose : échéance dans la réponse (got={data.get('echeance')!r})",
+                   bool(data.get('echeance')))
+    return ok
+
+
+# =============================================================================
 # Runner
 # =============================================================================
 
@@ -984,6 +1431,17 @@ def main():
         ('E3 sujet vide : pas de crash', test_E3_subject_vide),
         ('E4 body HTML strip cohérent', test_E4_body_html_strip),
         ('E5 mailer-daemon détecté auto-email', test_E5_auto_email_subtil),
+        # Famille F — Cuisine avancée
+        ('F1 idempotence fonctionnelle (call 2x)', test_F1_idempotence_fonctionnelle),
+        ('F2 panne Haiku : retry_count incrémenté', test_F2_haiku_panne_retry_count),
+        ('F3 MAX_RETRIES atteint : abandon', test_F3_max_retries_abandon),
+        ('F4 profil enrichissement progressif', test_F4_profil_enrichissement_progressif),
+        ('F5 pas de réveil rétroactif', test_F5_pas_de_reveil_retroactif),
+        ('F6 concurrence 2 threads sur même mid', test_F6_concurrence_double_call),
+        ('F7 body boundary exact 99/100', test_F7_body_boundary_exact),
+        ('F8 échéance format pourri (string)', test_F8_echeance_format_pourri),
+        ('F9 mail sans IMID', test_F9_mail_sans_imid),
+        ('F10 compose post_generation_analyze', test_F10_compose_post_generation),
     ]
 
     passed = 0
