@@ -124,25 +124,32 @@ Voir document dédié : [`SPEC_CONTACTS_BOOSTERMAIL.md`](SPEC_CONTACTS_BOOSTERMA
 
 ---
 
-## 6. Échéance VIP entrants — Option A (14/05/2026)
+## 6. Échéance — paradigme DB-driven (V12 Phase 2.1, 15/05/2026)
 
-**Décision Yvan 14/05** : `scan_echeance` activé pour les mails entrants **VIP uniquement** (Filtre 1 OK + Filtre 2 OK = contact connu avec fiche enrichie). Slide 4 PPTX « 5 frigos pleins en VIP » alignée. Pour PARTIAL / ÉCARTÉ, scan_echeance reste désactivé (cohérent avec spec ÉCHÉANCES 05/05 — risque faux positifs trop élevé sur contacts inconnus).
+**Historique** :
+- 14/05/2026 : Option A activée — `scan_echeance` activé pour entrants VIP afin de **détecter** des échéances.
+- 15/05/2026 : **Option A abandonnée** après 24h. Nouvelle reformulation Yvan : « ce qui compte ce n'est pas le statut VIP/PARTIAL, c'est qu'une échéance soit en cours vis-à-vis de l'adresse mail ».
 
-**Implémentation (N11 Option A)** :
-- `_prewarm_unified_for_mail` (app_plugin.py:4239) calcule `_branch_info_unified = _classify_mail_branch(mail_data)` puis active `scan_echeance = (branch == 'vip')`.
-- `_persist_commis_results` (app_plugin.py:3911) accepte un nouveau paramètre `echeances=None` qui distingue 3 cas sémantiquement :
-  - `None` : scan non-actif (PARTIAL ou skip-short-body) → `[]` stocké pour idempotence
-  - `[]`   : scan actif (VIP) mais 0 engagement détecté
-  - `[dict]` : scan actif et engagements détectés, à persister
+**Critère V12 Phase 2** : pas le statut contact, mais l'existence d'au moins une échéance active en DB liée à `from_email`. Les entrants servent au **matching** (clôture d'échéances existantes), plus à la **création**.
 
-**Conséquence pratique** :
-- VIP entrant : 5 frigos pleins (Body Sonnet + Résumé + Classement Mail + Classement PJ + **Échéance**)
-- PARTIAL entrant : 3 frigos pleins (Résumé + Classement Mail + Classement PJ)
-- ÉCARTÉ : aucun frigo pré-cuit
+**Implémentation (V12 Phase 2.1)** :
+- Helper unique `_should_scan_echeance(mode: str, mail_data: dict) -> bool` ([app_plugin.py:14005+](app_plugin.py:14005)) avec kwarg sémantique explicite. Résout l'asymétrie Obs-F10.
+- Phase 2.1 : `mode='compose'` → True (sortants V12 P1), `mode='incoming'` → False (Phase 2.2 ajoutera `db.has_active_echeance(from_email)`)
+- Marker `_scan_echeance_active = (branch == 'vip')` supprimé. Appel `_classify_mail_branch(mail_data)` orphelin supprimé.
+- `_persist_commis_results(echeances=None)` conserve la sémantique tri-état pour Phase 2.2 :
+  - `None` : scan non-actif → `[]` stocké pour idempotence
+  - `[]`   : scan actif mais 0 engagement détecté
+  - `[dict]` : scan actif et engagements détectés (Phase 2.2)
+
+**Conséquence pratique Phase 2.1** :
+- Entrants (toutes branches) : 3 frigos pleins (Résumé + Classement Mail + Classement PJ), **pas d'échéance**
+- Sortants compose : Cas A/B/C dans le dialog (cf [`SPEC_ECHEANCES_BOOSTERMAIL.md`](SPEC_ECHEANCES_BOOSTERMAIL.md) §2)
 
 **Liens** :
-- Spec détaillée : [`SPEC_ECHEANCES_BOOSTERMAIL.md`](SPEC_ECHEANCES_BOOSTERMAIL.md) §2 (révision 14/05)
-- Test régression : `tests/test_n11_branches.py::test_option_a_scan_echeance_conditional` + `::test_option_a_persist_echeances_param`
+- Spec détaillée : [`SPEC_ECHEANCES_BOOSTERMAIL.md`](SPEC_ECHEANCES_BOOSTERMAIL.md) §2 (révision 15/05 — abandon Option A + paradigme DB-driven)
+- Test régression : `tests/test_n11_branches.py::test_phase21_no_scan_echeance_marker_in_unified` + `::test_should_scan_echeance_helper_contract` + `::test_persist_echeances_param_kept_for_phase22`
+- Invariant archivé : `audit/INVARIANTS.md` I-BRANCHES-N11-OPTION-A (ARCHIVÉ 15/05)
+- Journal détaillé : `docs/architecture/REFONTE_N1_N11_JOURNAL.md` §6 ter
 
 ---
 

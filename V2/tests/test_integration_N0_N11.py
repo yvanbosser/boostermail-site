@@ -550,55 +550,11 @@ def test_C2_vip_contact_manually_edited():
     return ok
 
 
-def test_C3_vip_scan_echeance_active():
-    """C3 — VIP : `scan_echeance=True` activé (Option A 14/05).
-
-    Note méthodologique : body > `_COMMIS_MIN_BODY_LEN` (=100) obligatoire,
-    sinon court-circuit Haiku via _persist_commis_results court-body et le
-    mock builder n'est jamais appelé.
-    """
-    email = f'c3-vip-ech-{int(time.time())}@example.com'
-    _setup_vip_contact(email)
-    _long_body = ("Bonjour, je vous écris pour confirmer notre engagement "
-                  "prévu le 1er décembre 2026. Merci de me confirmer la "
-                  "disponibilité de votre côté. Cordialement.")
-    md = _make_mail_data(from_email=email, body=_long_body)
-    mid = md['internet_message_id']
-    _cleanup_mid(mid)
-
-    _orig_get_builder = ap._get_prompt_builder
-    seen_scan_echeance = {'value': None}
-
-    class _MockBuilder:
-        def analyze_one_mail_stream(self, **kwargs):
-            seen_scan_echeance['value'] = kwargs.get('scan_echeance')
-            yield ('end', {
-                'points': [], 'actions': [],
-                'echeance': {'description': 'Engagement test', 'date': '2026-12-01'},
-                'folder_mail': None, 'folder_pj': None,
-            })
-
-    ap._get_prompt_builder = lambda: _MockBuilder()
-    try:
-        ap._prewarm_unified_for_mail(mid, md, momentum_snapshot=None)
-    finally:
-        ap._get_prompt_builder = _orig_get_builder
-
-    ok = log_test("C3 VIP : scan_echeance=True passé au commis",
-                  seen_scan_echeance['value'] is True,
-                  f"got={seen_scan_echeance['value']!r}")
-    # Vérif que l'échéance est persistée
-    try:
-        ech_row = ap._db.get_mail_echeance(mid)
-        echeances = ech_row.get('echeances', []) if ech_row else []
-    except Exception:
-        echeances = []
-    ok &= log_test("C3 VIP : échéance détectée persistée (non vide)",
-                   len(echeances) >= 1,
-                   f"got={echeances!r}")
-    _cleanup_mid(mid)
-    _cleanup_contact(email)
-    return ok
+# C3 (Option A scan échéance VIP) supprimé en V12 Phase 2.1 — l'invariant
+# I-BRANCHES-N11-OPTION-A est archivé (cf audit/INVARIANTS.md). Les
+# entrants VIP ne déclenchent plus de scan échéance ; la régression
+# statique inverse est dans test_n11_branches.py
+# (test_phase21_no_scan_echeance_marker_in_unified).
 
 
 def test_C4_vip_repondre_instant():
@@ -1249,49 +1205,13 @@ def test_F7_body_boundary_exact():
     return ok
 
 
-def test_F8_echeance_format_pourri():
-    """F8 — Builder retourne `echeance="2026-12-01"` (string) au lieu d'un dict.
-    `_prewarm_unified_for_mail` doit gérer sans crash + ne pas polluer le frigo
-    avec une donnée non-dict."""
-    email = f'f8-pourri-{int(time.time())}@example.com'
-    _setup_vip_contact(email)
-    _long_body = "Body normal pour passer le filtre minimum requis. " * 3
-    md = _make_mail_data(from_email=email, body=_long_body)
-    mid = md['internet_message_id']
-    _cleanup_mid(mid)
-
-    _orig_get_builder = ap._get_prompt_builder
-
-    class _MockPourri:
-        def analyze_one_mail_stream(self, **kwargs):
-            # Retour pourri : string au lieu de dict
-            yield ('end', {'points': [], 'actions': [],
-                            'echeance': "2026-12-01",  # ← pourri (devrait être dict)
-                            'folder_mail': None, 'folder_pj': None})
-
-    ap._get_prompt_builder = lambda: _MockPourri()
-    crashed = False
-    try:
-        ap._prewarm_unified_for_mail(mid, md, momentum_snapshot=None)
-    except Exception as e:
-        crashed = True
-        crash_msg = str(e)
-    finally:
-        ap._get_prompt_builder = _orig_get_builder
-
-    ok = log_test(f"F8 échéance pourrie : pas de crash (crashed={crashed})",
-                  not crashed)
-    # Le frigo échéance doit contenir [] (scan VIP fait, format ignoré)
-    try:
-        ech_row = ap._db.get_mail_echeance(mid)
-        echeances = ech_row.get('echeances', []) if ech_row else []
-    except Exception:
-        echeances = None
-    ok &= log_test(f"F8 échéance pourrie : frigo = [] (string ignorée), got={echeances!r}",
-                   echeances == [])
-    _cleanup_mid(mid)
-    _cleanup_contact(email)
-    return ok
+# F8 (échéance format pourri entrants VIP) supprimé en V12 Phase 2.1 —
+# test était tautologique (mockait un cas que la vraie chaîne ne pouvait
+# pas produire, cf Obs-F8 INVARIANTS.md:1110). Désormais le scan échéance
+# est désactivé côté entrants (helper `_should_scan_echeance('incoming')`
+# retourne False), donc le mock builder n'est plus appelé pour cette voie.
+# Le format pourri dict-vs-string est couvert par les tests F10 sortants
+# (Cas C + premier-gagne) et tests/test_n12_normalize_echeance.py::S3.
 
 
 def test_F9_mail_sans_imid():
@@ -1566,7 +1486,7 @@ def main():
         # Famille C — VIP
         ('C1 contact enrichi = vip', test_C1_vip_contact_enrichi),
         ('C2 manually_edited = vip', test_C2_vip_contact_manually_edited),
-        ('C3 VIP : scan_echeance actif (Option A)', test_C3_vip_scan_echeance_active),
+        # C3 supprimé V12 Phase 2.1 (abandon Option A — cf commentaire test_C3*)
         ('C4 VIP : body Sonnet pré-cuit', test_C4_vip_repondre_instant),
         ('C5 VIP : classer instant', test_C5_vip_classer_instant),
         ('C6 VIP : résumé instant', test_C6_vip_voir_resume_instant),
@@ -1596,7 +1516,7 @@ def main():
         ('F5 pas de réveil rétroactif', test_F5_pas_de_reveil_retroactif),
         ('F6 concurrence 2 threads sur même mid', test_F6_concurrence_double_call),
         ('F7 body boundary exact 99/100', test_F7_body_boundary_exact),
-        ('F8 échéance format pourri (string)', test_F8_echeance_format_pourri),
+        # F8 supprimé V12 Phase 2.1 (test tautologique Obs-F8, scan désactivé entrants)
         ('F9 mail sans IMID', test_F9_mail_sans_imid),
         # F10 réécrit V12 (15/05/2026) — 7 sous-cas couvrant Cas A/B/C
         # + premier-gagne + silence + fallback FR. Remplace l'ancien F10

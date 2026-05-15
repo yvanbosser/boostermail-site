@@ -1,12 +1,14 @@
 ## SPEC ÉCHÉANCES — BoosterMail (consolidée)
 
-> **Dernière mise à jour** : 14/05/2026 (N11 Option A — extension VIP entrants)
+> **Dernière mise à jour** : 15/05/2026 (V12 Phase 2.1 — abandon Option A, paradigme DB-driven)
 >
 > **Statut** : source de vérité unique pour la fonctionnalité « Échéance ». Remplace `SPEC_ECHEANCES_OPTIMISATION.md` (proto, 06/04/2026, à archiver avec bandeau).
 >
 > **Origine** : audit complet 05/05 — état V2 SaaS sous-estimé jusque-là (mémoires + analyses pointaient vers OneDrive obsolète). Découverte : la feature est implémentée à ~90 % en V2. Cette spec consolide l'existant V2 + les décisions Yvan + le gap restant.
 >
-> **Évolution 14/05** : décision Yvan Option A N11 — scope étendu aux **mails entrants VIP** (slide 4 PPTX « 5 frigos pleins en VIP »). Les entrants PARTIAL et ÉCARTÉ restent sans scan échéance (économie API + cohérence). Voir §2.
+> **Évolution 14/05 (Option A)** : extension scope aux entrants VIP pour détection.
+>
+> **Évolution 15/05 (V12 Phase 2.1 — ABANDON Option A après 24h)** : nouvelle reformulation Yvan : « ce qui compte n'est pas le statut VIP/PARTIAL, c'est qu'une échéance soit en cours vis-à-vis de l'adresse mail ». Le critère de scan échéance entrant n'est plus le statut contact, mais l'**existence d'une échéance active en DB sur `from_email`**. Les entrants ne servent plus à créer (sortie d'Option A) mais à **matcher** des échéances existantes (Phase 2.2 à implémenter — sub-commis Haiku dédié). Voir §2 + journal `REFONTE_N1_N11_JOURNAL.md` §6 ter.
 
 ---
 
@@ -22,19 +24,41 @@
 
 ---
 
-## 2. Scope V1 (validé Yvan 05/05 + révision 14/05 Option A)
+## 2. Scope V12 (validé Yvan 15/05 — paradigme DB-driven)
 
-### In-scope
+### Sortants — création d'échéances (Phase 1 V12 livrée 15/05 matin, commit `76ce8cd`)
 
-✅ **Engagements sortants** : l'utilisateur déclare/promet quelque chose dans un mail qu'il envoie. Pipeline `_handle_post_send` + pré-scan BG.
+✅ **Engagements sortants compose pré-envoi** : l'utilisateur déclare/promet quelque chose dans un mail compose. Route `/api/post_generation_analyze` → commis Haiku N6.1 avec `signal_without_date=True` → validateur `_normalize_echeance_payload` discrimine 3 cas :
+  - **Cas A** — description + date résoluble (ISO ou fallback FR `extract_fr_dates`) → popup « Échéance détectée » auto-rempli
+  - **Cas B** — description + date floue → datepicker à compléter par l'user
+  - **Cas C** — description vide + signal vague (« au plus vite », « rapidement », « je reviens ») → popup « Vous mentionnez "X", créer ? »
+  - Silence (null) si tous champs vides après cleanup
 
-✅ **Engagements entrants VIP** (révision 14/05) : un mail entrant VIP (Filtre 1 OK + Filtre 2 OK = contact connu avec fiche enrichie) déclenche `scan_echeance=True` dans le commis Haiku unifié N6.1. Justification : en VIP, le contact est qualifié (fiche enrichie via O1) → risque de faux positif réduit + slide 4 PPTX « 5 frigos pleins en VIP ». Implémentation : dispatcher `_classify_mail_branch` → `_prewarm_unified_for_mail` active `scan_echeance` conditionnellement.
+Frontière sémantique tranchée 15/05 : POPPER pour engagement / demande / urgence — NE PAS POPPER pour politesse pure / hypothèse non engageante / accusé de réception sans suite.
+
+✅ **Engagements sortants post-envoi** : pipeline rattrapage Sonnet via `/api/echeances/post_send/<message_id>` — distinct du compose pré-envoi.
+
+### Entrants — matching d'échéances actives (Phase 2 V12)
+
+**Critère de scan refait 15/05** : pas le statut VIP/PARTIAL/ÉCARTÉ du contact, mais l'existence d'au moins une échéance active en DB liée à `from_email`. Les entrants ne servent plus à créer, mais à matcher pour clôturer.
+
+✅ **Phase 2.1 livrée 15/05 PM** (helper `_should_scan_echeance(mode, mail_data)` + abandon Option A 14/05) :
+  - Mode `'incoming'` retourne actuellement `False` pour tous les entrants
+  - Marker `_scan_echeance_active = (branch == 'vip')` supprimé
+  - `_classify_mail_branch` orphelin supprimé dans `_prewarm_unified_for_mail`
+  - Aucune création d'échéance depuis entrants (régression assumée 24h le temps de Phase 2.2)
+
+⏳ **Phase 2.2 à venir** :
+  - Sub-commis Haiku dédié `match_echeance_active(mail, active_list)` (option (b) validée par Yvan — pas de mélange dans le commis unifié N6.1)
+  - Helper `_should_scan_echeance('incoming', mail_data)` branchera `db.has_active_echeance(from_email)` → True si ≥ 1 échéance active
+  - Remplacement de `_auto_cancel_echeances_on_reply` heuristique 3-mots-communs par le matching IA
+  - Q1/Q2/Q3 tranchés par Yvan 15/05 : IA reçoit la liste des échéances actives en contexte / pas de création de nouvelle échéance distincte / mode strict (mentions vagues ignorées sur entrants)
 
 ### Out-of-scope
 
-❌ **Mails entrants PARTIAL** : contacts inconnus ou fiches vides (`sample_count = 0`). Risque de faux positif trop élevé sur des démarcheurs ou inconnus. Le commis tourne sans directive E pour ces mails.
+❌ **Synchronisation avec Tâches Outlook natives** (Yvan 05/05 : « sûrement pas »). On garde notre propre store + UI.
 
-❌ **Mails entrants ÉCARTÉS** : no-reply, > 30 jours, déjà répondu, body court, user en CC. Pas de scan IA du tout.
+❌ **Out-of-scope V1** — Multi-tenant strict (isolation DB par `user_id`). Travail en cours côté infra mais non bloquant pour la feature échéance MVP.
 
 ❌ **Synchronisation avec Tâches Outlook natives** (Yvan 05/05 : « sûrement pas »). On garde notre propre store + UI.
 

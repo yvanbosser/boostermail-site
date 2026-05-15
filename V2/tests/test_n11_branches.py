@@ -15,11 +15,16 @@ Refonte N11 (14/05/2026) :
     `_run_prefetch` (cold cache guard), `_run_prefetch` (post-prefetch normal),
     `/api/instant_reply` (diagnostic miss).
 
-SUSPENDU (décision Yvan en attente) :
-  - Réactivation Échéance VIP entrants (slide 4 dit OUI, spec ÉCHÉANCES 05/05
-    + memory `feature_echeances_scope` disent NON) — conflit produit à trancher.
+HISTORIQUE DES DÉCISIONS scan échéance entrants :
+  - 14/05/2026 : Option A activée (`scan_echeance` activé en VIP entrants pour
+    DÉTECTER des échéances). Invariant I-BRANCHES-N11-OPTION-A créé.
+  - 15/05/2026 : Option A ABANDONNÉE (V12 Phase 2.1). Vision Yvan revue :
+    « ce qui compte ce n'est pas le statut VIP/PARTIAL, c'est qu'une échéance
+    soit en cours vis-à-vis de l'adresse mail ». Les entrants servent au
+    matching (Phase 2.2 à venir), plus à la création. Invariant I-BRANCHES-
+    N11-OPTION-A archivé. Régression statique inverse ajoutée ci-dessous.
 
-Tests : 8 comportementaux + 3 régression statique.
+Tests : 8 comportementaux + 4 régression statique.
 
 Lancement : `python tests/test_n11_branches.py`
 """
@@ -205,37 +210,80 @@ def test_should_speculate_supprimé():
     return ok
 
 
-def test_option_a_scan_echeance_conditional():
-    """N11 Option A (14/05) — `_prewarm_unified_for_mail` calcule la branche
-    puis active `scan_echeance` uniquement en VIP.
+def test_phase21_no_scan_echeance_marker_in_unified():
+    """V12 Phase 2.1 — Régression statique INVERSE de l'ancien test
+    `test_option_a_scan_echeance_conditional`.
 
-    Régression statique : on vérifie via inspect.getsource que le code source
-    contient bien le pattern conditionnel.
+    L'invariant I-BRANCHES-N11-OPTION-A (Option A 14/05) a été ARCHIVÉ
+    le 15/05 suite à la révision Yvan : « ce qui compte n'est pas le
+    statut VIP/PARTIAL, c'est qu'une échéance soit en cours vis-à-vis
+    de l'adresse mail ». Les entrants ne déclenchent plus de scan
+    échéance détection ; le helper `_should_scan_echeance('incoming', _)`
+    retourne False en Phase 2.1 (Phase 2.2 ajoutera le scan matching IA
+    conditionné à `db.has_active_echeance(from_email)`).
+
+    Ce test garde la couverture statique : empêche un futur dev de remettre
+    le marker Option A par mégarde, et garantit que le branchement Phase 2.1
+    via helper est bien en place.
     """
     src = inspect.getsource(ap._prewarm_unified_for_mail)
-    # Pattern attendu : `scan_echeance` activé conditionnellement selon branche
-    ok = log_test("`_classify_mail_branch` appelé dans `_prewarm_unified_for_mail`",
-                  '_classify_mail_branch(mail_data)' in src)
-    ok &= log_test("`scan_echeance` activé conditionnellement (pas hardcoded False)",
-                   '_scan_echeance_active' in src and "scan_echeance=False" not in src,
-                   "scan_echeance toujours hardcoded False — Option A non appliquée"
-                   if "scan_echeance=False" in src else "")
-    ok &= log_test("`scan_echeance` actif si branche == 'vip'",
-                   "_branch_info_unified['branch'] == 'vip'" in src
-                   or "_branch_info_unified.get('branch') == 'vip'" in src)
+    ok = log_test("marker `_scan_echeance_active` ABSENT (Option A archivée)",
+                  '_scan_echeance_active' not in src,
+                  "marker Option A réintroduit — voir INVARIANTS.md archivé"
+                  if '_scan_echeance_active' in src else "")
+    ok &= log_test("`_classify_mail_branch(mail_data)` orphelin SUPPRIMÉ "
+                   "(plus de calcul branche pour décider scan_echeance)",
+                   '_classify_mail_branch(mail_data)' not in src,
+                   "appel orphelin restant — code mort à nettoyer"
+                   if '_classify_mail_branch(mail_data)' in src else "")
+    ok &= log_test("helper `_should_scan_echeance('incoming'` branché",
+                   "_should_scan_echeance('incoming'" in src,
+                   "helper non branché côté entrants" if
+                   "_should_scan_echeance('incoming'" not in src else "")
     return ok
 
 
-def test_option_a_persist_echeances_param():
-    """N11 Option A — `_persist_commis_results` accepte `echeances` (Optional)
-    et persiste conditionnellement (None → [] pour PARTIAL, liste pour VIP).
+def test_should_scan_echeance_helper_contract():
+    """V12 Phase 2.1 — Helper `_should_scan_echeance(mode, mail_data)`
+    a le contrat sémantique attendu (kwarg `mode` explicite, fail-fast
+    sur valeur inconnue).
+    """
+    has_helper = hasattr(ap, '_should_scan_echeance')
+    ok = log_test("`_should_scan_echeance` existe dans app_plugin",
+                  has_helper)
+    if not has_helper:
+        return False
+    # 'compose' → True (sortants V12 P1)
+    ok &= log_test("mode='compose' → True (sortants pré-envoi)",
+                   ap._should_scan_echeance('compose', {}) is True)
+    # 'incoming' → False (Phase 2.1)
+    ok &= log_test("mode='incoming' → False (Phase 2.1, attente Phase 2.2)",
+                   ap._should_scan_echeance('incoming', {}) is False)
+    # Mode inconnu → ValueError (fail-fast)
+    try:
+        ap._should_scan_echeance('unknown', {})
+        ok &= log_test("mode inconnu doit lever ValueError", False,
+                       "n'a pas levé d'exception")
+    except ValueError:
+        ok &= log_test("mode inconnu → ValueError (fail-fast)", True)
+    except Exception as e:
+        ok &= log_test("mode inconnu → mauvaise exception",
+                       False, f"got {type(e).__name__}: {e}")
+    return ok
+
+
+def test_persist_echeances_param_kept_for_phase22():
+    """V12 Phase 2.1 — `_persist_commis_results` garde le paramètre
+    `echeances` (Optional) avec sa sémantique tri-état (None / [] / [dict])
+    car Phase 2.2 le réutilisera pour le scan matching IA entrants.
+    En Phase 2.1, l'appel passe toujours `echeances=None` côté entrants.
     """
     sig = inspect.signature(ap._persist_commis_results)
     has_echeances = 'echeances' in sig.parameters
-    ok = log_test("Paramètre `echeances` présent dans signature",
+    ok = log_test("paramètre `echeances` conservé dans signature",
                   has_echeances)
     src = inspect.getsource(ap._persist_commis_results)
-    ok &= log_test("Logique conditionnelle echeances is None → []",
+    ok &= log_test("logique conditionnelle `echeances is None → []` conservée",
                    'echeances is None' in src)
     return ok
 
@@ -330,9 +378,11 @@ def main():
         ('test_branch_returns_dict_with_keys', test_branch_returns_dict_with_keys),
         ('test_filter1_fail_open_propagation', test_filter1_fail_open_propagation),
         ('test_should_speculate_supprime', test_should_speculate_supprimé),
-        # Option A (14/05) — réactivation Échéance VIP entrants
-        ('test_option_a_scan_echeance_conditional', test_option_a_scan_echeance_conditional),
-        ('test_option_a_persist_echeances_param', test_option_a_persist_echeances_param),
+        # V12 Phase 2.1 (15/05) — Option A 14/05 ABANDONNÉE.
+        # Régression statique INVERSE + contrat helper.
+        ('test_phase21_no_scan_echeance_marker_in_unified', test_phase21_no_scan_echeance_marker_in_unified),
+        ('test_should_scan_echeance_helper_contract', test_should_scan_echeance_helper_contract),
+        ('test_persist_echeances_param_kept_for_phase22', test_persist_echeances_param_kept_for_phase22),
         # Section 3 — Régressions statiques
         ('test_regression_no_double_filter_in_prefetch', test_regression_no_double_filter_in_prefetch),
         ('test_regression_summarize_bg_uses_dispatcher', test_regression_summarize_bg_uses_dispatcher),

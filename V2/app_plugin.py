@@ -3924,14 +3924,17 @@ def _persist_commis_results(*, mid, mail_data, points, actions, mail_suggestions
         pj_suggestions: Top 3 classement PJ
         has_pj: bool présence pièces jointes
         model: identifiant modèle utilisé (`'commis-n6.1'` ou `'skip-short-body'`)
-        echeances: list[dict] échéances détectées par le commis (VIP entrants
-                   N11 Option A) OU None (PARTIAL / skip / scan désactivé).
-                   None et [] ont des sémantiques différentes :
+        echeances: list[dict] | None. Sémantique tri-état préservée pour
+                   Phase 2.2 (scan matching IA entrants) :
                      - None  : scan_echeance non actif → on stocke [] pour
-                               préserver l'idempotence (compat pré-Option A).
+                               préserver l'idempotence (sinon boucle BG 45s).
                      - []    : scan_echeance actif mais 0 engagement détecté.
                      - [dict] : 1+ engagement(s) détecté(s), à persister.
-                   Cf I-ECHEANCE-N63-01 et SPEC_ECHEANCES_BOOSTERMAIL.md §2.
+                   V12 Phase 2.1 (15/05/2026) : entrants reçoivent toujours
+                   None (Option A abandonnée — cf §6 ter du journal).
+                   Phase 2.2 réintroduira [] / [dict] côté entrants via
+                   le scan matching IA conditionné à une échéance active
+                   en DB. Cf SPEC_ECHEANCES_BOOSTERMAIL.md §2.
     """
     # 1. Résumé — refonte N6.1, P+A produits par le commis désormais persistés
     try:
@@ -3948,14 +3951,15 @@ def _persist_commis_results(*, mid, mail_data, points, actions, mail_suggestions
     # Pas de _set_mail_preview pour 'summary' : ce plat n'a pas de slot RAM
     # (frontend lit la DB directement). Cf docstring de _prewarm_unified_for_mail.
 
-    # 2. Échéance — N11 Option A : persistence conditionnelle selon branche.
-    #   - VIP entrants : `echeances` = liste (peut être vide ou contenir des
-    #     engagements détectés par le commis Haiku via scan_echeance=True).
-    #   - PARTIAL / écarté / skip-short-body : `echeances=None`, on stocke
-    #     `[]` pour idempotence (sinon `_prewarm_unified_for_mail` boucle
-    #     à chaque cycle BG 45s car `has_mail_echeance(mid)` retournerait
-    #     False). Cohérent avec SPEC_ECHEANCES_BOOSTERMAIL.md (scope V1 =
-    #     sortants + VIP entrants depuis 14/05).
+    # 2. Échéance — V12 Phase 2.1 (15/05/2026, abandon Option A) :
+    #   - Tous entrants : `echeances=None`, on stocke `[]` pour préserver
+    #     l'idempotence (sinon `_prewarm_unified_for_mail` boucle à chaque
+    #     cycle BG 45s car `has_mail_echeance(mid)` retournerait False).
+    #   - Phase 2.2 réintroduira [] / [dict] côté entrants via le scan
+    #     matching IA conditionné à `_should_scan_echeance('incoming', _)`
+    #     qui basculera True quand `db.has_active_echeance(from_email)`.
+    #   - Sortants compose : persistence via la route post-envoi Sonnet
+    #     (`/api/echeances/post_send`), pas par ici.
     _echeances_persist = [] if echeances is None else echeances
     try:
         _db.save_mail_echeance(mid, _echeances_persist)
@@ -4239,19 +4243,15 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
             return
 
         # === 7. Appel commis Haiku unifié ===
-        # Décision Yvan 14/05 Option A : `scan_echeance` activé UNIQUEMENT en
-        # VIP entrants (slide 4 PPTX « 5 frigos pleins en VIP »). Les PARTIEL
-        # restent sans scan_echeance (économie tokens + spec V1 sortants only
-        # préservée pour ce cas). Le dispatcher unique N11
-        # `_classify_mail_branch` détermine la branche.
-        # La route `/api/post_generation_analyze` (mails compose sortants)
-        # reste sur scan_echeance=True par défaut (sortants).
-        try:
-            _branch_info_unified = _classify_mail_branch(mail_data)
-        except Exception as _e:
-            logger.debug(f"[unified] _classify_mail_branch erreur : {_e}")
-            _branch_info_unified = {'branch': 'partial', 'reason': 'classify_error'}
-        _scan_echeance_active = (_branch_info_unified['branch'] == 'vip')
+        # V12 Phase 2.1 (15/05/2026) : Option A 14/05 abandonnée. Le scan
+        # échéance entrant ne dépend plus du statut VIP/PARTIAL du contact
+        # (cf vision Yvan 15/05 : « ce qui compte ce n'est pas le statut,
+        # c'est qu'une échéance soit en cours vis-à-vis de l'adresse »).
+        # Phase 2.1 : `_should_scan_echeance('incoming', ...)` retourne False
+        # pour tous les entrants (le commis ne produit plus de section E).
+        # Phase 2.2 (à venir) : branchera DB lookup → True si échéance
+        # active sur from_email, pour faire du matching IA contre la liste.
+        # Helper unique justifié par 2 call sites distincts (Obs-F10 résolu).
         result = None
         for kind, payload in builder.analyze_one_mail_stream(
             mail=mail_data,
@@ -4261,7 +4261,7 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
             contact_profile=contact_profile,
             recent_classifications=recent_class,
             recent_pj_classifications=recent_pj,
-            scan_echeance=_scan_echeance_active,
+            scan_echeance=_should_scan_echeance('incoming', mail_data),
         ):
             if kind == 'end':
                 result = payload
@@ -4298,20 +4298,12 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
                 pj_suggestions.append(s)
 
         # === 9. Persister les 4 frigos ===
-        # Décision Yvan 14/05 Option A : on persiste l'échéance détectée
-        # quand le commis a scanné (VIP entrants). `result['echeance']` est
-        # un dict {description, date} ou None. On convertit en liste pour
-        # `save_mail_echeance` (qui attend une list[dict]).
-        _echeance_raw = result.get('echeance')
-        _echeances_to_persist = ([_echeance_raw]
-                                  if isinstance(_echeance_raw, dict)
-                                  else None)
-        # `None` ici signifie « pas de scan effectué » (PARTIAL ou erreur),
-        # `[]` signifie « scan effectué mais aucun engagement détecté »
-        # (VIP avec mail sans deadline). La distinction est utile pour
-        # l'idempotence dans `_persist_commis_results`.
-        if _scan_echeance_active and _echeances_to_persist is None:
-            _echeances_to_persist = []  # scan VIP fait, 0 échéance trouvée
+        # V12 Phase 2.1 : entrants ne déclenchent plus de scan échéance
+        # (`scan_echeance=False` via helper). Donc `result.get('echeance')`
+        # sera toujours None ici → `echeances=None` signifie « pas de scan
+        # effectué » dans la sémantique de `_persist_commis_results`.
+        # Phase 2.2 réintroduira la conversion liste quand le scan matching
+        # IA sera codé. Pas de pré-câblage Phase 2.1 (code mort en germe).
         _persist_commis_results(
             mid=mid, mail_data=mail_data,
             points=result.get('points', []),
@@ -4319,7 +4311,7 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
             mail_suggestions=mail_suggestions,
             pj_suggestions=pj_suggestions,
             has_pj=has_pj,
-            echeances=_echeances_to_persist,
+            echeances=None,  # Phase 2.1 : scan désactivé entrants
             model='commis-n6.1',
         )
 
@@ -14007,6 +13999,48 @@ def _compose_synthetic_mid(to, subject, body):
     return f'compose_{h}'
 
 
+def _should_scan_echeance(mode: str, mail_data: dict) -> bool:
+    """Décide si le commis Haiku doit scanner l'échéance pour ce mail.
+
+    Résout l'asymétrie « patches dispersés » dénoncée par Obs-F10
+    (cf audit/INVARIANTS.md lignes 1121-1127). Avant V12 Phase 2.1, la
+    décision était inline aux 2 call sites avec 2 mécanismes différents :
+    - compose-sortants : aucun kwarg passé (default True hérité)
+    - entrants : `scan_echeance = (branch == 'vip')` marker Option A 14/05
+
+    Désormais 1 helper central avec kwarg `mode` explicite (P0-1 démolisseur
+    V12 Phase 2.1 — pas d'inférence fragile sur message_id qui n'existe
+    pas dans `mail_data` côté compose).
+
+    Args:
+        mode: 'compose' (sortants pré-envoi) ou 'incoming' (mails reçus).
+        mail_data: dict du mail (utilisé en Phase 2.2 pour `db.has_active_
+            echeance(from_email)`, paramètre déjà accepté pour stabilité
+            de l'API entre 2.1 et 2.2).
+
+    Returns:
+        True si le commis doit produire la section E, False sinon.
+
+    Phase 2.1 (15/05/2026 — abandon Option A, vision DB-driven) :
+        - 'compose'  → True (hérité V12 Phase 1 sortants, vision A/B/C)
+        - 'incoming' → False (les entrants ne créent plus d'échéances —
+            Phase 2.2 ajoutera le scan matching IA conditionné à
+            l'existence d'une échéance active sur from_email).
+
+    Raises:
+        ValueError si mode est inconnu (fail-fast).
+    """
+    if mode == 'compose':
+        return True
+    if mode == 'incoming':
+        # Phase 2.1 : pas de scan entrant. Phase 2.2 branchera ici :
+        #   from_email = (mail_data.get('from_email') or '').lower().strip()
+        #   return bool(from_email and _db.has_active_echeance(from_email))
+        return False
+    raise ValueError(f"_should_scan_echeance: mode inconnu {mode!r} "
+                     f"(attendu 'compose' ou 'incoming')")
+
+
 def _normalize_echeance_payload(payload, today):
     """Normalise le payload échéance du commis Haiku compose-sortants.
 
@@ -14200,6 +14234,7 @@ def api_post_generation_analyze():
         if builder and hasattr(builder, 'analyze_one_mail_stream'):
             for kind, payload in builder.analyze_one_mail_stream(
                 mail_data, folders_outlook=[], folders_windows=[],
+                scan_echeance=_should_scan_echeance('compose', mail_data),
                 signal_without_date=True,
             ):
                 if kind == 'echeance':

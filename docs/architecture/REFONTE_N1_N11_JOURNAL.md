@@ -685,6 +685,65 @@ Si une seule vérification échoue → `echeance = None` dans la réponse → di
 
 ---
 
+## 6 ter. V12 — Phase 1 sortants livrée + Phase 2.1 abandon Option A (15/05/2026)
+
+### Phase 1 V12 sortants — livrée matin 15/05 (commit `76ce8cd`)
+
+**Résultat** : ferme le « trou unique Moment 2 » du §6 bis. La route compose `/api/post_generation_analyze` ne sérialise plus le payload Haiku tel quel — un validateur `_normalize_echeance_payload` (app_plugin.py:14007+) :
+- Discrimine 3 cas vision Yvan 15/05 : **Cas A** (description + date résoluble → popup auto-rempli), **Cas B** (description + date floue → datepicker à compléter), **Cas C** (description vide + signal vague « au plus vite » → popup « Vous mentionnez X »)
+- Frontière sémantique tranchée : POPPER pour engagement/demande/urgence, NE PAS POPPER pour politesse pure / hypothèse / accusé de réception
+- Fallback `extract_fr_dates` promeut « 15 décembre 2026 » non-ISO en Cas A automatiquement
+- Fix collatéral P0-1 : rename `date` → `date_echeance` côté payload (bug latent 14 jours)
+
+Implémentation : kwarg `signal_without_date=True` côté prompt Haiku (conditionnel pour préserver entrants), parser 3 segments + premier-gagne, frontend dialog.js dispatch sur description vide ou pas.
+
+Tests : `tests/test_n12_normalize_echeance.py` (16 cas unitaires purs) + `tests/test_integration_N0_N11.py` F10 réécrit en 7 sous-cas (a-g). **70/70 verts.**
+
+### Phase 2.1 V12 — abandon Option A (15/05 après-midi)
+
+**Revirement** : 24h après l'activation d'Option A (14/05), nouvelle reformulation produit par Yvan :
+
+> « Ce qui compte ce n'est pas le statut VIP/PARTIAL, c'est qu'une échéance soit en cours vis-à-vis de l'adresse mail. »
+
+**Implication** : le critère de scan échéance entrant bascule du **statut contact** (VIP/PARTIAL/ÉCARTÉ) vers l'**existence d'une échéance active en DB** sur `from_email`. Les entrants ne servent plus à **créer** des échéances mais à **matcher** des échéances existantes (clôture proposée).
+
+**Phase 2.1 = infrastructure de décision** (sans encore le scan matching IA) :
+- Helper unique `_should_scan_echeance(mode: str, mail_data: dict) -> bool` créé (app_plugin.py:14005+) — résout enfin Obs-F10 (asymétrie 2 mécanismes)
+- Marker `_scan_echeance_active = (branch == 'vip')` supprimé dans `_prewarm_unified_for_mail`
+- Appel orphelin `_classify_mail_branch(mail_data)` supprimé (code mort éliminé)
+- Phase 2.1 retourne `False` pour `mode='incoming'` ; Phase 2.2 branchera `db.has_active_echeance(from_email)`
+
+**Tests** : suppression `test_C3_vip_scan_echeance_active` + `test_F8_echeance_format_pourri` (orphelins/tautologiques) + `test_option_a_scan_echeance_conditional`. Ajout de 3 nouveaux dans `tests/test_n11_branches.py` (régression statique inverse + contrat helper + paramètre `echeances` conservé pour Phase 2.2). **82/82 verts au total.**
+
+**Documentation** :
+- `audit/INVARIANTS.md` : I-BRANCHES-N11-OPTION-A archivé avec note du revirement 24h. Obs-F8 et Obs-F10 marqués RÉSOLUS.
+- Mémoire utilisateur `feature_echeances_scope.md` à mettre à jour (séparer **création** sortants vs **matching** entrants Phase 2.2).
+
+### Coût méthodologique du revirement 24h
+
+Honnêteté pédagogique pour calibrer les futures décisions :
+- Option A (14/05) → 0 fiche échéance créée en prod (24h trop court pour usage utilisateur)
+- Tests à réécrire/supprimer : 3 (C3, F8, test_option_a_*)
+- Invariant à archiver : 1 (I-BRANCHES-N11-OPTION-A)
+- Effort de correction : ~45 min Phase 2.1 (helper + suppressions + docs)
+
+Leçon : les décisions « tranchons vite » sont saines mais doivent être assumées avec leur coût d'inversion possible. La méthodologie pacte (démolisseur + regard frais) a bien encadré l'aller comme le retour — aucune dérive silencieuse.
+
+### Méthodologie (4 défenses du pacte)
+
+- **Démolisseur pré-impl V12 Phase 1** : 5 P0 + 7 P1 → plan v5 ajusté
+- **Démolisseur pré-impl V12 Phase 2.1** : 3 P0 + 7 P1 → plan v2 (P0-1 fix helper signature, P0-2 audit DB → 0 fiches, P0-3 nettoyage `_classify_mail_branch` orphelin)
+- **Regard frais pré-commit Phase 1** : 0 P0 / 0 P1 / 6 P2 dette acquise
+- **Audit rétrospectif post-commit Phase 1** : 0 récidive bloquante, 1 mini-dette (P2-1 defense de code mort assumée)
+
+### Prochain pas — Phase 2.2
+
+Implémenter le scan matching IA pour les entrants ayant une échéance active en DB :
+- Sub-commis Haiku dédié `match_echeance_active(mail, active_list)` (option (b) validée par Yvan : pas de mélange dans le commis unifié N6.1)
+- Brancher dans `_prewarm_unified_for_mail` quand `_should_scan_echeance('incoming', mail_data)` retournera True
+- Remplacer `_auto_cancel_echeances_on_reply` heuristique 3-mots-communs par le matching IA
+- **Note importante du démolisseur Phase 2.1 (P1-6)** : `_auto_cancel_echeances_on_reply` actuelle ne tourne **qu'à l'envoi user** (route `/api/send_email`), pas à la réception entrante. Phase 2.2 devra brancher AUSSI sur la voie entrante (via `_prewarm_unified_for_mail`).
+
 ---
 
 ## 7. Statistiques globales N1-N11 (+ Option A + Validation finale)

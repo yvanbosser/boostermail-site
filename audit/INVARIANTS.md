@@ -1085,14 +1085,20 @@ Tout enregistrement de mail dans la table `threads` (toutes directions) déclenc
 - **Pourquoi** : avant N10, purge globale sans filtre `user_id` → (a) perte totale du squelette + des règles de classement préservées, (b) fuite cross-tenant. Corrigé en double.
 - **Action si violé** : restaurer le UPDATE-blank et la boucle multi-tenant.
 
-### I-BRANCHES-N11-OPTION-A : `scan_echeance` activé uniquement en VIP entrants
+### ~~I-BRANCHES-N11-OPTION-A~~ : `scan_echeance` activé uniquement en VIP entrants — **ARCHIVÉ 15/05/2026**
+
+> ⚠ **ARCHIVÉ 15/05/2026 — révision Yvan V12 Phase 2.1** : « ce qui compte n'est pas le statut VIP/PARTIAL, c'est qu'une échéance soit en cours vis-à-vis de l'adresse mail ». Les entrants ne déclenchent plus de scan échéance détection ; le scan matching IA viendra en Phase 2.2 (conditionné à l'existence d'une échéance active sur `from_email` en DB, pas au statut contact).
+>
+> **Durée de vie de l'invariant : 14/05 → 15/05 (24h)**. 0 fiche échéance créée en production pendant cette fenêtre (audit DB confirmé).
+>
+> Remplacé par : la régression statique INVERSE `tests/test_n11_branches.py::test_phase21_no_scan_echeance_marker_in_unified` qui garantit que le marker n'est pas réintroduit + le contrat helper `_should_scan_echeance(mode, mail_data)`.
+>
+> **Texte original conservé pour historique ci-dessous (ne plus appliquer)** :
 
 `_prewarm_unified_for_mail` calcule `_scan_echeance_active = (_branch_info_unified['branch'] == 'vip')` (app_plugin.py:4254) et propage la valeur au commis Haiku via `scan_echeance=_scan_echeance_active` (4264). Conséquence directe : **branche VIP → 5 frigos pleins (incl. échéance) ; branche PARTIAL → 3 frigos pleins (sans échéance)** — spec slide 4 PPTX respectée. Décision Yvan 14/05 PM (Option A) : fin du suspendu produit, échéances VIP entrantes désormais pré-cuites en BG.
-- **Preuve comportementale** : `tests/test_integration_N0_N11.py::test_C3_vip_scan_echeance_active` — mock builder reçoit `scan_echeance=True` ET échéance détectée persistée dans `mail_echeance_cache`. `::test_B6_partial_echeance_non_precuite` — branche PARTIAL → échéance persistée `[]` (idempotence) sans appel scan.
-- **Régression statique** : `tests/test_n11_branches.py::test_option_a_scan_echeance_conditional` — le source de `_prewarm_unified_for_mail` contient le pattern `scan_echeance = (.+branch.+vip)`.
-- **Sémantique tri-état** : `_persist_commis_results(echeances=None)` distingue 3 cas — `None` = scan pas effectué (PARTIAL skip), `[]` = scan effectué + 0 trouvé (VIP avec mail sans deadline), `[dict]` = scan effectué + détection.
-- **Pourquoi** : conflit pré-Option A entre slide 4 PPTX (« 5 frigos pleins en VIP » = échéance incluse) et SPEC_ECHEANCES V1 du 05/05 (« sortants only, out-of-scope les entrants »). Yvan a tranché 14/05 : Option A active, scope étendu aux VIP entrants. Mémoire utilisateur `feature_echeances_scope.md` à mettre à jour manuellement.
-- **Action si violé** : un développeur a (a) supprimé la conditionnelle `scan_echeance = (branch == 'vip')` pour passer la valeur en dur, (b) introduit une asymétrie où PARTIAL appelle le scan ou VIP ne l'appelle pas. Restaurer le pattern conditionnel exact.
+- ~~**Preuve comportementale** : `tests/test_integration_N0_N11.py::test_C3_vip_scan_echeance_active`~~ — **test supprimé en V12 Phase 2.1**.
+- ~~**Régression statique** : `tests/test_n11_branches.py::test_option_a_scan_echeance_conditional`~~ — **remplacé par `::test_phase21_no_scan_echeance_marker_in_unified` (inverse)**.
+- **Sémantique tri-état** : `_persist_commis_results(echeances=None)` conserve la distinction `None / [] / [dict]` — réutilisée en Phase 2.2 quand le scan matching IA réintroduira la persistance d'échéances depuis entrants.
 
 ---
 
@@ -1107,7 +1113,11 @@ Sous 2 threads concurrents sur le même `mid`, le check `get_all_dishes_for_mail
 - **Couverture test** : `tests/test_integration_N0_N11.py::test_F6_concurrence_double_call` — accepte ≤ 2 appels builder, donc le test passe avec 2 appels actuellement. Devrait être resserré à `== 1` après fix.
 - **Fix possible (hors scope cette session)** : wrap le check + l'appel builder sous un lock par-mid (`threading.Lock()` dans un dict `_mid_locks`), ou utiliser un sentinel atomique dans `_prefetch_cache`.
 
-### Obs-F8 : Test tautologique (defense de code mort)
+### ~~Obs-F8~~ : Test tautologique (defense de code mort) — **RÉSOLU 15/05/2026 V12 P2.1**
+
+> Le test `test_F8_echeance_format_pourri` a été supprimé en V12 Phase 2.1 (15/05/2026) après l'abandon d'Option A. Le mock builder qu'il portait n'est plus jamais appelé pour les entrants (helper `_should_scan_echeance('incoming', _)` retourne False). Le format pourri dict-vs-string est désormais couvert structurellement par les tests F10 sortants + `test_n12_normalize_echeance.py::test_S3_payload_string`. Texte original conservé ci-dessous pour traçabilité :
+
+### Obs-F8 (original) : Test tautologique (defense de code mort)
 
 Le test `test_F8_echeance_format_pourri` mocke un retour `'echeance': "2026-12-01"` (string brute) que la vraie méthode `analyze_one_mail_stream` (claude_ai.py:3580) **ne peut structurellement jamais produire** — le parser maison `_parse_line` (3787) construit toujours un dict `{description, date}` à partir de la ligne `E:` reçue, ou rien. Le test valide donc une robustesse contre un bug fictif.
 - **Anti-patterns concernés** : « defense de code mort » + « test tautologique » (cf. liste 8 anti-patterns codifiés N6→N9).
@@ -1118,7 +1128,11 @@ Le test `test_F8_echeance_format_pourri` mocke un retour `'echeance': "2026-12-0
   - Date passée : `E: livrable | 2025-01-01` → persisté tel quel (pas filtré par le code, alors que le prompt dit « date FUTURE uniquement »).
 - **Action recommandée session N12** : **réécrire** F8 (pas étendre) avec 4-5 sous-cas couvrant les vraies bourdes. Direction d'impl à arbitrer entre Direction 1 (prompt renforcé) + Direction 3 (validateur unique `_validate_echeance_payload`) OU Direction 2 (structured output `tool_use` Anthropic — garantie structurelle).
 
-### Obs-F10 : Asymétrie mécanisme `scan_echeance` entre entrants VIP et compose sortants
+### ~~Obs-F10~~ : Asymétrie mécanisme `scan_echeance` — **RÉSOLU 15/05/2026 V12 P2.1**
+
+> Le helper unique `_should_scan_echeance(mode: str, mail_data: dict) -> bool` a été créé en V12 Phase 2.1 (15/05/2026, [app_plugin.py:14005+](app_plugin.py:14005)) avec kwarg sémantique explicite `mode='compose'|'incoming'`. Les 2 call sites passent désormais par ce helper, fin de l'asymétrie « 2 mécanismes ». Contrat testé par `tests/test_n11_branches.py::test_should_scan_echeance_helper_contract`. Texte original conservé ci-dessous pour traçabilité :
+
+### Obs-F10 (original) : Asymétrie mécanisme `scan_echeance` entre entrants VIP et compose sortants
 
 - **Entrants VIP** (`_prewarm_unified_for_mail:4264`) : appel explicite `scan_echeance=_scan_echeance_active` (conditionnel à `branch == 'vip'`).
 - **Compose sortants** (`api_post_generation_analyze:14114`) : **pas de kwarg `scan_echeance`** passé au builder — comportement par défaut implicite, le code se contente d'écouter `kind == 'echeance'` dans le stream.
