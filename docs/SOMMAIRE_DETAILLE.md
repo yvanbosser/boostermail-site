@@ -450,6 +450,151 @@ docs/
 
 ---
 
+## 📦 ARCHIVES — Inventaire des éléments historiques du repo
+
+Cette section liste **TOUS les éléments historiques de `C:\EasyMail\`** (pas seulement `docs/`). Conservés pour traçabilité — **ne plus utiliser comme source de vérité active**. Audit complet du 16/05/2026.
+
+### A. Documentation archivée avec bandeau ⚠️
+
+Voir section « 📋 Docs explicitement marqués PÉRIMÉS » plus haut pour la liste des 26 docs archivés en batch le 16/05/2026 (specs_proto pré-N11 + analyses_proto_v2 plans non exécutés + PLUS_TARD + NOUVELLE_SESSION_V2).
+
+### B. Code historique racine (proto V1, lecture seule)
+
+> ⚠️ Le proto V1 a été remplacé par V2 SaaS le 25/04/2026. Conservé pour les bêta-testeurs Compta Santé historiques. **Décision Yvan 27/04** : OVH = source de vérité unique, le proto local ne devrait plus être utilisé.
+
+| Fichier | Taille | Rôle historique |
+|---|---|---|
+| `app.py` | 303 KB | Backend Flask proto port 5050, moteur IA original |
+| `claude_ai.py` | 106 KB | Moteur Claude proto (V2 a sa propre version `V2/claude_ai.py`) |
+| `outlook_com.py` | 76 KB | Accès COM Outlook — **REJETÉ en V2 SaaS** (Microsoft Graph uniquement) |
+| `database.py` | 58 KB | DB proto rétrocompatible (V2 a sa propre `V2/database.py`) |
+| `templates_mail.py` | 15 KB | 45 templates fixes proto — **désactivés 11/05** (décision « Claude partout ») |
+| `analyze_style.py` | 3 KB | Onboarding style proto |
+| `boostermail_service.py` | 45 KB | Service Windows local (pré-pivot SaaS) |
+| `boostermail_tray.py` | 3 KB | Icône tray Windows (local) |
+| `overlay.py` | 7 KB | Overlay PyQt (local, supprimé en SaaS) |
+| `start.bat` | 1 KB | Lance le proto port 5050 |
+| `install.ps1` / `uninstall.ps1` | ~12 KB | Installation locale Windows |
+| `install_outlook_addin.py` | 21 KB | Installation add-in Outlook local |
+| `test_com_selection.py` | 4 KB | Test COM sélection |
+| `manifest.xml` | 9 KB | Manifest proto (vs `BoosterMail-manifest.xml` SaaS) |
+| `netlify.toml` | 0.2 KB | Config déploiement Netlify (landing/blog) |
+
+### C. Dossiers racine historiques
+
+| Dossier | Contenu | Statut |
+|---|---|---|
+| `V2_backup/` | Snapshot V2 du 30/04/2026 | Backup ponctuel — `_deprecated_16avril/` à l'intérieur |
+| `companion/` | Companion local (`companion.py`, `popup_pyqt.py`, `launcher.ps1`) | Legacy proto — supprimé du workflow SaaS (cf I-RES-02 si encore référencé en local) |
+| `extension/` | Extension Chrome Outlook Web (`background.js`, `content.js`, `manifest.json`) | **Différée Phase 6 post-beta** (code 12011 `displayDialogAsync`) |
+| `installer/` | `EasyMail_Setup_V6.zip`, `phase2_setup.py` | Installer Windows local — obsolète SaaS |
+| `algorithme/` | (vide) | Ex-specs algorithme proto déplacées vers `docs/algorithme/` |
+| `specs/` | (vide) | Ex-specs proto déplacées vers `docs/specs_proto/` |
+| `templates/` | `inbox.html`, `email_detail.html`, `new_mail.html`, `contacts.html`, `echeances.html`, `profile.html` | Templates HTML proto (interface web standalone) — non utilisés en V2 SaaS |
+| `tests/` | `test_v2_gettable.py`, `test_v2_importance.py`, `test_v2_speculation.py`, `test_v2_streaming.py`, `test_v2_templates.py`, `test_v2_timing.py`, `test_v2_warmup.py` | Tests racine pre-refonte N1-N11 — V2 a ses propres tests dans `V2/tests/` (180 verts) |
+| `bloc note/`, `bloc note 1/` | Fichiers OneNote (`.one`) personnels Yvan (IMMOBILIER, FINANCE, EasyMail, Lingo, etc.) | **Notes personnelles non liées au code** |
+| `logs/` | Logs runtime | Transitoires |
+| `__pycache__/` | Cache Python | Transitoire (gitignored) |
+| `.pytest_cache/` | Cache pytest | Transitoire (gitignored) |
+
+### D. Données runtime (transitoires, à nettoyer périodiquement)
+
+| Fichier | Taille | Statut |
+|---|---|---|
+| `emails.db` | 32 MB | DB proto SQLite (V2 utilise `V2/boostermail.db`) |
+| `emails.db-shm`, `emails.db-wal` | Variable | WAL files SQLite proto |
+| `drafts_v2.json` | Variable | Persistance brouillons V2 — **ACTIVE** |
+| `drafts_v2.json.bak_20260425_184120` | 66 KB | Backup brouillons (avant pivot SaaS) — supprimable |
+| `prefetch_cache.json` | 1.3 MB | Persistance cache prefetch V1 (legacy) — supprimable |
+| `prefetch_cache_v2.json` | 1.5 MB | Persistance cache prefetch V2 — **ACTIVE** |
+| `inbox_graph_all.json`, `inbox_graph_raw.json` | ~1 MB | Captures debug Graph API (25/04) — supprimables |
+| `style_profile.txt` | 8.5 KB | Profil style proto (V2 a sa propre version DB) |
+| `style_profile_backup_20260416.txt` | 11 KB | Backup style proto — supprimable |
+
+### E. Logs (transitoires)
+
+| Fichier | Taille |
+|---|---|
+| `boostermail.log` | 380 KB |
+| `addin_debug.log` | 349 KB |
+| `popup_pyqt.log` | 975 KB |
+| `pyqt_dialog.log` | 39 KB |
+| `companion_stderr.log` | 362 KB |
+| `V2_stderr.log` | 402 KB |
+| `V2_stderr_test.log` | 525 KB |
+| `V2_stdout.log` | 0.05 KB |
+| `V2_stdout_test.log` | 24 KB |
+
+**Note** : ces logs sont **transitoires** (rotation manuelle). À nettoyer périodiquement (~3 MB cumulés).
+
+### F. ZIPs de déploiement (one-shot historiques)
+
+| Fichier | Taille | Date | Rôle |
+|---|---|---|---|
+| `blog-deploy.zip` | 217 KB | 27/04 | Deploy initial blog/landing |
+| `blog-deploy-complete.zip` | 259 KB | 27/04 | Deploy complet |
+| `boostermail-complete.zip` | 259 KB | 27/04 | Build complet |
+| `boostermail-fixed.zip` / `boostermail-fixed-v2.zip` | 259 KB | 27/04 | Fixes post-deploy |
+| `site_web_final.zip` | 259 KB | 27/04 | Site web final |
+
+**Action recommandée** : déplacer dans `V2_backup/zips_deploys_27avril/` ou supprimer (l'historique git garde tout).
+
+### G. Fichiers markers / état (transitoires, gitignored)
+
+| Fichier | Rôle |
+|---|---|
+| `.boostermail.launch` | Marker lancement |
+| `.boostermail.pid` | PID processus actif |
+| `.deps_installed` | Marker dépendances proto installées |
+| `.deps_v2_installed` | Marker dépendances V2 installées |
+| `.dev_mode` | Marker dev mode |
+
+### H. Configuration sensible
+
+| Fichier | Statut |
+|---|---|
+| `config.json` | **GITIGNORED** — clé API Anthropic locale |
+| `config.json.example` | Exemple template (commitable) |
+
+### I. Dossiers en cours / actifs (NE PAS archiver)
+
+| Dossier | Rôle |
+|---|---|
+| `V2/` | Plugin V2 autonome SaaS — **cible active** |
+| `audit/` | Invariants + rapports — **actif** |
+| `docs/` | Documentation consolidée — **actif** |
+| `core/` | Socle partagé provider-agnostic (`auth_base`, `ai_provider`, `claude_provider`, `openai_provider`, `email_provider`) — **utilisé par V2** |
+| `landing/` | Page marketing (`blog-*.html`, `index.html`) — **actif** |
+| `site web/` | Sites web déployés (blog multilingue de/en/es/fr) — **actif (14/05)** |
+| `site-source/` | Source sites web (`build.py`, `extract_articles.py`, README, QUICK_START) — **actif** |
+| `legal/` | Mentions légales SaaS (privacy, terms, registre traitements, sous-traitants, freelance) — **actif** |
+| `tools/` | Utilitaires dev (`generate_icons.py`) — **actif** |
+| `.claude/` | Worktrees + outils Claude Code — **actif** |
+| `.git/` | Repo git — **actif** |
+
+### J. Récapitulatif du nettoyage possible
+
+Si vous voulez réduire l'encombrement de `C:\EasyMail\` :
+
+**Suppressions safe (l'historique git garde tout)** :
+- 6 zips de déploiement (~1.5 MB)
+- `drafts_v2.json.bak_20260425_184120` (66 KB)
+- `prefetch_cache.json` legacy (1.3 MB)
+- `inbox_graph_all.json` + `inbox_graph_raw.json` (~1 MB)
+- `style_profile_backup_20260416.txt` (11 KB)
+
+**Archive à valider avec Yvan** (décision business) :
+- Code proto V1 racine (`app.py`, `claude_ou.py`, etc. — ~600 KB cumulés) : conservés si bêta-testeurs encore actifs sur proto local, sinon supprimables
+- `companion/` : si jamais besoin de revenir à un mode local hybride
+- `installer/` : si jamais besoin de packaging Windows
+- `extension/` : différée Phase 6 mais réactivable
+
+**À nettoyer périodiquement** :
+- Logs racine (~3 MB cumulés)
+- `__pycache__/`, `.pytest_cache/` (gitignored mais peuvent être supprimés)
+
+---
+
 ## 🗺️ Flowchart — "Je cherche quoi faire maintenant"
 
 ```
@@ -457,32 +602,54 @@ docs/
 │ Démarrage de session                 │
 └──────────────┬───────────────────────┘
                ▼
-   Lire : CLAUDE.md + NOUVELLE_SESSION_V2.md
+   Lire : CLAUDE.md + NOUVELLE_SESSION_V3.md
                │
                ▼
    Lire : docs/SOMMAIRE_DETAILLE.md  ← CE FICHIER
                │
                ▼
-   Lire : docs/PLUS_TARD_VF.md (TL;DR en haut)
+   Lire : docs/PLUS_TARD_VF.md (header → sessions récentes)
                │
                ▼
 ┌──────────────────────────────────────┐
 │ Selon le sujet de la session…        │
 ├──────────────────────────────────────┤
-│ Bug / fonctionnalité                 │
-│  → docs/specs_proto/SPEC_FONCTION…   │
+│ Architecture V2 actuelle             │
+│  → docs/architecture/REFONTE_N1_N11_ │
+│    JOURNAL.md (refonte + V12 SALLE)  │
 │                                      │
-│ Portage proto → V2                   │
-│  → docs/analyses_proto_v2/V2_vs_PROTO│
+│ Invariants techniques                │
+│  → audit/INVARIANTS.md (I-*)         │
 │                                      │
-│ Auth / Graph / Companion             │
-│  → docs/v2_specs/SPEC_PHASE2 │
+│ Inventaire caches/threads/routes     │
+│  → audit/INVENTAIRE_V2.md            │
 │                                      │
-│ Scoring / niveaux                    │
-│  → docs/algorithme/SPEC_SCORING…     │
+│ Classement mail+PJ                   │
+│  → docs/specs_proto/SPEC_CLASSEMENT_ │
+│    BOOSTERMAIL.md                    │
+│                                      │
+│ Échéances                            │
+│  → docs/specs_proto/SPEC_ECHEANCES_  │
+│    BOOSTERMAIL.md                    │
+│                                      │
+│ Arbre décisionnel                    │
+│  → docs/specs_proto/SPEC_ARBRE_      │
+│    DECISIONNEL.md (+ .pptx)          │
+│                                      │
+│ Auth / Graph / Companion (Phase 2)   │
+│  → docs/v2_specs/SPEC_PHASE2_*.md    │
 │                                      │
 │ Historique / décisions               │
-│  → docs/specs_proto/HISTORIQUE…      │
+│  → docs/specs_proto/HISTORIQUE_      │
+│    DECISIONS.md                      │
+│                                      │
+│ Session SaaS infra (OVH)             │
+│  → docs/saas/ONBOARDING_SESSION_     │
+│    SAAS.md                           │
+│                                      │
+│ Session New Outlook                  │
+│  → docs/outlook/ONBOARDING_NEW_      │
+│    OUTLOOK_VIA_OVH.md                │
 └──────────────────────────────────────┘
 ```
 
@@ -493,8 +660,11 @@ docs/
 1. **Mettre à jour ce sommaire** à chaque ajout/déplacement de doc.
 2. **Ne pas dupliquer le contenu** — le sommaire pointe, il ne résume pas tout.
 3. **Un doc = un emplacement** — si ambigu, mettre dans la catégorie la plus forte et créer un renvoi.
-4. **Garder CLAUDE.md et NOUVELLE_SESSION_V2.md à la racine** — ce sont les points d'entrée obligatoires.
+4. **Garder CLAUDE.md et NOUVELLE_SESSION_V3.md à la racine** — ce sont les points d'entrée obligatoires. `NOUVELLE_SESSION_V2.md` est archivé (bandeau ⚠️ depuis 16/05).
 
 ---
 
-*Dernière mise à jour : 27/04/2026 — Consolidation merge SaaS+Outlook : Étapes 1+2+5 SaaS closes + Patterns #15/#16/#17 Outlook + pivot OVH source de vérité.*
+*Dernière mise à jour : 16/05/2026 — Grosse MAJ post sessions 11-16/05 :*
+*— Refonte N1-N11 (11 niveaux + 6 -bis correctifs) + V12 (Phase 1 sortants + Phase 2.1/2.2 entrants) + V12 SALLE (Phase A/B/C/C-bis) + audit profond (4 sub-agents).*
+*— 26 docs archivés en batch avec bandeau ⚠️ standardisé.*
+*— Section « 📦 ARCHIVES — Inventaire des éléments historiques du repo » ajoutée (couvre TOUT `C:\EasyMail\` au-delà de `docs/`).*
