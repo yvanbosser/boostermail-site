@@ -2998,6 +2998,18 @@ _FILTER_1_MIN_BODY_LEN = 10  # appliqué APRÈS strip HTML, en codepoints Unicod
 _PREEMPTIVE_TIER1_SCAN_DEPTH = 50      # nb de mails inbox scannés au démarrage
 _PREEMPTIVE_TIER1_MAX_CANDIDATES = 20  # nb max de spéculations Sonnet lancées
 
+# Phase 3.1 — 5 variations de style (rotation sur compteur 1-5+).
+# Utilisées par `/generate_reply` quand l'utilisateur clique « Essayer une
+# autre réponse » dans le dialog 80%. Module-level pour éviter la reconstruction
+# de la liste à chaque appel (16/05/2026 — audit profond Phase C bis).
+_VARIATION_STYLES = (
+    "Change l'ouverture, les tournures de phrases et la structure. Même fond, forme différente.",
+    "Adopte un angle complètement différent. Reformule chaque phrase autrement. Varie la longueur.",
+    "Commence différemment, utilise d'autres mots, change l'ordre des idées. Sois plus direct.",
+    "Prends un ton légèrement différent. Restructure le mail. Trouve de nouvelles formulations.",
+    "Réécris tout depuis zéro avec un style frais. Aucune phrase ne doit ressembler aux versions précédentes.",
+)
+
 
 def _parse_mail_date(mail_data):
     """Parse le champ 'date' d'un mail_data dict en datetime naïf, fail-open.
@@ -12617,19 +12629,12 @@ def generate_reply():
 
     brief = data.get('brief', '')[:2000]
 
-    # Phase 3.1 — 5 variations de style (rotation sur compteur 1-5+)
-    # Envoyé par le frontend quand l'utilisateur clique "Essayer une autre réponse".
+    # Phase 3.1 — 5 variations de style (rotation sur compteur 1-5+).
+    # Cf `_VARIATION_STYLES` au niveau module pour la définition.
     variation = int(data.get('variation', 0) or 0)
     if variation:
-        _variation_styles = [
-            "Change l'ouverture, les tournures de phrases et la structure. Même fond, forme différente.",
-            "Adopte un angle complètement différent. Reformule chaque phrase autrement. Varie la longueur.",
-            "Commence différemment, utilise d'autres mots, change l'ordre des idées. Sois plus direct.",
-            "Prends un ton légèrement différent. Restructure le mail. Trouve de nouvelles formulations.",
-            "Réécris tout depuis zéro avec un style frais. Aucune phrase ne doit ressembler aux versions précédentes.",
-        ]
-        style_idx = (variation - 1) % len(_variation_styles)
-        brief = (brief + "\n" if brief else "") + f"[VARIATION #{variation}] {_variation_styles[style_idx]}"
+        style_idx = (variation - 1) % len(_VARIATION_STYLES)
+        brief = (brief + "\n" if brief else "") + f"[VARIATION #{variation}] {_VARIATION_STYLES[style_idx]}"
 
     # DEBUG : tracer la longueur du body reçu pour diagnostic add-in
     try:
