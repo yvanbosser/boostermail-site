@@ -1094,8 +1094,14 @@ def test_F5_pas_de_reveil_retroactif():
 
 def test_F6_concurrence_double_call():
     """F6 — 2 threads `_prewarm_unified_for_mail(mid, md)` en parallèle.
-    Le builder doit être appelé AU PLUS 2 fois (idéalement 1 si lock TOCTOU OK).
-    Aucun crash, frigos cohérents en fin."""
+
+    V12 SALLE Phase B.1 (15/05/2026) — Obs-F6 RÉSOLUE : lock par-(user_id, mid)
+    en début de fonction (`_get_unified_lock(mid)` + `acquire(blocking=False)`).
+    Avant : le test plafonnait à `≤ 2` car le check `get_all_dishes_for_mail`
+    n'était pas atomique avec l'appel builder. Maintenant : `== 1` strict
+    (le 2e thread voit le lock pris et abandonne, le 1er fait le boulot
+    pour les 2).
+    """
     import threading
     email = f'f6-concur-{int(time.time())}@example.com'
     _setup_partial_contact(email)
@@ -1138,8 +1144,9 @@ def test_F6_concurrence_double_call():
 
     ok = log_test(f"F6 concurrence : aucun crash en 2 threads (got errors={errors})",
                   not errors)
-    ok &= log_test(f"F6 concurrence : builder appelé ≤ 2× (got {call_count['value']})",
-                   call_count['value'] <= 2)
+    # V12 SALLE Phase B.1 — Obs-F6 RÉSOLUE : lock par-mid → strict == 1.
+    ok &= log_test(f"F6 concurrence : builder appelé == 1× (Obs-F6 résolue, got {call_count['value']})",
+                   call_count['value'] == 1)
     has_summary = ap._db.has_mail_summary(mid)
     ok &= log_test("F6 concurrence : frigo Résumé cohérent (rempli en fin)",
                    has_summary)

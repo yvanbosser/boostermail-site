@@ -1104,6 +1104,24 @@ Helper module-level `_lookup_folder_name(folder_id)` résout le nom de dossier v
 - **Pourquoi** : démolisseur pré-impl V12 SALLE Phase A — 3 P0 (signature helper, move success non checké, undo pollue apprentissage) + 6 P1 + 3 P2. Pacte « pas de patches sur patches » : tout corriger en un seul passage cohérent (option b validée par Yvan) plutôt que d'empiler des -bis.
 - **Action si violé** : un développeur a (a) réintroduit `_resolve_entry_id` inline dans une route, (b) bypassé `_classify_to_folder` en réimplémentant le pipeline classify, (c) réassigné `_classify_momentum = {...}` au lieu de `.clear()+.update()`, (d) supprimé le check `move_result['success']` ou réintroduit `purge_email_cache_for(new_id)`. Restaurer le helper unifié + le pattern multi-tenant + les 3 garde-fous.
 
+### I-UNIFIED-LOCK-PER-MID : lock par-(user_id, mid) pour `_prewarm_unified_for_mail` (V12 SALLE Phase B.1)
+
+Refonte 15/05/2026 V12 SALLE Phase B.1 — résolution Obs-F6 TOCTOU. Tout appel à `_prewarm_unified_for_mail(mid, ...)` doit acquérir le lock par-mid via `_get_unified_lock(mid)` en `acquire(blocking=False)` AVANT le check `get_all_dishes_for_mail`. Sans ce lock, 2 threads concurrents pouvaient appeler le commis Haiku 2 fois pour le même mid (gaspillage IA × 2, last-write-wins en DB).
+
+Sémantique : si le lock est déjà détenu (un autre thread cuisine ce mid), abandon silencieux. Le 1er thread persiste les frigos pour les 2. Garantit que le test `test_F6_concurrence_double_call` plafonne à `== 1` appel builder strict (au lieu de `≤ 2` avant).
+
+Multi-tenant safe : la clé du dict `_unified_locks` est `f"{user_id}::{mid}"` (via `_get_current_user_id()`). Sans cette précaution, 2 users ayant reçu le même mail (forward ou CC) verraient leurs commis Haiku s'annuler mutuellement (régression multi-tenant silencieuse).
+
+LRU OrderedDict avec `_UNIFIED_LOCKS_MAX = 500` : `move_to_end` à chaque accès, `popitem(last=False)` pour évincer les plus anciens au-delà de la limite. Pas de fuite mémoire infinie. `_unified_locks_meta_lock` protège la mutation du dict (race entre `_get_unified_lock` concurrents sur des mids différents).
+
+`finally: _lock.release()` à la sortie de `_prewarm_unified_for_mail` — defense in depth (l'`except Exception` interne devrait tout attraper mais on garantit le release dans tous les cas, sinon lock pris à vie sur exception non capturée).
+
+Prérequis à Phase B.3 (fusion route bundle `/api/mail_preview`) : sans ce lock, transformer la route bundle en wrapper sur les 3 portes spécialisées triplerait les `_spawn_bg` BG (1 par porte au lieu de 1 partagé) → 3 appels Haiku concurrents au lieu de 1. Le lock garantit qu'un seul gagne, les 2 autres abandonnent.
+
+- **Preuve comportementale** : `tests/test_integration_N0_N11.py::test_F6_concurrence_double_call` — assertion stricte `call_count['value'] == 1` (avant : `<= 2`).
+- **Pourquoi** : démolisseur Phase B P0-B1 — la fusion bundle prévue Phase B.3 aurait aggravé Obs-F6 (3 spawns au lieu de 2). Mieux vaut résoudre la cause racine maintenant (lock par-mid) avant la refonte structurelle. Pacte « pas de patches sur patches » : on ne fait pas un patch pour contourner Obs-F6 dans la nouvelle fusion, on règle Obs-F6 à la source.
+- **Action si violé** : un développeur a (a) supprimé l'`_lock.acquire(blocking=False)` au début de `_prewarm_unified_for_mail`, (b) déplacé le check `get_all_dishes_for_mail` AVANT le lock (re-créant le TOCTOU), (c) retiré le `finally: _lock.release()` (lock pris à vie sur exception), (d) supprimé le scope `user_id::` de la clé (régression multi-tenant). Restaurer le pattern lock + clé user-scoped + finally release.
+
 ### I-UNFLATTEN-SUGGESTIONS : helper unique de désérialisation top 3 (V12 SALLE Phase A — finition cuisine)
 
 Refonte 15/05/2026 V12 SALLE Phase A — finition transverse cuisine identifiée par le sub-agent inventaire systémique (découverte #5 et #3).
@@ -1154,7 +1172,11 @@ Quand le helper retourne True côté entrants, `_prewarm_unified_for_mail` étap
 
 Les 3 observations ci-dessous **ne sont PAS des invariants au sens strict** (pas testables comme « code conforme »), mais des **signaux remontés honnêtement** par la batterie E2E + audit sub-agent post-batterie. Elles sont **à traiter en priorité dans la session N12**.
 
-### Obs-F6 : TOCTOU possible sur idempotence `_prewarm_unified_for_mail`
+### ~~Obs-F6~~ : TOCTOU possible sur idempotence `_prewarm_unified_for_mail` — **RÉSOLU 15/05/2026 V12 SALLE Phase B.1**
+
+> Lock par-(user_id, mid) ajouté en début de `_prewarm_unified_for_mail` via le helper `_get_unified_lock(mid)` ([app_plugin.py](../V2/app_plugin.py)). `acquire(blocking=False)` : si un autre thread cuisine déjà ce mid, abandon silencieux (le 1er thread persistera pour les 2). Test `test_F6_concurrence_double_call` resserré de `≤ 2` à `== 1` strict. Multi-tenant safe via clé `user_id::mid` dans le dict. LRU OrderedDict avec trim auto à 500 entrées max — pas de fuite mémoire. Nouvel invariant **I-UNIFIED-LOCK-PER-MID** ci-dessous. Texte original conservé ci-dessous pour traçabilité :
+
+### Obs-F6 (original) : TOCTOU possible sur idempotence `_prewarm_unified_for_mail`
 
 Sous 2 threads concurrents sur le même `mid`, le check `get_all_dishes_for_mail` au début de `_prewarm_unified_for_mail` **n'est pas atomique** avec l'appel builder qui suit. Conséquence observée : le builder a été appelé **2× au lieu de 1× idéal** dans le test `test_F6_concurrence_double_call`. Last-write-wins → frigos cohérents en fin, mais ~2× coût Haiku en cas de race.
 - **Impact** : faible (concurrence sur même mid = rare en prod, frigos cohérents en fin).

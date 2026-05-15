@@ -2493,6 +2493,63 @@ else:
 _mail_preview_lock = threading.Lock()
 
 # =============================================================================
+# V12 SALLE Phase B.1 (15/05/2026) — Lock par-mid résolution Obs-F6 TOCTOU
+# =============================================================================
+# Avant ce lock, 2 threads concurrents sur le même `mid` pouvaient passer le
+# check `get_all_dishes_for_mail(mid)` (l. ~4126 dans `_prewarm_unified_for_
+# mail`) simultanément et appeler le commis Haiku 2 fois (Obs-F6 documentée
+# dans `audit/INVARIANTS.md`). Coût : 2× appel IA, last-write-wins en DB,
+# frigos cohérents en fin mais gaspillage Haiku × 2.
+#
+# Conséquence pour Phase B.3 (fusion route bundle) : si on transforme la route
+# `/api/mail_preview/<mid>` en wrapper sur les 3 portes spécialisées, chaque
+# porte déclenche son propre `_spawn_bg(_prewarm_mail_preview)` → 3 threads
+# parallèles au lieu de 1. Sans ce lock, on aggraverait Obs-F6 (test F6
+# tomberait à 3 appels au lieu de 2). Le lock est donc PRÉREQUIS à Phase B.3.
+#
+# Implémentation : `OrderedDict` user-scoped (clé `user_id::mid`) avec LRU
+# auto-trim à 500 entrées max. Acquire en `blocking=False` : si un autre
+# thread cuisine déjà, on abandonne (le 1er fera le boulot pour les 2).
+from collections import OrderedDict as _OrderedDict
+_unified_locks = _OrderedDict()  # 'user_id::mid' → threading.Lock()
+_unified_locks_meta_lock = threading.Lock()  # protège la mutation du dict
+_UNIFIED_LOCKS_MAX = 500
+
+
+def _get_unified_lock(mid):
+    """Retourne le lock par-mid user-scoped pour `_prewarm_unified_for_mail`.
+
+    Multi-tenant safe : la clé du dict inclut `user_id` (cf `_get_current_user_id`
+    interne). Sans cette précaution, 2 users ayant reçu le même mail
+    (forward ou CC) verraient leurs commis Haiku s'annuler mutuellement
+    (l'un des 2 ne persisterait pas ses frigos).
+
+    LRU naturelle : `OrderedDict` + `move_to_end` à chaque accès, `popitem(last=False)`
+    pour évincer les plus anciens au-delà de `_UNIFIED_LOCKS_MAX`. Pas de fuite
+    mémoire infinie.
+
+    Returns:
+        `threading.Lock` partagé entre tous les appelants concurrents pour
+        ce `(user_id, mid)`. Appeler `acquire(blocking=False)` côté caller
+        pour éviter de bloquer un thread BG.
+    """
+    user_id = (_get_current_user_id() or 'default') if _get_current_user_id else 'default'
+    key = f"{user_id}::{mid}"
+    with _unified_locks_meta_lock:
+        lk = _unified_locks.get(key)
+        if lk is None:
+            # Trim LRU FIFO si dépasse max
+            while len(_unified_locks) >= _UNIFIED_LOCKS_MAX:
+                _unified_locks.popitem(last=False)
+            lk = threading.Lock()
+            _unified_locks[key] = lk
+        else:
+            # Move-to-end : marque comme récemment utilisé
+            _unified_locks.move_to_end(key)
+        return lk
+
+
+# =============================================================================
 # Refonte Niveau 1 (11/05/2026) — Canonicalisation unique des message_id
 # =============================================================================
 # Tout mail entrant dans BoosterMail doit être identifié par UNE seule clé :
@@ -4106,7 +4163,21 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
 
     Note design : pas de side-effect autre que les écritures DB + RAM cache.
     Multi-tenant safe via `_db._uid()` et `_set_mail_preview` (UserScopedDict).
+
+    V12 SALLE Phase B.1 (15/05/2026) — Résolution Obs-F6 TOCTOU.
+    Acquisition d'un lock par-(user_id, mid) en début de fonction. Avant ce
+    lock, 2 threads concurrents sur le même `mid` pouvaient appeler le
+    builder 2 fois (`test_F6_concurrence_double_call` plafonnait à ≤ 2).
+    Maintenant : `acquire(blocking=False)` — si un autre thread cuisine déjà
+    ce mid, on abandonne silencieusement (le 1er thread persistera pour les
+    2, et le 2e thread aurait DB hit complet → early return de toutes
+    façons). Le test peut donc être resserré à `call_count == 1`.
     """
+    # Lock par-(user_id, mid) — résolution Obs-F6 (cf docstring + INVARIANTS.md).
+    _lock = _get_unified_lock(mid)
+    if not _lock.acquire(blocking=False):
+        logger.debug(f"[unified] skip {mid[:30]} — lock détenu par un autre thread")
+        return
     try:
         # === 0. Garde retry ===
         # Si on a déjà épuisé les retries pour ce mid → return early sans
@@ -4410,6 +4481,12 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
                 f"[unified] FAILED {mid[:30]} (retry {retries}/{_COMMIS_MAX_RETRIES}) "
                 f"→ retry au cycle BG suivant : {e}"
             )
+    finally:
+        # V12 SALLE Phase B.1 — release le lock par-mid acquis en début (Obs-F6).
+        # Le `finally` garantit le release même en cas d'exception non capturée
+        # par le bloc `except` ci-dessus (defense in depth, l'`except Exception`
+        # devrait tout attraper mais on ne prend pas de risque sur l'invariant).
+        _lock.release()
 
 
 def _prewarm_mail_preview(mail_data):
