@@ -4039,6 +4039,40 @@ def _persist_commis_results(*, mid, mail_data, points, actions, mail_suggestions
     _set_mail_preview(mid, 'pj_classement', 'done', pj_data)
 
 
+def _unflatten_suggestions(suggestion):
+    """Déplie le top 3 des suggestions stocké de manière nestée dans
+    `suggestion['_suggestions']`. Retourne une liste plate prête à servir.
+
+    Refonte V12 SALLE Phase A (15/05/2026) — finition cuisine signalée par
+    le sub-agent inventaire systémique : avant cette extraction, le même
+    pattern de désérialisation défensive était dupliqué dans 7 sites
+    (`_prewarm_unified_for_mail` × 2, `api_dialog_init` × 1, `api_mail_preview`
+    × 2 dont 1 buggé, `_fetch_single_preview_plate` × 2). Ce helper :
+      1. supprime la duplication (1 site producteur + 1 helper consommateur)
+      2. corrige la régression silencieuse `api_mail_preview` PJ qui
+         retournait `[_sp]` (1 entrée) au lieu de désérialiser le top 3
+         (oubli du fix N8 P0-3 sur la route bundle legacy).
+
+    Convention de stockage (cf `_persist_commis_results:3974` et :4012) :
+    la `suggestion` principale est le dict racine ; le top 3 complet est
+    porté dans une clé interne `_suggestions` pour économiser le schéma DB
+    (1 colonne `suggestion_json` au lieu de 2 colonnes parallèles).
+
+    Args:
+        suggestion: dict racine (avec ou sans clé `_suggestions` nesté), OU
+            None / autre type (résilience contre bourdes DB).
+
+    Returns:
+        `list[dict]` plate. `[]` si suggestion falsy. `[suggestion]` si pas
+        de `_suggestions` nesté présent. `suggestion['_suggestions']` sinon.
+    """
+    if not suggestion:
+        return []
+    if isinstance(suggestion, dict) and '_suggestions' in suggestion:
+        return suggestion.get('_suggestions') or [suggestion]
+    return [suggestion]
+
+
 def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
     """Commis Haiku unifié — produit P/A/E/F/J en 1 appel et alimente les 4 frigos.
 
@@ -4100,18 +4134,14 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
                     and _ech_cached is not None):
                 # Reconstruction RAM cache à partir DB
                 _cs = _cls_cached.get('suggestion')
-                _cls_list = (_cs.get('_suggestions', [_cs])
-                             if isinstance(_cs, dict) and '_suggestions' in _cs
-                             else ([_cs] if _cs else []))
+                _cls_list = _unflatten_suggestions(_cs)
                 _set_mail_preview(mid, 'classement', 'done', {
                     'suggestion': _cs,
                     'suggestions': _cls_list,
                     'source': _cls_cached.get('source', 'none'),
                 })
                 _ps = _normalize_pj_suggestion(_pj_cached.get('suggestion'))
-                _pj_list = (_ps.get('_suggestions', [_ps])
-                            if isinstance(_ps, dict) and '_suggestions' in _ps
-                            else ([_ps] if _ps else []))
+                _pj_list = _unflatten_suggestions(_ps)
                 _set_mail_preview(mid, 'pj_classement', 'done', {
                     'suggestion': _ps,
                     'suggestions': _pj_list,
@@ -8252,12 +8282,9 @@ def api_dialog_init():
                 db_cls = _db.get_mail_classement(message_id)
                 if db_cls is not None:
                     _s = db_cls.get('suggestion')
-                    _sl = (_s.get('_suggestions', [_s])
-                           if isinstance(_s, dict) and '_suggestions' in _s
-                           else ([_s] if _s else []))
                     cls_data = {
                         'suggestion': _s,
-                        'suggestions': _sl,
+                        'suggestions': _unflatten_suggestions(_s),
                         'source': db_cls.get('source', 'none'),
                     }
                     _set_mail_preview(message_id, 'classement', 'done', cls_data)
@@ -9073,63 +9100,149 @@ def api_reply_external_detected():
     return jsonify({"ok": True, "cache_purged": True})
 
 
-@app.route('/api/classify_email', methods=['POST'])
-def api_classify_email():
+# =============================================================================
+# Phase A V12 SALLE (15/05/2026) — Helpers Classer rapide
+# =============================================================================
+# Refonte des 2 routes /api/classify_email[_manual] :
+# - Factorise le clone `_resolve_entry_id` inline × 2 → helper module-level
+# - Factorise les ~80 lignes dupliquées d'orchestration → `_classify_to_folder`
+# - Corrige 4 bugs identifiés par le démolisseur pré-impl V12 Phase A :
+#     #28 PLUS_TARD_VF : purge_email_cache_for(new_id) → IMID original
+#     P0-2 : move_to_folder success non vérifié → classement fantôme silencieux
+#     P0-3 : undo réclasse Inbox et pollue l'apprentissage → flag `learn=False`
+#     P1-1 : folder_name perdu si frontend ne l'envoie pas → lookup arbre
+# - Préserve l'invariant multi-tenant : `_classify_momentum.clear() + .update()`
+#   (PAS de réassignation `= {...}` qui casserait le proxy UserScopedDict)
+
+
+def _resolve_outlook_entry_id(graph, mid):
+    """Résout un identifiant de mail (IMID ou Entry ID) en Graph Entry ID.
+
+    Refonte V12 SALLE Phase A — extraction du clone inline dupliqué × 2 dans
+    `api_classify_email` (ex-l. 9100-9112) et `api_classify_email_manual`
+    (ex-l. 9227-9237). Sémantique byte-identique avec la version précédente.
+
+    Contexte : depuis le fix 02/05 (signal Yvan « le classement automatique ne
+    fonctionne pas »), Graph rejette /messages/{id}/move avec un 400 si l'`id`
+    passé est un IMID `<...@domain>` au lieu d'un Graph Entry ID. Le frontend
+    dialog.js envoie l'IMID — on doit le résoudre live via Graph API.
+
+    Args:
+        graph: instance `GraphClient` (déjà obtenue via `get_graph()`).
+        mid: identifiant mail. Vide / None → `''`. Déjà Entry ID (pas `<>`) →
+             retour direct sans appel Graph. IMID → résolution live.
+
+    Returns:
+        Graph Entry ID si résolu, `''` si vide ou échec (le caller doit alors
+        renvoyer 404 « Mail introuvable côté Outlook »).
     """
-    Classe un mail dans un dossier Outlook (move reçu + copy envoyé).
-    Mode Standard uniquement.
+    if not mid:
+        return ''
+    is_imid = mid.startswith('<') and '@' in mid and mid.endswith('>')
+    if not is_imid:
+        return mid  # déjà Graph Entry ID
+    try:
+        em = graph.get_email_by_internet_id(mid)
+        return em.get('id', '') if em else ''
+    except Exception as _ex:
+        logger.warning(f"[classify] résolution IMID→Entry échouée : {_ex}")
+        return ''
 
-    Fix 02/05/2026 (signal Yvan « le classement automatique ne fonctionne
-    pas ») : Graph 400 sur /messages/{id}/move quand l'ID passé est un
-    internetMessageId (<...@gmail.com>) au lieu d'un Graph Entry ID. Le
-    frontend dialog.js envoie l'IMID, on résout d'abord en Entry ID via
-    get_email_by_internet_id.
+
+def _lookup_folder_name(folder_id):
+    """Retourne le `folder_path` (ou `folder_name`) à partir du `folder_id`,
+    en lisant l'arbre Outlook cached. Fallback `''` si introuvable.
+
+    Refonte V12 SALLE Phase A — fix P1-1 démolisseur : le frontend
+    `/api/classify_email` (dialog.js:4977-4983) n'envoie pas `folder_name`.
+    Avant la refonte, le code stockait `folder_path=''` en DB
+    `folder_classifications`, polluant silencieusement le Tier R1 du moteur
+    d'apprentissage avec des classements anonymes.
     """
-    data = request.get_json() or {}
-    message_id = data.get('message_id', '')
-    folder_id = data.get('folder_id', '')
-    sent_message_id = data.get('sent_message_id', '')  # ID du mail envoyé (copie)
+    if not folder_id:
+        return ''
+    try:
+        for f in _get_outlook_folders_cached() or []:
+            if f.get('id') == folder_id:
+                # Privilégie path (plus complet, ex: 'Boîte de réception/IMMO/X')
+                # sinon name (juste 'X').
+                return f.get('path', '') or f.get('name', '')
+    except Exception as _ex:
+        logger.debug(f"[classify] lookup folder_name échec : {_ex}")
+    return ''
 
-    if not message_id or not folder_id:
-        return jsonify({"error": "message_id et folder_id requis"}), 400
 
+def _classify_to_folder(message_id, folder_id, folder_name,
+                        sent_message_id='', learn=True):
+    """Helper unifié : orchestre le classement Outlook + side-effects DB.
+
+    Refonte V12 SALLE Phase A — factorise les ~80 lignes dupliquées entre
+    `api_classify_email` et `api_classify_email_manual` (anti-pattern doublon
+    routes signalé par le démolisseur pré-impl). Consommé par les 2 routes
+    publiques, qui se réduisent à du parsing JSON + résolution préalable.
+
+    Pipeline :
+        1. Récupère le client Graph (fail-fast si Mode Standard désactivé)
+        2. Résout l'IMID en Graph Entry ID via `_resolve_outlook_entry_id`
+        3. Move Graph + **vérification `success`** (P0-2 démolisseur — sans ça,
+           un échec Graph silencieux laissait save_classification + momentum +
+           purge_frigos s'exécuter sur un mail qui n'avait PAS bougé, polluant
+           l'apprentissage et trompant le frontend qui recevait `status: ok`).
+        4. Copy du mail envoyé (best-effort, ne bloque pas en cas d'échec)
+        5. Apprentissage (`save_classification` + `_classify_momentum`) UNIQUEMENT
+           si `learn=True` (P0-3 démolisseur — quand l'user clique « Annuler »
+           dans le toast undo, le frontend re-classe vers `Boîte de réception`
+           avec `learn=False` pour ne PAS enregistrer une préférence Inbox
+           erronée dans le moteur d'apprentissage).
+        6. Purge frigos selon dispatcher N7 (action='classified')
+        7. Purge email_cache avec l'**IMID original** (`message_id`), PAS le
+           `new_id` Graph Entry ID post-move (fix #28 PLUS_TARD_VF — DELETE
+           silencieux ne faisait rien avant car la table `email_cache` est
+           keyée sur IMID canonique depuis N2 11/05).
+
+    Args:
+        message_id: IMID du mail reçu à classer (clé canonique RFC 2822).
+        folder_id: Graph Folder ID destination.
+        folder_name: Path ou nom du dossier (pour DB d'apprentissage + momentum).
+        sent_message_id: IMID du mail envoyé à copier (workflow post-send).
+                         Vide → pas de copie.
+        learn: si False, skip étape 5 (cas undo, ne pollue pas l'apprentissage).
+
+    Returns:
+        Tuple (response_dict, status_code) prêt pour `jsonify`. En cas d'échec
+        Graph (404 Outlook ou 502 Move) le response_dict contient `error` +
+        `detail` ; sinon contient `status: ok` + `move` + `copy`.
+    """
     graph = get_graph()
     if not graph:
-        return jsonify({"error": "Mode Standard requis"}), 403
+        return {"error": "Mode Standard requis"}, 403
 
-    def _resolve_entry_id(mid):
-        """IMID (<...@domain>) → Graph Entry ID. Si déjà Entry ID, retour direct."""
-        if not mid:
-            return ''
-        is_imid = mid.startswith('<') and '@' in mid and mid.endswith('>')
-        if not is_imid:
-            return mid
-        try:
-            em = graph.get_email_by_internet_id(mid)
-            return em.get('id', '') if em else ''
-        except Exception as _ex:
-            logger.warning(f"[classify_email] résolution IMID→Entry échouée : {_ex}")
-            return ''
+    # 1. Résolution IMID → Graph Entry ID (live API)
+    graph_id = _resolve_outlook_entry_id(graph, message_id)
+    if not graph_id:
+        return {"error": "Mail introuvable côté Outlook"}, 404
+    sent_graph_id = _resolve_outlook_entry_id(graph, sent_message_id) if sent_message_id else ''
 
-    try:
-        # Résoudre IMID → Entry ID avant les appels Graph (sinon 400)
-        graph_id = _resolve_entry_id(message_id)
-        if not graph_id:
-            return jsonify({"error": "Mail introuvable côté Outlook"}), 404
-        sent_graph_id = _resolve_entry_id(sent_message_id) if sent_message_id else ''
+    # 2. Move Graph + check success (P0-2 fix démolisseur)
+    move_result = graph.move_to_folder(graph_id, folder_id)
+    if not move_result.get('success'):
+        # Side-effects skipped — pas de classement fantôme.
+        return {
+            "error": "Move Graph échoué",
+            "detail": move_result.get('error', ''),
+            "move": move_result,
+        }, 502
 
-        # Déplacer le mail reçu
-        move_result = graph.move_to_folder(graph_id, folder_id)
+    # 3. Copy du mail envoyé (best-effort, ne bloque pas la réponse)
+    copy_result = None
+    if sent_graph_id:
+        copy_result = graph.copy_to_folder(sent_graph_id, folder_id)
 
-        # Copier le mail envoyé (si fourni)
-        copy_result = None
-        if sent_graph_id:
-            copy_result = graph.copy_to_folder(sent_graph_id, folder_id)
+    new_id = move_result.get('new_id', '') or graph_id
 
-        # Sauvegarder en DB pour apprentissage
-        new_id = move_result.get('new_id', '') or graph_id
+    # 4. Apprentissage (conditionnel — skip si learn=False, cas undo)
+    if learn:
         email = graph.get_email_by_id(new_id)
-        folder_name = data.get('folder_name', '')  # Nom du dossier (fourni par le frontend)
         if email:
             contact_email = email.get('from_email', '')
             domain = _extract_email_domain(contact_email)
@@ -9143,10 +9256,10 @@ def api_classify_email():
                 subject=email.get('subject', ''),
                 subject_keywords=subject_kw,
             )
-            # Momentum : mémoriser ce dossier pour les 30 prochaines minutes
-            # Étape 7 multi-tenant — clear + update au lieu de réassignation
-            # globale (sinon on remplace le proxy UserScopedDict par un dict simple
-            # et on perd l'isolation user-scoped pour les accès suivants).
+            # Multi-tenant SAFE — invariant I-CLASSIFY-A : NE PAS réassigner
+            # `_classify_momentum = {...}` (casserait le proxy UserScopedDict
+            # qui isole le momentum par-user). Le pattern `clear()+update()`
+            # mute le dict sous-jacent sans toucher au proxy.
             _classify_momentum.clear()
             _classify_momentum.update({
                 'folder_id': folder_id,
@@ -9154,24 +9267,53 @@ def api_classify_email():
                 'ts': time.time(),
             })
 
-        # Refonte N7 : action='classified' selon table de vérité spec slide 5.
-        # Vide Brouillon + Classement Mail + Classement PJ ; GARDE Résumé +
-        # Échéance (mail reste consultable dans son nouveau dossier).
-        _purge_frigos_for_action(message_id, 'classified')
-        # NOTE : `purge_email_cache_for(new_id)` est un BUG LATENT documenté
-        # dans PLUS_TARD_VF.md item #28 — `new_id` est un Graph Entry ID
-        # post-déplacement, pas un IMID. Le DELETE ne fait rien (silencieux).
-        # Conservé tel quel hors scope N7 strict.
-        try:
-            _db.purge_email_cache_for(new_id)
-        except Exception:
-            pass
+    # 5. Purge frigos (dispatcher unique N7 — table de vérité spec slide 5)
+    # Action 'classified' : vide Brouillon + Classement Mail + Classement PJ ;
+    # GARDE Résumé + Échéance (mail reste consultable dans son nouveau dossier).
+    _purge_frigos_for_action(message_id, 'classified')
 
-        return jsonify({
-            "status": "ok",
-            "move": move_result,
-            "copy": copy_result,
-        })
+    # 6. Purge email_cache avec IMID original (fix #28 PLUS_TARD_VF).
+    # Avant : `purge_email_cache_for(new_id)` recevait le Graph Entry ID
+    # post-move → DELETE silencieux sans effet (table keyée sur IMID depuis
+    # N2 11/05). Entrées orphelines s'accumulaient. Maintenant le DELETE
+    # cible la vraie ligne et purge effectivement.
+    try:
+        _db.purge_email_cache_for(message_id)
+    except Exception as _e:
+        logger.debug(f"[classify] purge_email_cache_for échec non-bloquant : {_e}")
+
+    return {
+        "status": "ok",
+        "move": move_result,
+        "copy": copy_result,
+    }, 200
+
+
+@app.route('/api/classify_email', methods=['POST'])
+def api_classify_email():
+    """Classe un mail dans un dossier Outlook depuis une suggestion sélectionnée.
+
+    Refonte V12 SALLE Phase A — wrapper mince autour de `_classify_to_folder`.
+    Si le frontend n'envoie pas `folder_name` (cas observé dans dialog.js:4977-
+    4983 qui ne transmet que folder_id), on le résout via `_lookup_folder_name`
+    pour ne pas polluer l'apprentissage avec `folder_path=''`.
+    """
+    data = request.get_json() or {}
+    message_id = data.get('message_id', '')
+    folder_id = data.get('folder_id', '')
+    sent_message_id = data.get('sent_message_id', '')
+    # P1-1 fix : résoudre folder_name si absent (frontend dialog.js ne l'envoie pas)
+    folder_name = data.get('folder_name', '') or _lookup_folder_name(folder_id)
+
+    if not message_id or not folder_id:
+        return jsonify({"error": "message_id et folder_id requis"}), 400
+
+    try:
+        response, status = _classify_to_folder(
+            message_id, folder_id, folder_name,
+            sent_message_id=sent_message_id, learn=True,
+        )
+        return jsonify(response), status
     except GraphAuthError:
         return jsonify({"error": "Token expiré", "auth_required": True}), 401
     except Exception as e:
@@ -9181,26 +9323,26 @@ def api_classify_email():
 
 @app.route('/api/classify_email_manual', methods=['POST'])
 def api_classify_email_manual():
-    """
-    Classe un mail dans un dossier saisi manuellement par l'user (path texte).
-    Crée récursivement les dossiers manquants via Graph API.
+    """Classe un mail dans un dossier saisi manuellement (path texte, création
+    récursive si manquant).
 
-    Use case : signal Yvan 30/04 PM. La mailbox cloud `groupe-bosser.fr` n'a
-    que 4 dossiers système (Archive, Boîte de réception, Flux RSS, Éléments
-    envoyés). Pas de hiérarchie métier (IMMOBILIER, METEOR, LINKIAA, etc).
-    Le proto port 5050 fonctionnait via Outlook COM (mailbox locale = arbo
-    complète). En SaaS Graph API on a une mailbox cloud souvent moins peuplée.
-    Solution : permettre la saisie manuelle d'un path → création + classement.
+    Refonte V12 SALLE Phase A — wrapper autour de `_classify_to_folder` + étape
+    de résolution récursive du path (Graph API `resolve_or_create_folder_path`).
+    Use case original (Yvan 30/04 PM) : mailbox cloud `groupe-bosser.fr` quasi-
+    vide (4 dossiers système), saisie manuelle d'un path métier → création +
+    classement.
 
-    Body JSON : { message_id, path, sent_message_id? }
-    Path ex: 'IMMOBILIER/METEOR' ou 'Boîte de réception/IMMOBILIER/METEOR'.
-    Sécurité : max 5 niveaux profondeur, max 100 chars par segment (cf
-    GraphClient.resolve_or_create_folder_path).
+    Body JSON : `{ message_id, path, sent_message_id?, learn? }`
+    `learn=False` permet au bouton « Annuler » du toast undo de réclasser vers
+    `Boîte de réception` SANS polluer l'apprentissage (fix P0-3 démolisseur).
+    Path ex: 'IMMOBILIER/METEOR'. Sécurité 5 niveaux × 100 chars/segment côté
+    `GraphClient.resolve_or_create_folder_path`.
     """
     data = request.get_json() or {}
     message_id = data.get('message_id', '')
     path = (data.get('path', '') or '').strip()
     sent_message_id = data.get('sent_message_id', '')
+    learn = bool(data.get('learn', True))  # P0-3 fix : frontend undo passe False
 
     if not message_id or not path:
         return jsonify({"error": "message_id et path requis"}), 400
@@ -9210,7 +9352,7 @@ def api_classify_email_manual():
         return jsonify({"error": "Mode Standard requis"}), 403
 
     try:
-        # 1) Résoudre le path → folder_id (création récursive si manquant)
+        # 1. Résoudre le path → folder_id (création récursive si besoin)
         resolve = graph.resolve_or_create_folder_path(path)
         if not resolve.get('success'):
             return jsonify({
@@ -9222,65 +9364,17 @@ def api_classify_email_manual():
         final_path = resolve['final_path']
         created_folders = resolve.get('created_folders', [])
 
-        # Fix 02/05/2026 (idem api_classify_email) : résoudre IMID → Entry ID
-        # avant les appels Graph (Graph 400 sinon).
-        def _resolve_entry_id(mid):
-            if not mid:
-                return ''
-            is_imid = mid.startswith('<') and '@' in mid and mid.endswith('>')
-            if not is_imid:
-                return mid
-            try:
-                em = graph.get_email_by_internet_id(mid)
-                return em.get('id', '') if em else ''
-            except Exception:
-                return ''
+        # 2. Délégation au helper unifié
+        response, status = _classify_to_folder(
+            message_id, folder_id, final_path,
+            sent_message_id=sent_message_id, learn=learn,
+        )
+        if status != 200:
+            return jsonify(response), status
 
-        graph_id = _resolve_entry_id(message_id)
-        if not graph_id:
-            return jsonify({"error": "Mail introuvable côté Outlook"}), 404
-        sent_graph_id = _resolve_entry_id(sent_message_id) if sent_message_id else ''
-
-        # 2) Déplacer le mail reçu
-        move_result = graph.move_to_folder(graph_id, folder_id)
-
-        # 3) Copier le mail envoyé (si fourni)
-        copy_result = None
-        if sent_graph_id:
-            copy_result = graph.copy_to_folder(sent_graph_id, folder_id)
-
-        # 4) Sauvegarder en DB pour apprentissage (rule learning)
-        new_id = move_result.get('new_id', '') or graph_id
-        email = graph.get_email_by_id(new_id)
-        if email:
-            contact_email = email.get('from_email', '')
-            domain = _extract_email_domain(contact_email)
-            subject_kw = _extract_subject_keywords(email.get('subject', ''))
-            _db.save_classification(
-                entry_id=new_id,
-                folder_path=final_path,
-                folder_id=folder_id,
-                contact_email=contact_email,
-                domain=domain,
-                subject=email.get('subject', ''),
-                subject_keywords=subject_kw,
-            )
-            _classify_momentum.clear()
-            _classify_momentum.update({
-                'folder_id': folder_id,
-                'folder_name': final_path,
-                'ts': time.time(),
-            })
-
-        # 5) Refonte N7 : action='classified' (cf table de vérité spec slide 5).
-        _purge_frigos_for_action(message_id, 'classified')
-        # Bug latent purge_email_cache_for(new_id) — cf PLUS_TARD_VF.md #28.
-        try:
-            _db.purge_email_cache_for(new_id)
-        except Exception:
-            pass
-
-        # 6) Invalider le cache outlook_folders (nouveau dossier créé → arbre changé)
+        # 3. Invalidation cache outlook_folders CONDITIONNELLE (P1-5 démolisseur :
+        # seulement si dossier créé, sinon surcoût Graph inutile à chaque
+        # classement manuel sur path existant).
         if created_folders and _get_user_cache is not None and _get_current_user_id is not None:
             try:
                 user_id = _get_current_user_id() or 'default'
@@ -9292,16 +9386,14 @@ def api_classify_email_manual():
 
         logger.info(
             f"[manual_classify] {message_id[:30]} → {final_path} "
-            f"(créés: {len(created_folders)})"
+            f"(créés: {len(created_folders)}, learn={learn})"
         )
-        return jsonify({
-            "status": "ok",
-            "folder_id": folder_id,
-            "final_path": final_path,
-            "created_folders": created_folders,
-            "move": move_result,
-            "copy": copy_result,
-        })
+
+        # Enrichir la réponse avec les infos spécifiques au mode manuel
+        response['folder_id'] = folder_id
+        response['final_path'] = final_path
+        response['created_folders'] = created_folders
+        return jsonify(response), 200
     except GraphAuthError:
         return jsonify({"error": "Token expiré", "auth_required": True}), 401
     except Exception as e:
@@ -9974,12 +10066,9 @@ def api_mail_preview(message_id):
             db_cls = _db.get_mail_classement(message_id)
             if db_cls is not None:
                 _s = db_cls.get('suggestion')
-                _sl = (_s.get('_suggestions', [_s])
-                       if isinstance(_s, dict) and '_suggestions' in _s
-                       else ([_s] if _s else []))
                 cls_data = {
                     'suggestion': _s,
-                    'suggestions': _sl,
+                    'suggestions': _unflatten_suggestions(_s),
                     'source': db_cls.get('source', 'none'),
                 }
                 _set_mail_preview(message_id, 'classement', 'done', cls_data)
@@ -9989,10 +10078,16 @@ def api_mail_preview(message_id):
         try:
             db_pj = _db.get_mail_pj_classement(message_id)
             if db_pj is not None:
+                # Fix régression silencieuse V12 SALLE Phase A (15/05) :
+                # avant cette ligne, la désérialisation PJ utilisait `[_sp]`
+                # (1 entrée) au lieu du helper _unflatten_suggestions qui
+                # déplie le top 3. Bug latent depuis le 24/04 (oubli du
+                # fix N8 P0-3 sur la route bundle legacy). Sub-agent
+                # inventaire systémique découverte #3.
                 _sp = db_pj.get('suggestion')
                 pj_data = {
                     'suggestion': _sp,
-                    'suggestions': [_sp] if _sp else [],
+                    'suggestions': _unflatten_suggestions(_sp),
                     'source': db_pj.get('source', 'none'),
                 }
                 _set_mail_preview(message_id, 'pj_classement', 'done', pj_data)
@@ -10111,12 +10206,9 @@ def _fetch_single_preview_plate(message_id, plate):
             db_row = _db.get_mail_classement(message_id)
             if db_row is not None:
                 _s = db_row.get('suggestion')
-                _sl = (_s.get('_suggestions', [_s])
-                       if isinstance(_s, dict) and '_suggestions' in _s
-                       else ([_s] if _s else []))
                 cls_data = {
                     'suggestion': _s,
-                    'suggestions': _sl,
+                    'suggestions': _unflatten_suggestions(_s),
                     'source': db_row.get('source', 'none'),
                 }
                 _set_mail_preview(message_id, 'classement', 'done', cls_data)
@@ -10152,18 +10244,14 @@ def _fetch_single_preview_plate(message_id, plate):
                     except Exception as _e:
                         logger.debug(f"[preview-pj] no_pj recheck : {_e}")
             if db_row is not None:
+                # Top 3 PJ — désérialisation via `_unflatten_suggestions`
+                # (V12 SALLE Phase A). Origine du pattern : fix N8 démolisseur
+                # P0-3 pour ne plus afficher 1 seule entrée dans le popup PJ
+                # quand le commis avait produit un top 3.
                 _sp = db_row.get('suggestion')
-                # N8 (démolisseur v2 P0-3) — désérialiser le top 3 PJ
-                # nesté dans `_suggestions` comme le fait déjà le chemin
-                # mail (9847-9849). Avant : `pj_data['suggestions']` était
-                # toujours `[_sp]` (1 seule entrée) même si le commis avait
-                # produit un top 3 → bug UI popup PJ.
-                _spl = (_sp.get('_suggestions', [_sp])
-                        if isinstance(_sp, dict) and '_suggestions' in _sp
-                        else ([_sp] if _sp else []))
                 pj_data = {
                     'suggestion': _sp,
-                    'suggestions': _spl,
+                    'suggestions': _unflatten_suggestions(_sp),
                     'source': db_row.get('source', 'none'),
                 }
                 _set_mail_preview(message_id, 'pj_classement', 'done', pj_data)

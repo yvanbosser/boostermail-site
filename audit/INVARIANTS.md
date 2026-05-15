@@ -1085,6 +1085,38 @@ Tout enregistrement de mail dans la table `threads` (toutes directions) déclenc
 - **Pourquoi** : avant N10, purge globale sans filtre `user_id` → (a) perte totale du squelette + des règles de classement préservées, (b) fuite cross-tenant. Corrigé en double.
 - **Action si violé** : restaurer le UPDATE-blank et la boucle multi-tenant.
 
+### I-CLASSIFY-A : Helper unifié `_classify_to_folder` pour les 2 routes Classer (V12 SALLE Phase A)
+
+Refonte 15/05/2026 V12 SALLE Phase A — les 2 routes `/api/classify_email` et `/api/classify_email_manual` consomment un helper unique `_classify_to_folder(message_id, folder_id, folder_name, sent_message_id='', learn=True)` ([app_plugin.py](../V2/app_plugin.py)) qui orchestre move + copy + save + momentum + purge avec 3 garde-fous structurels :
+
+1. **Check `move_result.get('success')` AVANT side-effects** — empêche les classements fantômes silencieux (avant : si Graph rejetait le move, save_classification + momentum + purge_frigos s'exécutaient quand même, polluant l'apprentissage avec un classement qui n'avait pas eu lieu).
+2. **Flag `learn=False`** — désactive `save_classification` + `_classify_momentum.update()` pour le cas undo (`_classifyUndoMail` dialog.js:2225). Avant : chaque clic « Annuler » enregistrait une fausse préférence Inbox dans `folder_classifications`.
+3. **`_db.purge_email_cache_for(message_id)`** avec l'IMID original (et non plus `new_id` Graph Entry ID post-move) — fix bug latent #28 PLUS_TARD_VF, DELETE silencieux sans effet pendant 2 semaines.
+
+Pattern multi-tenant **OBLIGATOIRE** sur `_classify_momentum` : `.clear() + .update({...})` (mutation du dict sous-jacent). **Réassignation `_classify_momentum = {...}` INTERDITE** car remplace le proxy `UserScopedDict` par un dict simple → perte de l'isolation user-scoped.
+
+Helper module-level `_resolve_outlook_entry_id(graph, mid)` factorise la résolution IMID→Graph Entry ID — anti-doublon (avant : clone inline × 2 dans les 2 routes).
+
+Helper module-level `_lookup_folder_name(folder_id)` résout le nom de dossier via `_get_outlook_folders_cached()` quand le frontend n'envoie pas `folder_name` (fix P1-1 démolisseur — empêche `folder_path=''` polluant le Tier R1 du moteur d'apprentissage).
+
+- **Preuve comportementale** : `tests/test_la_salle.py` 17 cas en 3 catégories (filet sécurité, TDD des 4 fixes, régressions statiques). 114/114 verts globaux.
+- **Régression statique** : `tests/test_la_salle.py::test_STATIC_helper_resolve_outlook_entry_id_module_level`, `::test_STATIC_no_duplicate_resolve_entry_id_inline_in_routes`, `::test_STATIC_classify_to_folder_unified_helper_exists`, `::test_STATIC_momentum_uses_clear_update_pattern`, `::test_STATIC_classify_routes_check_move_success`.
+- **Pourquoi** : démolisseur pré-impl V12 SALLE Phase A — 3 P0 (signature helper, move success non checké, undo pollue apprentissage) + 6 P1 + 3 P2. Pacte « pas de patches sur patches » : tout corriger en un seul passage cohérent (option b validée par Yvan) plutôt que d'empiler des -bis.
+- **Action si violé** : un développeur a (a) réintroduit `_resolve_entry_id` inline dans une route, (b) bypassé `_classify_to_folder` en réimplémentant le pipeline classify, (c) réassigné `_classify_momentum = {...}` au lieu de `.clear()+.update()`, (d) supprimé le check `move_result['success']` ou réintroduit `purge_email_cache_for(new_id)`. Restaurer le helper unifié + le pattern multi-tenant + les 3 garde-fous.
+
+### I-UNFLATTEN-SUGGESTIONS : helper unique de désérialisation top 3 (V12 SALLE Phase A — finition cuisine)
+
+Refonte 15/05/2026 V12 SALLE Phase A — finition transverse cuisine identifiée par le sub-agent inventaire systémique (découverte #5 et #3).
+
+Convention de stockage du top 3 des suggestions classement Mail/PJ : le dict racine porte les champs principaux + une clé interne `_suggestions` qui nest le top 3 complet (cf `_persist_commis_results:3974 et :4012`). Un seul helper `_unflatten_suggestions(suggestion)` ([app_plugin.py](../V2/app_plugin.py)) déplie en list[dict] plate, consommé par 7 sites côté cuisine + salle (`_prewarm_unified_for_mail` × 2, `api_dialog_init` × 1, `api_mail_preview` × 2, `_fetch_single_preview_plate` × 2).
+
+Effet collatéral du refactor : régression silencieuse `api_mail_preview` PJ corrigée — avant cette refonte, la route bundle retournait `[_sp]` (1 entrée) au lieu de désérialiser le top 3 (oubli du fix N8 P0-3 sur la voie legacy). Selon la voie d'appel frontend (route bundle ou 3 portes spécialisées), l'utilisateur voyait 1 ou 3 suggestions PJ pour le même mail. Désormais cohérent.
+
+- **Preuve comportementale** : 114/114 tests verts post-refactor (16 N12 + 15 N13 + 14 N11 + 52 N0-N11 + 17 La SALLE).
+- **Régression statique recommandée** (à ajouter si un futur dev tente de réintroduire le pattern inline) : grep le source pour `\.get\('_suggestions',` outside de `_unflatten_suggestions` lui-même.
+- **Pourquoi** : pacte « pas de patches sur patches » — 7 sites du même pattern défensif `_s.get('_suggestions', [_s]) if isinstance(...) else [...]` = dette dispersée, source de divergences silencieuses (preuve : la route `api_mail_preview` PJ ne faisait pas la désérialisation correctement → user voyait 1 suggestion au lieu de 3). Une seule fonction = un seul comportement.
+- **Action si violé** : restaurer le helper unique + corriger les sites qui auraient réintroduit le pattern inline.
+
 ### I-ECHEANCE-DB-DRIVEN : critère scan échéance entrant = existence en DB (V12 Phase 2.2)
 
 Le scan échéance sur mail entrant n'est PAS conditionné au statut VIP/PARTIAL du contact (Option A abandonnée 15/05) mais à l'existence d'au moins une échéance active en DB sur `from_email`. Helper unique `_should_scan_echeance(mode, mail_data)` (`app_plugin.py:_should_scan_echeance`) :

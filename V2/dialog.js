@@ -2222,10 +2222,20 @@ function _classifyUndoMail() {
     var undoEl = document.getElementById('cfMailUndo');
     var btnEl = document.getElementById('cfMailBtn');
     undoEl.innerHTML = '<span>Annulation en cours…</span>';
+    // V12 SALLE Phase A (15/05) — learn:false pour éviter de polluer
+    // l'apprentissage avec une fausse préférence Inbox (P0-3 démolisseur).
+    // L'undo est un retour en arrière physique, PAS un classement à
+    // apprendre. Sans ce flag, chaque undo enregistrait une ligne dans
+    // folder_classifications avec folder_path='Boîte de réception' →
+    // le moteur de suggestion proposait Inbox comme dossier favori.
     _fetchWithBearer(_backendUrl + '/api/classify_email_manual', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({message_id: _cfMessageId, path: 'Boîte de réception'})
+        body: JSON.stringify({
+            message_id: _cfMessageId,
+            path: 'Boîte de réception',
+            learn: false,
+        })
     })
     .then(function() {
         undoEl.style.display = 'none';

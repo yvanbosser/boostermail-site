@@ -1089,23 +1089,19 @@ partageront un mail (newsletter commune, mailing-list, alias générique).
 
 ---
 
-### 28. Bug latent `api_classify_email` purge `email_cache` avec mauvaise clé — N7 13/05/2026
+### 28. ~~Bug latent `api_classify_email` purge `email_cache` avec mauvaise clé~~ — ✅ FAIT 15/05/2026 V12 SALLE Phase A
 
-**Origine** : Audit démolisseur PRÉ-impl N7 (refonte des 5 frigos & nettoyage), point B.1.
+**Statut** : RÉSOLU dans le commit V12 SALLE Phase A (15/05/2026). Le fix est intégré dans le helper unifié `_classify_to_folder(message_id, folder_id, folder_name, sent_message_id, learn)` qui appelle désormais `_db.purge_email_cache_for(message_id)` avec l'IMID original (et non plus `new_id` Graph Entry ID post-move). Le DELETE cible maintenant la vraie ligne et purge effectivement.
 
-**Symptôme** : `app_plugin.py:8627-8632` — après un classement de mail, le code appelle `_db.purge_email_cache_for(new_id)` où `new_id` est l'**Entry ID Graph retourné par le déplacement** (Outlook donne un nouvel ID au mail dans son nouveau dossier). Or la table `email_cache` est **keyée sur l'IMID** (`internet_message_id`, identifiant universel du mail) depuis la refonte N2 (11/05/2026).
+**Tests régression** :
+- `tests/test_la_salle.py::test_FIX_28_purges_email_cache_with_imit_not_new_id` (TDD : rouge sur main avant fix, vert après refonte)
+- `tests/test_la_salle.py::test_STATIC_classify_to_folder_unified_helper_exists` (régression statique helper module-level)
 
-**Conséquence** : `purge_email_cache_for(new_id)` cherche un mail avec `imid = new_id`, qui n'existe pas (puisque `new_id` est un Graph Entry ID, pas un IMID). **Le DELETE ne fait rien.** L'entrée stale du mail brut reste en base jusqu'au TTL 730 jours.
-
-**Impact** : croissance lente de `email_cache` avec entrées orphelines après chaque classement utilisateur. Pas critique en mono-user (purge TTL 2 ans s'en occupe) mais devient un problème de coût stockage en SaaS multi-tenant à grande échelle.
-
-**Solution** : passer `message_id` (l'IMID d'origine, disponible dans le contexte de la route) à `purge_email_cache_for(...)` au lieu de `new_id`.
-
-**Effort estimé** : ~10 min (1 ligne à corriger + 1 test ciblé).
-
-**Priorité** : 🟡 moyenne — pas urgent (TTL 2 ans), mais à corriger pour ne pas alimenter la dette stockage.
-
-**Pourquoi pas traité dans N7** : N7 = refonte des 5 frigos pré-cuits (slide 5 arbre V2). `email_cache` est le mail brut, scope adjacent. Ne pas mélanger 2 refontes dans 1 commit (leçon N6.3 mensonge métriques).
+**Historique original (Origine + Symptôme + Conséquence + Solution) conservé pour traçabilité** :
+- *Origine* : Audit démolisseur PRÉ-impl N7 (refonte des 5 frigos & nettoyage), point B.1.
+- *Symptôme* : `app_plugin.py:8627-8632` (numérotation pré-refonte) — après un classement de mail, le code appelait `_db.purge_email_cache_for(new_id)` où `new_id` est l'Entry ID Graph retourné par le déplacement. Or la table `email_cache` est keyée sur l'IMID depuis la refonte N2 (11/05/2026).
+- *Conséquence* : DELETE silencieux sans effet (croissance lente d'entrées orphelines).
+- *Solution appliquée* : passer `message_id` (IMID original) au lieu de `new_id` — intégré dans `_classify_to_folder` étape 6.
 
 ---
 

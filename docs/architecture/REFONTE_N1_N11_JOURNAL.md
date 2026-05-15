@@ -803,7 +803,87 @@ Test dédié : `tests/test_n13_match_echeance.py::test_prompt_injection_whitelis
 
 ---
 
-## 7. Statistiques globales N1-N11 (+ Option A + Validation finale)
+## 7. La SALLE — Phase A (Classer rapide) livrée (15/05/2026 PM tardif)
+
+### Contexte
+
+La cuisine (N1-N11 + V12 Phase 1/2.1/2.2) étant terminée, Yvan a explicité la nouvelle mission : appliquer la même rigueur au pacte fondateur pour **La SALLE** (3 actions user — Classer rapide / Voir résumé + échéance / Répondre). Cible : « service 3 étoiles Michelin × rapidité fast food ». Ordre validé : A (Classer) → B (Voir résumé) → C (Répondre).
+
+### Démarche méthodologique
+
+Travail entièrement en mode **« nocode jusqu'à validation »** sur 2 cartographies complémentaires avant d'écrire la première ligne :
+
+1. **Cartographie 1 — parcours utilisateur** (3 cartes en analogie restaurant) : 30s d'attente max sur Classer (polling sans event), 5 portes pour 1 carte « Voir résumé », 5 patches empilés sur 1 bloc « Répondre ».
+2. **Cartographie 2 — inventaire systémique** (4 dimensions : stockage, dette historique, données en transit, dépendances transverses) : 10 découvertes complémentaires dont la régression silencieuse `mail_preview` PJ (top 3 affiché à tort comme top 1).
+3. **Démolisseur pré-impl Phase A** : 3 erreurs factuelles dans le plan v1 corrigées (`_resolve_entry_id` est Graph live pas DB, `_ensure_folder_path_recursive` n'existe pas, invalidation cache outlook_folders doit rester conditionnelle) + 2 vrais bugs prod découverts (P0-2 move success non checké + P0-3 undo qui pollue l'apprentissage). Plan élargi (option b) pour tout corriger en un seul passage cohérent.
+
+### Livré dans cette session
+
+**Refonte Phase A (Classer rapide)** :
+- Helper module-level `_resolve_outlook_entry_id(graph, mid)` — factorise le clone inline dupliqué × 2 dans les 2 routes Classer.
+- Helper `_lookup_folder_name(folder_id)` — résout le nom de dossier via l'arbre Outlook cached quand le frontend n'envoie pas `folder_name` (fix P1-1 : avant cette refonte, `save_classification` recevait `folder_path=''` polluant le Tier R1 du moteur d'apprentissage).
+- Helper unifié `_classify_to_folder(message_id, folder_id, folder_name, sent_message_id, learn)` — orchestre move + copy + save + momentum + purge avec 3 fixes intégrés :
+  - **#28 PLUS_TARD_VF** : `_db.purge_email_cache_for(message_id)` reçoit l'IMID original (pas le `new_id` Graph Entry ID post-move) — bug latent 2 semaines résolu.
+  - **P0-2 démolisseur** : check `move_result.get('success')` AVANT side-effects — empêche les classements fantômes silencieux quand Graph rejette.
+  - **P0-3 démolisseur** : flag `learn=False` permet à `_classifyUndoMail` (dialog.js:2225) de réclasser dans Inbox SANS enregistrer une fausse préférence d'apprentissage.
+- Routes amincies `api_classify_email` (~22 lignes) et `api_classify_email_manual` (~45 lignes) — wrappers minces autour de `_classify_to_folder` qui gardent leur contrat HTTP public.
+- Frontend : 1 ligne ajoutée dans `dialog.js:2225` (`learn: false` dans le POST undo).
+
+**Finition cuisine (en cohérence pacte « pas de patches, code propre »)** :
+- Helper `_unflatten_suggestions(suggestion)` — extrait le pattern de désérialisation du top 3 nesté `_suggestions` dupliqué dans **7 sites** (`_prewarm_unified_for_mail` × 2, `api_dialog_init` × 1, `api_mail_preview` × 2, `_fetch_single_preview_plate` × 2). Au passage : **régression silencieuse `api_mail_preview` PJ corrigée** — route bundle retournait `[_sp]` (1 entrée) au lieu de désérialiser le top 3 ; oubli du fix N8 P0-3 sur la voie legacy. Découverte du sub-agent inventaire systémique #3.
+
+**Tests** :
+- `tests/test_la_salle.py` (nouveau, 17 cas en 3 catégories) :
+  - §1 Filet sécurité (8) : capture comportement actuel correct (happy paths + erreurs)
+  - §2 TDD des fixes (4) : rouge sur main avant fix, vert post-refonte
+  - §3 Régressions statiques (5) : protection long-terme contre récidive (helpers module-level, pattern multi-tenant `clear()+update()` préservé, check `move.success` obligatoire)
+- 114/114 tests verts au total (17 La SALLE + 16 N12 + 15 N13 + 14 N11 + 52 integration N0-N11).
+
+### Liaison cuisine ↔ salle — auditée et confirmée propre
+
+`_purge_frigos_for_action('classified')` est bien câblé aux 4 call sites où l'état change (event_purge_mail, classify, send_reply, post-send) — dispatcher N7 unique. La refonte Phase A préserve l'appel via `_classify_to_folder` étape 5.
+
+Helpers transverses propres confirmés par le sub-agent inventaire systémique : `_classify_mail_branch` (N11), `_purge_frigos_for_action` (N7), `_canonicalize_message_id` (N1), `_normalize_email`, `_set_mail_preview`, `_should_scan_echeance` (V12 P2.1), `_prewarm_unified_for_mail` (N6.1), `_persist_commis_results` (N6.1), `_compute_classement_suggestions` (N8), `_compute_pj_classement_suggestions` (N9).
+
+Nouveau helper transverse créé en Phase A : `_unflatten_suggestions` (côté cuisine, consommé par 7 sites côté cuisine + salle). Source de vérité unique pour la convention de stockage `suggestion['_suggestions']` nesté.
+
+### Méthodologie pacte (4 défenses respectées)
+
+- **Démolisseur pré-impl** : 3 P0 + 6 P1 + 3 P2 sur plan v1 → plan v2 corrigé (option b étendue 4 fixes au lieu de 2).
+- **Plan v2 validé par Yvan** avec rappel explicite : « pas de patches sur patches, code propre robuste efficace ».
+- **Tests TDD avant fix** : les 4 fixes ont été testés rouge sur main avant correction, vert post-refonte. Pas de figement de bug par filet écrit après.
+- **Régressions statiques** : 5 invariants protègent long-terme (helpers module-level présents, pas de réassignation `_classify_momentum = {...}` qui casserait UserScopedDict, check `move.success` obligatoire dans `_classify_to_folder`).
+- Audit rétrospectif post-commit : à faire après push.
+
+### Tableau récapitulatif Phase A
+
+| Métrique | Avant | Après |
+|---|---|---|
+| LoC routes Classer (api_classify_email + manual) | ~235 | ~155 (-34 %) |
+| Clone `_resolve_entry_id` inline | 2 | 0 (helper module-level) |
+| Sites désérialisation `_suggestions` à la main | 7 | 0 (helper `_unflatten_suggestions`) |
+| Bugs prod | 4 (#28 + P0-2 + P0-3 + P1-1) | 0 |
+| Régression silencieuse `mail_preview` PJ top 3 | latente | corrigée (effet collatéral) |
+| Couverture HTTP test_client | 0 | 17 cas (3 catégories) |
+| Liaison cuisine ↔ salle (`_purge_frigos_for_action`) | 4 sites ✓ | 4 sites ✓ |
+
+### Prochains pas — Phase B (Voir résumé + échéance)
+
+- Réduire les **5 routes pour 1 carte UI** à 3 portes spécialisées + 1 chef d'orchestre (la route bundle `mail_preview` devient un wrapper de 10 lignes).
+- Découper `_prewarm_unified_for_mail` (343 lignes, 10 étapes mélangées) en 6 sous-fonctions de ~50 lignes.
+- Remplacer le long-polling `/api/mail_summary` (boucle `sleep(0.2)` 3s) par un signal `threading.Event`.
+- Effort estimé 3-4 jours.
+
+### Prochains pas — Phase C (Répondre)
+
+- Tackle frontal du bloc anti-doublon greeting/closing/signature (5 patches empilés en 72 lignes → fonction unique `_assemble_preemptive_reply`).
+- Suppression code mort `/api/match_template` (55 lignes commentées « pour réversibilité 5 min », endormies depuis 14 jours).
+- Renommage métriques `template.draft → instant_reply.draft` (les templates n'existent plus).
+- Effort estimé 2-3 jours.
+
+---
+
+## 8. Statistiques globales N1-N11 (+ Option A + Validation finale)
 
 | | Chiffre |
 |---|---|
@@ -824,7 +904,7 @@ Test dédié : `tests/test_n13_match_echeance.py::test_prompt_injection_whitelis
 
 ---
 
-## 8. Les leçons consolidées
+## 9. Les leçons consolidées
 
 ### Leçon 1 — Le -bis n'est pas un échec, c'est la méthodologie
 
