@@ -17,7 +17,7 @@ DB proto : database.py + C:/EasyMail/boostermail.db
 DB V2 : V2/database.py + V2/boostermail.db (séparée, migrée depuis proto le 18/04)
 ```
 
-→ detail architecture dans `docs/specs_proto/SPEC_PHASE2_RESUME.md` (bilan historique) et `docs/analyses_proto_v2/V2_MASTER_SPEC.md` (état actuel)
+→ detail architecture actuelle (post-refonte N1-N11 + V12 SALLE) : [`docs/architecture/REFONTE_N1_N11_JOURNAL.md`](docs/architecture/REFONTE_N1_N11_JOURNAL.md) (source de vérité 16/05/2026) + [`audit/INVARIANTS.md`](audit/INVARIANTS.md) (règles I-* projet) + [`audit/INVENTAIRE_V2.md`](audit/INVENTAIRE_V2.md) (caches, threads, routes)
 
 ---
 

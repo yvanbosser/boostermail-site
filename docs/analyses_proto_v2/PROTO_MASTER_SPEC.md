@@ -1,3 +1,15 @@
+> ⚠️ **DOCUMENT HISTORIQUE / ARCHIVE — pré-refonte N1-N11 (16/05/2026)**
+>
+> Ce document décrit un état du projet qui a été remplacé par la refonte
+> architecturale N1-N11 (11-14/05/2026) puis V12 SALLE (15-16/05).
+> Conservé pour traçabilité historique. **Ne pas utiliser comme source
+> de vérité pour l'état actuel du code.**
+>
+> Snapshot d'état au 18/04/2026 — depuis : ~90 routes V2 autonomes,
+> refonte N1-N11 livrée 11-14/05, V12 SALLE Phase A/B/C/C-bis livrée 15-16/05.
+
+---
+
 # PROTO — MASTER SPECIFICATION
 
 > **Dernière mise à jour** : 18/04/2026 (git)

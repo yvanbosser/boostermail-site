@@ -1,3 +1,16 @@
+> ⚠️ **DOCUMENT HISTORIQUE / ARCHIVE — pré-refonte N1-N11 (16/05/2026)**
+>
+> Ce document décrit un état du projet qui a été remplacé par la refonte
+> architecturale N1-N11 (11-14/05/2026) puis V12 SALLE (15-16/05).
+> Conservé pour traçabilité historique. **Ne pas utiliser comme source
+> de vérité pour l'état actuel du code.**
+>
+> Analyse comparative proto/V2 datant d'avant la refonte N1-N11.
+> Les patterns décrits (streaming chunks, prefetch, etc.) ont été
+> profondément modifiés depuis.
+
+---
+
 # ANALYSE — Pourquoi le Proto fonctionne mieux que V2
 
 > **Dernière mise à jour** : 18/04/2026 (git)

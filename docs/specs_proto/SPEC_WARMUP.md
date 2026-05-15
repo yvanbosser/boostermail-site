@@ -1,3 +1,14 @@
+> ⚠️ **DOCUMENT HISTORIQUE / ARCHIVE — pré-refonte N1-N11 (16/05/2026)**
+>
+> Ce document décrit un état du projet qui a été remplacé par la refonte
+> architecturale N1-N11 (11-14/05/2026) puis V12 SALLE (15-16/05).
+> Conservé pour traçabilité historique. **Ne pas utiliser comme source
+> de vérité pour l'état actuel du code.**
+>
+> Doc CURRENT (référence à jour) : `docs/architecture/REFONTE_N1_N11_JOURNAL.md (warmup remplacé par _run_preemptive_bg)`.
+
+---
+
 ## SPEC WARMUP — BoosterMail (consolidée 08/05/2026)
 
 > **Statut** : source de vérité unique pour le warmup BoosterMail.

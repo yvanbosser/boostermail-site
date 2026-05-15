@@ -1,5 +1,30 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
+> **🆕 16/05/2026 (sessions 15-16/05 — V12 sortants + entrants + SALLE Phase A/B/C/C-bis + audit profond)** :
+>
+> 3 jours de refonte intensive. Tous les items réglés sont marqués ✅ FAIT dans la liste ci-dessous. Synthèse :
+>
+> - **V12 Phase 1** (sortants) : création échéances depuis compose Cas A/B/C livrée (commit `76ce8cd`).
+> - **V12 Phase 2.1** (entrants) : abandon Option A « VIP scan échéance », pivot vers paradigme DB-driven (`_should_scan_echeance(mode, mail_data)` helper).
+> - **V12 Phase 2.2** (matching entrants) : cascade `match_echeance_for_mail` Tier 1 heuristique → Tier 2 sub-commis Haiku → Tier 3 fallback, + 3 défenses prompt injection (commit `d5ec3d6`).
+> - **V12 SALLE Phase A** (Classer rapide) : helper unifié `_classify_to_folder` + 4 fixes prod + finition cuisine (commit `4c93537`). **Item #28 marqué ✅ FAIT.**
+> - **V12 SALLE Phase B.1** (lock per-mid) : `_get_unified_lock(mid)` clé `user_id::mid`, résout Obs-F6 TOCTOU (commit `f6024b0`).
+> - **V12 SALLE Phase B.2** (root cause no_pj) : suppression patch + `$expand=attachments` Graph (commit `eb80ee8`).
+> - **V12 SALLE Phase B.3** (fusion route bundle) : `api_mail_preview` → wrapper ~15 LoC sur `_fetch_single_preview_plate` × 3 (commit `5763048`).
+> - **V12 SALLE Phase C** (Répondre) : helper unique `_ensure_reply_envelope_html` en cuisine, salle triviale, -90 LoC code mort (commit `871056b`).
+> - **V12 SALLE Phase C bis** (invalidation cache contact) : `_invalidate_reply_cache_for_contact` + wrapper `_save_contact_profile_with_invalidation`, 8 sites migrés (commit `ab045d8`).
+> - **Audit profond 16/05** (4 sub-agents en parallèle, ~120 findings, filtre critique appliqué — 6+ faux positifs écartés) : verdict 3 étoiles Michelin × fast-food **CONFIRMÉ** sur les 3 axes (cuisine / salle / communication). 1 patch trivial appliqué : `_variation_styles` module-level (commit `dd407c7`).
+>
+> Tests cumulés : **180/180 verts**.
+>
+> Nouveaux invariants livrés : `I-CLASSIFY-A`, `I-UNFLATTEN-SUGGESTIONS`, `I-UNIFIED-LOCK-PER-MID`, `I-GRAPH-EXPAND-ATTACHMENTS`, `I-MAIL-PREVIEW-DELEGATES`, `I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN`, `I-CONTACT-PROFILE-INVALIDATES-REPLY-CACHE`.
+>
+> Nouvelles leçons consolidées : §9 Leçon 10 « Le commentaire qui ment » (anti-pattern documentation aspirationnelle).
+>
+> Voir `docs/architecture/REFONTE_N1_N11_JOURNAL.md` §7 « La SALLE — Phase A/B/C/C-bis » pour le récit détaillé.
+>
+> ---
+>
 > **🆕 12/05/2026 (session conception feature « audit boîte mail »)** :
 >
 > Cadrage en cours d'une nouvelle feature **audit de boîte mail** accessible depuis le dashboard utilisateur (que Michael bâtit sur `feat/michael/multi-user`). Scope MVP arrêté à 6 catégories de "bruit" identifiables avec faible faux positif (doublons niveaux 1+2, spams confirmés, mails techniques périmés, invitations calendrier passées, newsletters/pubs, notifications réseaux sociaux). Principe directeur : « moins supprimer que trop » → action par défaut = déplacement vers dossier dédié `_BoosterMail_Audit/<catégorie>`, jamais suppression directe. Deux types d'audit distingués : **ponctuel** (grand ménage sur stock existant) et **permanent** (surveillance des nouveaux entrants). **Arborescence optimisée = différé** (chantier à part entière, trop complexe pour ce MVP).

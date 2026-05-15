@@ -1,3 +1,14 @@
+> ⚠️ **DOCUMENT HISTORIQUE / ARCHIVE — pré-refonte N1-N11 (16/05/2026)**
+>
+> Ce document décrit un état du projet qui a été remplacé par la refonte
+> architecturale N1-N11 (11-14/05/2026) puis V12 SALLE (15-16/05).
+> Conservé pour traçabilité historique. **Ne pas utiliser comme source
+> de vérité pour l'état actuel du code.**
+>
+> Doc CURRENT (référence à jour) : `docs/PLUS_TARD_VF.md`.
+
+---
+
 # Spécifications — Priorités 18 à 22
 
 > **Dernière mise à jour** : 12/04/2026 (git)

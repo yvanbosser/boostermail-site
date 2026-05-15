@@ -1,7 +1,10 @@
 # BoosterMail — Structure du projet
 
-> **Dernière mise à jour** : 18/04/2026
+> **Dernière mise à jour** : 16/05/2026 (post V12 SALLE Phase A/B/C/C-bis + audit profond)
 > Carte de l'arborescence du projet — où trouver quoi.
+>
+> Pour le détail de la refonte architecturale, voir
+> [`docs/architecture/REFONTE_N1_N11_JOURNAL.md`](architecture/REFONTE_N1_N11_JOURNAL.md).
 
 ---
 
@@ -10,26 +13,41 @@
 ```
 C:\EasyMail\
 ├── CLAUDE.md                       ← Règles absolues, architecture
-├── NOUVELLE_SESSION_V2.md          ← Guide de démarrage Claude
+├── NOUVELLE_SESSION_V3.md          ← Guide de démarrage Claude (V3 succède à V2)
 │
-├── app.py                          ← PROTO (LECTURE SEULE) — moteur bêta-testeurs
-├── claude_ai.py                    ← PROTO (LECTURE SEULE) — moteur IA proto
-├── outlook_com.py                  ← PROTO (LECTURE SEULE) — COM Outlook
-├── database.py                     ← DB proto (rétrocompatible V2)
-├── boostermail.db                  ← DB proto (ne PAS toucher depuis V2)
-├── start.bat                       ← Lance le proto
+├── V2/                             ← Plugin V2 AUTONOME (cible active, SaaS OVH)
+│   ├── app_plugin.py               ← Backend Flask V2 (~16k lignes, ~90 routes)
+│   ├── claude_ai.py                ← Sub-commis Claude (analyze_one_mail_stream, etc.)
+│   ├── outlook_graph.py            ← Microsoft Graph API
+│   ├── database.py                 ← SQLite multi-tenant (UserScopedDict bridge)
+│   ├── dialog.js                   ← Dialog 80% Office.js (Office add-in)
+│   ├── manifest.xml                ← Manifeste Office add-in
+│   └── tests/                      ← 180+ tests verts
 │
-├── V2/                             ← Plugin V2 AUTONOME (cible active)
-├── companion/                      ← Companion COM (Windows local)
-├── core/                           ← Socle partagé provider-agnostic
+├── audit/                          ← Méthodologie + invariants + rapports
+│   ├── INVARIANTS.md               ← Règles projet I-* (source de vérité technique)
+│   ├── INVENTAIRE_V2.md            ← Inventaire V2 (caches, threads, routes)
+│   ├── PLAYBOOK.md                 ← Méthodologie audit 4 angles
+│   ├── ANOMALIES_RECURRENTES.md    ← Patterns récurrents
+│   └── rapports/                   ← Rapports audit datés (traçabilité historique)
+│
 ├── docs/                           ← TOUTE la documentation consolidée
 │
-├── extension/                      ← Extension Chrome (Outlook Web)
-├── installer/                      ← Packages d'installation
+├── companion/                      ← Companion local (legacy proto, plus utilisé en SaaS)
+├── core/                           ← Socle partagé provider-agnostic
+├── extension/                      ← Extension Chrome (Outlook Web, différée Phase 6)
+├── installer/                      ← Packages d'installation (legacy proto)
 ├── landing/                        ← Page marketing
-├── templates/                      ← Templates HTML proto (LECTURE SEULE)
-└── tests/                          ← Tests unitaires
+├── legal/                          ← Mentions légales SaaS (privacy, terms, RGPD)
+├── algorithme/                     ← Specs algorithmes (proto historique)
+├── specs/                          ← Specs proto (historique, voir docs/specs_proto/)
+├── tests/                          ← Tests unitaires racine
+└── V2_backup/                      ← Backup snapshot V2 30/04 (historique)
 ```
+
+> ⚠️ **Note** : le proto (`app.py`, `outlook_com.py`, `boostermail.db` à la racine,
+> `start.bat`) n'existe plus depuis le pivot SaaS du 25/04/2026. Le moteur
+> historique a été remplacé par V2 autonome (`V2/app_plugin.py`).
 
 ---
 

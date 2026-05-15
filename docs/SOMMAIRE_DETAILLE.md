@@ -1,8 +1,23 @@
 # SOMMAIRE DÉTAILLÉ — Documentation BoosterMail (ex EasyMail)
 
-> **Dernière mise à jour** : 08/05/2026 PM tardif — session **« Audit remediation — exécution du plan en 7 phases + 3 audits sous angles différents »** ajoutée. 12 commits sur sub-branche `feat/yvan/audit-remediation-08-05` mergée `--no-ff` sur `feat/yvan/frontend` (top `55f3fc5+`). Phase 1 bloquants SaaS livrée (PII redaction + brief sanitization + cascade Haiku→Sonnet + SECURITY_GUARD étendu). Phases 2-4 quality + token optim (~−200 à −500 tokens/draft). Phase 5 test runner permanent [`audit/tests/validation_scenarios.py`](../audit/tests/validation_scenarios.py) (8/8 OK). Phase 6 observabilité ([`docs/saas/OBSERVABILITY_AUDIT_REMEDIATION_20260508.md`](saas/OBSERVABILITY_AUDIT_REMEDIATION_20260508.md), 22 logs structurés). Phase 7 doc : 3 nouveaux invariants **I-PII-01** / **I-PROMPT-01** / **I-PROMPT-02** + Pattern **#25** Contradictions inter-blocs. **32 anomalies trouvées au cumul, 16 corrigées** dont 1 critique (`confidence` non-float crash) et 1 fuite RGPD subtile (subject piégé loggé en clair). Hub synthèse : [`audit/rapports/2026-05-08_audit_remediation_DONE.md`](../audit/rapports/2026-05-08_audit_remediation_DONE.md). Bilan complet [`OUTLOOK_BILAN_SESSION_20260508_audit_remediation.md`](sessions/OUTLOOK_BILAN_SESSION_20260508_audit_remediation.md).
+> **Dernière mise à jour** : 16/05/2026 — sessions intensives 11-16/05 livrées sur `feat/yvan/frontend` :
+> - **Refonte N1-N11** (11-14/05) : 11 niveaux architecturaux + 6 -bis correctifs + Option A + batterie E2E 48 scénarios. Voir [`docs/architecture/REFONTE_N1_N11_JOURNAL.md`](architecture/REFONTE_N1_N11_JOURNAL.md).
+> - **V12 Phase 1** (15/05 matin) : création échéances depuis compose sortants (commit `76ce8cd`).
+> - **V12 Phase 2.1** (15/05 PM) : abandon Option A VIP entrants, pivot DB-driven (commit `0a8a957`).
+> - **V12 Phase 2.2** (15/05 PM) : cascade matching IA entrants Tier 1/2/3 + 3 défenses prompt injection (commit `d5ec3d6`).
+> - **V12 SALLE Phase A** (15/05 PM) : Classer rapide — helper unifié `_classify_to_folder` + 4 fixes prod + finition cuisine (commit `4c93537`).
+> - **V12 SALLE Phase B.1** (15/05 PM) : lock per-mid `_get_unified_lock` résout Obs-F6 TOCTOU (commit `f6024b0`).
+> - **V12 SALLE Phase B.2** (15/05 soir) : root cause no_pj corrigée à la source + `$expand=attachments` Graph (commit `eb80ee8`).
+> - **V12 SALLE Phase B.3** (15/05 soir) : fusion route bundle `api_mail_preview` en wrapper léger (commit `5763048`).
+> - **V12 SALLE Phase C** (15/05 soir) : Répondre — helper unique `_ensure_reply_envelope_html` en cuisine, salle triviale, -90 LoC code mort (commit `871056b`).
+> - **V12 SALLE Phase C bis** (16/05) : invalidation cache contact `_invalidate_reply_cache_for_contact` + wrapper unique, 8 sites migrés (commit `ab045d8`).
+> - **Audit profond 16/05** (4 sub-agents en parallèle, ~120 findings, 6+ faux positifs filtrés) : verdict **3 étoiles Michelin × fast-food CONFIRMÉ** sur les 3 axes (cuisine / salle / communication). 1 patch trivial : `_variation_styles` module-level (commit `dd407c7`).
 >
-> **Dernière mise à jour précédente** : 08/05/2026 PM — session **« Audit complet arbre décisionnel + plan remediation »** ajoutée. Nouveau dossier [`docs/architecture/`](architecture/) avec PowerPoint visuel + nouveau **`SPEC_ARBRE_DECISIONNEL.md`** comme source de vérité unique du flux post-O5. 9 anomalies arbre fixées (commits a14600b + 0d814bc + b000133), audit blocs prompt Claude (20 anomalies), plan d'intervention détaillé pour Phase 1 SaaS launch. Bilan complet `OUTLOOK_BILAN_SESSION_20260508_audit_complet.md`.
+> **Tests : 180/180 verts**. Nouveaux invariants : `I-CLASSIFY-A`, `I-UNFLATTEN-SUGGESTIONS`, `I-UNIFIED-LOCK-PER-MID`, `I-GRAPH-EXPAND-ATTACHMENTS`, `I-MAIL-PREVIEW-DELEGATES`, `I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN`, `I-CONTACT-PROFILE-INVALIDATES-REPLY-CACHE`. Nouvelle leçon §9 Leçon 10 « Le commentaire qui ment ».
+>
+> ---
+>
+> **Dernière mise à jour précédente** : 08/05/2026 PM tardif — session « Audit remediation — exécution du plan en 7 phases + 3 audits sous angles différents ». 12 commits sur sub-branche `feat/yvan/audit-remediation-08-05` mergée `--no-ff` sur `feat/yvan/frontend`. Phase 1 bloquants SaaS livrée (PII redaction + brief sanitization + cascade Haiku→Sonnet + SECURITY_GUARD étendu). Phases 2-4 quality + token optim (~−200 à −500 tokens/draft). Phase 5 test runner permanent [`audit/tests/validation_scenarios.py`](../audit/tests/validation_scenarios.py) (8/8 OK). Phase 6 observabilité ([`docs/saas/OBSERVABILITY_AUDIT_REMEDIATION_20260508.md`](saas/OBSERVABILITY_AUDIT_REMEDIATION_20260508.md), 22 logs structurés). Phase 7 doc : 3 nouveaux invariants **I-PII-01** / **I-PROMPT-01** / **I-PROMPT-02** + Pattern **#25** Contradictions inter-blocs. **32 anomalies trouvées au cumul, 16 corrigées**. Hub : [`audit/rapports/2026-05-08_audit_remediation_DONE.md`](../audit/rapports/2026-05-08_audit_remediation_DONE.md).
 
 > **Objectif** : index unique de TOUTE la documentation du projet.
 > À lire en début de session pour savoir **où trouver quoi** sans relire les docs entiers.
@@ -57,6 +72,23 @@ En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux
 
 ### Décisions qui ont bougé récemment (non exhaustif)
 
+#### Sessions 11-16/05/2026 — Refonte N1-N11 + V12 + SALLE Phase A/B/C/C-bis
+
+- **Refonte architecturale N1-N11** (11-14/05) : 11 niveaux pour transformer V2 en architecture saine — canonicalisation `message_id` (N1), stockage brut frigo principal (N2), carnet d'adresses (N3), filtre 1 « écarter » (N4), filtre 2 « VIP vs PARTIEL » (N5), commis Haiku unifié (N6.1), prompt Sonnet en blocs (N6.2), 5 frigos + nettoyage (N7), règles classement mail/PJ (N8), moteur commun + 3 portes PJ (N9), contacts gestion (N10), dispatcher 3 branches ÉCARTÉ/PARTIEL/VIP (N11). Cf [`docs/architecture/REFONTE_N1_N11_JOURNAL.md`](architecture/REFONTE_N1_N11_JOURNAL.md).
+- **V12 Phase 1** (15/05) — Création échéances sortants : popup Cas A (date+description) / Cas B (date floue) / Cas C (description vide signal vague). Frontière sémantique : POPPER engagement/demande/urgence, IGNORER politesse/hypothèse/accusé.
+- **V12 Phase 2.1** (15/05) — **Option A VIP entrants ABANDONNÉE** (24h après livraison Option A) : « ce qui compte n'est pas le statut VIP/PARTIAL, c'est qu'une échéance soit en cours vis-à-vis de l'adresse mail ». Pivot vers paradigme DB-driven `_should_scan_echeance(mode, mail_data)`.
+- **V12 Phase 2.2** (15/05) — Matching IA entrants DB-driven : cascade `match_echeance_for_mail` Tier 1 heuristique → Tier 2 sub-commis Haiku → Tier 3 fallback anti-SPOF. 3 défenses prompt injection (délimiteurs XML, whitelist sortie, double-check scope user).
+- **V12 SALLE Phase A** (15/05) — Helper unifié `_classify_to_folder` pour les 2 routes Classer (classify_email + classify_email_undo). Item PLUS_TARD_VF #28 RÉSOLU (purge email_cache mauvaise clé).
+- **V12 SALLE Phase B.1** (15/05) — Lock per-(user_id, mid) résout Obs-F6 TOCTOU. Test resserré `≤ 2` → `== 1` strict.
+- **V12 SALLE Phase B.2** (15/05) — Patch « no_pj invalide » supprimé à la source : `$expand=attachments` ajouté dans `get_received_emails` Graph (invariant `I-GRAPH-EXPAND-ATTACHMENTS`).
+- **V12 SALLE Phase B.3** (15/05) — `api_mail_preview` refondue en wrapper léger (~15 LoC) sur `_fetch_single_preview_plate` × 3 (avant : 135 LoC dupliquées).
+- **V12 SALLE Phase C** (15/05) — « Cuisine garantit, salle livre » : helper unique `_ensure_reply_envelope_html` appelé en cuisine AVANT stockage cache. Les 3 sites salle deviennent triviaux. -200 LoC patches dispersés, -90 LoC code mort. Métriques renommées `template.*` → `instant_reply.*`. Invariant `I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN`.
+- **V12 SALLE Phase C bis** (16/05) — Invalidation cache brouillons quand fiche contact change : helper `_invalidate_reply_cache_for_contact` + wrapper unique `_save_contact_profile_with_invalidation` (8 sites migrés). Tient la promesse mensongère du commentaire ajouté en Phase C. Invariant `I-CONTACT-PROFILE-INVALIDATES-REPLY-CACHE`.
+- **Audit profond 16/05** — 4 sub-agents en parallèle (cartographie + cuisine ligne par ligne + salle ligne par ligne + scénarios E2E), ~120 findings. **Filtre critique appliqué : 6+ faux positifs détectés et écartés** (« zéro persistance disque » FAUX, « race condition profil contact » FAUX, « LRU trim race » FAUX, etc.). Verdict 3 étoiles Michelin × fast-food CONFIRMÉ sur les 3 axes.
+- **Leçon 10 « Le commentaire qui ment »** (16/05) — Anti-pattern « documentation aspirationnelle » : un commentaire qui nomme une fonction interne (« via `_foo()` ») doit déclencher un grep de vérification. Si la fonction n'existe pas → soit implémenter immédiatement, soit supprimer la promesse.
+
+#### Décisions précédentes (avant le 11/05)
+
 - Taskpane pinable → **REJETÉ** au profit de l'overlay non-intrusif (08/04)
 - V1.1 hybride → **ABANDONNÉ**, une seule version V1 (10/04)
 - Mode « Standard » / « Performance Réduite » → **RENOMMÉS** en Mode Complet / Mode Dégradé (10/04)
@@ -81,23 +113,36 @@ En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux
 
 Les docs antérieurs à ces décisions peuvent décrire l'ancien état. **Ne pas les utiliser comme source pour le code actuel sans vérifier.**
 
-### 📋 Docs explicitement marqués PÉRIMÉS (mise à jour 18/04/2026)
+### 📋 Docs explicitement marqués PÉRIMÉS (mise à jour 16/05/2026)
 
-Ces docs portent un bandeau **⚠️ DOCUMENT PÉRIMÉ/HISTORIQUE** en en-tête — ne pas s'y référer sans validation :
+Ces docs portent un bandeau **⚠️ DOCUMENT HISTORIQUE / ARCHIVE — pré-refonte N1-N11 (16/05/2026)** en en-tête — ne pas s'y référer sans validation :
+
+**Batch archivé le 16/05/2026** (26 docs avec bandeau standardisé) :
+
+| Dossier | Docs archivés | Raison |
+|---|---|---|
+| `docs/specs_proto/` | `SPEC_CACHE_DOSSIERS`, `SPEC_D2_FUSION_RECALIBRAGE`, `SPEC_DOUBLON_CLASSEMENT`, `SPEC_FONCTIONNALITES_PROTO`, `SPEC_IMAGES_INLINE`, `SPEC_OCR_LIMITE`, `SPEC_OUTLOOK_COM`, `SPEC_PHASE2_RESUME`, `SPEC_PREINJECTION`, `SPEC_PRIORITES_15_16_17`, `SPEC_PRIORITES_18_22`, `SPEC_RECALIBRAGE_ADAPTATIF`, `SPEC_RESCAN_CONDITIONNEL`, `SPEC_ROUTES_API`, `SPEC_SYSTEM_PROMPT`, `SPEC_TABLES_DB`, `SPEC_TEMPLATES`, `SPEC_WARMUP` (18 docs) | Patterns du proto historique, remplacés par la refonte N1-N11 + V12 |
+| `docs/analyses_proto_v2/` | `V2_MASTER_SPEC`, `PROTO_MASTER_SPEC`, `ANALYSE_PROTO_VS_V2`, `PLAN_PORTAGE_PROTO_V2`, `V2_FIX_PLAN`, `V2_OPTIMISATION_STRATEGIE` (6 docs) | Plans de portage proto→V2 jamais exécutés. La refonte N1-N11 a pris une approche complètement différente |
+| `docs/` | `PLUS_TARD.md` | Remplacé par `PLUS_TARD_VF.md` (consolidé 08/05) |
+| racine | `NOUVELLE_SESSION_V2.md` | Remplacé par `NOUVELLE_SESSION_V3.md` (25/04) |
+
+**Déjà archivés précédemment** (bandeau différent) :
 
 | Doc | Type | Raison |
 |---|---|---|
+| `docs/specs_proto/SPEC_CLASSIFICATION_MAIL.md` | Fusionné | → `SPEC_CLASSEMENT_BOOSTERMAIL.md` (02/05) |
+| `docs/specs_proto/SPEC_CLASSIFICATION_PJ.md` | Fusionné | → `SPEC_CLASSEMENT_BOOSTERMAIL.md` (02/05) |
+| `docs/specs_proto/SPEC_CLASSIFICATION_ENRICHIE.md` | Fusionné | → `SPEC_CLASSEMENT_BOOSTERMAIL.md` (02/05) |
+| `docs/specs_proto/SPEC_ECHEANCES_OPTIMISATION.md` | Fusionné | → `SPEC_ECHEANCES_BOOSTERMAIL.md` (15/05) |
+| `docs/specs_proto/SPEC_CONTACTS_ADAPTATIF.md` | Fusionné | → `SPEC_CONTACTS_BOOSTERMAIL.md` |
+| `docs/specs_proto/SPEC_SMART_SPECULATIF.md` | Périmé | Patterns spéculation remplacés par N1-N11 |
+| `docs/v2_specs/TODO_SESSION_SUIVANTE.md` | Archivé pré-pivot SaaS | → `docs/PLUS_TARD_VF.md` |
 | `docs/v2_specs/PLAN_ACTION_PHASE_2.md` | Historique figé | Bilan Phase 2 terminée 07/04 |
-| `docs/specs_proto/SPEC_PHASE2_RESUME.md` | Historique figé | Résumé Phase 2 terminée 07/04 |
 | `docs/v2_specs/SPEC_PHASE2_DECISIONS.md` | Périmé partiel | taskpane pinable, Mode Standard, V1_outlook |
 | `docs/v2_specs/SPEC_PHASE2_DIALOG.md` | Périmé partiel | taskpane pinable, Mode Standard |
 | `docs/v2_specs/SPEC_PHASE2_GRAPH.md` | Périmé léger | V1_outlook, Mode Standard (API Graph reste OK) |
-| `docs/STRUCTURE_PROJET.md` | Périmé | Chemins V1_outlook/ obsolètes |
 
-**En attente de décision utilisateur** sur 2 docs NIVEAU 1 qui mentionnent aussi du vocabulaire périmé (option : bandeau + retirer NIVEAU 1, ou updater le contenu) :
-- ~~`docs/v2_specs/TODO_SESSION_SUIVANTE.md`~~ ✅ archivé 27/04 PM (pré-pivot SaaS) — voir `docs/PLUS_TARD_VF.md`
-- `docs/v2_specs/PLAN_FINALISATION_OUTLOOK.md`
-- `docs/v2_specs/PLAN_ACTION_PHASE_3.md`
+**STRUCTURE_PROJET.md** : mis à jour le 16/05/2026 (post-refonte N1-N11 + V12).
 
 ---
 
