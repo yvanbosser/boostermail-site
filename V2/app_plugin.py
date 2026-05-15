@@ -10102,142 +10102,48 @@ def api_update_echeance(echeance_id):
 
 @app.route('/api/mail_preview/<path:message_id>')
 def api_mail_preview(message_id):
-    """Phase 2.A (24/04) — Lookup du preview pré-chauffé pour un mail.
+    """Phase 2.A (24/04) — Lookup bundle 3-plats du preview pré-chauffé.
 
-    Retourne échéance + classement pré-calculés en BG (warmup + continuous_spec).
-    Consommé par le dialog 80% au chargement pour peupler les cards
-    infoEcheance et infoClassement instantanément.
+    V12 SALLE Phase B.3 (15/05/2026) — refonte en wrapper léger sur les 3
+    portes spécialisées Phase 3 (`/api/echeance/<mid>`, `/api/classement_
+    mail/<mid>`, `/api/classement_pj/<mid>`). AVANT cette refonte, cette
+    route dupliquait à 90% la logique RAM→DB→trigger BG du helper
+    `_fetch_single_preview_plate` (135 LoC de doublon entre route bundle
+    et helper). APRÈS : ~15 LoC qui agrègent les 3 résultats du helper.
 
-    Réponse :
+    Le verrou par-(user_id, mid) V12 Phase B.1 (invariant I-UNIFIED-LOCK-
+    PER-MID) garantit qu'un seul `_spawn_bg(_prewarm_mail_preview)` fait
+    le travail même si les 3 portes en déclenchent chacune un. Les 2 autres
+    abandonnent silencieusement. La fusion bundle est donc structurellement
+    safe (pas de triple-spawn Haiku redondant).
+
+    Réponse (shape inchangé pour rétrocompat frontend dialog.js:2560+) :
     {
       "echeance": {"status": "done"|"running"|"miss", "data": [...] or null},
-      "classement": {"status": ..., "data": {suggestion, source} or null},
+      "classement": {"status": ..., "data": {suggestion, suggestions, source} or null},
+      "pj_classement": {"status": ..., "data": {...} or null},
       "cache_hit": bool,
     }
 
-    Si status=miss (mail pas encore pré-chauffé), le client peut afficher
-    un placeholder en attendant — un scan BG sera déclenché à la demande.
+    `cache_hit` = au moins un plat 'done' (sémantique préservée). Note
+    démolisseur P1-B2 : ce champ n'est lu par AUCUN site frontend JS
+    (grep confirmé). Pourrait être retiré dans une passe ultérieure.
     """
     if not message_id:
         return jsonify({"error": "message_id requis"}), 400
 
-    with _mail_preview_lock:
-        entry = _mail_preview_cache.get(message_id, {})
+    # Délégation aux 3 portes spécialisées via le helper unique.
+    # Le helper gère RAM cache → DB → trigger BG dans cet ordre, avec
+    # idempotence par-mid (lock V12 P B.1) côté `_prewarm_unified_for_mail`.
+    ech = _fetch_single_preview_plate(message_id, 'echeance')
+    cls = _fetch_single_preview_plate(message_id, 'classement')
+    pj = _fetch_single_preview_plate(message_id, 'pj_classement')
 
-    if not entry:
-        # Phase 1 corrigée (24/04) : RAM miss → check DB persistant.
-        # Si DB HIT → retour instantané + peuple RAM pour prochains clics.
-        # Si DB miss aussi → déclenche scan BG + retourne "miss".
-        ech_entry = None
-        cls_entry = None
-        pj_entry = None
-        try:
-            db_ech = _db.get_mail_echeance(message_id)
-            if db_ech is not None:
-                ech_data = db_ech.get('echeances', [])
-                _set_mail_preview(message_id, 'echeance', 'done', ech_data)
-                ech_entry = {"status": "done", "data": ech_data}
-        except Exception as e:
-            logger.debug(f"[mail_preview] check DB ech : {e}")
-        try:
-            db_cls = _db.get_mail_classement(message_id)
-            if db_cls is not None:
-                _s = db_cls.get('suggestion')
-                cls_data = {
-                    'suggestion': _s,
-                    'suggestions': _unflatten_suggestions(_s),
-                    'source': db_cls.get('source', 'none'),
-                }
-                _set_mail_preview(message_id, 'classement', 'done', cls_data)
-                cls_entry = {"status": "done", "data": cls_data}
-        except Exception as e:
-            logger.debug(f"[mail_preview] check DB cls : {e}")
-        try:
-            db_pj = _db.get_mail_pj_classement(message_id)
-            if db_pj is not None:
-                # Fix régression silencieuse V12 SALLE Phase A (15/05) :
-                # avant cette ligne, la désérialisation PJ utilisait `[_sp]`
-                # (1 entrée) au lieu du helper _unflatten_suggestions qui
-                # déplie le top 3. Bug latent depuis le 24/04 (oubli du
-                # fix N8 P0-3 sur la route bundle legacy). Sub-agent
-                # inventaire systémique découverte #3.
-                _sp = db_pj.get('suggestion')
-                pj_data = {
-                    'suggestion': _sp,
-                    'suggestions': _unflatten_suggestions(_sp),
-                    'source': db_pj.get('source', 'none'),
-                }
-                _set_mail_preview(message_id, 'pj_classement', 'done', pj_data)
-                pj_entry = {"status": "done", "data": pj_data}
-        except Exception as e:
-            logger.debug(f"[mail_preview] check DB pj : {e}")
-
-        # Si au moins un bloc HIT DB, retourner ce qu'on a + miss pour l'autre
-        if ech_entry or cls_entry or pj_entry:
-            # Déclencher scan BG pour le bloc manquant
-            if not (ech_entry and cls_entry and pj_entry):
-                try:
-                    cached = _db.get_cached_email(message_id)
-                    if cached:
-                        mail_data = {
-                            'internet_message_id': message_id,
-                            'from_email': cached.get('from_email', ''),
-                            'from_name': cached.get('from_name', ''),
-                            'subject': cached.get('subject', ''),
-                            'body': cached.get('body') or cached.get('html_body', ''),
-                            'body_preview': cached.get('body_preview', ''),
-                            'has_attachments': cached.get('has_attachments', False),
-                            'attachments': cached.get('attachments') or [],
-                        }
-                        _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-ondemand')
-                except Exception:
-                    pass
-            return jsonify({
-                "echeance": ech_entry or {"status": "miss", "data": None},
-                "classement": cls_entry or {"status": "miss", "data": None},
-                "pj_classement": pj_entry or {"status": "miss", "data": None},
-                "cache_hit": True,
-            })
-
-        # Total miss : déclencher scan BG, retourner miss
-        try:
-            cached = _db.get_cached_email(message_id)
-            if cached:
-                mail_data = {
-                    'internet_message_id': message_id,
-                    'from_email': cached.get('from_email', ''),
-                    'from_name': cached.get('from_name', ''),
-                    'subject': cached.get('subject', ''),
-                    'body': cached.get('body') or cached.get('html_body', ''),
-                    'body_preview': cached.get('body_preview', ''),
-                    'has_attachments': cached.get('has_attachments', False),
-                    'attachments': cached.get('attachments') or [],
-                }
-                _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-ondemand')
-        except Exception as e:
-            logger.debug(f"[mail_preview] on-demand trigger échec : {e}")
-        return jsonify({
-            "echeance": {"status": "miss", "data": None},
-            "classement": {"status": "miss", "data": None},
-            "pj_classement": {"status": "miss", "data": None},
-            "cache_hit": False,
-        })
-
-    # Entry présent : retourner l'état actuel
     return jsonify({
-        "echeance": {
-            "status": entry.get('echeance', {}).get('status', 'miss'),
-            "data": entry.get('echeance', {}).get('data'),
-        },
-        "classement": {
-            "status": entry.get('classement', {}).get('status', 'miss'),
-            "data": entry.get('classement', {}).get('data'),
-        },
-        "pj_classement": {
-            "status": entry.get('pj_classement', {}).get('status', 'miss'),
-            "data": entry.get('pj_classement', {}).get('data'),
-        },
-        "cache_hit": True,
+        "echeance": ech,
+        "classement": cls,
+        "pj_classement": pj,
+        "cache_hit": any(p.get('status') == 'done' for p in (ech, cls, pj)),
     })
 
 

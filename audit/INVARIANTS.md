@@ -1104,6 +1104,20 @@ Helper module-level `_lookup_folder_name(folder_id)` résout le nom de dossier v
 - **Pourquoi** : démolisseur pré-impl V12 SALLE Phase A — 3 P0 (signature helper, move success non checké, undo pollue apprentissage) + 6 P1 + 3 P2. Pacte « pas de patches sur patches » : tout corriger en un seul passage cohérent (option b validée par Yvan) plutôt que d'empiler des -bis.
 - **Action si violé** : un développeur a (a) réintroduit `_resolve_entry_id` inline dans une route, (b) bypassé `_classify_to_folder` en réimplémentant le pipeline classify, (c) réassigné `_classify_momentum = {...}` au lieu de `.clear()+.update()`, (d) supprimé le check `move_result['success']` ou réintroduit `purge_email_cache_for(new_id)`. Restaurer le helper unifié + le pattern multi-tenant + les 3 garde-fous.
 
+### I-MAIL-PREVIEW-DELEGATES : route bundle `/api/mail_preview/<mid>` délègue aux 3 portes spécialisées (V12 SALLE Phase B.3)
+
+Refonte 15/05/2026 V12 SALLE Phase B.3 — la route bundle `api_mail_preview` ([app_plugin.py](../V2/app_plugin.py)) doit être un **wrapper léger** sur le helper `_fetch_single_preview_plate(message_id, plate)` appelé 3 fois (une par plat : 'echeance', 'classement', 'pj_classement'). Aucune duplication de la logique RAM→DB→trigger BG.
+
+Avant cette refonte : 135 LoC qui dupliquaient à 90% la logique du helper consommé par les 3 portes Phase 3 spécialisées. Après : ~15 LoC qui agrègent les 3 résultats. Code dupliqué éliminé, source de vérité unique.
+
+Sécurité de la fusion : invariant I-UNIFIED-LOCK-PER-MID (V12 P B.1) garantit qu'un seul `_spawn_bg(_prewarm_mail_preview)` fait le travail même si les 3 portes en déclenchent chacune un. Les 2 autres acquièrent le lock pris et abandonnent silencieusement. Donc la fusion bundle n'aggrave pas Obs-F6 (préalable B.1).
+
+Shape de réponse inchangé pour rétrocompat frontend dialog.js:2560+ : `{echeance, classement, pj_classement, cache_hit}` avec chaque plat = `{status, data}`.
+
+- **Régression statique** : `tests/test_la_salle.py::test_R8_api_mail_preview_uses_fetch_single_helper` (helper appelé exactement 3×) + `::test_R9_api_mail_preview_no_db_dup_logic` (pas d'appel DB direct ni de spawn BG hors helper).
+- **Pourquoi** : duplication 90% entre route bundle et helper, héritée Phase 2.A (24/04) vs Phase 3 (25/04) jamais nettoyée. La régression silencieuse PJ corrigée Phase A (`_unflatten_suggestions`) était un signal d'alarme : 2 implémentations divergeaient silencieusement sur le top 3. Une seule source de vérité = plus aucune divergence possible.
+- **Action si violé** : un développeur a (a) réintroduit la logique RAM→DB→trigger BG inline dans `api_mail_preview` au lieu de déléguer, (b) ajouté un comportement spécifique au bundle qui n'est pas dans le helper (asymétrie). Restaurer le wrapper léger.
+
 ### I-GRAPH-EXPAND-ATTACHMENTS : `$expand=attachments` obligatoire dans les méthodes Graph qui peuplent `email_cache` (V12 SALLE Phase B.2)
 
 Refonte 15/05/2026 V12 SALLE Phase B.2 — résolution root cause du bug « no_pj faussement positif au warmup ». Toute méthode Graph chargeant des mails destinés à `email_cache` (via `save_email_cache` direct ou indirect) DOIT inclure `$expand=attachments` dans l'URL Graph. Sans cet expand, le payload normalisé `_normalize_email` (outlook_graph.py:329-408) construit `attachments=[]` même quand `hasAttachments=True` (puisque le champ `attachments` est absent du JSON Graph) — la cuisine en aval voit `mail_data.attachments=[]` et `_compute_pj_classement_suggestions` reçoit `attachment_names=[]` → suggestions PJ paupres.

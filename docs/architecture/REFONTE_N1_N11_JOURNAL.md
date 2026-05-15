@@ -889,12 +889,24 @@ Pourquoi le warmup et pas les autres flux :
 
 Net : **-26 lignes** (-27 patch supprimé + 1 ligne expand). 19/19 tests La SALLE verts + 116/116 globaux. Nouvel invariant `I-GRAPH-EXPAND-ATTACHMENTS` codifie la règle pour les futures méthodes Graph.
 
-### Prochains pas — Phase B.3 (fusion route bundle + segmentation cuisine)
+### Phase B.3 livrée (15/05/2026, commit suivant) — fusion route bundle
 
-- Réduire les **5 routes pour 1 carte UI** : route bundle `/api/mail_preview` → wrapper sur les 3 portes spécialisées Phase 3 (ou suppression complète si frontend l'utilise déjà via les 3 portes — à trancher).
-- Découper `_prewarm_unified_for_mail` (343 lignes, 10 étapes mélangées) en sous-fonctions claires (sans tomber dans l'anti-pattern « 6 sous-fonctions à 1 appelant » du démolisseur Phase B P2-B2 — préférer nested functions avec intercalaires).
-- Réécriture des ~10 tests qui font `inspect.getsource(_prewarm_unified_for_mail)` pour grepper des patterns spécifiques (impacté par tout découpage).
-- Effort estimé révisé 1.5 jour (sans threading.Event qui était descope du démolisseur Phase B P0-B3).
+`api_mail_preview` refondue en **wrapper léger** sur les 3 portes spécialisées via `_fetch_single_preview_plate`. Avant : 135 LoC dupliquaient à 90% la logique RAM→DB→trigger BG. Après : 15 LoC qui agrègent les 3 résultats du helper unique. Shape de réponse inchangé pour rétrocompat frontend (`echeance, classement, pj_classement, cache_hit`).
+
+Sécurité de la fusion validée par le verrou I-UNIFIED-LOCK-PER-MID livré en Phase B.1 — même si les 3 portes déclenchent chacune un `_spawn_bg(_prewarm_mail_preview)`, le lock par-mid garantit qu'un seul thread cuisine. Les 2 autres abandonnent silencieusement. Pas de triple-spawn Haiku redondant.
+
+Nouvel invariant `I-MAIL-PREVIEW-DELEGATES`. 2 régressions statiques (R8, R9) verrouillent le wrapper.
+
+**Découpage `_prewarm_unified_for_mail` reporté** : démolisseur Phase B P2-B2 a signalé l'anti-pattern « 6 sous-fonctions à 1 appelant » = code mort en germe. Préférer nested functions + intercalaires (gain de lisibilité moindre mais sans dette). Hors scope V12, à traiter quand un 2e appelant émerge OU si l'observabilité du carnet devient critique.
+
+**Net Phase B.3 : ~-120 lignes de prod** (-135 ancien code + ~15 wrapper + 0 dans helper qui existait déjà).
+
+### Prochains pas — Phase C (Répondre)
+
+- Tackle frontal du bloc anti-doublon greeting/closing/signature (5 patches empilés en 72 lignes → fonction unique `_assemble_preemptive_reply`).
+- Suppression code mort `/api/match_template` (55 lignes commentées « pour réversibilité 5 min », endormies depuis 14 jours).
+- Renommage métriques `template.draft → instant_reply.draft` (les templates n'existent plus depuis 11/05).
+- Effort estimé 2-3 jours.
 
 ### Prochains pas — Phase C (Répondre)
 

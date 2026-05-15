@@ -516,6 +516,56 @@ def test_R7_no_no_pj_invalide_patch_in_fetch_single_preview_plate():
     )
 
 
+def test_R8_api_mail_preview_uses_fetch_single_helper():
+    """V12 SALLE Phase B.3 — La route bundle `api_mail_preview` doit
+    déléguer aux 3 portes spécialisées via `_fetch_single_preview_plate`,
+    pas dupliquer la logique RAM→DB→trigger BG.
+
+    Avant cette refonte : 135 LoC dupliquaient à 90% la logique du helper
+    `_fetch_single_preview_plate` consommé par les 3 portes Phase 3
+    (`/api/echeance/<mid>`, `/api/classement_mail/<mid>`,
+    `/api/classement_pj/<mid>`). Maintenant : wrapper léger qui agrège
+    les 3 résultats.
+
+    Le verrou par-(user_id, mid) V12 P B.1 (cf I-UNIFIED-LOCK-PER-MID)
+    empêche les triple-spawns BG quand chaque porte déclenche son propre
+    `_prewarm_mail_preview` : seul le 1er thread acquiert le lock, les
+    2 autres abandonnent silencieusement. Donc la fusion est safe.
+    """
+    src = inspect.getsource(ap.api_mail_preview)
+    n_calls = src.count('_fetch_single_preview_plate(')
+    return log_test(
+        f"R8 api_mail_preview délègue aux 3 portes "
+        f"(_fetch_single_preview_plate appelé {n_calls}× — attendu 3)",
+        n_calls == 3,
+        "le wrapper doit appeler le helper exactement 3 fois (1 par plat)"
+        if n_calls != 3 else "",
+    )
+
+
+def test_R9_api_mail_preview_no_db_dup_logic():
+    """V12 SALLE Phase B.3 — La route bundle ne doit PLUS contenir la
+    logique de lookup DB ni de trigger BG dupliquée. Tout est délégué
+    au helper unique `_fetch_single_preview_plate` (anti-duplication)."""
+    src = inspect.getsource(ap.api_mail_preview)
+    # Vérif STRICTE — matche les VRAIS appels (avec arguments), pas les
+    # mentions dans docstring/commentaire (pédagogiques mais légitimes).
+    # Les vrais appels DB ont `(message_id)`, les vrais spawn ont `, args=`.
+    bad_patterns = [
+        '_db.get_mail_echeance(message_id',
+        '_db.get_mail_classement(message_id',
+        '_db.get_mail_pj_classement(message_id',
+        '_spawn_bg(_prewarm_mail_preview, args=',
+    ]
+    found = [p for p in bad_patterns if p in src]
+    return log_test(
+        f"R9 api_mail_preview pas de duplication helper "
+        f"(patterns interdits trouvés : {found if found else 'aucun ✓'})",
+        not found,
+        "doit déléguer 100% au helper" if found else "",
+    )
+
+
 def test_STATIC_classify_routes_check_move_success():
     """Static R5 — Le helper `_classify_to_folder` doit vérifier
     `move_result['success']` avant les side-effects (P0-2 démolisseur)."""
@@ -566,6 +616,9 @@ def main():
         # B.2 — Phase B.2 root cause no_pj (15/05 PM)
         ('R6 get_received_emails contient $expand=attachments (B.2 fix racine)', test_R6_get_received_emails_expands_attachments),
         ('R7 patch no_pj invalide supprimé (B.2 root cause réglée)', test_R7_no_no_pj_invalide_patch_in_fetch_single_preview_plate),
+        # B.3 — Phase B.3 fusion route bundle (15/05 PM)
+        ('R8 api_mail_preview délègue aux 3 portes (B.3 fusion)', test_R8_api_mail_preview_uses_fetch_single_helper),
+        ('R9 api_mail_preview pas de duplication helper (B.3 anti-doublon)', test_R9_api_mail_preview_no_db_dup_logic),
     ]
 
     n_ok = 0
