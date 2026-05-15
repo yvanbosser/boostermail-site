@@ -675,9 +675,17 @@ class GraphClient(EmailProvider):
         """
         try:
             select = _FULL_SELECT if include_body else _LIST_SELECT
+            # V12 SALLE Phase B.2 (15/05/2026) — `$expand=attachments` ajouté
+            # pour que `_normalize_email` peuple correctement le champ
+            # `attachments` (et non juste le booléen `has_attachments`). Sans
+            # cet expand, le warmup persistait dans `email_cache` 200 mails
+            # avec `has_attachments=true attachments=[]` → la cuisine
+            # `_compute_pj_classement_suggestions` recevait `attachment_names=[]`
+            # → suggestions PJ paupres. Cf invariant I-GRAPH-EXPAND-ATTACHMENTS.
             url = (
                 f'/me/mailFolders/inbox/messages'
                 f'?$select={select}'
+                f'&$expand=attachments'
                 f'&$orderby=receivedDateTime desc'
                 f'&$top={min(limit, 1000)}'
             )

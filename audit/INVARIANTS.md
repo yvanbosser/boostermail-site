@@ -1104,6 +1104,23 @@ Helper module-level `_lookup_folder_name(folder_id)` résout le nom de dossier v
 - **Pourquoi** : démolisseur pré-impl V12 SALLE Phase A — 3 P0 (signature helper, move success non checké, undo pollue apprentissage) + 6 P1 + 3 P2. Pacte « pas de patches sur patches » : tout corriger en un seul passage cohérent (option b validée par Yvan) plutôt que d'empiler des -bis.
 - **Action si violé** : un développeur a (a) réintroduit `_resolve_entry_id` inline dans une route, (b) bypassé `_classify_to_folder` en réimplémentant le pipeline classify, (c) réassigné `_classify_momentum = {...}` au lieu de `.clear()+.update()`, (d) supprimé le check `move_result['success']` ou réintroduit `purge_email_cache_for(new_id)`. Restaurer le helper unifié + le pattern multi-tenant + les 3 garde-fous.
 
+### I-GRAPH-EXPAND-ATTACHMENTS : `$expand=attachments` obligatoire dans les méthodes Graph qui peuplent `email_cache` (V12 SALLE Phase B.2)
+
+Refonte 15/05/2026 V12 SALLE Phase B.2 — résolution root cause du bug « no_pj faussement positif au warmup ». Toute méthode Graph chargeant des mails destinés à `email_cache` (via `save_email_cache` direct ou indirect) DOIT inclure `$expand=attachments` dans l'URL Graph. Sans cet expand, le payload normalisé `_normalize_email` (outlook_graph.py:329-408) construit `attachments=[]` même quand `hasAttachments=True` (puisque le champ `attachments` est absent du JSON Graph) — la cuisine en aval voit `mail_data.attachments=[]` et `_compute_pj_classement_suggestions` reçoit `attachment_names=[]` → suggestions PJ paupres.
+
+Méthodes Graph concernées :
+- `get_email_by_id` (outlook_graph.py:483-504) — déjà OK : `$expand=attachments` présent l. 494 (factorisé avec `_FULL_SELECT`).
+- `get_email_by_internet_id` (outlook_graph.py:506-538) — déjà OK : `$expand=attachments` présent l. 522.
+- `get_received_emails` (outlook_graph.py:654-694) — **CORRIGÉ Phase B.2** : ajout `&$expand=attachments` dans l'URL (l. 686+).
+
+Conséquence sur la suppression du patch cassé : `_fetch_single_preview_plate` ligne ~10229 contenait un patch « cache no_pj invalide » (Fix 02/05 mail Dufau) qui détectait que la fiche stockée disait `no_pj` MAIS `email_cache.attachments` contenait des PJ → invalidait `db_row=None` pour re-trigger BG. Patch structurellement CASSÉ : la cuisine re-tournait avec le MÊME `mail_data` warmup buggué → re-persistait `no_pj` → spinner 24s puis no_pj à nouveau. Maintenant que la racine est corrigée (warmup expand attachments), le patch est supprimé.
+
+- **Preuve comportementale** : non-régression `test_integration_N0_N11.py` 52/52 + `test_n6_1_commis_haiku.py` etc.
+- **Régression statique** : `tests/test_la_salle.py::test_R6_get_received_emails_expands_attachments` vérifie que la méthode contient `$expand=attachments` + `::test_R7_no_no_pj_invalide_patch_in_fetch_single_preview_plate` vérifie que la branche `if db_row.get('source') == 'no_pj':` est absente.
+- **Pacte « pas de patches sur patches »** : on ne « répare » pas le patch cassé en aval (sauvetage défensif), on **supprime** le patch et on corrige à la source. -27 +1 = -26 lignes nettes.
+- **Pourquoi le warmup** : en usage normal, BoosterMail tourne 24/7 connecté via webhook Graph (`_handle_graph_webhook_notifications` ligne 6002 utilise `get_email_by_id` qui a déjà `$expand=attachments`). Le warmup est un backup en cas d'anomalie / redémarrage V2. Mais quand il tourne (boot, restart), il persistait 200 mails par boot sans attachments — pollution latente des frigos.
+- **Action si violé** : un développeur a (a) supprimé `$expand=attachments` de `get_received_emails`, (b) ajouté une nouvelle méthode Graph chargeant des mails sans `$expand=attachments`, (c) réintroduit le patch « cache no_pj invalide » au lieu de fixer une nouvelle source. Restaurer l'expand + ajouter une régression statique pour la nouvelle méthode si applicable.
+
 ### I-UNIFIED-LOCK-PER-MID : lock par-(user_id, mid) pour `_prewarm_unified_for_mail` (V12 SALLE Phase B.1)
 
 Refonte 15/05/2026 V12 SALLE Phase B.1 — résolution Obs-F6 TOCTOU. Tout appel à `_prewarm_unified_for_mail(mid, ...)` doit acquérir le lock par-mid via `_get_unified_lock(mid)` en `acquire(blocking=False)` AVANT le check `get_all_dishes_for_mail`. Sans ce lock, 2 threads concurrents pouvaient appeler le commis Haiku 2 fois pour le même mid (gaspillage IA × 2, last-write-wins en DB).

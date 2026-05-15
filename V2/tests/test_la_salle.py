@@ -462,6 +462,60 @@ def test_STATIC_momentum_uses_clear_update_pattern():
     return ok
 
 
+def test_R6_get_received_emails_expands_attachments():
+    """V12 SALLE Phase B.2 — `get_received_emails` doit demander à Graph
+    `$expand=attachments` pour que les mails persistés dans `email_cache`
+    via le warmup aient la liste détaillée des PJ (pas juste le booléen
+    `hasAttachments`).
+
+    Avant fix : URL `?$select={_FULL_SELECT}&$orderby=...&$top=...` SANS
+    `$expand=attachments`. Le payload normalisé contenait `attachments=[]`
+    même quand le mail avait des PJ → `_compute_pj_classement_suggestions`
+    recevait `attachment_names=[]` → suggestions PJ paupres.
+
+    Après fix : URL contient `$expand=attachments`. Les mails warmup ont
+    leurs attachments expandés à la source. Plus besoin de patch défensif
+    en aval. Cf invariant I-GRAPH-EXPAND-ATTACHMENTS.
+    """
+    from outlook_graph import GraphClient
+    src = inspect.getsource(GraphClient.get_received_emails)
+    return log_test(
+        "R6 get_received_emails contient $expand=attachments "
+        "(B.2 fix racine warmup)",
+        '$expand=attachments' in src,
+        "absent — warmup persiste mails sans liste PJ détaillée"
+        if '$expand=attachments' not in src else "",
+    )
+
+
+def test_R7_no_no_pj_invalide_patch_in_fetch_single_preview_plate():
+    """V12 SALLE Phase B.2 — Le patch « cache no_pj invalide » dans
+    `_fetch_single_preview_plate` (commenté `Fix 02/05/2026 mail Dufau`)
+    était structurellement CASSÉ : il invalidait `db_row=None` pour
+    re-trigger BG, mais la cuisine re-tournait avec le MÊME `mail_data`
+    buggué (attachments=[] au warmup) → re-persistait no_pj. Le seul
+    effet utilisateur : spinner 24s puis no_pj à nouveau.
+
+    Maintenant que R6 corrige la racine (warmup expand attachments), ce
+    patch n'a plus de raison d'être. Suppression complète.
+
+    Pacte « pas de patches sur patches » : on remplace le patch cassé par
+    la correction à la source, on ne le « répare » pas.
+    """
+    src = inspect.getsource(ap._fetch_single_preview_plate)
+    # Vérif STRICTE sur le CODE du patch (pas le commentaire descriptif qui
+    # peut légitimement référencer le mot « no_pj invalide » dans un texte
+    # explicatif). Le coeur du patch était la branche `if db_row.get('source')
+    # == 'no_pj':` qui invalidait db_row pour re-trigger BG.
+    bad_branch_present = "db_row.get('source') == 'no_pj'" in src
+    return log_test(
+        "R7 patch 'cache no_pj invalide' supprimé (root cause R6 réglée)",
+        not bad_branch_present,
+        "branche `if db_row.get('source') == 'no_pj':` encore présente"
+        if bad_branch_present else "",
+    )
+
+
 def test_STATIC_classify_routes_check_move_success():
     """Static R5 — Le helper `_classify_to_folder` doit vérifier
     `move_result['success']` avant les side-effects (P0-2 démolisseur)."""
@@ -509,6 +563,9 @@ def main():
         ('R3 helper unifié _classify_to_folder existe', test_STATIC_classify_to_folder_unified_helper_exists),
         ('R4 momentum pattern clear+update préservé (multi-tenant)', test_STATIC_momentum_uses_clear_update_pattern),
         ('R5 _classify_to_folder vérifie move.success', test_STATIC_classify_routes_check_move_success),
+        # B.2 — Phase B.2 root cause no_pj (15/05 PM)
+        ('R6 get_received_emails contient $expand=attachments (B.2 fix racine)', test_R6_get_received_emails_expands_attachments),
+        ('R7 patch no_pj invalide supprimé (B.2 root cause réglée)', test_R7_no_no_pj_invalide_patch_in_fetch_single_preview_plate),
     ]
 
     n_ok = 0

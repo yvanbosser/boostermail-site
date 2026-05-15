@@ -867,12 +867,34 @@ Nouveau helper transverse créé en Phase A : `_unflatten_suggestions` (côté c
 | Couverture HTTP test_client | 0 | 17 cas (3 catégories) |
 | Liaison cuisine ↔ salle (`_purge_frigos_for_action`) | 4 sites ✓ | 4 sites ✓ |
 
-### Prochains pas — Phase B (Voir résumé + échéance)
+### Phase B.1 livrée (15/05/2026, commit `f6024b0`)
 
-- Réduire les **5 routes pour 1 carte UI** à 3 portes spécialisées + 1 chef d'orchestre (la route bundle `mail_preview` devient un wrapper de 10 lignes).
-- Découper `_prewarm_unified_for_mail` (343 lignes, 10 étapes mélangées) en 6 sous-fonctions de ~50 lignes.
-- Remplacer le long-polling `/api/mail_summary` (boucle `sleep(0.2)` 3s) par un signal `threading.Event`.
-- Effort estimé 3-4 jours.
+Verrou anti-doublon par-(user_id, mid) sur `_prewarm_unified_for_mail` — résolution Obs-F6 TOCTOU. Test `test_F6_concurrence_double_call` resserré de `≤ 2` à `== 1` strict. Multi-tenant safe via clé `user_id::mid`, LRU OrderedDict à 500 entrées max, `finally: release` defense in depth. Nouvel invariant `I-UNIFIED-LOCK-PER-MID`. **Prérequis** technique à Phase B.3 (fusion route bundle) qui aurait sinon triplé les triggers BG.
+
+### Phase B.2 livrée (15/05/2026, commit suivant)
+
+**Root cause `no_pj` réglée à la source** : la méthode Graph `get_received_emails` (utilisée par le warmup au boot pour 200 mails) n'incluait pas `$expand=attachments` dans son URL. Le payload normalisé `_normalize_email` lit `graph_email.get('attachments', [])` → vide si absent du JSON. Donc les mails warmup étaient persistés dans `email_cache` avec `has_attachments=True` mais `attachments=[]`. La cuisine en aval voyait `mail_data.attachments=[]` → `_compute_pj_classement_suggestions(attachment_names=[])` → suggestions PJ paupres → fiche stockée en `no_pj` ou `unified_none_*`.
+
+Correction à la source — **1 ligne ajoutée à `outlook_graph.py:686+`** :
+```
+&$expand=attachments
+```
+
+Conséquence : le patch « cache no_pj invalide » dans `_fetch_single_preview_plate` (l. 10229-10245, 27 lignes, Fix 02/05 mail Dufau) perd sa raison d'être. Selon le démolisseur Phase B, ce patch était structurellement CASSÉ : il invalidait `db_row=None` pour re-trigger BG, mais la cuisine re-tournait avec le MÊME `mail_data` warmup buggué → re-persistait `no_pj` → spinner 24s puis no_pj à nouveau. Donc **27 lignes supprimées** : pacte « pas de patches sur patches » respecté, on ne « répare » pas le patch en aval, on corrige à la source et on retire le patch cassé.
+
+Pourquoi le warmup et pas les autres flux :
+- `get_email_by_id` et `get_email_by_internet_id` (utilisés par fallback Graph live + webhook créés) ont DÉJÀ `$expand=attachments` (l. 494, 522 outlook_graph.py).
+- Le webhook Graph (`_handle_graph_webhook_notifications` l. 6002) appelle `graph.get_email_by_id(odata_id)` → mails ingérés en temps réel ont leurs attachments correctement expandés.
+- Seul `get_received_emails` était fautif. En usage normal 24/7, le webhook gère bien — le warmup ne tourne qu'au boot/restart.
+
+Net : **-26 lignes** (-27 patch supprimé + 1 ligne expand). 19/19 tests La SALLE verts + 116/116 globaux. Nouvel invariant `I-GRAPH-EXPAND-ATTACHMENTS` codifie la règle pour les futures méthodes Graph.
+
+### Prochains pas — Phase B.3 (fusion route bundle + segmentation cuisine)
+
+- Réduire les **5 routes pour 1 carte UI** : route bundle `/api/mail_preview` → wrapper sur les 3 portes spécialisées Phase 3 (ou suppression complète si frontend l'utilise déjà via les 3 portes — à trancher).
+- Découper `_prewarm_unified_for_mail` (343 lignes, 10 étapes mélangées) en sous-fonctions claires (sans tomber dans l'anti-pattern « 6 sous-fonctions à 1 appelant » du démolisseur Phase B P2-B2 — préférer nested functions avec intercalaires).
+- Réécriture des ~10 tests qui font `inspect.getsource(_prewarm_unified_for_mail)` pour grepper des patterns spécifiques (impacté par tout découpage).
+- Effort estimé révisé 1.5 jour (sans threading.Event qui était descope du démolisseur Phase B P0-B3).
 
 ### Prochains pas — Phase C (Répondre)
 

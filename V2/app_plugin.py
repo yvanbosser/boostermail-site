@@ -10292,34 +10292,21 @@ def _fetch_single_preview_plate(message_id, plate):
                 return {'status': 'done', 'data': cls_data}
         elif plate == 'pj_classement':
             db_row = _db.get_mail_pj_classement(message_id)
-            if db_row is not None:
-                # Fix 02/05/2026 (signal Yvan : mail Dufau classement_pj
-                # = no_pj alors qu'il a 1 PJ « Procedure import pst.docx »).
-                # Cause : au warmup BG initial, mail_data n'avait pas
-                # toujours les attachments peuplés (Graph $select sans
-                # détail) → save no_pj faussement → cache idempotent →
-                # blocage permanent. Constat DB OVH : 100/125 entrées en
-                # no_pj (80%) ce qui est anormal.
-                # Fix : si cache dit no_pj MAIS email_cache a maintenant
-                # des attachments → invalider et passer à l'étape 3
-                # (re-trigger BG avec mail_data correct).
-                if db_row.get('source') == 'no_pj':
-                    try:
-                        _cached_email = _db.get_cached_email(message_id)
-                        _has_pj = bool(
-                            (_cached_email or {}).get('has_attachments')
-                            or ((_cached_email or {}).get('attachments') or [])
-                        )
-                        if _has_pj:
-                            logger.info(
-                                f"[preview-pj] cache no_pj invalide pour "
-                                f"{message_id[:30]}... (attachments détectés "
-                                f"dans email_cache) → re-trigger pipeline"
-                            )
-                            # Skip return → tombe dans l'étape 3 (re-trigger BG)
-                            db_row = None
-                    except Exception as _e:
-                        logger.debug(f"[preview-pj] no_pj recheck : {_e}")
+            # V12 SALLE Phase B.2 (15/05/2026) — suppression du patch cassé
+            # « Fix 02/05/2026 mail Dufau cache no_pj invalide ». Ce patch
+            # détectait `cache=no_pj` MAIS `email_cache.attachments=[...]`
+            # et invalidait `db_row=None` pour re-trigger BG. Problème :
+            # la cuisine re-tournait avec le MÊME `mail_data` warmup
+            # buggué (Graph `$select` sans `$expand=attachments`) → re-
+            # persistait no_pj → spinner 24s puis no_pj à nouveau. Patch
+            # structurellement cassé, pas juste sale.
+            #
+            # Root cause corrigée par Phase B.2 : `get_received_emails`
+            # ajoute désormais `$expand=attachments` dans la requête
+            # Graph (cf invariant I-GRAPH-EXPAND-ATTACHMENTS). Le warmup
+            # persiste les mails avec attachments expandés → la cuisine
+            # voit les PJ → suggestions PJ correctes → plus jamais de
+            # `no_pj` faussement positif au warmup.
             if db_row is not None:
                 # Top 3 PJ — désérialisation via `_unflatten_suggestions`
                 # (V12 SALLE Phase A). Origine du pattern : fix N8 démolisseur
