@@ -957,6 +957,55 @@ Cette question a pivoté le plan v2 (« simplifier la salle ») en plan v3 (« d
 
 **Net Phase C : -200 LoC de patches dispersés, +120 LoC de helper centralisé, -90 LoC de code mort = ~-170 LoC de prod nettoyée, +600 LoC de tests**.
 
+### Phase C bis livrée (16/05/2026 — commit `ab045d8`) — invalidation cache brouillons sur change fiche contact
+
+**Découverte fin de session par audit honnête** : à la question d'Yvan « Y a-t-il des points en cours toujours non traités ? », l'audit du code révèle un commentaire ajouté en Phase C qui **mentait** :
+
+```python
+# Récupération contact_profile + signature à T+0 (cuisson). Si le
+# profil évolue après (analyze_contact_profile enrichit), le cache
+# est invalidé via `_invalidate_reply_cache_for_contact` appelée
+# par `save_contact_profile`. Pas de patches dispersés.
+```
+
+La fonction `_invalidate_reply_cache_for_contact` **n'existait pas**. 9 sites appelaient `_db.save_contact_profile` direct sans invalidation. Conséquence en prod : `analyze_contact_profile` enrichit la fiche (tutoiement détecté, prénom corrigé, signature personnalisée) → la cuisine a déjà pré-cuit des brouillons avec l'ANCIENNE fiche → l'user voit un brouillon obsolète au prochain clic. Race silencieuse.
+
+**Vision Yvan reformulée pour valider l'implémentation** :
+
+> *« Quand la fiche d'un contact change, jeter à la poubelle les brouillons pré-cuisinés pour ce contact dans le pass-plat. La prochaine fois que l'user clique « Répondre », BoosterMail re-cuisine avec la fiche à jour. »*
+
+**Implémentation Phase C bis** :
+- Helper unique `_invalidate_reply_cache_for_contact(email)` (50 LoC) — normalise l'email (case-insensitive + trim), purge les entrées `_reply_cache` dont `'contact'` matche, **préserve** les brouillons `user_modified` (jamais perdre le travail user), scope par-user via `_iter_user_caches('reply')`, déclenche persist async post-invalidation.
+- Wrapper unique `_save_contact_profile_with_invalidation(email, profile_data)` (3 LoC) — point d'entrée unique pour TOUS les writes de fiche contact (save + invalidate atomiquement).
+- 8 sites historiques migrés vers le wrapper (1 reste = au sein du wrapper lui-même).
+- Commentaire mensonger corrigé pour refléter la réalité.
+
+**Tests Phase C bis** (7 TDD + 1 régression statique) :
+- T1 : helper existe au niveau module.
+- T2 : wrapper existe au niveau module.
+- T3 : purge ciblée — entrées matchant l'email purgées, autres conservées.
+- T4 : préservation `user_modified` — brouillons user_edit JAMAIS purgés.
+- T5 : normalisation email case-insensitive + trim.
+- T6 : email vide / None → no-op silencieux (pas de crash).
+- T7 : idempotent (2 appels = 1 résultat).
+- R5 : grep `_db.save_contact_profile(` hors wrapper → 0 résultat.
+
+Nouvel invariant `I-CONTACT-PROFILE-INVALIDATES-REPLY-CACHE` ([audit/INVARIANTS.md](../../audit/INVARIANTS.md)).
+
+**Tests : 180/180 verts** (24/24 Phase C complets, 156 autres suites).
+
+**Net Phase C bis : +53 LoC prod (helper + wrapper), -16 LoC patches dispersés (8 sites migrés en 1 ligne chacun), +1 LoC commentaire correct (au lieu de mensonger), +212 LoC tests + invariant**.
+
+### Leçon Phase C bis — Le commentaire qui ment
+
+**Le « bug » subtil découvert** : en Phase C, j'ai écrit un commentaire qui promettait un comportement (« le cache est invalidé via `_invalidate_reply_cache_for_contact` appelée par `save_contact_profile` »), mais je n'ai **pas implémenté ce comportement**. Le commentaire seul donnait l'illusion d'un système complet.
+
+**Type d'anti-pattern** : « documentation aspirational » — décrire ce qu'on AURAIT VOULU faire comme si c'était fait. Pire qu'un bug visible, parce qu'un futur lecteur (ou moi-même 1 semaine plus tard) lit le commentaire et passe à autre chose, persuadé que c'est OK.
+
+**Comment détecter ce pattern à l'avenir** : tout commentaire qui nomme une fonction (« via `_invalidate_X` ») doit déclencher un `Grep` pour vérifier que la fonction EXISTE. Si elle n'existe pas, soit on implémente immédiatement, soit on supprime la promesse du commentaire et on documente honnêtement le compromis.
+
+**Régression statique recommandée pour le futur** : à chaque PR qui touche un commentaire mentionnant une fonction interne, un linter pourrait grep le module pour vérifier que cette fonction existe. Pas implémenté ici (hors scope), mais à garder en tête.
+
 ---
 
 ## 8. Statistiques globales N1-N11 (+ Option A + Validation finale)
@@ -1023,6 +1072,21 @@ La batterie d'intégration N0-N11 (48 scénarios) a fait remonter **2 lacunes m�
 - **F10 asymétrie de mécanisme** : la route `/api/post_generation_analyze` (compose sortants) appelle le builder SANS `scan_echeance=` explicite, alors que `_prewarm_unified_for_mail` (entrants) le passe explicitement. Asymétrie technique entre les 2 portes d'entrée commis Haiku → tout changement futur de politique scan échéance coûte double.
 
 À retenir : **les tests unitaires verts ne garantissent pas l'absence de tests tautologiques**. L'audit post-batterie (E2E + sub-agent) est une 5ᵉ défense méthodologique à formaliser.
+
+### Leçon 10 — Le commentaire qui ment (Phase C bis 16/05/2026)
+
+Phase C a livré un helper `_ensure_reply_envelope_html` propre, mais le commentaire ajouté autour de son intégration **promettait** un mécanisme d'invalidation cache (« le cache est invalidé via `_invalidate_reply_cache_for_contact` appelée par `save_contact_profile` ») qui **n'existait pas**. La fonction nommée n'a jamais été implémentée.
+
+C'est un anti-pattern subtil : **« documentation aspirationnelle »** — décrire ce qu'on aurait voulu faire comme si c'était fait. Pire qu'un bug visible, parce que :
+- Un futur lecteur (ou moi-même 1 semaine plus tard) lit le commentaire et passe à autre chose, persuadé que c'est OK.
+- Aucun test ne crashe parce que la fonction n'est jamais appelée.
+- Aucun grep n'alerte parce que le nom n'est utilisé qu'en commentaire.
+
+**Comment ça a été détecté** : Yvan a posé une question simple en fin de session — « Y a-t-il des points en cours toujours non traités ? ». L'audit honnête a forcé à grep `_invalidate_reply_cache_for_contact` → 1 résultat (le commentaire), 0 définition. La question d'Yvan a fait office de **6e défense méthodologique** : l'audit final non programmé.
+
+**Comment éviter à l'avenir** : tout commentaire qui nomme une fonction interne doit déclencher un `Grep` de vérification. Si la fonction n'existe pas, soit on implémente immédiatement, soit on supprime la promesse et on documente honnêtement le compromis (« cache invalidation deferred — risque acceptable, voir issue #X »).
+
+À retenir : **un commentaire qui ment est pire qu'un commentaire absent**. Le pacte « code parfaitement propre » s'applique aussi au commentaire — il doit refléter la réalité, pas l'intention.
 
 ---
 
