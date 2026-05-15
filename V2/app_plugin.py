@@ -4298,12 +4298,11 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
                 pj_suggestions.append(s)
 
         # === 9. Persister les 4 frigos ===
-        # V12 Phase 2.1 : entrants ne déclenchent plus de scan échéance
-        # (`scan_echeance=False` via helper). Donc `result.get('echeance')`
-        # sera toujours None ici → `echeances=None` signifie « pas de scan
-        # effectué » dans la sémantique de `_persist_commis_results`.
-        # Phase 2.2 réintroduira la conversion liste quand le scan matching
-        # IA sera codé. Pas de pré-câblage Phase 2.1 (code mort en germe).
+        # V12 Phase 2.2 (15/05/2026) : entrants reçoivent toujours
+        # `echeances=None` dans _persist_commis_results car le scan échéance
+        # entrant a quitté le commis unifié (la section E n'est plus dans
+        # le prompt côté entrants). Le matching IA, lui, vit dans son
+        # propre sub-commis dédié (cf étape 10 ci-dessous).
         _persist_commis_results(
             mid=mid, mail_data=mail_data,
             points=result.get('points', []),
@@ -4311,9 +4310,43 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
             mail_suggestions=mail_suggestions,
             pj_suggestions=pj_suggestions,
             has_pj=has_pj,
-            echeances=None,  # Phase 2.1 : scan désactivé entrants
+            echeances=None,  # entrants : scan détection désactivé depuis P2.1
             model='commis-n6.1',
         )
+
+        # === 10. Matching échéances actives (V12 Phase 2.2) ===
+        # Si le contact a au moins une échéance active en DB, on lance la
+        # cascade `match_echeance_for_mail` (Tier 1 heuristique + Tier 2 IA
+        # via sub-commis Haiku + Tier 3 fallback). Si match → statut
+        # `pending_confirmation` (cf spec §10 gap 4 CLOSE). Sinon silence.
+        # Critère DB-driven aligné vision Yvan 15/05 : « ce qui compte n'est
+        # pas le statut VIP/PARTIAL, c'est qu'une échéance soit en cours
+        # vis-à-vis de l'adresse mail ».
+        if _should_scan_echeance('incoming', mail_data):
+            try:
+                _from_email = _normalize_email(mail_data.get('from_email', '') or '')
+                _active = _db.get_echeances_for_contact(_from_email) if _from_email else []
+                if _active:
+                    _match = match_echeance_for_mail(mail_data, _active)
+                    if _match:
+                        # Double-check scope (défense race condition + prompt
+                        # injection #3) : l'échéance doit être toujours active
+                        # ET toujours liée à ce correspondant ET appartenir au
+                        # bon user (scope `_uid()` interne de get_echeance).
+                        # Couvre le cas où l'user a déplacé/clôturé pendant
+                        # le scan IA + ferme la défense en profondeur.
+                        _ech_check = _db.get_echeance(_match['id'])
+                        if (_ech_check
+                            and _ech_check.get('statut') == 'active'
+                            and _normalize_email(_ech_check.get('correspondant', '')) == _from_email):
+                            _db.update_echeance(_match['id'], {'statut': 'pending_confirmation'})
+                            logger.info(
+                                f"[unified] échéance matched (entrant) : "
+                                f"id={_match['id']} desc='{(_match.get('description') or '')[:40]}' "
+                                f"source={_match.get('source')}"
+                            )
+            except Exception as _e:
+                logger.warning(f"[unified] match_echeance entrants : {_e}")
 
         # Reset retry compteur sur succès
         _commis_retry_count.pop(mid, None)
@@ -10745,46 +10778,136 @@ from utils_date import (  # noqa: E402
 )
 
 
-def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids=None):
-    """Annule auto les echeances actives d'un correspondant si le correspondant a REPONDU (mail recu).
-    NE SE DECLENCHE PAS quand l'utilisateur ENVOIE un mail — seulement quand il REPOND a un mail recu.
+def match_echeance_for_mail(mail, active_echeances):
+    """Unified matcher : mail entrant → échéance active traitée (V12 Phase 2.2).
 
-    Refonte N6.3 : le matching réponse↔échéance est désormais centralisé dans
-    `_match_for_cancel` (sémantique byte-identique avec l'algo précédent : ≥ 3
-    mots communs de longueur ≥ 4).
+    Fonction UNIQUE qui remplace l'ancienne logique inline de
+    `_auto_cancel_echeances_on_reply` ET ajoute le matching IA côté entrants
+    (cf docs/architecture/REFONTE_N1_N11_JOURNAL.md §6 quater). Cascade
+    interne propre — pas de double mécanisme parallèle :
+
+      Tier 1 — heuristique pure (≥3 mots communs sujet ↔ description).
+               Gratuit, déterministe. Si match unique évident → retour direct.
+      Tier 2 — sub-commis Haiku `match_echeance_active`.
+               Appelé si Tier 1 a 0 ou ≥2 candidats (ambigu).
+               Défenses prompt-injection intégrées (whitelist + délimiteurs).
+      Tier 3 — fallback heuristique (premier candidat partiel).
+               Joue si Tier 2 timeout / Haiku down / null. Anti-SPOF.
+
+    Args:
+        mail: dict {subject, body?, from_email, from_name?}. `body` peut être
+              absent pour le flow post-send user (seul le subject sert au
+              Tier 1) — le Tier 2 IA reste pertinent côté entrants où le
+              body est disponible.
+        active_echeances: list[dict] échéances actives du correspondant,
+              déjà filtrées `statut='active'` + scope user_id.
+
+    Returns:
+        dict {id, description, date_echeance, original_subject,
+              source: 'heuristic'|'ia'|'heuristic_fallback'} ou None.
+    """
+    if not active_echeances:
+        return None
+
+    subject = mail.get('subject', '') or ''
+
+    # === TIER 1 — heuristique pure (≥3 mots communs) =====================
+    tier1_matches = [e for e in active_echeances if _match_for_cancel(e, subject)]
+    if len(tier1_matches) == 1:
+        # Match unique évident — retour direct, pas d'appel IA inutile.
+        e = tier1_matches[0]
+        return {
+            'id': e.get('id'),
+            'description': e.get('description'),
+            'date_echeance': e.get('date_echeance'),
+            'original_subject': e.get('original_subject'),
+            'source': 'heuristic',
+        }
+
+    # === TIER 2 — sub-commis Haiku (cas 0 ou ≥2 candidats) ===============
+    # On n'appelle Haiku que si le Tier 1 n'a pas tranché. Borne le coût
+    # IA aux cas réellement ambigus (cf démolisseur Phase 2.2 P0-2).
+    try:
+        ai = _get_prompt_builder()
+        if ai and hasattr(ai, 'match_echeance_active'):
+            ia_match = ai.match_echeance_active(mail, active_echeances)
+            if ia_match:
+                return ia_match
+    except Exception as _e:
+        logger.warning(f"[match_echeance] IA error (fallback Tier 3) : {_e}")
+
+    # === TIER 3 — fallback heuristique (anti-SPOF) =======================
+    # Si Tier 2 timeout / Haiku down / refus whitelist, on retombe sur
+    # le 1er candidat partiel du Tier 1. Préserve le comportement pré-V12
+    # Phase 2.2 quand Haiku est indisponible (P0-3 démolisseur).
+    if tier1_matches:
+        e = tier1_matches[0]
+        return {
+            'id': e.get('id'),
+            'description': e.get('description'),
+            'date_echeance': e.get('date_echeance'),
+            'original_subject': e.get('original_subject'),
+            'source': 'heuristic_fallback',
+        }
+
+    return None
+
+
+def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids=None):
+    """V12 Phase 2.2 (15/05/2026) — wrapper sur la cascade `match_echeance_for_mail`.
+
+    Appelé quand l'user envoie une RÉPONSE via BoosterMail (route
+    /api/send_email post-send). NE SE DÉCLENCHE PAS à la réception d'un
+    mail (ce cas est couvert par `_prewarm_unified_for_mail` côté V12 P2.2).
+
+    Refonte V12 Phase 2.2 : remplace l'ancien matching heuristique inline
+    pur (`_match_for_cancel` direct) par la cascade unifiée qui :
+      - garde l'heuristique en Tier 1 (gratuit, 70-80% des cas)
+      - escalade au sub-commis Haiku si ambigu (Tier 2)
+      - fallback heuristique anti-SPOF si Haiku down (Tier 3)
+
+    Note : le body de la réponse user n'est pas dispo dans `cached_email`
+    (qui ne porte que le mail auquel on répond). Le Tier 1 tranche sur le
+    sujet seul ici — comportement byte-identique à la version pré-V12 P2.2
+    dans le cas heuristique-seule. Le Tier 2 IA reste pertinent quand
+    plusieurs échéances actives pourraient matcher (ambiguïté sujet).
     """
     exclude_ids = exclude_ids or set()
     from_email = ''
     if cached_email:
         from_email = _normalize_email(cached_email.get('from', ''))
     if not from_email:
-        return  # Nouveau mail sans mail recu = pas d'auto-annulation
+        return  # Pas de mail reçu → pas d'auto-annulation
 
     try:
-        all_echeances = _db.get_echeances(statut='active')
+        active = _db.get_echeances_for_contact(from_email)
     except Exception as _e:
-        logger.debug(f"[auto-cancel] get_echeances échoué : {_e}")
+        logger.debug(f"[auto-cancel] get_echeances_for_contact échoué : {_e}")
         return
 
-    for ech in all_echeances:
-        if ech.get('id') in exclude_ids:
-            continue
-        ech_corr = _normalize_email(ech.get('correspondant', ''))
-        if ech_corr != from_email:
-            continue
-        if not _match_for_cancel(ech, subject):
-            continue
-        try:
-            # Statut intermédiaire 'pending_confirmation' au lieu d'annulation
-            # silencieuse — l'utilisateur valide/conserve via la section
-            # "À confirmer" de la page Échéances.
-            _db.update_echeance(ech['id'], {'statut': 'pending_confirmation'})
-            logger.debug(
-                f"[echeances] Pending confirmation: '{(ech.get('description') or '')[:50]}' "
-                f"(correspondant a repondu)"
-            )
-        except Exception as _e:
-            logger.debug(f"[auto-cancel] update_echeance échoué pour id={ech.get('id')}: {_e}")
+    active = [e for e in active if e.get('id') not in exclude_ids]
+    if not active:
+        return
+
+    mail_for_match = {
+        'subject': subject,
+        'body': '',  # Pas dispo dans ce flow — Tier 1 tranche sur sujet.
+        'from_email': from_email,
+        'from_name': cached_email.get('from_name', '') if cached_email else '',
+    }
+    match = match_echeance_for_mail(mail_for_match, active)
+    if not match:
+        return
+
+    try:
+        _db.update_echeance(match['id'], {'statut': 'pending_confirmation'})
+        logger.debug(
+            f"[echeances] Pending confirmation : "
+            f"'{(match.get('description') or '')[:50]}' "
+            f"(correspondant a répondu, source={match.get('source')})"
+        )
+    except Exception as _e:
+        logger.debug(f"[auto-cancel] update_echeance échoué id={match.get('id')}: {_e}")
 
 
 # --- PJ extraction & upload ---------------------------------------------------
@@ -14021,11 +14144,15 @@ def _should_scan_echeance(mode: str, mail_data: dict) -> bool:
     Returns:
         True si le commis doit produire la section E, False sinon.
 
-    Phase 2.1 (15/05/2026 — abandon Option A, vision DB-driven) :
-        - 'compose'  → True (hérité V12 Phase 1 sortants, vision A/B/C)
-        - 'incoming' → False (les entrants ne créent plus d'échéances —
-            Phase 2.2 ajoutera le scan matching IA conditionné à
-            l'existence d'une échéance active sur from_email).
+    Comportement V12 Phase 2.2 (15/05/2026, paradigme DB-driven complet) :
+        - 'compose'  → True systématique (hérité V12 Phase 1 sortants, A/B/C)
+        - 'incoming' → True si `db.has_active_echeance(from_email)`, False sinon.
+            Vision Yvan 15/05 : « ce qui compte n'est pas le statut VIP/PARTIAL,
+            c'est qu'une échéance soit en cours vis-à-vis de l'adresse mail ».
+            Multi-tenant via `_uid()` interne de `get_echeances_for_contact`.
+            Quand True, l'étape 10 de `_prewarm_unified_for_mail` lance le
+            sub-commis `match_echeance_active` puis la cascade
+            `match_echeance_for_mail` pour matcher avec l'échéance traitée.
 
     Raises:
         ValueError si mode est inconnu (fail-fast).
@@ -14033,10 +14160,19 @@ def _should_scan_echeance(mode: str, mail_data: dict) -> bool:
     if mode == 'compose':
         return True
     if mode == 'incoming':
-        # Phase 2.1 : pas de scan entrant. Phase 2.2 branchera ici :
-        #   from_email = (mail_data.get('from_email') or '').lower().strip()
-        #   return bool(from_email and _db.has_active_echeance(from_email))
-        return False
+        # V12 Phase 2.2 (15/05/2026) : DB-driven. Le sub-commis matching
+        # ne se déclenche que si au moins une échéance active existe sur
+        # `from_email` (cf vision Yvan 15/05). Multi-tenant via `_uid()`
+        # interne de `get_echeances_for_contact`. `_normalize_email` aligne
+        # le lookup avec `_auto_cancel_echeances_on_reply` (P1-8 démolisseur).
+        from_email = _normalize_email(mail_data.get('from_email', '') or '')
+        if not from_email:
+            return False
+        try:
+            return _db.has_active_echeance(from_email)
+        except Exception as _e:
+            logger.debug(f"[should_scan_echeance] DB lookup error : {_e}")
+            return False
     raise ValueError(f"_should_scan_echeance: mode inconnu {mode!r} "
                      f"(attendu 'compose' ou 'incoming')")
 

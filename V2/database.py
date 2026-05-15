@@ -2805,6 +2805,35 @@ class Database:
         """, (correspondant, uid))
         return [dict(r) for r in c.fetchall()]
 
+    def get_echeance(self, echeance_id):
+        """Retourne une échéance par id (scope multi-tenant user_id), ou None.
+
+        V12 Phase 2.2 — utilisé par `_prewarm_unified_for_mail` pour le
+        double-check scope avant `update_echeance(_, statut='pending_confirmation')`.
+        Défense race condition : si l'user a déplacé/clôturé l'échéance entre
+        le lookup (`get_echeances_for_contact`) et l'update du sub-commis,
+        on évite d'écraser le statut courant par `pending_confirmation`.
+        """
+        uid = self._uid()
+        c = self._conn().cursor()
+        c.execute("""
+            SELECT * FROM echeances WHERE id = ? AND user_id = ?
+        """, (echeance_id, uid))
+        row = c.fetchone()
+        return dict(row) if row else None
+
+    def has_active_echeance(self, correspondant):
+        """Retourne True si ≥1 échéance active existe pour ce correspondant
+        (multi-tenant via `_uid()` interne de `get_echeances_for_contact`).
+
+        V12 Phase 2.2 — utilisé par `_should_scan_echeance('incoming', _)`
+        pour décider si le sub-commis Haiku matching doit être déclenché
+        sur le mail entrant. Critère du paradigme DB-driven (cf vision
+        Yvan 15/05 : « ce qui compte c'est qu'une échéance soit en cours
+        vis-à-vis de l'adresse mail »).
+        """
+        return bool(self.get_echeances_for_contact(correspondant))
+
     # --- RÉSUMÉS DE MAILS (21/04) ------------------------------------------
 
     def save_mail_summary(self, data):

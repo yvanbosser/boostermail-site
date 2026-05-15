@@ -244,9 +244,15 @@ def test_phase21_no_scan_echeance_marker_in_unified():
 
 
 def test_should_scan_echeance_helper_contract():
-    """V12 Phase 2.1 — Helper `_should_scan_echeance(mode, mail_data)`
-    a le contrat sémantique attendu (kwarg `mode` explicite, fail-fast
-    sur valeur inconnue).
+    """V12 Phase 2.2 — Helper `_should_scan_echeance(mode, mail_data)`
+    a le contrat sémantique attendu :
+      - mode='compose'  → True toujours (sortants V12 P1)
+      - mode='incoming' → True si db.has_active_echeance(from_email), sinon False
+      - mode inconnu    → ValueError (fail-fast)
+
+    Phase 2.2 (15/05/2026) : le helper passe d'un retour False statique
+    (Phase 2.1) à un lookup DB. Multi-tenant via `_uid()` interne de
+    `get_echeances_for_contact`.
     """
     has_helper = hasattr(ap, '_should_scan_echeance')
     ok = log_test("`_should_scan_echeance` existe dans app_plugin",
@@ -256,9 +262,40 @@ def test_should_scan_echeance_helper_contract():
     # 'compose' → True (sortants V12 P1)
     ok &= log_test("mode='compose' → True (sortants pré-envoi)",
                    ap._should_scan_echeance('compose', {}) is True)
-    # 'incoming' → False (Phase 2.1)
-    ok &= log_test("mode='incoming' → False (Phase 2.1, attente Phase 2.2)",
+    # 'incoming' sans from_email → False (court-circuit)
+    ok &= log_test("mode='incoming' + mail_data vide → False (pas de from_email)",
                    ap._should_scan_echeance('incoming', {}) is False)
+    # 'incoming' avec from_email inexistant en DB → False
+    ok &= log_test("mode='incoming' + from_email inconnu → False",
+                   ap._should_scan_echeance(
+                       'incoming',
+                       {'from_email': f'unknown-{int(__import__("time").time())}@nowhere.example'}
+                   ) is False)
+    # 'incoming' avec from_email + échéance active en DB → True
+    # Setup minimal : créer une échéance active sur un email de test, vérifier
+    # que le helper la voit, puis cleanup.
+    _test_email = f'phase22-helper-{int(__import__("time").time())}@example.com'
+    _ech_id = None
+    try:
+        _ech_id = ap._db.save_echeance({
+            'correspondant': _test_email,
+            'description': 'test phase 2.2 helper',
+            'date_echeance': '2026-12-15',
+            'statut': 'active',
+            'direction': 'sent',
+        })
+        ok &= log_test("mode='incoming' + DB has active → True",
+                       ap._should_scan_echeance(
+                           'incoming', {'from_email': _test_email}
+                       ) is True)
+    finally:
+        # Cleanup
+        if _ech_id:
+            try:
+                ap._db.update_echeance(_ech_id, {'statut': 'annulee'})
+            except Exception:
+                pass
+
     # Mode inconnu → ValueError (fail-fast)
     try:
         ap._should_scan_echeance('unknown', {})

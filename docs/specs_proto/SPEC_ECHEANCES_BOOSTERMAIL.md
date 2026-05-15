@@ -42,17 +42,22 @@ Frontière sémantique tranchée 15/05 : POPPER pour engagement / demande / urge
 
 **Critère de scan refait 15/05** : pas le statut VIP/PARTIAL/ÉCARTÉ du contact, mais l'existence d'au moins une échéance active en DB liée à `from_email`. Les entrants ne servent plus à créer, mais à matcher pour clôturer.
 
-✅ **Phase 2.1 livrée 15/05 PM** (helper `_should_scan_echeance(mode, mail_data)` + abandon Option A 14/05) :
-  - Mode `'incoming'` retourne actuellement `False` pour tous les entrants
+✅ **Phase 2.1 livrée 15/05 PM** (helper `_should_scan_echeance(mode, mail_data)` + abandon Option A 14/05) — commit `0a8a957` :
   - Marker `_scan_echeance_active = (branch == 'vip')` supprimé
   - `_classify_mail_branch` orphelin supprimé dans `_prewarm_unified_for_mail`
-  - Aucune création d'échéance depuis entrants (régression assumée 24h le temps de Phase 2.2)
+  - Helper sémantique avec kwarg `mode` explicite (résout Obs-F10)
 
-⏳ **Phase 2.2 à venir** :
-  - Sub-commis Haiku dédié `match_echeance_active(mail, active_list)` (option (b) validée par Yvan — pas de mélange dans le commis unifié N6.1)
-  - Helper `_should_scan_echeance('incoming', mail_data)` branchera `db.has_active_echeance(from_email)` → True si ≥ 1 échéance active
-  - Remplacement de `_auto_cancel_echeances_on_reply` heuristique 3-mots-communs par le matching IA
-  - Q1/Q2/Q3 tranchés par Yvan 15/05 : IA reçoit la liste des échéances actives en contexte / pas de création de nouvelle échéance distincte / mode strict (mentions vagues ignorées sur entrants)
+✅ **Phase 2.2 livrée 15/05 PM** (cascade matching IA entrants DB-driven) :
+  - Helper `_should_scan_echeance('incoming', mail_data)` → True si `db.has_active_echeance(from_email)`. Multi-tenant via `_uid()` interne.
+  - Sub-commis Haiku dédié `ClaudeAssistant.match_echeance_active(mail, active_echeances)` — distinct du commis unifié N6.1 (option (b) validée Yvan)
+  - Fonction unifiée `match_echeance_for_mail(mail, active_echeances)` (cascade 3 tiers) :
+    - **Tier 1** : heuristique pure `_match_for_cancel` (≥3 mots communs, gratuit, déterministe) — match unique évident retourné direct
+    - **Tier 2** : sub-commis Haiku si Tier 1 ambigu (0 ou ≥2 candidats) — borne coût IA aux cas réellement ambigus
+    - **Tier 3** : fallback heuristique anti-SPOF si Haiku timeout/down/null
+  - Intégration `_prewarm_unified_for_mail` étape 10 : matching lancé côté entrants quand échéance active. Double-check scope (statut='active' + correspondant correct) AVANT `update_echeance(_, 'pending_confirmation')`.
+  - Refonte `_auto_cancel_echeances_on_reply` en wrapper sur la cascade (40 lignes, plus de duplication algo)
+  - **3 défenses prompt injection** intégrées au sub-commis (cf invariant I-ECHEANCE-DB-DRIVEN dans `audit/INVARIANTS.md`) : délimiteurs XML `<MAIL_HEADERS>` + `<MAIL_BODY>` couvrant subject + from_name + body, whitelist en sortie (id ∈ active_echeances), double-check scope user
+  - Frontend : statu quo gap 4 (cards page Échéances + badge overlay) — pas de popup in-context Phase 2.2 (reportable Phase 2.3 si remontée user)
 
 ### Out-of-scope
 
