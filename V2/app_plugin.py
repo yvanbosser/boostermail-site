@@ -2248,8 +2248,11 @@ atexit.register(_db.close_all_threads)
 # _reply_cache[message_id] = {
 #     'status':    'running' | 'done' | 'cancelled',
 #     'source':    'bg_speculation' | 'user_edit',   # qui a écrit cette entrée
-#     'text':      str,
-#     'chunks':    list (optionnel, pour streaming depuis BG gen),
+#     'text':      str (HTML enveloppe complète, garantie cuisine via
+#                       `_ensure_reply_envelope_html` — cf I-REPLY-ENVELOPE-
+#                       GUARANTEED-IN-KITCHEN),
+#     'user_modified': bool (préserve les brouillons user-touchés à
+#                            l'invalidation cache — cf Phase C bis),
 #     'timestamp': epoch,
 #     'contact':   str,
 #     'importance': 'R'|'S'|'H',
@@ -2677,12 +2680,6 @@ def _reply_cache_metrics_report_loop():
         except Exception as e:
             logger.warning(f"[reply_cache metrics] log error : {e}")
         time.sleep(15 * 60)  # 15 min
-
-# Refonte N7 : 3 constantes orphelines `_MAX_POST_SEND_CACHE` /
-# `_MAX_PJ_POST_SEND_CACHE` / `_POST_SEND_CACHE_TTL` supprimées (les 3 caches
-# associés `_echeance_post_send_cache` / `_classification_post_send_cache` /
-# `_pj_classification_post_send_cache` ont été supprimés 27/04 audit kit #10
-# — write-only ou jamais utilisés). Le grep confirme 0 caller restant.
 
 # --- Phase 2.A (24/04 plan structurel) — Pré-chauffe BG preview dialog 80%
 # Alimente les cards `infoEcheance` + `infoClassement` du dialog 80% avec
@@ -8039,7 +8036,12 @@ def _start_speculative(mail_data):
             try:
                 if from_email:
                     _ctx_profile = _db.get_contact_profile(from_email)
-            except Exception:
+            except Exception as _cp_e:
+                logger.debug(
+                    f"[speculative] lecture contact_profile échouée pour "
+                    f"{from_email[:30] if from_email else '?'} : {_cp_e} "
+                    f"— greeting fallback générique"
+                )
                 _ctx_profile = None
             _ctx_user_name = _get_user_name()
             text_html = _ensure_reply_envelope_html(
@@ -10516,11 +10518,6 @@ def api_classement_pj_single(message_id):
     return jsonify(_fetch_single_preview_plate(message_id, 'pj_classement'))
 
 
-# Refonte N6.3 : route POST /api/echeances/pre_scan SUPPRIMÉE — cache orphelin
-# (jamais relu par le post-send qui re-scanne via Claude). Le seul chemin actif
-# est désormais `/api/echeances/post_send/<message_id>`.
-
-
 @app.route('/api/echeances/purge_archives', methods=['POST'])
 def api_echeances_purge_archives():
     """Supprime définitivement toutes les échéances archivées (terminées + annulées)."""
@@ -10947,14 +10944,6 @@ if _UserScopedDict is not None:
     _classify_momentum = _UserScopedDict('classify_momentum')
 else:
     _classify_momentum = {}
-
-# Refonte N6.3 : route POST /api/echeances/pre_scan, son cache + lock + regex
-# heuristiques (_ECHEANCE_DATE_PATTERNS, _ECHEANCE_REFERENCE_WORDS,
-# _ECHEANCE_ENGAGEMENT_WORDS), le helper _has_echeance_pattern, la constante
-# _MAX_PRE_SCAN_CACHE et la version locale _trim_dict_cache (FIFO simple) ont
-# été supprimés ensemble. Le cache était orphelin (écrit jamais relu). Le
-# post-send re-scanne via Claude. La version _trim_dict_cache restante (plus
-# haut dans le fichier, trim par ts) est utilisée par _pj_text_cache.
 
 
 # === Helpers texte partagés (scope échéances) =========================
