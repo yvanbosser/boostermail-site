@@ -1208,6 +1208,24 @@ Idempotence : `_ensure_reply_envelope_html` est idempotent — appelable plusieu
 - **Pourquoi** : pacte « pas de patches sur patches » — 3 sites de garde dispersés = dette dispersée, source de divergences silencieuses entre cache HIT preemptive vs cache HIT draft vs cuisson live. Une seule cuisine, un seul comportement.
 - **Action si violé** : un développeur a (a) réintroduit la garde anti-désobéissance dans `/api/instant_reply` ou `stream_from_preemptive` (= salle qui contrôle), (b) supprimé l'appel `_ensure_reply_envelope_html` dans `_start_speculative` (= cuisine sans garde, frontend voit des doublons greeting), (c) cassé l'idempotence du helper (= corruption à 2ème appel). Restaurer le pattern « garde unique en cuisine, salle triviale ».
 
+### I-CONTACT-PROFILE-INVALIDATES-REPLY-CACHE : invalidation cache brouillons sur change fiche contact (V12 SALLE Phase C bis)
+
+Extension Phase C bis (16/05/2026) — vision Yvan : « *Quand la fiche d'un contact change, jeter à la poubelle les brouillons pré-cuisinés pour ce contact dans le pass-plat. La prochaine fois que l'user clique « Répondre », BoosterMail re-cuisine avec la fiche à jour.* »
+
+Sans cette invalidation, `analyze_contact_profile` enrichit la fiche (tutoiement détecté, prénom corrigé, signature personnalisée) → la cuisine a déjà pré-cuit des brouillons avec l'ANCIENNE fiche → l'user voit un brouillon obsolète au prochain clic. Race silencieuse.
+
+**Implémentation centralisée** :
+- Helper unique `_invalidate_reply_cache_for_contact(email)` ([app_plugin.py](../V2/app_plugin.py)) — purge les entrées `_reply_cache` dont `'contact'` matche l'email (normalisé case-insensitive + trim). Préserve les brouillons `user_modified` (le travail user n'est jamais perdu).
+- Wrapper unique `_save_contact_profile_with_invalidation(email, profile_data)` — point d'entrée unique pour TOUS les writes de fiche contact. Appelle `_db.save_contact_profile` + `_invalidate_reply_cache_for_contact`.
+- **Multi-tenant safe** : scope par-user via `_iter_user_caches('reply')`. Fallback mono-user si helpers non chargés.
+- **Persistance** : déclenchement async de `_persist_reply_cache` après invalidation pour cohérence post-restart V2.
+
+**Régression statique R5** : `tests/test_la_salle_phase_c.py::test_STATIC_INVALIDATE_no_direct_save_contact_profile_in_app_plugin` — grep `_db.save_contact_profile(` dans app_plugin.py → 0 résultat HORS wrapper. 8 sites historiques migrés vers le wrapper en Phase C bis.
+
+- **Preuve comportementale** : 7 tests TDD (`tests/test_la_salle_phase_c.py` T1-T7) — existence helper + wrapper, purge ciblée, préservation `user_modified`, normalisation case-insensitive, no-op email vide, idempotence.
+- **Pourquoi** : tient la promesse du commentaire `_start_speculative:8035` (« le cache est invalidé via `_invalidate_reply_cache_for_contact` ») qui était mensongère avant Phase C bis (fonction n'existait pas, 9 sites appelaient `_db.save_contact_profile` direct).
+- **Action si violé** : un développeur a (a) appelé `_db.save_contact_profile` direct (R5 fail), (b) supprimé l'appel `_invalidate_reply_cache_for_contact` du wrapper (= cache plus invalidé, brouillons obsolètes silencieux), (c) cassé la préservation `user_modified` (= perte travail user), (d) déscopé le multi-tenant (= invalidation cross-user). Restaurer le pattern « wrapper unique + invalidation ciblée + préservation user_modified ».
+
 ### ~~I-BRANCHES-N11-OPTION-A~~ : `scan_echeance` activé uniquement en VIP entrants — **ARCHIVÉ 15/05/2026**
 
 > ⚠ **ARCHIVÉ 15/05/2026 — révision Yvan V12 Phase 2.1** : « ce qui compte n'est pas le statut VIP/PARTIAL, c'est qu'une échéance soit en cours vis-à-vis de l'adresse mail ». Les entrants ne déclenchent plus de scan échéance détection ; le scan matching IA viendra en Phase 2.2 (conditionné à l'existence d'une échéance active sur `from_email` en DB, pas au statut contact).

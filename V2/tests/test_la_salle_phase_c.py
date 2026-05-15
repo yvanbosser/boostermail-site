@@ -318,18 +318,19 @@ def test_STATIC_instant_reply_no_inline_assembly():
 
 
 def test_STATIC_match_template_dead_code_removed():
-    """R3 — `/api/match_template` était une route DÉSACTIVÉE 11/05 avec
-    55 lignes commentées « pour réversibilité 5 min ». Anti-pattern « code
-    mort en wrapper rétro-compat ». Doit être SUPPRIMÉ (git garde l'historique)."""
+    """R3 — `/api/match_template` avait 55 lignes commentées « pour réversibilité
+    5 min ». Ce bloc mort doit disparaître. Le stub (1 LoC) reste pour la
+    compatibilité dialog.js (le frontend interroge encore la route avant
+    `/generate_reply`). Bloc DESACTIVE 11/05/2026 + commentaire "réversibilité
+    5 min" doivent être absents."""
     src = inspect.getsource(ap)
-    # La route et son commentaire de réversibilité doivent disparaître
-    has_route = "@app.route('/api/match_template'" in src
+    has_disactive_block = "DESACTIVE 11/05/2026" in src
     has_reversibility_comment = "réversibilité" in src and "5 min" in src
     return log_test(
         f"R3 code mort match_template supprimé "
-        f"(route={'présent' if has_route else 'absent ✓'}, "
+        f"(bloc DESACTIVE={'présent' if has_disactive_block else 'absent ✓'}, "
         f"commentaire réversibilité={'présent' if has_reversibility_comment else 'absent ✓'})",
-        not has_route and not has_reversibility_comment,
+        not has_disactive_block and not has_reversibility_comment,
     )
 
 
@@ -343,6 +344,157 @@ def test_STATIC_metrics_renamed_instant_reply():
         f"R4 métriques `template.*` renommées (présence dans /api/instant_reply : "
         f"{'oui (à renommer)' if has_template_metric else 'non ✓'})",
         not has_template_metric,
+    )
+
+
+# =============================================================================
+# §5 — Phase C bis : invalidation cache contact_profile (16/05/2026)
+# =============================================================================
+# Vision Yvan : « Quand la fiche d'un contact change, jeter à la poubelle
+# les brouillons pré-cuisinés pour ce contact dans le pass-plat. La prochaine
+# fois que le user clique « Répondre », BoosterMail re-cuisine. »
+# Tient la promesse du commentaire ligne 7951 (helper était mentionné mais
+# n'existait pas avant Phase C bis).
+# =============================================================================
+
+def _seed_reply_cache(mid, contact_email, source='bg_speculation', text='<p>Bonjour Vincent,</p><p>Test</p>'):
+    """Helper test : seed une entrée fictive dans `_reply_cache`."""
+    import time as _t
+    ap._reply_cache[mid] = {
+        'status': 'done',
+        'source': source,
+        'user_modified': source == 'user_edit',
+        'text': text,
+        'timestamp': _t.time(),
+        'contact': contact_email,
+        'importance': 'S',
+    }
+
+
+def _clear_reply_cache():
+    ap._reply_cache.clear()
+
+
+def test_INVALIDATE_1_helper_exists():
+    """T1 — `_invalidate_reply_cache_for_contact` doit exister au niveau module."""
+    return log_test(
+        "T1 helper `_invalidate_reply_cache_for_contact` exposé module-level",
+        hasattr(ap, '_invalidate_reply_cache_for_contact')
+        and callable(ap._invalidate_reply_cache_for_contact),
+    )
+
+
+def test_INVALIDATE_2_wrapper_exists():
+    """T2 — wrapper `_save_contact_profile_with_invalidation` doit exister."""
+    return log_test(
+        "T2 wrapper `_save_contact_profile_with_invalidation` exposé module-level",
+        hasattr(ap, '_save_contact_profile_with_invalidation')
+        and callable(ap._save_contact_profile_with_invalidation),
+    )
+
+
+def test_INVALIDATE_3_purges_matching_bg_entries():
+    """T3 — Invalidation purge les entrées bg_speculation pour le contact."""
+    _clear_reply_cache()
+    _seed_reply_cache('<mid1@x>', 'vincent@example.com', source='bg_speculation')
+    _seed_reply_cache('<mid2@x>', 'autre@example.com', source='bg_speculation')
+    ap._invalidate_reply_cache_for_contact('vincent@example.com')
+    has_vincent = '<mid1@x>' in ap._reply_cache
+    has_autre = '<mid2@x>' in ap._reply_cache
+    _clear_reply_cache()
+    return log_test(
+        f"T3 purge ciblée (vincent purgé={not has_vincent}, autre conservé={has_autre})",
+        not has_vincent and has_autre,
+    )
+
+
+def test_INVALIDATE_4_preserves_user_modified():
+    """T4 — Invalidation NE TOUCHE PAS les brouillons user_modified (= user_edit).
+    Préserve le travail user — règle non négociable."""
+    _clear_reply_cache()
+    _seed_reply_cache('<mid_bg@x>', 'vincent@example.com', source='bg_speculation')
+    _seed_reply_cache('<mid_user@x>', 'vincent@example.com', source='user_edit')
+    ap._invalidate_reply_cache_for_contact('vincent@example.com')
+    has_bg = '<mid_bg@x>' in ap._reply_cache
+    has_user = '<mid_user@x>' in ap._reply_cache
+    _clear_reply_cache()
+    return log_test(
+        f"T4 user_edit conservé (bg purgé={not has_bg}, user_edit conservé={has_user})",
+        not has_bg and has_user,
+    )
+
+
+def test_INVALIDATE_5_normalize_email_case_insensitive():
+    """T5 — Email normalisé pour comparaison (case-insensitive + trim).
+    Cas : profil stocké en lowercase, contact dans cache en mixed-case."""
+    _clear_reply_cache()
+    _seed_reply_cache('<mid1@x>', 'Vincent@Example.COM', source='bg_speculation')
+    ap._invalidate_reply_cache_for_contact('  vincent@example.com  ')
+    has_entry = '<mid1@x>' in ap._reply_cache
+    _clear_reply_cache()
+    return log_test(
+        f"T5 normalize email (case-insensitive + trim) → entrée purgée",
+        not has_entry,
+    )
+
+
+def test_INVALIDATE_6_empty_email_noop():
+    """T6 — Email vide / None → no-op silencieux (pas de crash)."""
+    _clear_reply_cache()
+    _seed_reply_cache('<mid1@x>', 'vincent@example.com', source='bg_speculation')
+    try:
+        ap._invalidate_reply_cache_for_contact('')
+        ap._invalidate_reply_cache_for_contact(None)
+        crashed = False
+    except Exception:
+        crashed = True
+    has_entry = '<mid1@x>' in ap._reply_cache
+    _clear_reply_cache()
+    return log_test(
+        f"T6 email vide/None → no-op (pas de crash={not crashed}, entrée intacte={has_entry})",
+        not crashed and has_entry,
+    )
+
+
+def test_INVALIDATE_7_idempotent():
+    """T7 — Appel 2× consécutifs = même résultat (idempotent)."""
+    _clear_reply_cache()
+    _seed_reply_cache('<mid1@x>', 'vincent@example.com', source='bg_speculation')
+    ap._invalidate_reply_cache_for_contact('vincent@example.com')
+    ap._invalidate_reply_cache_for_contact('vincent@example.com')  # 2e appel
+    crashed = False
+    has_entry = '<mid1@x>' in ap._reply_cache
+    _clear_reply_cache()
+    return log_test(
+        f"T7 idempotent (2 appels → 0 entrée, pas de crash)",
+        not has_entry and not crashed,
+    )
+
+
+def test_STATIC_INVALIDATE_no_direct_save_contact_profile_in_app_plugin():
+    """R5 — Tous les appels à `_db.save_contact_profile(...)` dans app_plugin.py
+    doivent passer par le wrapper `_save_contact_profile_with_invalidation`
+    (sauf au sein du wrapper lui-même). Sinon une mise à jour de fiche contact
+    ne purge pas le cache et le user voit un brouillon obsolète."""
+    src_path = os.path.join(os.path.dirname(__file__), '..', 'app_plugin.py')
+    with open(src_path, 'r', encoding='utf-8') as f:
+        src = f.read()
+    # Compte les appels directs (hors wrapper)
+    lines = src.split('\n')
+    direct_calls = []
+    in_wrapper = False
+    for i, line in enumerate(lines, start=1):
+        if 'def _save_contact_profile_with_invalidation' in line:
+            in_wrapper = True
+            continue
+        if in_wrapper and line and not line.startswith(' ') and not line.startswith('\t'):
+            in_wrapper = False
+        if '_db.save_contact_profile(' in line and not in_wrapper:
+            direct_calls.append(i)
+    return log_test(
+        f"R5 0 appel direct à `_db.save_contact_profile` hors wrapper "
+        f"(trouvés : {direct_calls if direct_calls else 'aucun ✓'})",
+        len(direct_calls) == 0,
     )
 
 
@@ -377,6 +529,15 @@ def main():
         ('R2 /api/instant_reply pas de garde inline', test_STATIC_instant_reply_no_inline_assembly),
         ('R3 code mort match_template supprimé', test_STATIC_match_template_dead_code_removed),
         ('R4 métriques template.* renommées instant_reply.*', test_STATIC_metrics_renamed_instant_reply),
+        # §5 — Phase C bis : invalidation cache contact_profile
+        ('T1 helper _invalidate_reply_cache_for_contact exposé', test_INVALIDATE_1_helper_exists),
+        ('T2 wrapper _save_contact_profile_with_invalidation exposé', test_INVALIDATE_2_wrapper_exists),
+        ('T3 invalidation purge ciblée bg_speculation', test_INVALIDATE_3_purges_matching_bg_entries),
+        ('T4 invalidation préserve user_modified', test_INVALIDATE_4_preserves_user_modified),
+        ('T5 invalidation case-insensitive + trim', test_INVALIDATE_5_normalize_email_case_insensitive),
+        ('T6 invalidation email vide → no-op', test_INVALIDATE_6_empty_email_noop),
+        ('T7 invalidation idempotente', test_INVALIDATE_7_idempotent),
+        ('R5 0 appel direct _db.save_contact_profile hors wrapper', test_STATIC_INVALIDATE_no_direct_save_contact_profile_in_app_plugin),
     ]
 
     n_ok = 0

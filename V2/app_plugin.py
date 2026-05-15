@@ -2572,6 +2572,89 @@ def _reply_metric_inc(key, n=1):
         _reply_cache_metrics[key] = _reply_cache_metrics.get(key, 0) + n
 
 
+def _invalidate_reply_cache_for_contact(email):
+    """V12 SALLE Phase C bis (16/05/2026) — invalidation cache brouillons
+    quand la fiche d'un contact change.
+
+    Vision Yvan : « Quand la fiche d'un contact change, jeter à la poubelle
+    les brouillons pré-cuisinés pour ce contact dans le pass-plat. La
+    prochaine fois que le user clique « Répondre », BoosterMail re-cuisine
+    avec la fiche à jour. »
+
+    Sans cette invalidation : `analyze_contact_profile` enrichit la fiche
+    (tutoiement détecté, prénom corrigé, signature personnalisée) → la
+    cuisine a déjà pré-cuit des brouillons avec l'ANCIENNE fiche → l'user
+    voit un brouillon obsolète au prochain clic. Race silencieuse.
+
+    Préservation user_modified : les brouillons que l'user a déjà touchés
+    (`source='user_edit'` ou `user_modified=True`) ne sont JAMAIS purgés.
+    On ne perd pas le travail user.
+
+    Multi-tenant : scope par-user via `_iter_user_caches('reply')`.
+    Fallback mono-user si helpers non chargés.
+
+    Idempotent : 2 appels consécutifs = 1 résultat (le 2e ne trouve rien).
+    """
+    if not email:
+        return
+    normalized = _normalize_email(email)
+    if not normalized:
+        return
+    invalidated = 0
+    with _reply_lock:
+        if _iter_user_caches is not None:
+            for _user_id, sub_cache in _iter_user_caches('reply'):
+                stale_keys = [
+                    k for k, v in sub_cache.items()
+                    if _normalize_email(v.get('contact', '')) == normalized
+                    and not _is_user_modified(v)
+                ]
+                for k in stale_keys:
+                    sub_cache.pop(k, None)
+                invalidated += len(stale_keys)
+        else:
+            stale_keys = [
+                k for k, v in _reply_cache.items()
+                if _normalize_email(v.get('contact', '')) == normalized
+                and not _is_user_modified(v)
+            ]
+            for k in stale_keys:
+                _reply_cache.pop(k, None)
+            invalidated = len(stale_keys)
+    if invalidated:
+        logger.info(
+            f"[reply_cache] Invalidate {invalidated} brouillon(s) pré-cuit(s) "
+            f"pour contact {_hash_email_partial(normalized)} "
+            f"(fiche contact modifiée — re-cuisson au prochain clic)"
+        )
+        _reply_metric_inc('purges_event', invalidated)
+        # Persister pour cohérence post-restart V2 (sinon les entrées
+        # purgées seraient rechargées depuis drafts_v2.json au reboot).
+        try:
+            _spawn_bg(_persist_reply_cache, name='persist-contact-invalidation')
+        except Exception:
+            pass
+
+
+def _save_contact_profile_with_invalidation(email, profile_data):
+    """Wrapper unique « save fiche contact + invalidation cache brouillons ».
+
+    Point d'entrée unique pour TOUTES les écritures de fiche contact. Garantit
+    que le cache des brouillons pré-cuisinés reste synchronisé avec les fiches
+    contact — un brouillon avec ancienne fiche ne sort jamais du pass-plat.
+
+    Cf invariant I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN (extension Phase C bis) :
+    la cuisine 3 étoiles ne doit jamais re-servir un plat préparé avec une
+    recette obsolète. Quand la recette de base (fiche contact) change, on
+    jette les plats déjà au pass-plat pour forcer une re-cuisson.
+
+    Régression statique R5 (tests/test_la_salle_phase_c.py) : aucun appel
+    direct à `_db.save_contact_profile` ne doit subsister dans app_plugin.py.
+    """
+    _db.save_contact_profile(email, profile_data)
+    _invalidate_reply_cache_for_contact(email)
+
+
 def _reply_cache_metrics_report_loop():
     """Log périodique (15 min) du hit rate + compteurs. Aide le debug prod."""
     time.sleep(300)  # premier rapport après 5 min
@@ -7950,7 +8033,8 @@ def _start_speculative(mail_data):
             # Récupération contact_profile + signature à T+0 (cuisson). Si le
             # profil évolue après (analyze_contact_profile enrichit), le cache
             # est invalidé via `_invalidate_reply_cache_for_contact` appelée
-            # par `save_contact_profile`. Pas de patches dispersés.
+            # par `_save_contact_profile_with_invalidation` (wrapper unique
+            # autour de `_db.save_contact_profile` — Phase C bis 16/05/2026).
             _ctx_profile = None
             try:
                 if from_email:
@@ -8791,7 +8875,7 @@ def api_update_contact():
     profile_data = data.get('profile', {})
     if not isinstance(profile_data, dict):
         return jsonify({"error": "profile doit être un objet JSON"}), 400
-    _db.save_contact_profile(email, profile_data)
+    _save_contact_profile_with_invalidation(email, profile_data)
     return jsonify({"status": "ok"})
 
 
@@ -12290,7 +12374,7 @@ def api_admin_recalibrate_contacts_signature():
                 if existing:
                     existing_copy = dict(existing)
                     existing_copy['sample_count'] = 0
-                    _db.save_contact_profile(email, existing_copy)
+                    _save_contact_profile_with_invalidation(email, existing_copy)
                     _maybe_analyze_contact(email)
                     # Vérifier si signature trouvée
                     refreshed = _db.get_contact_profile(email)
@@ -14461,7 +14545,7 @@ def api_post_send():
                                       else (_profile.get('profile_json') or {}))
                             if _pdata.get('register') != 'tutoiement':
                                 _pdata['register'] = 'tutoiement'
-                                _db.save_contact_profile(_contact, _pdata)
+                                _save_contact_profile_with_invalidation(_contact, _pdata)
                                 logger.info(f"[learning] {_hash_email_partial(_contact)} → forcé tutoiement")
                         except Exception as e:
                             logger.debug(f"[_db.save_contact_profile] silent error : {e}")
@@ -14513,7 +14597,7 @@ def api_post_send():
                     existing = _db.get_contact_profile(contact_email)
                     if existing:
                         existing['sample_count'] = 0
-                        _db.save_contact_profile(contact_email, existing)
+                        _save_contact_profile_with_invalidation(contact_email, existing)
                     logger.info(f"[learning] TRIGGER greeting/closing → re-analyse {_hash_email_partial(contact_email)}")
                 # Audit 03/05 fix RC2 : bypass_cooldown=True car action user
                 # explicite (correction post-envoi détectée).
@@ -14976,7 +15060,7 @@ def _maybe_analyze_contact(contact_email, bypass_cooldown=False):
         profile = _apply_register_guard(profile, sent_mails)
         is_new = (sample_count == 0)  # squelette → enrichi
         profile['email'] = contact_email
-        _db.save_contact_profile(contact_email, profile)
+        _save_contact_profile_with_invalidation(contact_email, profile)
         logger.info(
             f"[learning] Profil sauvegarde: {_hash_email_partial(contact_email)} "
             f"— {profile.get('category','?')}, {profile.get('register','?')}"
@@ -15089,7 +15173,7 @@ def api_analyze_contact():
             existing = _db.get_contact_profile(contact_email)
             if existing:
                 existing['sample_count'] = 0
-                _db.save_contact_profile(contact_email, existing)
+                _save_contact_profile_with_invalidation(contact_email, existing)
             # Audit 03/05 fix RC2 : bypass_cooldown=True car action user
             # explicite (route /api/analyze_contact appelée à la demande).
             _maybe_analyze_contact(contact_email, bypass_cooldown=True)
@@ -15161,7 +15245,7 @@ def api_recalibrate_contacts():
                     existing = _db.get_contact_profile(email)
                     if existing:
                         existing['sample_count'] = 0
-                        _db.save_contact_profile(email, existing)
+                        _save_contact_profile_with_invalidation(email, existing)
                     # Audit 03/05 fix RC2 : bypass_cooldown=True (recalibrage
                     # batch lancé volontairement par l'user via la page Profil).
                     _maybe_analyze_contact(email, bypass_cooldown=True)
@@ -15781,7 +15865,7 @@ def api_add_contact_keyword():
             vocab.append(keyword)
             pj['specific_vocabulary'] = vocab
             profile['profile_json'] = json.dumps(pj, ensure_ascii=False)
-            _db.save_contact_profile(email, profile)
+            _save_contact_profile_with_invalidation(email, profile)
         return jsonify({'status': 'ok', 'vocabulary': vocab})
     except Exception as e:
         logger.warning(f"[add_contact_keyword] {email}: {e}")
