@@ -1182,6 +1182,32 @@ Quand le helper retourne True côté entrants, `_prewarm_unified_for_mail` étap
 - **Pourquoi** : vision Yvan 15/05 — « ce qui compte n'est pas le statut VIP/PARTIAL, c'est qu'une échéance soit en cours vis-à-vis de l'adresse mail ». Les entrants servent au matching (clôture), plus à la création (qui reste sortants only via V12 Phase 1).
 - **Action si violé** : un développeur a (a) réintroduit le marker Option A `_scan_echeance_active = (branch == 'vip')`, (b) court-circuité le helper, (c) supprimé une des 3 défenses prompt injection du sub-commis. Restaurer le paradigme DB-driven via helper unique.
 
+### I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN : enveloppe complète garantie en cuisine (V12 SALLE Phase C)
+
+Refonte 15/05/2026 V12 SALLE Phase C — vision Yvan 3 étoiles Michelin : « *un plat qui sort de cuisine est parfait. Le serveur livre, point. Si le serveur contrôle, c'est que la cuisine n'est pas 3 étoiles* ». Toute garde anti-désobéissance Claude (autosalutation Vincent-Lecou, oubli signature « Cdlt » seul, anglicisme contextuel FR, body en HTML brut, markdown parasite) est centralisée dans un seul helper `_ensure_reply_envelope_html(body, contact_profile, correspondent_email, user_name)` ([app_plugin.py:2427](../V2/app_plugin.py)). Le helper est **appelé en CUISINE**, jamais en salle :
+
+1. `_start_speculative` (pré-cuisson BG) — applique le helper AVANT stockage dans `_reply_cache` ([app_plugin.py](../V2/app_plugin.py))
+2. `generate_sse` dans `/generate_reply` (cuisson à la commande) — applique le helper après le stream Claude, emit `replace_body` plain si différent du brut
+
+Conséquence : `_reply_cache['text']` est toujours l'enveloppe complète (`<p>greeting</p>body<p>closing<br>signature</p>`). Les 3 sites de livraison côté salle deviennent **triviaux** :
+- `/api/instant_reply` (cache HIT preemptive) : `return jsonify({"text": entry.get('text'), "html": True})` — 0 contrôle ([app_plugin.py:11719](../V2/app_plugin.py))
+- `stream_from_preemptive` (SSE cache HIT) : `yield cached_plain` un seul chunk + `done` — 0 contrôle ([app_plugin.py](../V2/app_plugin.py))
+- `generate_sse` côté frontend : `chunk` typewriter + `replace_body` final si la cuisine a corrigé — 0 contrôle dans le stream
+
+Avant Phase C : 3 sites de garde dispersés avec règles divergentes (`/api/instant_reply` ~127 lignes inline, SSE `stream_from_preemptive` ~25 lignes, `generate_sse` ~50 lignes). **Patches sur patches éliminés (~200 LoC) par 1 helper centralisé (~120 LoC) appelé en cuisine.**
+
+Idempotence : `_ensure_reply_envelope_html` est idempotent — appelable plusieurs fois sans corrompre le body (skip injection si l'enveloppe est complète, strip premier `<p>` self-greeting si Claude désobéit).
+
+- **Preuve comportementale** : `tests/test_la_salle_phase_c.py` — 12 tests TDD (C1-C12 : helper composition, idempotence, Vincent-Lecou self-greeting, anglicisme FR, « Cdlt » seul, prénom dans closing, garbage draft hors scope) + 4 régressions statiques (existence helper, `/api/instant_reply` sans assembly inline, `/api/match_template` dead code supprimé, métriques renommées).
+- **Régressions statiques** :
+  - Grep `_log_template_metric\(['"]template\.draft|template\.miss\.|template\.preemptive` dans `app_plugin.py` → 0 résultats (métriques renommées `instant_reply.*`).
+  - Grep `DESACTIVE 11/05/2026` dans `app_plugin.py` → 0 résultats (code mort `/api/match_template` supprimé).
+  - Grep dans `/api/instant_reply` du bloc preemptive : pas de `_normalize_reply_greeting_closing` ni de `_body_has_greeting` (la salle ne contrôle plus).
+- **Multi-tenant** : `contact_profile` est lu via `_db.get_contact_profile` scopé par `_uid()` → pas de fuite cross-user dans l'enveloppe. Signature résolue via `_resolve_user_signature` (PLUS_TARD_VF #3 — override par contact).
+- **Anti-désobéissance Claude couverts** : (a) Vincent-Lecou autosalutation `Bonjour Yvan,` quand c'est Yvan qui rédige → strip + ré-injection bon greeting, (b) Claude génère « Cdlt » seul sans signature → ajout signature après, (c) Claude génère greeting anglais sur contact FR → corrigé via `_normalize_reply_greeting_closing` qui inclut désormais la garde anti-anglicisme FR, (d) Claude génère du HTML malgré l'instruction plain → `_normalize_reply_to_html` détecte et passe through.
+- **Pourquoi** : pacte « pas de patches sur patches » — 3 sites de garde dispersés = dette dispersée, source de divergences silencieuses entre cache HIT preemptive vs cache HIT draft vs cuisson live. Une seule cuisine, un seul comportement.
+- **Action si violé** : un développeur a (a) réintroduit la garde anti-désobéissance dans `/api/instant_reply` ou `stream_from_preemptive` (= salle qui contrôle), (b) supprimé l'appel `_ensure_reply_envelope_html` dans `_start_speculative` (= cuisine sans garde, frontend voit des doublons greeting), (c) cassé l'idempotence du helper (= corruption à 2ème appel). Restaurer le pattern « garde unique en cuisine, salle triviale ».
+
 ### ~~I-BRANCHES-N11-OPTION-A~~ : `scan_echeance` activé uniquement en VIP entrants — **ARCHIVÉ 15/05/2026**
 
 > ⚠ **ARCHIVÉ 15/05/2026 — révision Yvan V12 Phase 2.1** : « ce qui compte n'est pas le statut VIP/PARTIAL, c'est qu'une échéance soit en cours vis-à-vis de l'adresse mail ». Les entrants ne déclenchent plus de scan échéance détection ; le scan matching IA viendra en Phase 2.2 (conditionné à l'existence d'une échéance active sur `from_email` en DB, pas au statut contact).

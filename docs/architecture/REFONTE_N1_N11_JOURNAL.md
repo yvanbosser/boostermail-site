@@ -901,19 +901,61 @@ Nouvel invariant `I-MAIL-PREVIEW-DELEGATES`. 2 régressions statiques (R8, R9) v
 
 **Net Phase B.3 : ~-120 lignes de prod** (-135 ancien code + ~15 wrapper + 0 dans helper qui existait déjà).
 
-### Prochains pas — Phase C (Répondre)
+### Phase C livrée (15/05/2026 soir) — refonte 3 étoiles Michelin « cuisine garantit, salle livre »
 
-- Tackle frontal du bloc anti-doublon greeting/closing/signature (5 patches empilés en 72 lignes → fonction unique `_assemble_preemptive_reply`).
-- Suppression code mort `/api/match_template` (55 lignes commentées « pour réversibilité 5 min », endormies depuis 14 jours).
-- Renommage métriques `template.draft → instant_reply.draft` (les templates n'existent plus depuis 11/05).
-- Effort estimé 2-3 jours.
+**Vision Yvan, formulée pendant le démolisseur Plan v2** :
 
-### Prochains pas — Phase C (Répondre)
+> *« Nous sommes dans une cuisine haute gastronomie 3 étoiles Michelin. Ce qui sort de la cuisine ne peut pas avoir d'erreur. Est-ce vraiment nécessaire que le serveur contrôle ? »*
 
-- Tackle frontal du bloc anti-doublon greeting/closing/signature (5 patches empilés en 72 lignes → fonction unique `_assemble_preemptive_reply`).
-- Suppression code mort `/api/match_template` (55 lignes commentées « pour réversibilité 5 min », endormies depuis 14 jours).
-- Renommage métriques `template.draft → instant_reply.draft` (les templates n'existent plus).
-- Effort estimé 2-3 jours.
+Cette question a pivoté le plan v2 (« simplifier la salle ») en plan v3 (« déplacer la garde en cuisine, la salle devient triviale »). C'est la formulation la plus puissante du pacte rencontrée dans la refonte : si la cuisine garantit le plat, le serveur ne contrôle plus, il livre. Tout contrôle côté salle = signal que la cuisine n'est pas 3 étoiles.
+
+**Avant Phase C : 3 sites de garde dispersés** avec des règles divergentes :
+1. `_start_speculative` (cuisine pré-cuisson) — **aucune garde** (faisait confiance à Claude)
+2. `/api/instant_reply` (salle) — **127 lignes** de 5 patches empilés (anti-doublon, Vincent-Lecou, « Cdlt » seul, anglicisme FR, garbage)
+3. `stream_from_preemptive` + `generate_sse` (SSE salle) — **~75 lignes** d'une autre variante
+
+**Après Phase C : 1 helper centralisé en cuisine** (`_ensure_reply_envelope_html`, ~120 LoC), appelé AVANT stockage cache. Le cache contient l'enveloppe complète garantie. Les 3 sites de livraison deviennent triviaux (1-3 LoC chacun).
+
+**Anti-désobéissance Claude couverts par le helper** :
+- (a) **Vincent-Lecou autosalutation** — Claude génère « Bonjour Yvan, » alors que c'est Yvan qui rédige → strip premier `<p>` self-greeting + ré-injection bon greeting via `_normalize_reply_greeting_closing` (qui inclut désormais la garde unifiée `_user_first + _user_last`).
+- (b) **« Cdlt » seul sans signature** — Claude oublie la signature → ajout après le closing (sauf si prénom user déjà inline).
+- (c) **Anglicisme FR** — Claude génère greeting EN sur contact FR → corrigé via `_normalize_reply_greeting_closing` (garde anti-anglicisme existante).
+- (d) **HTML parasite dans le body** — Claude génère `<p>` malgré l'instruction plain → `_normalize_reply_to_html` détecte (idempotent : pass-through si déjà HTML).
+
+**Bugs latents corrigés en chemin** (le démolisseur a remonté ces régressions silencieuses) :
+- `_body_has_greeting` / `_body_has_closing` utilisaient un strip HTML naïf (regex `<[^>]+>`) — corrigé pour utiliser `_html_to_plain_text(text, paragraph_break='\n')`.
+- `_normalize_reply_greeting_closing` ne vérifiait que `_user_last` pour la garde anti-self-greeting — divergence Vincent-Lecou ; ajout du check `_user_first` également.
+
+**Idempotence du helper** — appelable plusieurs fois sans corruption :
+- Si l'enveloppe est complète → retour tel quel.
+- Si auto-greeting détecté → strip + ré-injection bon greeting (1 seule fois, idempotent au 2e appel car has_greeting devient False puis True).
+
+**Code mort supprimé** :
+- `/api/match_template` : 55 lignes de logique commentée « pour réversibilité 5 min » (endormies depuis 11/05). Stub conservé (`return {match: False, disabled: True}`) pour ne pas casser dialog.js.
+- `generate_reply` : 35 lignes de détection template commentées (mêmes raisons).
+- **Net : -90 lignes de code mort**.
+
+**Métriques renommées** :
+- `template.draft → instant_reply.draft`
+- `template.preemptive → instant_reply.preemptive`
+- `template.miss.* → instant_reply.miss.*`
+- L'agrégation dashboard `/api/admin/templates_stats` lit les deux préfixes (anciennes données historiques préservées via normalisation en ligne).
+
+**Nouvel invariant `I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN`** ([audit/INVARIANTS.md](../../audit/INVARIANTS.md)) — 4 régressions statiques verrouillent :
+- R-C1 : existence du helper module-level.
+- R-C2 : `/api/instant_reply` preemptive sans `_normalize_reply_greeting_closing` ni `_body_has_greeting` (la salle ne contrôle plus).
+- R-C3 : `/api/match_template` dead code supprimé (grep `DESACTIVE 11/05/2026` → 0).
+- R-C4 : métriques renommées (grep `template.draft|template.miss\.|template.preemptive` → 0).
+
+**Tests** : 16 tests verts en 1.21s (`tests/test_la_salle_phase_c.py`) — 12 TDD comportementaux (C1-C12) + 4 régressions statiques.
+
+**Méthodologie pacte (4 défenses appliquées)** :
+- Démolisseur pré-impl v1 → pivot vers plan v2 (« simplifier salle ») après que démolisseur a montré que Claude génère déjà une réponse complète depuis 08/05.
+- Cadrage Yvan pendant plan v2 → pivot vers plan v3 (« cuisine garantit ») via la question 3 étoiles Michelin.
+- Démolisseur pré-impl plan v3 → identification de 2 bugs latents dans helpers existants (corrigés en chemin, pas en patch séparé).
+- Regard frais pré-commit (à venir étape 9).
+
+**Net Phase C : -200 LoC de patches dispersés, +120 LoC de helper centralisé, -90 LoC de code mort = ~-170 LoC de prod nettoyée, +600 LoC de tests**.
 
 ---
 

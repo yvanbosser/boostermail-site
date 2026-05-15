@@ -633,11 +633,25 @@ def _normalize_reply_greeting_closing(contact_profile, correspondent_email, user
     if contact_profile:
         greeting = (contact_profile.get('greeting') or '').strip()
         closing = (contact_profile.get('closing') or '').strip()
-        # Garde anti-confusion : si greeting contient le nom user, reset
+        # Garde anti-confusion : si greeting contient le PRÉNOM ou le NOM
+        # de l'user, reset. V12 SALLE Phase C (15/05) : avant cette refonte,
+        # la garde ne checkait QUE `_user_last` → ratait Vincent-Lecou pour
+        # `user_name='Yvan BOSSER'` greeting='Bonjour Yvan,' (Yvan = prénom,
+        # pas dans _user_last='bosser'). Le 5e patch de `/api/instant_reply`
+        # corrigeait ce cas avec un check `_user_first` supplémentaire. Phase
+        # C absorbe ce check ici → 1 seule source de vérité, plus de divergence
+        # entre garde cuisine (`_normalize_reply_greeting_closing`) et garde
+        # salle (`/api/instant_reply` ligne 11579-11595).
         if user_name_setting:
             _user_parts = user_name_setting.split()
             _user_last = _user_parts[-1].lower() if _user_parts else ''
-            if _user_last and len(_user_last) >= 3 and _user_last in greeting.lower():
+            _user_first = _user_parts[0].lower() if _user_parts else ''
+            _greeting_lower = greeting.lower()
+            _user_in_greeting = (
+                (_user_last and len(_user_last) >= 3 and _user_last in _greeting_lower)
+                or (_user_first and len(_user_first) >= 3 and _user_first in _greeting_lower)
+            )
+            if _user_in_greeting:
                 _prn_parts = (contact_profile.get('display_name') or '').split()
                 _prn = _prn_parts[0] if _prn_parts else ''
                 greeting = f"Bonjour {_prn}," if _prn else "Bonjour,"
@@ -2408,6 +2422,126 @@ def _normalize_reply_to_html(text):
     # Fix 27/04 (Bug B v3) : '' au lieu de '\n' — voir commentaire CSS pre-wrap
     # plus haut. Tous les <p> en HTML compact, le margin CSS gère l'espacement.
     return ''.join(html_parts)
+
+
+def _ensure_reply_envelope_html(body, contact_profile, correspondent_email, user_name):
+    """V12 SALLE Phase C (15/05/2026) — Garde anti-désobéissance Claude
+    centralisée, applique en CUISINE avant stockage cache.
+
+    Philosophie 3 étoiles Michelin (vision Yvan 15/05) :
+    > « Un plat qui sort de cuisine est parfait. Le serveur livre, point.
+    >   Si le serveur contrôle, c'est que la cuisine n'est pas 3 étoiles. »
+
+    Avant Phase C : 3 sites de garde dispersés avec règles divergentes :
+      1. `_start_speculative` (cuisine) : aucune garde (faisait confiance)
+      2. `/api/instant_reply` (salle) : 127 lignes de 5 patches empilés
+      3. SSE `stream_from_preemptive` + `/generate_reply` : encore une autre variante
+
+    Après Phase C : 1 seul helper centralise. Appelé en CUISINE avant
+    stockage cache. La salle/SSE livrent tel quel.
+
+    Garantie : la réponse stockée dans `_reply_cache` est COMPLÈTE et
+    correcte (greeting + corps + closing + signature). Si Claude
+    désobéit (cas observés : autosalutation Vincent-Lecou, oubli
+    signature « Cdlt » seul, anglicisme en contexte FR), la garde
+    corrige immédiatement.
+
+    Idempotent — appelable plusieurs fois sans corrompre : si l'enveloppe
+    est complète, retour tel quel ; sinon complète.
+
+    Args:
+        body: réponse Claude (plain text OU HTML, normalisé en interne).
+        contact_profile: dict {greeting, closing, display_name, language, ...}
+            ou None. Profil contact pour calcul greeting/closing/signature.
+        correspondent_email: email du correspondant (pour fallback greeting
+            si contact_profile vide).
+        user_name: prénom/nom user authentifié (pour garde anti-self-
+            greeting Vincent-Lecou + signature).
+
+    Returns:
+        str HTML complet avec enveloppe garantie. Structure :
+            <p>{greeting}</p>{body_html}<p>{closing}<br>{signature}</p>
+        avec greeting/closing/signature injectés seulement si absents
+        du body Claude original.
+
+    Réutilise les 8 helpers existants (composition, pas duplication) :
+      - `_normalize_reply_to_html` (l. 2368)
+      - `_normalize_reply_greeting_closing` (l. 619) avec gardes anti-
+        confusion user_name + anti-anglicisme FR
+      - `_resolve_user_signature` (l. 2294) signature perso par contact
+        (PLUS_TARD_VF #3)
+      - `_html_to_plain_text` (l. 864) pour détection plain anti-doublon
+      - `_body_has_greeting` (l. 13407) + `_body_has_closing` (l. 13430)
+      - `_should_append_signature` (l. 2315) avec garde doublon prénom
+    """
+    import html as _html_mod_envelope
+
+    # 1. Normalise body en HTML (idempotent — détecte si déjà HTML)
+    body_html = _normalize_reply_to_html(body) if body else ''
+
+    # 2. Calcule greeting/closing avec toutes les gardes existantes
+    #    (anti-confusion user_name + anti-anglicisme FR + fallbacks)
+    greeting, closing = _normalize_reply_greeting_closing(
+        contact_profile, correspondent_email, user_name,
+    )
+
+    # 3. Résout la signature (peut être personnalisée par contact,
+    #    PLUS_TARD_VF #3 — signature perso par contact)
+    signature = _resolve_user_signature(contact_profile, user_name)
+
+    # 4. Détecte ce qui est déjà présent dans le body (idempotence +
+    #    skip injection si Claude a bien fait). Cas Vincent-Lecou : si
+    #    le body Claude commence par « Bonjour Yvan, » (autosalutation),
+    #    on strip cette ligne pour qu'elle soit remplacée par le bon
+    #    greeting (calculé via _normalize_reply_greeting_closing qui
+    #    inclut désormais la garde _user_first+_user_last unifiée).
+    body_plain = _html_to_plain_text(body_html, paragraph_break='\n') if body_html else ''
+    has_greeting = _body_has_greeting(body_html)
+
+    # Garde anti-self-greeting Claude-désobéissant — strip 1ère ligne du body
+    # si elle contient le nom user (cas Claude qui dit « Bonjour Yvan, » alors
+    # que c'est Yvan qui rédige). Le bon greeting sera ré-injecté à l'étape 5.
+    if has_greeting and user_name and body_plain:
+        _user_parts = user_name.strip().split()
+        _user_first = (_user_parts[0].lower() if _user_parts else '')
+        _user_last = (_user_parts[-1].lower() if _user_parts else '')
+        _first_line = next((l for l in body_plain.split('\n') if l.strip()), '').lower()
+        _self_greeting = (
+            (_user_first and len(_user_first) >= 3 and _user_first in _first_line)
+            or (_user_last and len(_user_last) >= 3 and _user_last in _first_line)
+        )
+        if _self_greeting:
+            # Strip le premier <p>...</p> qui contient le nom user
+            body_html = re.sub(
+                r'^\s*<p[^>]*>[^<]*(?:%s|%s)[^<]*</p>\s*'
+                % (re.escape(_user_first), re.escape(_user_last)),
+                '', body_html, count=1, flags=re.IGNORECASE,
+            )
+            has_greeting = False
+            body_plain = _html_to_plain_text(body_html, paragraph_break='\n') if body_html else ''
+
+    has_closing = _body_has_closing(body_html)
+    should_add_sig = _should_append_signature(closing, user_name, body=body_plain)
+
+    # 5. Assemblage avec injection sélective (idempotent)
+    html_parts = []
+    if not has_greeting:
+        html_parts.append(f'<p>{_html_mod_envelope.escape(greeting, quote=False)}</p>')
+    html_parts.append(body_html)
+    if not has_closing:
+        # Pas de closing dans body → ajouter closing + signature ensemble
+        sig_block = _html_mod_envelope.escape(closing, quote=False)
+        if should_add_sig and signature:
+            sig_block += '<br>' + _html_mod_envelope.escape(signature, quote=False)
+        html_parts.append(f'<p>{sig_block}</p>')
+    elif should_add_sig and signature:
+        # Closing déjà dans body (« Cdlt » seul, etc.) mais pas de signature
+        # → ajouter signature seule après
+        html_parts.append(f'<p>{_html_mod_envelope.escape(signature, quote=False)}</p>')
+
+    return ''.join(html_parts)
+
+
 _reply_lock = threading.Lock()
 # Refonte N7 : split TTL safety_net selon `user_modified` (arbitrage Yvan 13/05).
 # - Brouillons user-modifiés (`user_modified=True`) : 15 jours — l'user a investi
@@ -7762,30 +7896,6 @@ def _start_speculative(mail_data):
                                       max_tokens=max_tokens, temperature=0.3,
                                       stream=False)
 
-        # Fix 24/04 (régression P0.5) : Claude peut générer naturellement en
-        # HTML (<p>...</p>). Si on découpe directement full_text en chunks
-        # par mot, on obtient des fragments HTML cassés (`<p>Bonj`, `our,</p>`,
-        # etc.) qui s'affichent comme texte brut côté dialog au stream.
-        # Fix : extraire plain text pour chunks (stream safe) mais garder
-        # full_text pour la normalisation HTML finale du cache.
-        _full_plain = full_text
-        if '<' in _full_plain:
-            _full_plain = _html_to_plain_text(_full_plain, paragraph_break='\n\n')
-            import html as _html_mod_spec
-            _full_plain = _html_mod_spec.unescape(_full_plain).strip()
-
-        # Découper en chunks (plain text, stream safe)
-        chunks = []
-        words = _full_plain.split(' ')
-        batch = []
-        for word in words:
-            batch.append(word)
-            if len(batch) >= 3:
-                chunks.append(' '.join(batch) + ' ')
-                batch = []
-        if batch:
-            chunks.append(' '.join(batch))
-
         with _reply_lock:
             # ANOMALIE #9 fix : ne pas écraser un flag 'cancelled' posé par generate_reply()
             _existing_entry = _reply_cache.get(message_id, {})
@@ -7823,7 +7933,6 @@ def _start_speculative(mail_data):
                                f"(cache exceptionnellement > 500)")
 
             # P0.5 (24/04) : normaliser le texte en HTML avant stockage.
-            # `chunks` restent basés sur full_text (plain) pour streaming sûr.
             text_html = _normalize_reply_to_html(full_text)
             # Phase 1.5 (25/04 soir) — Garde-fou anti-pollution : ne PAS stocker
             # un refus de Claude (body factice/tronqué) qui pollue le cache.
@@ -7831,18 +7940,38 @@ def _start_speculative(mail_data):
                 logger.warning(f"[speculative] DRAFT POUBELLE détecté (probable body factice) "
                                f"pour {message_id[:30]} — non stocké, retry au prochain cycle")
                 return
+            # V12 SALLE Phase C (15/05/2026) — Garde anti-désobéissance Claude
+            # APPLIQUÉE EN CUISINE. Le cache contient désormais la réponse
+            # COMPLÈTE garantie (greeting + body + closing + signature),
+            # plus jamais le corps brut Claude seul. La salle (/api/instant_
+            # reply) et le SSE n'ont plus aucun contrôle à faire — ils livrent
+            # tel quel. Cf invariant I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN.
+            #
+            # Récupération contact_profile + signature à T+0 (cuisson). Si le
+            # profil évolue après (analyze_contact_profile enrichit), le cache
+            # est invalidé via `_invalidate_reply_cache_for_contact` appelée
+            # par `save_contact_profile`. Pas de patches dispersés.
+            _ctx_profile = None
+            try:
+                if from_email:
+                    _ctx_profile = _db.get_contact_profile(from_email)
+            except Exception:
+                _ctx_profile = None
+            _ctx_user_name = _get_user_name()
+            text_html = _ensure_reply_envelope_html(
+                text_html, _ctx_profile, from_email, _ctx_user_name,
+            )
             _reply_cache[message_id] = {
                 'status': 'done',
                 'source': 'bg_speculation',      # pour badge UI "pré-généré"
                 'user_modified': False,          # refactor 23/04 : source de vérité
-                'text': text_html,
-                'chunks': chunks,
+                'text': text_html,               # enveloppe HTML complète (cuisine 3* Michelin)
                 'timestamp': time.time(),
                 'contact': from_email,
                 'importance': importance_letter,
             }
 
-        logger.info(f"Spéculation prête pour {message_id[:20]}... ({len(chunks)} chunks)")
+        logger.info(f"Spéculation prête pour {message_id[:20]}... ({len(text_html)} chars HTML)")
         _broadcast_sse('speculative_ready', {'message_id': message_id})
         # Draft prêt → déclencher preview (échéance + classement + PJ) immédiatement (25/04)
         _spawn_bg(_prewarm_mail_preview, args=(mail_data,), name='preview-post-draft')
@@ -11510,7 +11639,7 @@ def api_instant_reply():
             entry = _reply_cache.get(message_id, {})
         if _is_user_modified(entry) and entry.get('status') == 'done':
             _reply_metric_inc('hits')
-            _log_template_metric('template.draft', message_id)
+            _log_template_metric('instant_reply.draft', message_id)
             logger.info(f"[instant_reply] HIT source=draft msg={message_id[:30]}")
             # P0.5 : garantir HTML propre pour affichage direct côté dialog
             return jsonify({
@@ -11553,130 +11682,19 @@ def api_instant_reply():
                 and entry.get('status') == 'done'
                 and entry.get('text')):
             _reply_metric_inc('hits')
-            # Reconstituer avec greeting/closing via contact_profile
-            contact_profile = None
-            try:
-                if from_email:
-                    contact_profile = _db.get_contact_profile(from_email)
-            except Exception:
-                pass
-            greeting = ((contact_profile or {}).get('greeting', '') or 'Bonjour,')
-            closing = ((contact_profile or {}).get('closing', '') or 'Cordialement,')
-            user_name = _get_user_name()
-            # PLUS_TARD_VF #3 (28/04) — signature personnalisée par contact.
-            # `user_name` reste utilisé pour les gardes anti-self-greeting
-            # (extraction patronyme canonique), `signature` pour le rendu final.
-            signature = _resolve_user_signature(contact_profile, user_name)
-            body = entry.get('text', '')
-
-            # Fix 26/04 (Bug Vincent Lecou greeting) — garde-fou anti
-            # auto-salutation. Si le greeting du profil contient le prénom OU
-            # le nom de famille de l'utilisateur (ex: "Bonjour Yvan,"), c'est
-            # le contact qui salue Yvan, pas Yvan qui salue le contact →
-            # erreur d'analyse `analyze_contact_profile`. Regenerer via le
-            # display_name du contact.
-            # Logique alignée sur stream_from_preemptive ligne 7311+.
-            if user_name and contact_profile:
-                _name_parts = user_name.split()
-                _last = _name_parts[-1].lower() if _name_parts else ''
-                _first = _name_parts[0].lower() if _name_parts else ''
-                _greeting_lower = greeting.lower()
-                _user_in_greeting = (
-                    (_last and len(_last) >= 3 and _last in _greeting_lower) or
-                    (_first and len(_first) >= 3 and _first in _greeting_lower)
-                )
-                if _user_in_greeting:
-                    _prn = (contact_profile.get('display_name') or '').strip()
-                    # display_name peut être "LECOU Vincent" ou "Vincent HUBERT" :
-                    # extraire le 1er token alphabétique avec majuscule initiale.
-                    _prn_parts = [p for p in _prn.split()
-                                  if p and not p.isupper()] or _prn.split()
-                    _firstname = _prn_parts[0] if _prn_parts else ''
-                    greeting = f"Bonjour {_firstname}," if _firstname else "Bonjour,"
-
-            # Fix 21/04 (doublon Bonjour) — Claude génère souvent la réponse
-            # avec un greeting ET un closing inclus. Ajouter greeting/closing
-            # en plus crée des doublons ("Bonjour,\n\nBonjour Jean, ...").
-            # Détection simple : si le body commence/finit déjà par un
-            # greeting/closing reconnu, on ne l'ajoute pas.
-            #
-            # Fix 24/04 (régression P0.5) : le body peut maintenant être en
-            # HTML (`<p>Bonjour,</p>...`) depuis le fix mise-en-forme cache.
-            # `startswith('bonjour')` échouait car la 1ère lettre est `<`.
-            # → Extraire plain text avant détection (strip HTML + entités).
-            import html as _html_mod_check
-            _body_plain = _html_to_plain_text(body, paragraph_break='\n\n')
-            _body_plain = _html_mod_check.unescape(_body_plain)
-            _body_stripped = _body_plain.strip()
-            _body_lower = _body_stripped.lower()
-            _greeting_patterns = ('bonjour', 'bonsoir', 'hello', 'salut',
-                                  'cher ', 'chère ', 'chers ', 'chères ',
-                                  'monsieur', 'madame', 'mesdames', 'messieurs',
-                                  'coucou', 'hi ', 'dear ')
-            has_greeting = any(_body_lower.startswith(p) for p in _greeting_patterns)
-
-            _closing_patterns = ('cordialement', 'bien cordialement',
-                                 'bien à vous', 'bien à toi', 'bien sincèrement',
-                                 'sincèrement', 'amicalement', 'bonne journée',
-                                 'bonne soirée', 'à bientôt', 'à très vite',
-                                 'merci', 'best regards', 'regards',
-                                 'cdlt', 'cdt', 'cordial')
-            # Check si dernière ligne non-vide matche un closing
-            _last_lines = [ln.strip() for ln in _body_stripped.split('\n') if ln.strip()]
-            _last_line_lower = (_last_lines[-1] if _last_lines else '').lower()
-            has_closing = any(_last_line_lower.startswith(p) for p in _closing_patterns)
-            # Fix 24/04 : aussi vérifier l'avant-dernière ligne (souvent le closing
-            # est suivi de la signature user_name, ex: "Cdlt\nyvan")
-            if not has_closing and len(_last_lines) >= 2:
-                _penult_lower = _last_lines[-2].lower()
-                has_closing = any(_penult_lower.startswith(p) for p in _closing_patterns)
-
-            # P0.5 (24/04) : assembler la réponse en HTML prêt à afficher.
-            # Le body du cache est HTML depuis P0.5 — on le garde tel quel.
-            # Fallback : si cache legacy plain text, normalise.
-            import html as _html_mod
-            body_html = body if re.search(r'<(p|br|div)', body, re.IGNORECASE) \
-                             else _normalize_reply_to_html(body)
-
-            html_parts = []
-            if not has_greeting:
-                html_parts.append(f'<p>{_html_mod.escape(greeting, quote=False)}</p>')
-            html_parts.append(body_html)
-
-            # Fix 26/04 (Bug C) — Découpler closing et signature.
-            # Avant : si has_closing → skip closing ET signature.
-            # Problème observé : Claude génère parfois juste "Cdlt" (sans
-            # signature complète) → has_closing=True → step skip TOUT →
-            # résultat : "Cdlt" seul, pas de "Yvan BOSSER..." ajouté.
-            # Idem cas faux positif "Merci de me proposer..." matché comme
-            # closing → skip → user voit body sans signature.
-            # Fix : closing skipé seulement si déjà dans body, MAIS signature
-            # ajoutée si user_name absent du body (via _should_append_signature
-            # Niveau B 26/04 qui scanne le body).
-            should_add_sig = _should_append_signature(closing, signature,
-                                                      body=_body_plain)
-            if not has_closing:
-                # Pas de closing dans body → ajouter closing + signature dans
-                # un SEUL <p> avec <br> (convention email standard, évite
-                # interligne excessive de 2 <p> séparés).
-                sig_block = _html_mod.escape(closing, quote=False)
-                if should_add_sig and signature:
-                    sig_block += '<br>' + _html_mod.escape(signature, quote=False)
-                html_parts.append(f'<p>{sig_block}</p>')
-            elif should_add_sig and signature:
-                # Closing déjà dans body (Cdlt seul, etc.) MAIS pas de
-                # signature → ajouter signature seule après.
-                html_parts.append(f'<p>{_html_mod.escape(signature, quote=False)}</p>')
-
-            _log_template_metric('template.preemptive', message_id)
+            # V12 SALLE Phase C (15/05/2026) — Refonte 3 étoiles Michelin :
+            # le serveur ne contrôle plus, il livre. Toute la garde
+            # anti-désobéissance Claude (5 patches empilés ~115 lignes
+            # avant cette refonte) est centralisée dans `_ensure_reply_
+            # envelope_html` appelé en CUISINE par `_start_speculative`
+            # AVANT stockage cache. Le cache contient déjà la réponse
+            # complète garantie (greeting + body + closing + signature).
+            # Cf invariant I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN.
+            _log_template_metric('instant_reply.preemptive', message_id)
             logger.info(f"[instant_reply] HIT source=preemptive msg={message_id[:30]}")
             return jsonify({
                 "source": "preemptive",
-                # Fix 27/04 (Bug B v3) : '' au lieu de '\n' — pre-wrap CSS
-                # rendait les '\n' entre <p> comme line breaks visibles
-                # additionnels au margin → trop espacé après greeting et
-                # avant closing. Compact uniforme, margin CSS gère seul.
-                "text": ''.join(html_parts),
+                "text": entry.get('text', ''),
                 "html": True,
                 "badge": "Pré-générée",
                 "timestamp": entry.get('timestamp', 0),
@@ -11737,7 +11755,7 @@ def api_instant_reply():
         except Exception:
             pass
     # PLUS_TARD_VF #2 (28/04) — track le code de la miss reason pour stats agrégées
-    _log_template_metric(f"template.miss.{_miss_reason_to_code(miss_reason)}", message_id)
+    _log_template_metric(f"instant_reply.miss.{_miss_reason_to_code(miss_reason)}", message_id)
     logger.info(f"[instant_reply] MISS reason='{miss_reason}' "
                 f"msg={message_id[:30] if message_id else 'no-id'}")
     return jsonify({"source": "none", "miss_reason": miss_reason})
@@ -11745,73 +11763,12 @@ def api_instant_reply():
 
 @app.route('/api/match_template', methods=['POST'])
 def api_match_template():
-    """
-    Teste si un template (fixe ou appris) match le mail ouvert.
-
-    DESACTIVE 11/05/2026 — décision Yvan « Claude partout » étendue aux
-    templates. La route renvoie systématiquement {"match": False} pour
-    que le frontend bascule sur la génération Claude via /generate_reply.
-    Route conservée pour ne pas casser dialog.js (qui appelle cette URL
-    avant de lancer la génération). Logique d'origine commentée plus bas
-    pour réversibilité rapide (5 min).
+    """Stub conservé pour compat dialog.js — Claude génère désormais
+    toutes les réponses (décision Yvan 11/05/2026, ratifiée 15/05 V12
+    Phase C). Le frontend interroge cette route avant `/generate_reply` ;
+    on renvoie systématiquement `match: False` pour basculer sur Claude.
     """
     return jsonify({"match": False, "disabled": True})
-
-    # ----- DESACTIVE 11/05/2026 -----
-    # data = request.get_json() or {}
-    # email_body = data.get('email_body', '') or ''
-    # subject = data.get('subject', '') or ''
-    # brief = data.get('brief', '') or ''
-    # reply_mode = data.get('reply_mode', 'reply') or 'reply'
-    # importance = data.get('importance', 0)
-    # current_draft = data.get('current_draft', '') or ''
-    # from_email = (data.get('from_email', '') or '').lower()
-    # try:
-    #     importance_int = int(importance) if importance else 0
-    # except (ValueError, TypeError):
-    #     importance_int = 0
-    # try:
-    #     learned = [lt for lt in _db.get_learned_templates()
-    #                if lt.get('status') != 'demoted']
-    # except Exception as e:
-    #     logger.warning(f"Erreur get_learned_templates: {e}")
-    #     learned = []
-    # try:
-    #     result = match_template_with_confidence(
-    #         email_body=email_body, subject=subject, brief=brief,
-    #         is_first_mail=(reply_mode == 'new'), reply_mode=reply_mode,
-    #         importance_override=importance_int, current_draft=current_draft,
-    #         learned_templates=learned,
-    #     )
-    # except Exception as e:
-    #     logger.warning(f"Erreur match_template: {e}")
-    #     return jsonify({"match": False, "error": str(e)})
-    # if not result:
-    #     return jsonify({"match": False})
-    # contact_profile = None
-    # try:
-    #     if from_email:
-    #         contact_profile = _db.get_contact_profile(from_email)
-    # except Exception:
-    #     pass
-    # user_name = _get_user_name()
-    # signature = _resolve_user_signature(contact_profile, user_name)
-    # if result['source'] == 'fixed':
-    #     text = assemble_template(result['template_dict'], contact_profile, signature)
-    # else:
-    #     text = assemble_learned_template(result['learned'], contact_profile, signature)
-    # confidence = result['confidence']
-    # return jsonify({
-    #     "match": True,
-    #     "template": text,
-    #     "template_id": result['template_id'] if result['source'] == 'fixed'
-    #                    else f"learned_{result['template_id']}",
-    #     "template_name": result['template_name'],
-    #     "source": result['source'],
-    #     "confidence": confidence,
-    #     "threshold_passed": confidence >= 0.75,
-    # })
-    # ----- /DESACTIVE 11/05/2026 -----
 
 
 @app.route('/api/template_feedback', methods=['POST'])
@@ -12424,10 +12381,14 @@ def api_admin_templates_stats():
         conn = _db._conn()
         c = conn.cursor()
 
-        # 1. Totaux par catégorie (template.* et learned_tpl.*)
+        # 1. Totaux par catégorie (instant_reply.* / legacy template.* / learned_tpl.*).
+        # V12 SALLE Phase C (15/05/2026) — renommage `template.*` → `instant_reply.*`.
+        # On lit les deux préfixes pour préserver la lecture des métriques historiques.
         c.execute(
             "SELECT action, COUNT(*) as n FROM metrics "
-            "WHERE (action LIKE 'template.%' OR action LIKE 'learned_tpl.%') "
+            "WHERE (action LIKE 'instant_reply.%' "
+            "       OR action LIKE 'template.%' "
+            "       OR action LIKE 'learned_tpl.%') "
             "AND datetime(created_at) >= datetime('now', ?) "
             "GROUP BY action ORDER BY n DESC",
             (f'-{days} days',)
@@ -12444,25 +12405,30 @@ def api_admin_templates_stats():
         learned_usage_inc = 0
 
         for action, n in all_actions:
-            # template.* events
-            if action == 'template.draft':
+            # Normalise legacy `template.*` (avant 15/05/2026) en `instant_reply.*`
+            # pour aggrégation uniforme — pas de patch sur patch, conversion en ligne.
+            _norm = action
+            if action.startswith('template.'):
+                _norm = 'instant_reply.' + action[len('template.'):]
+            # instant_reply.* events
+            if _norm == 'instant_reply.draft':
                 by_source['draft'] += n
                 instant_reply_total += n
-            elif action == 'template.preemptive':
+            elif _norm == 'instant_reply.preemptive':
                 by_source['preemptive'] += n
                 instant_reply_total += n
-            elif action == 'template.learned':
+            elif _norm == 'instant_reply.learned':
                 by_source['learned'] += n
                 instant_reply_total += n
-            elif action.startswith('template.fixed.'):
+            elif _norm.startswith('instant_reply.fixed.'):
                 by_source['fixed'] += n
                 instant_reply_total += n
-                tpl_name = action[len('template.fixed.'):]
+                tpl_name = _norm[len('instant_reply.fixed.'):]
                 top_fixed_templates[tpl_name] = top_fixed_templates.get(tpl_name, 0) + n
-            elif action.startswith('template.miss.'):
+            elif _norm.startswith('instant_reply.miss.'):
                 by_source['miss'] += n
                 instant_reply_total += n
-                reason = action[len('template.miss.'):]
+                reason = _norm[len('instant_reply.miss.'):]
                 miss_reasons[reason] = miss_reasons.get(reason, 0) + n
             # learned_tpl.* events
             elif action.startswith('learned_tpl.skipped.'):
@@ -12646,68 +12612,44 @@ def generate_reply():
 
     # Cache unifié (Plan 3 §9.1) : pas de TTL — purge purement événementielle.
     # Safety net 4 semaines géré par le thread `_reply_cache_safety_net_loop`.
+    #
+    # V12 SALLE Phase C (15/05/2026) — Refonte 3 étoiles Michelin :
+    # `cached_text` contient la réponse COMPLÈTE garantie (greeting + body +
+    # closing + signature) car `_start_speculative` (la cuisine) applique
+    # `_ensure_reply_envelope_html` AVANT stockage. La salle livre tel quel
+    # en un chunk unique — perception « réponse instantanée pré-générée »
+    # qui valorise le pré-cuit. Plus aucune reconstruction côté salle.
+    # Cf invariant I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN.
     if message_id and not brief:
         with _reply_lock:
             cached = _reply_cache.get(message_id, {})
-            if cached.get('status') == 'done' and cached.get('chunks'):
-                cached_chunks = list(cached['chunks'])      # copie locale (thread-safe)
+            if cached.get('status') == 'done' and cached.get('text'):
                 cached_text = cached.get('text', '')        # copie locale
-                cache_age = time.time() - cached.get('ts', time.time())
+                cache_age = time.time() - cached.get('timestamp', time.time())
+                _preemptive_imp = cached.get('importance', 'S')
                 _reply_cache.pop(message_id, None)     # consommé → pop immédiat
             else:
-                cached_chunks = None
                 cached_text = ''
                 cache_age = 0.0
-        if cached_chunks:
+                _preemptive_imp = 'S'
+        if cached_text:
             logger.info(f"Cache préemptif HIT pour {message_id[:20]} (age={cache_age:.0f}s)")
             # Nettoyer aussi le prefetch_cache (contexte A/B/C déjà consommé par la spéculation)
             with _prefetch_lock:
                 _prefetch_cache.pop(message_id, None)
 
-            # Reconstruire greeting/closing (le cache contient seulement le corps)
-            _preemptive_from = cached.get('contact', '')
-            _preemptive_imp = cached.get('importance', 'S')
-            _preemptive_cp = _db.get_contact_profile(_preemptive_from) if _preemptive_from else None
-            # STAND-BY S4 — helper centralisé (avant : ~30 lignes dupliquées)
-            _preemptive_uname = _get_user_name()
-            _preemptive_greeting, _preemptive_closing = _normalize_reply_greeting_closing(
-                _preemptive_cp, _preemptive_from, _preemptive_uname
-            )
-            # PLUS_TARD_VF #3 (28/04) — signature résolue par contact
-            # (override par contact_profile sinon settings.user_name).
-            _preemptive_sig = _resolve_user_signature(_preemptive_cp, _preemptive_uname)
-
-            # Audit 08/05 fix doublons — détection migration douce.
-            # Le cached_text peut être :
-            #   - LEGACY (corps seul, généré sous l'ancien postfix "NE PAS
-            #     inclure d'ouverture") → on injecte greeting/closing/signature
-            #     en local pour rendre le draft complet
-            #   - NEW (mail complet, généré sous le nouveau prompt « Claude
-            #     partout ») → on skip l'injection (sinon doublon)
-            _cached_has_greeting = _body_has_greeting(cached_text)
-            _cached_has_closing = _body_has_closing(cached_text)
+            # Le cache contient l'enveloppe HTML complète. Pour le protocole SSE
+            # (frontend rend `chunk` via `insertAdjacentText` = texte brut), on
+            # dérive la version plain text via `_html_to_plain_text`. Le résultat
+            # est correct grammaticalement car la cuisine a déjà garanti
+            # greeting + body + closing + signature dans l'enveloppe.
+            cached_plain = _html_to_plain_text(cached_text, paragraph_break='\n\n')
 
             def stream_from_preemptive():
-                # Greeting — skip si cached_text en a déjà un (cas Claude génère tout)
-                _greeting_html = ''
-                if not _cached_has_greeting:
-                    _greeting_html = f"{_preemptive_greeting}\n\n"
-                    yield f"data: {json.dumps({'chunk': _greeting_html})}\n\n"
-                # Corps (chunks du cache)
-                for chunk in cached_chunks:
-                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
-                    time.sleep(0.05)  # Délai progressif (perception)
-                # Closing + signature — skip si cached_text en a déjà
-                _closing_html = ''
-                if not _cached_has_closing:
-                    _closing_html = f"\n\n{_preemptive_closing}"
-                    # Fix 24/04 (Bug C) + Niveau B (26/04) : skip signature si
-                    # closing contient déjà le prénom user OU body a sig inline.
-                    if _preemptive_sig and _should_append_signature(_preemptive_closing, _preemptive_sig, body=cached_text):
-                        _closing_html += f"\n{_preemptive_sig}"
-                    yield f"data: {json.dumps({'chunk': _closing_html})}\n\n"
+                # Cuisine garantit le plat complet — salle livre tel quel.
+                yield f"data: {json.dumps({'chunk': cached_plain})}\n\n"
                 if message_id:
-                    _store_proposed(message_id, _greeting_html + cached_text + _closing_html)
+                    _store_proposed(message_id, cached_text)
                 yield f"data: {json.dumps({'done': True, 'importance_used': _preemptive_imp})}\n\n"
 
             return Response(
@@ -13071,121 +13013,39 @@ INSTRUCTIONS ECHEANCES :
     # final ; `user_name` reste pour les gardes anti-self-greeting (patronyme).
     signature = _resolve_user_signature(contact_profile, user_name)
 
-    # Templates désactivés 11/05/2026 — décision Yvan « Claude partout » étendue
-    # aux templates (cf bilan 8/05 + bug greeting profil sur mail Alain).
-    # Bloc conservé en commentaire pour réversibilité rapide (5 min).
-    # ----- DESACTIVE 11/05/2026 -----
-    # try:
-    #     tpl, tpl_name = detect_template(
-    #         email_body=raw_body,  # déjà cappé à 10K plus haut
-    #         subject=subject,
-    #         brief=brief,
-    #         is_first_mail=(reply_mode == 'new'),
-    #         reply_mode=reply_mode,
-    #         importance_override=importance_int,
-    #     )
-    #     if tpl:
-    #         tpl_text = assemble_template(tpl, contact_profile, signature)
-    #         logger.info(f"Template '{tpl_name}' pour {message_id[:20] if message_id else '?'}")
-    #         if message_id:
-    #             with _reply_lock:
-    #                 entry = _reply_cache.get(message_id, {})
-    #                 if entry.get('status') == 'running':
-    #                     _reply_cache[message_id] = {'status': 'cancelled'}
-    #         def stream_template():
-    #             words = tpl_text.split(' ')
-    #             for i in range(0, len(words), 3):
-    #                 chunk = ' '.join(words[i:i+3]) + ' '
-    #                 yield f"data: {json.dumps({'chunk': chunk})}\n\n"
-    #                 time.sleep(0.02)
-    #             if message_id:
-    #                 _store_proposed(message_id, tpl_text)
-    #             yield f"data: {json.dumps({'done': True, 'importance_used': importance_letter})}\n\n"
-    #         return Response(
-    #             stream_with_context(stream_template()),
-    #             mimetype='text/event-stream',
-    #             headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
-    #         )
-    # except Exception as e:
-    #     logger.warning(f"Erreur detect_template generate_reply: {e}")
-    # ----- /DESACTIVE 11/05/2026 -----
-
     # max_tokens déjà calculé en haut selon importance_letter
 
     def generate_sse():
         full_text = []
         try:
-            # Audit 08/05 fix doublons — décision « Claude partout » :
-            # Claude génère ouverture+corps+clôture+signature. On capture
-            # tous les chunks pour décider rétrospectivement si on doit
-            # injecter greeting/closing en local (cas dégradé : Claude a
-            # désobéi au prompt et n'a pas généré d'ouverture).
-            # Avant : greeting toujours injecté en tête → doublon si Claude
-            # générait aussi le sien.
-            _streamed_chunks = []  # accumulateur pour détecter post-stream
+            # V12 SALLE Phase C (15/05/2026) — Cuisson à la commande :
+            # Claude génère en live (typewriter UX côté frontend). À la fin
+            # du stream, la cuisine finalise le plat via
+            # `_ensure_reply_envelope_html` (garde unique anti-désobéissance
+            # Claude). Si le résultat diffère du brut streamé (markdown,
+            # HTML parasite, greeting/closing/signature manquants), on
+            # swap l'éditeur via `replace_body` en plain text.
+            # Cf invariant I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN.
 
             # Streaming du corps IA (Claude génère TOUT : ouverture+corps+clôture)
             for chunk in ai.generate_reply(system_prompt, user_prompt,
                                            max_tokens=max_tokens, temperature=0.3,
                                            stream=True):
-                _streamed_chunks.append(chunk)
                 full_text.append(chunk)
                 yield f"data: {json.dumps({'chunk': chunk})}\n\n"
 
-            # Audit 08/05 fix doublons — full_text contient maintenant tout
-            # le draft Claude (ouverture+corps+clôture+signature). Avant :
-            # full_text[0] = greeting injecté en local, [1:] = body Claude.
-            # Markdown cleanup (strip **bold**, *italic*, #headers, - bullets)
-            _body_text = ''.join(full_text)
-            _body_clean = re.sub(r'\*\*(.+?)\*\*', r'\1', _body_text)
-            _body_clean = re.sub(r'\*(.+?)\*', r'\1', _body_clean)
-            _body_clean = re.sub(r'^#+\s*', '', _body_clean, flags=re.MULTILINE)
-            _body_clean = re.sub(r'^\s*[-•]\s+', '', _body_clean, flags=re.MULTILINE)
-            # Fix 24/04 (P1) — filet de sécurité : strip balises HTML si Claude
-            # a malgré tout généré du HTML (< = balise ouvrante détectée).
-            _had_html = '<' in _body_clean
-            if _had_html:
-                _body_clean = re.sub(r'<br\s*/?>', '\n', _body_clean, flags=re.IGNORECASE)
-                _body_clean = re.sub(r'</p>\s*<p[^>]*>', '\n\n', _body_clean, flags=re.IGNORECASE)
-                _body_clean = re.sub(r'<p[^>]*>', '', _body_clean, flags=re.IGNORECASE)
-                _body_clean = re.sub(r'</p>', '\n\n', _body_clean, flags=re.IGNORECASE)
-                _body_clean = _HTML_TAG_RE.sub('',_body_clean)
-                import html as _html_mod_stream
-                _body_clean = _html_mod_stream.unescape(_body_clean)
-                _body_clean = re.sub(r'\n{3,}', '\n\n', _body_clean).strip()
-                logger.info(f"[generate_reply] balises HTML strippées (Claude a ignoré l'instruction plain)")
-            if _body_clean != _body_text:
-                full_text[:] = [_body_clean]
-
-            # Audit 08/05 fix doublons — injection closing+signature en local
-            # UNIQUEMENT si Claude n'en a pas déjà généré (cas dégradé : Claude
-            # a oublié la clôture/signature malgré le contexte du Bloc D).
-            # Avant : closing+signature toujours injectés → doublon avec
-            # ce que Claude générait selon Bloc D ("Cordialement, Yvan").
-            if not _body_has_closing(_body_clean):
-                closing_html = f"\n\n{closing}"
-                if signature and _should_append_signature(closing, signature, body=_body_clean):
-                    closing_html += f"\n{signature}"
-                yield f"data: {json.dumps({'chunk': closing_html})}\n\n"
-                full_text.append(closing_html)
-
-            # Audit 08/05 fix doublons — filet de sécurité greeting :
-            # Si Claude a misbehavé et omis l'ouverture (rare, mais possible
-            # quand le profil D a une confiance faible), on émet un
-            # replace_body avec le greeting injecté en tête. L'éditeur côté
-            # dialog swap d'un coup pour ne pas afficher un draft sans
-            # ouverture.
-            _final_check = ''.join(full_text)
-            if not _body_has_greeting(_final_check) and greeting:
-                _final_check = f"{greeting}\n\n{_final_check.lstrip()}"
-                full_text[:] = [_final_check]
-                yield f"data: {json.dumps({'replace_body': _final_check})}\n\n"
-                logger.info("[generate_reply] greeting injecté en post (Claude a omis l'ouverture)")
-            # Fix 24/04 : si Claude a généré du HTML, émettre replace_body
-            # avec le texte FINAL complet pour que le dialog swap d'un coup.
-            elif _had_html:
-                _full_replace = ''.join(full_text)
-                yield f"data: {json.dumps({'replace_body': _full_replace})}\n\n"
+            # Cuisson terminée — la cuisine assemble l'enveloppe complète garantie.
+            _body_raw = ''.join(full_text)
+            _envelope_html = _ensure_reply_envelope_html(
+                _body_raw, contact_profile, correspondent, user_name,
+            )
+            # Le protocole SSE rend `chunk`/`replace_body` en plain text
+            # (`insertAdjacentText` / `innerText`). On dérive donc la version
+            # plain depuis l'enveloppe HTML produite par la cuisine.
+            _final_plain = _html_to_plain_text(_envelope_html, paragraph_break='\n\n')
+            if _final_plain != _body_raw:
+                full_text[:] = [_final_plain]
+                yield f"data: {json.dumps({'replace_body': _final_plain})}\n\n"
 
             # -- GARDE POST-GÉNÉRATION (Python pur, <5ms) --
             _pg_warnings = []
@@ -13408,17 +13268,17 @@ def _body_has_greeting(text):
     """Audit 08/05 fix doublons — Détecte si le body commence par une
     ouverture (Bonjour/Salut/Hello/Cher/Bonsoir/Hi/Hey...).
 
-    Utilisé pour la migration vers « Claude génère ouverture+corps+clôture+
-    signature en intégralité ». Permet à stream_from_preemptive et
-    generate_sse de skipper l'injection locale du greeting quand le body
-    en contient déjà un.
-
-    Strip HTML simple (cas des cached_text en HTML format) avant détection.
+    V12 SALLE Phase C (15/05) : utilise `_html_to_plain_text` avec
+    paragraph_break='\\n' (vs ancien strip naïf qui ratait les `<p>` sans
+    `\\n` natif — bug latent caché par les 5 patches du serveur). Le HTML
+    produit par `_normalize_reply_to_html` est compact (`</p><p>` sans
+    `\\n`), donc l'ancien split('\\n') ne séparait pas les paragraphes.
     """
     if not text or not isinstance(text, str):
         return False
-    # Strip HTML basique pour détecter "Bonjour" même dans <p>Bonjour...</p>
-    plain = _HTML_TAG_RE.sub('', text) if '<' in text else text
+    # Conversion HTML → plain text avec séparation paragraphes en \n.
+    # `_html_to_plain_text` remplace <br> et <p>/</p> par \n avant strip tags.
+    plain = _html_to_plain_text(text, paragraph_break='\n') if '<' in text else text
     for line in plain.split('\n'):
         s = line.strip()
         if s:
@@ -13431,12 +13291,16 @@ def _body_has_closing(text):
     """Audit 08/05 fix doublons — Détecte si le body se termine par une
     clôture (Cordialement/Cdlt/Bien à vous/Amicalement/...).
 
+    V12 SALLE Phase C (15/05) : utilise `_html_to_plain_text` avec
+    paragraph_break='\\n' pour séparer correctement les paragraphes HTML
+    compacts (cf `_body_has_greeting` même bug latent fixé).
+
     Pendant à _body_has_greeting, regarde les 2 dernières lignes non-vides
     (couvre le cas "Cordialement,\\nYvan" où la signature suit le closing).
     """
     if not text or not isinstance(text, str):
         return False
-    plain = _HTML_TAG_RE.sub('', text) if '<' in text else text
+    plain = _html_to_plain_text(text, paragraph_break='\n') if '<' in text else text
     nonempty = [l.strip() for l in plain.split('\n') if l.strip()]
     if not nonempty:
         return False
