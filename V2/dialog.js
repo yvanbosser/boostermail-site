@@ -3605,20 +3605,41 @@ function _onGenerationDone(streamedText) {
             }).then(function(r) { return r.json(); }).then(function(data) {
                 console.log('[option-c] response:', data);
                 if (!data) data = {};
-                // Échéance — 07/05 fix Yvan : date formatée FR ; fallback
-                // "(date à préciser)" si Claude n'a pas converti ; card cliquable.
+                // Échéance — V12 Phase 1 (15/05/2026) : dispatch sur les 3 cas
+                // produits par `_normalize_echeance_payload` côté serveur (cf
+                // app_plugin.py:14007+ et §6 bis du journal). Plus de fiches
+                // pourries (description vide + date non-ISO + date passée)
+                // grâce au validateur backend ; la carte affiche désormais
+                // également les "mentions vagues" (Cas C) en orange comme
+                // invitation à création manuelle via l'overlay.
+                //   - data.echeance == null                  → "Néant" (silence)
+                //   - data.echeance.description non vide     → Cas A/B (titre desc + date FR ou "date à préciser")
+                //   - data.echeance.description vide+extrait → Cas C ("Vous mentionnez 'X'" en orange)
                 var echEl = document.getElementById('infoEcheanceContent');
                 if (echEl) {
                     if (data.echeance) {
                         var d = data.echeance;
-                        var desc = (d.description || 'Échéance détectée').slice(0, 80);
-                        var dateStr = _formatEcheanceDateFR(d.date_echeance);
-                        if (dateStr) {
-                            echEl.innerHTML = _escapeHtml(desc)
-                                + '<br><span style="color:#888;font-size:11px;">' + _escapeHtml(dateStr) + '</span>';
+                        var hasDesc = !!(d.description && d.description.trim());
+                        if (hasDesc) {
+                            // Cas A/B — engagement avec description actionnable.
+                            var desc = d.description.slice(0, 80);
+                            var dateStr = _formatEcheanceDateFR(d.date_echeance);
+                            if (dateStr) {
+                                echEl.innerHTML = _escapeHtml(desc)
+                                    + '<br><span style="color:#888;font-size:11px;">' + _escapeHtml(dateStr) + '</span>';
+                            } else {
+                                echEl.innerHTML = _escapeHtml(desc)
+                                    + '<br><span style="color:#c62828;font-size:11px;font-style:italic;">date à préciser</span>';
+                            }
                         } else {
-                            echEl.innerHTML = _escapeHtml(desc)
-                                + '<br><span style="color:#c62828;font-size:11px;font-style:italic;">date à préciser</span>';
+                            // Cas C — signal d'engagement/urgence vague sans description claire.
+                            // Affichage orange pour suggérer l'action manuelle (overlay au clic).
+                            var extraitDisp = (d.extrait || '').slice(0, 60);
+                            var titreC = extraitDisp
+                                ? 'Vous mentionnez « ' + extraitDisp + ' »'
+                                : 'Signal d’engagement détecté';
+                            echEl.innerHTML = '<span style="color:#e65100;">' + _escapeHtml(titreC) + '</span>'
+                                + '<br><span style="color:#888;font-size:11px;font-style:italic;">cliquer pour créer manuellement</span>';
                         }
                         _setEcheanceCardClickable(true);
                     } else {

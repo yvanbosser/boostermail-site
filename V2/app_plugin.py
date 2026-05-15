@@ -10746,7 +10746,11 @@ def _match_for_check_sender(echeance, subject):
 # `V2/utils_date.py` (source de vérité unique partagée avec `claude_ai.py`,
 # évite les imports circulaires). Réexposition locale pour les call-sites
 # internes qui utilisaient déjà les noms underscored.
-from utils_date import parse_db_date as _parse_db_date, format_date_fr as _format_date_fr  # noqa: E402
+from utils_date import (  # noqa: E402
+    parse_db_date as _parse_db_date,
+    format_date_fr as _format_date_fr,
+    extract_fr_dates as _extract_fr_dates,
+)
 
 
 def _auto_cancel_echeances_on_reply(to_email, subject, cached_email, exclude_ids=None):
@@ -14003,6 +14007,85 @@ def _compose_synthetic_mid(to, subject, body):
     return f'compose_{h}'
 
 
+def _normalize_echeance_payload(payload, today):
+    """Normalise le payload échéance du commis Haiku compose-sortants.
+
+    Ferme le « trou unique » Moment 2 du §6 bis du journal (Obs-F8 / Obs-F10) :
+    avant V12, la route compose sérialisait le payload Haiku tel quel, exposant
+    le frontend aux fiches pourries (date non-ISO, description vide, date passée).
+
+    Trois sorties possibles côté frontend (cf docs/architecture/REFONTE_N1_N11_JOURNAL.md §6 bis) :
+        - description non vide + date_echeance non vide → popup Cas A auto-rempli
+        - description non vide + date_echeance vide   → popup Cas B (datepicker à compléter)
+        - description vide   + extrait non vide      → popup Cas C (« Vous mentionnez X, créer ? »)
+    Retour None uniquement si description + date + extrait sont tous vides.
+
+    Le renommage `date` → `date_echeance` corrige le bug pré-existant N6.1
+    (P0-1 démolisseur V12) : `V2/dialog.js` lit `data.echeance.date_echeance`
+    partout (lignes 386, 2433, 2636, 3615, 4247) mais le payload Haiku exposait
+    `data.echeance.date`. Le Cas A affichait donc systématiquement le fallback
+    « date à préciser » alors que Haiku avait bien détecté la date.
+
+    Le fallback `extract_fr_dates(extrait)` promeut un Cas B en Cas A si une
+    date FR (ex: « 15 décembre 2026 ») est extractible depuis l'extrait littéral.
+
+    Args:
+        payload: dict {description?, date?, extrait?} produit par le parser
+            `_parse_line` (claude_ai.py), ou autre type (None, str — résilience
+            contre bourdes LLM).
+        today: `datetime.date` du jour. Frontière inclusive : un mail envoyé
+            aujourd'hui peut légitimement avoir une échéance « pour ce soir »
+            (date == today acceptée).
+
+    Returns:
+        dict `{description: str, date_echeance: str, extrait: str}` plat,
+        ou `None` si rien à signaler.
+    """
+    if not isinstance(payload, dict):
+        return None
+
+    desc = (payload.get('description') or '').strip()[:200]
+    raw_date = (payload.get('date') or '').strip()
+    extrait = (payload.get('extrait') or '').strip()[:100]
+
+    # Validation date : YYYY-MM-DD strict ET >= today (frontière inclusive).
+    date_echeance = ''
+    if re.match(r'^\d{4}-\d{2}-\d{2}$', raw_date):
+        try:
+            d = datetime.strptime(raw_date, '%Y-%m-%d').date()
+            if d >= today:
+                date_echeance = raw_date
+        except ValueError:
+            # Ex: '2026-02-30' (jour invalide). On reste sur date vide,
+            # le fallback FR ci-dessous peut encore sauver le coup.
+            pass
+
+    # Fallback FR : si pas de date ISO valide mais extrait présent, tenter
+    # d'extraire une date « jour + mois » de l'extrait (« 15 décembre 2026 »,
+    # « le 18 mai »). Promeut un Cas B/C en Cas A automatiquement.
+    # P1-1 démolisseur : on prend la première candidate future trouvée. Edge
+    # case fin d'année (mois implicite année suivante) reporté Phase 2.
+    if not date_echeance and extrait:
+        for dt, _match in _extract_fr_dates(extrait, today.year):
+            if dt.date() >= today:
+                date_echeance = dt.strftime('%Y-%m-%d')
+                break
+
+    # Silence complet uniquement si vraiment rien à signaler. Si Haiku a
+    # produit une fiche avec date présente mais description+extrait vides
+    # (bug LLM), on laisse passer en Cas C dégradé — le frontend affichera
+    # un placeholder. Préserve la promesse « plus jamais de silence quand
+    # un signal existe ».
+    if not desc and not date_echeance and not extrait:
+        return None
+
+    return {
+        'description': desc,
+        'date_echeance': date_echeance,
+        'extrait': extrait,
+    }
+
+
 @app.route('/api/post_generation_analyze', methods=['POST'])
 def api_post_generation_analyze():
     """Analyse post-génération mode new (cas C2 spec §4) — délègue au moteur
@@ -14106,20 +14189,32 @@ def api_post_generation_analyze():
     _set_mail_preview(mid, 'classement', 'done', cls_data)
     _set_mail_preview(mid, 'pj_classement', 'done', pj_data)
 
-    # Échéance via le commis (mail brouillon → échéance probable que le user prend)
+    # Échéance via le commis (mail brouillon → échéance probable que le user prend).
+    # V12 Phase 1 (15/05/2026) : `signal_without_date=True` active la philosophie
+    # permissive Cas A/B/C (cf §6 bis journal). Le payload Haiku est ensuite
+    # normalisé par `_normalize_echeance_payload` qui ferme le « trou unique »
+    # Moment 2 (Obs-F8 / Obs-F10) et corrige le rename frontend `date_echeance`.
     echeance_data = None
     try:
         builder = _get_prompt_builder()
         if builder and hasattr(builder, 'analyze_one_mail_stream'):
             for kind, payload in builder.analyze_one_mail_stream(
-                mail_data, folders_outlook=[], folders_windows=[]
+                mail_data, folders_outlook=[], folders_windows=[],
+                signal_without_date=True,
             ):
                 if kind == 'echeance':
-                    echeance_data = payload
+                    # Premier-gagne déjà appliqué côté parser ; defense-in-
+                    # depth : on ne réécrase pas si on a déjà capté un payload.
+                    if echeance_data is None:
+                        echeance_data = payload
                 elif kind == 'end':
                     break
     except Exception as e:
         logger.warning(f"[post_gen_analyze] echeance: {e}")
+
+    # Normalisation : valide ISO + futur, fallback FR, rename date_echeance.
+    # Retourne None si vraiment rien à signaler → frontend ne pop pas.
+    echeance_data = _normalize_echeance_payload(echeance_data, datetime.now().date())
 
     # Lecture résultat depuis _mail_preview_cache (alimenté par les prewarm)
     with _mail_preview_lock:

@@ -1330,49 +1330,206 @@ def test_F9_mail_sans_imid():
     return ok
 
 
-def test_F10_compose_post_generation():
-    """F10 — Route `/api/post_generation_analyze` (compose sortants — scope V1
-    principal SPEC_ECHEANCES). Le builder reçoit le mail brouillon, retourne
-    une échéance, qui est intégrée dans la réponse JSON."""
-    # On utilise Flask test client
-    try:
-        client = ap.app.test_client()
-    except Exception as e:
-        return log_test(f"F10 setup Flask test_client KO: {e}", False)
+def _f10_call_route_with_mock(echeance_payload, extra_yield=None):
+    """Helper F10 V12 — appelle la route compose avec un mock builder qui yield
+    une échéance contrôlée. Retourne (resp, data, seen_kwargs) ou lève en cas
+    de problème de setup Flask.
 
+    Le mock yield le payload donné comme event 'echeance' puis 'end'. Permet
+    de tester `_normalize_echeance_payload` côté route (intégration mock builder
+    → route → normalize → JSON) sans appel IA réel.
+
+    `extra_yield` (optionnel) permet de yield des events supplémentaires avant
+    'end' — utile pour tester le premier-gagne (2 échéances).
+    """
+    client = ap.app.test_client()
     _orig_get_builder = ap._get_prompt_builder
-    seen_call = {'value': False}
+    seen_kwargs = {}
 
     class _MockBuilder:
         def analyze_one_mail_stream(self, *args, **kwargs):
-            seen_call['value'] = True
-            # Yield echeance event puis end
-            yield ('echeance', {'description': 'Livrable client',
-                                 'date': '2026-12-15'})
+            seen_kwargs.update(kwargs)
+            if echeance_payload is not None:
+                yield ('echeance', echeance_payload)
+            if extra_yield:
+                for ev in extra_yield:
+                    yield ev
             yield ('end', {})
 
     ap._get_prompt_builder = lambda: _MockBuilder()
     try:
         resp = client.post('/api/post_generation_analyze', json={
             'to': 'client@example.com',
-            'subject': 'Engagement projet',
-            'body': "Bonjour, je vous confirme la livraison du livrable client "
-                    "pour le 15 décembre 2026. Bien cordialement.",
+            'subject': 'Engagement projet V12',
+            'body': "Bonjour, ceci est un body de longueur raisonnable pour "
+                    "passer le filtre minimum requis par la route compose. "
+                    "Cordialement.",
             'pj_names': [],
         })
         data = resp.get_json() or {}
-    except Exception as e:
-        ap._get_prompt_builder = _orig_get_builder
-        return log_test(f"F10 appel route KO: {e}", False)
     finally:
         ap._get_prompt_builder = _orig_get_builder
+    return resp, data, seen_kwargs
 
-    ok = log_test(f"F10 route /api/post_generation_analyze : status 200 (got {resp.status_code})",
+
+def test_F10a_compose_cas_A_happy_path():
+    """F10a — Cas A : description + date ISO future + extrait → echeance
+    présente avec date_echeance ISO (renommée depuis 'date', cf P0-1)."""
+    payload = {
+        'description': 'Livrable client',
+        'date': '2026-12-15',
+        'extrait': 'avant le 15 décembre',
+    }
+    resp, data, kw = _f10_call_route_with_mock(payload)
+    ok = log_test(f"F10a route status 200 (got {resp.status_code})",
                   resp.status_code == 200)
-    ok &= log_test(f"F10 compose : builder appelé (got {seen_call['value']})",
-                   seen_call['value'] is True)
-    ok &= log_test(f"F10 compose : échéance dans la réponse (got={data.get('echeance')!r})",
-                   bool(data.get('echeance')))
+    ok &= log_test("F10a route passe signal_without_date=True au commis",
+                    kw.get('signal_without_date') is True,
+                    f"got={kw.get('signal_without_date')!r}")
+    ech = data.get('echeance')
+    ok &= log_test(f"F10a echeance présente dans réponse (got={ech!r})",
+                    ech is not None)
+    if ech is None:
+        return False
+    ok &= log_test("F10a description conservée",
+                    ech.get('description') == 'Livrable client')
+    ok &= log_test("F10a date_echeance ISO présente (fix P0-1 rename)",
+                    ech.get('date_echeance') == '2026-12-15')
+    ok &= log_test("F10a pas de clé 'date' (rename complet)",
+                    'date' not in ech)
+    return ok
+
+
+def test_F10b_compose_cas_B_pending_date_floue():
+    """F10b — Cas B pending : description présente + date vide + extrait sans
+    date FR résoluble → echeance présente avec date_echeance vide (le frontend
+    affichera datepicker à compléter)."""
+    payload = {
+        'description': 'Confirmer planning',
+        'date': '',
+        'extrait': 'cette semaine si possible',
+    }
+    resp, data, _ = _f10_call_route_with_mock(payload)
+    ok = log_test(f"F10b route status 200 (got {resp.status_code})",
+                  resp.status_code == 200)
+    ech = data.get('echeance')
+    ok &= log_test("F10b echeance présente (Cas B)", ech is not None)
+    if ech is None:
+        return False
+    ok &= log_test("F10b description présente",
+                    ech.get('description') == 'Confirmer planning')
+    ok &= log_test("F10b date_echeance vide (à compléter par user)",
+                    ech.get('date_echeance') == '')
+    return ok
+
+
+def test_F10c_compose_cas_A_via_fallback_fr():
+    """F10c — Cas A via fallback : description + date vide (Haiku n'a pas
+    formaté ISO) + extrait avec date FR « 15 décembre 2026 » → fallback
+    `extract_fr_dates` promeut → date_echeance ISO."""
+    payload = {
+        'description': 'Présenter livrable',
+        'date': '',
+        'extrait': 'avant le 15 décembre 2026',
+    }
+    resp, data, _ = _f10_call_route_with_mock(payload)
+    ok = log_test(f"F10c route status 200 (got {resp.status_code})",
+                  resp.status_code == 200)
+    ech = data.get('echeance')
+    ok &= log_test("F10c echeance présente", ech is not None)
+    if ech is None:
+        return False
+    ok &= log_test("F10c date_echeance promue via fallback FR",
+                    ech.get('date_echeance') == '2026-12-15',
+                    f"got={ech.get('date_echeance')!r}")
+    return ok
+
+
+def test_F10d_compose_cas_C_mention_vague():
+    """F10d — Cas C : description vide + extrait vague « au plus vite »
+    → echeance présente avec description vide (frontend affichera popup
+    « Vous mentionnez "au plus vite", créer manuellement ? »)."""
+    payload = {
+        'description': '',
+        'date': '',
+        'extrait': 'au plus vite',
+    }
+    resp, data, _ = _f10_call_route_with_mock(payload)
+    ok = log_test(f"F10d route status 200 (got {resp.status_code})",
+                  resp.status_code == 200)
+    ech = data.get('echeance')
+    ok &= log_test("F10d echeance présente (Cas C mention)", ech is not None)
+    if ech is None:
+        return False
+    ok &= log_test("F10d description vide (signal vague)",
+                    ech.get('description') == '')
+    ok &= log_test("F10d extrait conservé pour titre popup",
+                    ech.get('extrait') == 'au plus vite')
+    return ok
+
+
+def test_F10e_compose_date_passee_bascule_pending():
+    """F10e — Date passée (anti-régression) : description + date passée
+    + extrait sans date résoluble → date rejetée (basculement en pending),
+    mais la fiche est conservée (description présente → Cas B)."""
+    payload = {
+        'description': 'Vieille promesse',
+        'date': '2025-01-01',
+        'extrait': 'comme convenu',
+    }
+    resp, data, _ = _f10_call_route_with_mock(payload)
+    ok = log_test(f"F10e route status 200 (got {resp.status_code})",
+                  resp.status_code == 200)
+    ech = data.get('echeance')
+    ok &= log_test("F10e echeance conservée (description présente)",
+                    ech is not None)
+    if ech is None:
+        return False
+    ok &= log_test("F10e date passée rejetée → date_echeance vide",
+                    ech.get('date_echeance') == '')
+    return ok
+
+
+def test_F10f_compose_silence_si_tout_vide():
+    """F10f — Anti-régression silence : si Haiku rend un payload avec tous
+    les champs vides après cleanup, la route renvoie `echeance: null` (le
+    frontend affichera « Néant »)."""
+    payload = {'description': '', 'date': '', 'extrait': ''}
+    resp, data, _ = _f10_call_route_with_mock(payload)
+    ok = log_test(f"F10f route status 200 (got {resp.status_code})",
+                  resp.status_code == 200)
+    ok &= log_test("F10f echeance = null (silence complet)",
+                    data.get('echeance') is None,
+                    f"got={data.get('echeance')!r}")
+    return ok
+
+
+def test_F10g_compose_premier_gagne_multi_E():
+    """F10g — Premier-gagne (Obs-F10 P0-4 démolisseur V12) : si Haiku yield
+    2 échéances (bug LLM), la route conserve uniquement la première."""
+    payload1 = {
+        'description': 'Première échéance',
+        'date': '2026-12-15',
+        'extrait': 'avant le 15 décembre',
+    }
+    payload2 = {
+        'description': 'Seconde échéance',
+        'date': '2026-12-20',
+        'extrait': 'jusqu\'au 20',
+    }
+    # Le mock yield 2 events 'echeance' avant 'end'
+    resp, data, _ = _f10_call_route_with_mock(
+        payload1, extra_yield=[('echeance', payload2)]
+    )
+    ok = log_test(f"F10g route status 200 (got {resp.status_code})",
+                  resp.status_code == 200)
+    ech = data.get('echeance')
+    ok &= log_test("F10g echeance présente", ech is not None)
+    if ech is None:
+        return False
+    ok &= log_test("F10g première échéance conservée (premier-gagne)",
+                    ech.get('description') == 'Première échéance',
+                    f"got desc={ech.get('description')!r}")
     return ok
 
 
@@ -1441,7 +1598,17 @@ def main():
         ('F7 body boundary exact 99/100', test_F7_body_boundary_exact),
         ('F8 échéance format pourri (string)', test_F8_echeance_format_pourri),
         ('F9 mail sans IMID', test_F9_mail_sans_imid),
-        ('F10 compose post_generation_analyze', test_F10_compose_post_generation),
+        # F10 réécrit V12 (15/05/2026) — 7 sous-cas couvrant Cas A/B/C
+        # + premier-gagne + silence + fallback FR. Remplace l'ancien F10
+        # happy path qui était une vérif `bool(echeance)` insuffisante
+        # (P1-3 démolisseur).
+        ('F10a compose Cas A happy path (+rename date_echeance)', test_F10a_compose_cas_A_happy_path),
+        ('F10b compose Cas B pending date floue', test_F10b_compose_cas_B_pending_date_floue),
+        ('F10c compose Cas A via fallback FR (15 décembre 2026)', test_F10c_compose_cas_A_via_fallback_fr),
+        ('F10d compose Cas C mention vague (au plus vite)', test_F10d_compose_cas_C_mention_vague),
+        ('F10e compose date passée → bascule pending', test_F10e_compose_date_passee_bascule_pending),
+        ('F10f compose silence (tout vide → echeance null)', test_F10f_compose_silence_si_tout_vide),
+        ('F10g compose premier-gagne multi-E (Obs-F10 P0-4)', test_F10g_compose_premier_gagne_multi_E),
     ]
 
     passed = 0

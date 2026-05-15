@@ -3580,7 +3580,8 @@ Contenu :
     def analyze_one_mail_stream(self, mail, folders_outlook=None, folders_windows=None,
                                  pj_text='', contact_profile=None,
                                  recent_classifications=None, recent_pj_classifications=None,
-                                 today_str=None, scan_echeance=True):
+                                 today_str=None, scan_echeance=True,
+                                 signal_without_date=False):
         """Vision Yvan 02/05 PM tardif — « Cuisinier + Commis ».
 
         Le commis Haiku produit en UN SEUL appel jusqu'à 5 plats :
@@ -3616,11 +3617,23 @@ Contenu :
                        consomment pas le résultat échéance (ex: `_prewarm_
                        mail_preview` pour mails entrants, scope V1 sortants
                        only). Default True (backward-compat).
+            signal_without_date: si True (compose-sortants V12 Phase 1), le
+                       prompt remonte aussi les signaux d'engagement/demande/
+                       urgence SANS date claire (Cas C — popup « Vous mentionnez
+                       X »). Format ligne E à 3 segments. Si False (défaut,
+                       entrants VIP N11 Option A), comportement strict
+                       inchangé : seuls les marqueurs temporels explicites
+                       avec date future remontent. Voir Obs-F10 / INVARIANTS.md
+                       + docs/architecture/REFONTE_N1_N11_JOURNAL.md §6 bis.
 
         Yield des tuples :
             ('point', str)        — point principal
             ('action', str)       — action attendue
-            ('echeance', dict)    — {description, date} (uniquement si scan_echeance=True)
+            ('echeance', dict)    — {description, date, extrait}
+                                     (uniquement si scan_echeance=True ; premier
+                                     yield seulement — Obs-F10 V12 premier-gagne ;
+                                     `extrait` est '' en mode strict, peuplé
+                                     uniquement si signal_without_date=True)
             ('folder_mail', dict) — {folder_id, folder_path, reason} ou None
             ('folder_pj', dict)   — {folder_path, reason} ou None
             ('end', dict)         — {points, actions, echeance, folder_mail,
@@ -3681,16 +3694,54 @@ Contenu :
 
         # Section E (échéance) conditionnelle — économie tokens quand le caller
         # ne consomme pas le résultat (cas entrants, scope V1 sortants only).
+        #
+        # ⚠ Obs-F10 (cf audit/INVARIANTS.md lignes 1121-1127) : cette section
+        # est partagée entre compose-sortants (signal_without_date=True,
+        # philosophie permissive Cas A/B/C) et entrants VIP (signal_without_date
+        # =False, philosophie stricte « date FUTURE uniquement »). Tout
+        # assouplissement OU restriction doit être conditionné par
+        # signal_without_date sous peine de régression Option A. Helper unique
+        # `_should_scan_echeance` reporté Phase 2 (cf §6 bis journal).
         _section_e = ""
         _n_section_class_mail = 3
         if scan_echeance:
-            _section_e = (
-                f"3. **Échéance détectée** (0 ou 1 ligne) — préfixe \"E: <description> | <date YYYY-MM-DD>\"\n"
-                f"   - Une vraie échéance = MARQUEUR TEMPOREL EXPLICITE (date précise, \"avant le X\", \"d'ici le X\")\n"
-                f"   - \"Dès que possible\" / \"rapidement\" / \"prochainement\" = PAS d'échéance\n"
-                f"   - Date FUTURE uniquement (> {today_str}). Si date passée → IGNORER.\n"
-                f"   - Si pas d'échéance → pas de ligne E\n"
-            )
+            if signal_without_date:
+                # Mode permissif compose-sortants (V12 Phase 1).
+                # Le prompt remonte aussi engagement/demande/urgence SANS date :
+                # la route appelle ensuite `_normalize_echeance_payload` qui
+                # dispatche entre Cas A (date résoluble), Cas B (date floue à
+                # compléter), Cas C (signal vague — popup « Vous mentionnez X »).
+                # La frontière vague/politesse a été tranchée par Yvan le
+                # 15/05/2026 — cf §6 bis du journal.
+                _section_e = (
+                    "3. **Signal d'échéance** (0 ou 1 ligne) — préfixe "
+                    "\"E: <description> | <date YYYY-MM-DD ou vide> | <extrait>\"\n"
+                    "   Remonte une ligne E si le mail exprime :\n"
+                    "   - un ENGAGEMENT pris par l'auteur (\"je vous envoie\", \"je traite\", \"je reviens\")\n"
+                    "   - une DEMANDE d'action au correspondant (\"pourriez-vous\", \"merci de\", \"je reste dans l'attente\")\n"
+                    "   - une URGENCE/priorité affichée (\"c'est urgent\", \"prioritaire\")\n"
+                    "   NE remonte PAS de ligne E pour :\n"
+                    "   - politesse de fin (\"cordialement\", \"n'hésitez pas\", \"à votre disposition\")\n"
+                    "   - hypothèse non engageante (\"nous pourrions\", \"peut-être\", \"envisager\")\n"
+                    "   - accusé de réception sans suite (\"bien noté\", \"compris\", \"bien reçu\")\n"
+                    "   Format des 3 segments séparés par \"|\" :\n"
+                    "   - <description> : reformulation actionnable courte (ex: \"livrer devis\"). LAISSE VIDE \"\" si signal sans action claire (juste « au plus vite »).\n"
+                    f"   - <date YYYY-MM-DD ou vide> : date >= {today_str} si déterminable, sinon vide. Pas d'autre format que ISO.\n"
+                    "   - <extrait> : passage LITTÉRAL du mail qui contient le signal (max 100 chars, pas de reformulation).\n"
+                    "   Si vraiment rien à signaler → pas de ligne E.\n"
+                )
+            else:
+                # Mode strict entrants VIP (N11 Option A, comportement N6.1).
+                # Inchangé volontairement — la philosophie « date FUTURE
+                # uniquement » est ce qui borne le risque de faux-positifs sur
+                # les mails reçus de partenaires VIP.
+                _section_e = (
+                    f"3. **Échéance détectée** (0 ou 1 ligne) — préfixe \"E: <description> | <date YYYY-MM-DD>\"\n"
+                    f"   - Une vraie échéance = MARQUEUR TEMPOREL EXPLICITE (date précise, \"avant le X\", \"d'ici le X\")\n"
+                    f"   - \"Dès que possible\" / \"rapidement\" / \"prochainement\" = PAS d'échéance\n"
+                    f"   - Date FUTURE uniquement (> {today_str}). Si date passée → IGNORER.\n"
+                    f"   - Si pas d'échéance → pas de ligne E\n"
+                )
             _n_section_class_mail = 4
         _n_sections = 5 if scan_echeance else 4
         _n_section_class_pj = _n_section_class_mail + 1
@@ -3786,16 +3837,42 @@ Contenu :
             if scan_echeance:
                 for prefix in ('E:', 'E :'):
                     if upper.startswith(prefix.upper()):
+                        # Premier-gagne (Obs-F10 P0-4 démolisseur V12) : si
+                        # Haiku produit plusieurs lignes E (bug LLM ou prompt
+                        # mal interprété), on conserve uniquement la première.
+                        # Aligne avec la consigne prompt « 0 ou 1 ligne ».
+                        # Évite le silencieux last-write-wins qui brouillait
+                        # le payload Cas A en cas de seconde ligne Cas C.
+                        if _state['echeance'] is not None:
+                            return (None, None)
                         text = line[len(prefix):].strip(' -:').strip()
-                        if text:
-                            desc, date = _parse_kv_pipe(text)
-                            # Validation date YYYY-MM-DD basique
-                            if date and not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
-                                date = ''  # date invalide, on garde la description
-                            ech_obj = {'description': desc[:200], 'date': date}
-                            nonlocal_set('echeance', ech_obj)
-                            return ('echeance', ech_obj)
-                        return (None, None)
+                        # Split en 3 segments séparés par '|' :
+                        # description | date | extrait. Rétrocompat entrants
+                        # VIP (mode strict 2 segments) : si pas de 3e segment,
+                        # extrait reste ''. Si pas de 2e segment, date ''.
+                        if '|' in text:
+                            parts = text.split('|', 2)
+                        else:
+                            parts = [text]
+                        desc = parts[0].strip() if len(parts) >= 1 else ''
+                        date = parts[1].strip() if len(parts) >= 2 else ''
+                        extrait = parts[2].strip() if len(parts) >= 3 else ''
+                        # Validation date YYYY-MM-DD basique (sémantique
+                        # historique : on ne casse pas le contrat entrants).
+                        if date and not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
+                            date = ''
+                        # Skip yield si TOUT vide après cleanup (vraiment rien
+                        # à signaler). Préserve le silence quand Haiku produit
+                        # une ligne 'E:' vide par bug LLM.
+                        if not desc and not date and not extrait:
+                            return (None, None)
+                        ech_obj = {
+                            'description': desc[:200],
+                            'date': date,
+                            'extrait': extrait[:100],
+                        }
+                        nonlocal_set('echeance', ech_obj)
+                        return ('echeance', ech_obj)
             for prefix in ('F:', 'F :'):
                 if upper.startswith(prefix.upper()):
                     text = line[len(prefix):].strip(' -:').strip()
