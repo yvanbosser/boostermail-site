@@ -31,7 +31,7 @@ function openEasyMailDialog(event) {
         from = item.from.emailAddress || '';
     }
     var internetMessageId = item.internetMessageId || '';
-    var hasAttachments = item.attachments ? item.attachments.length > 0 : false;
+    var hasAttachments = (item.attachments || []).some(function(a) { return a && !a.isInline; });
     var to = '';
     if (item.to && item.to.length > 0) {
         to = item.to.map(function(r) { return r.emailAddress; }).join(',');

@@ -251,7 +251,7 @@ def create_auth_blueprint(auth_provider_factory) -> Blueprint:
         # Générer un state anti-CSRF
         state = secrets.token_urlsafe(32)
         session['auth_state'] = state
-        session['auth_return_url'] = request.args.get('return_url', '/plugin/dialog.html')
+        session['auth_return_url'] = request.args.get('return_url', '/onboarding')
 
         auth_url = provider.get_auth_url(state)
         return redirect(auth_url)
@@ -271,7 +271,7 @@ def create_auth_blueprint(auth_provider_factory) -> Blueprint:
         error = request.args.get('error')
         if error:
             error_desc = request.args.get('error_description', 'Erreur inconnue')
-            return_url = session.pop('auth_return_url', '/plugin/dialog.html')
+            return_url = session.pop('auth_return_url', '/onboarding')
             return redirect(f'{return_url}?auth_error={error}&auth_error_desc={error_desc}')
 
         # Échanger le code contre des tokens
@@ -287,7 +287,7 @@ def create_auth_blueprint(auth_provider_factory) -> Blueprint:
             # Backward-compat : provider sans support state (legacy)
             user_info = provider.exchange_code(code)
         except Exception as e:
-            return_url = session.pop('auth_return_url', '/plugin/dialog.html')
+            return_url = session.pop('auth_return_url', '/onboarding')
             return redirect(f'{return_url}?auth_error=exchange_failed&auth_error_desc={str(e)}')
 
         # Upsert user dans la table users (multi-user SaaS)
@@ -322,7 +322,7 @@ def create_auth_blueprint(auth_provider_factory) -> Blueprint:
         provider._store.set_mode('standard')
 
         # Rediriger vers le dialog
-        return_url = session.pop('auth_return_url', '/plugin/dialog.html')
+        return_url = session.pop('auth_return_url', '/onboarding')
         return redirect(f'{return_url}?auth_success=1')
 
     @auth_bp.route('/auth/logout')

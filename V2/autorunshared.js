@@ -224,7 +224,7 @@ function _onItemChanged() {
         subject: String(subject).substring(0, 60),
         from_email: from
     });
-    var hasAttachments = item.attachments ? item.attachments.length > 0 : false;
+    var hasAttachments = (item.attachments || []).some(function(a) { return a && !a.isInline; });
     var to = (item.to && item.to.length > 0) ? item.to.map(function(r) { return r.emailAddress; }).join(',') : '';
     var cc = (item.cc && item.cc.length > 0) ? item.cc.map(function(r) { return r.emailAddress; }).join(',') : '';
 
@@ -312,7 +312,7 @@ function _openDialogFromRead(item, event) {
     }
     var internetMessageId = item.internetMessageId || '';
     var conversationId = item.conversationId || '';  // (O2)
-    var hasAttachments = item.attachments ? item.attachments.length > 0 : false;
+    var hasAttachments = (item.attachments || []).some(function(a) { return a && !a.isInline; });
     var to = '';
     if (item.to && item.to.length > 0) {
         to = item.to.map(function(r) { return r.emailAddress; }).join(',');

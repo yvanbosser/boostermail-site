@@ -150,36 +150,6 @@
         }
         .btn-secondary:hover { background: #f0f4fa; }
 
-        /* ─── Microsoft button (étape 1) ─── */
-        .btn-microsoft {
-            display: flex; align-items: center; justify-content: center; gap: 10px;
-            width: 100%;
-            padding: 14px 20px;
-            background: #fff;
-            border: 1px solid #d6dde7;
-            border-radius: 8px;
-            font-size: 14px; font-weight: 500; color: #2d3548;
-            cursor: pointer;
-            transition: all 0.15s;
-            font-family: inherit;
-        }
-        .btn-microsoft:hover:not(:disabled) {
-            border-color: #0F6CBD;
-            box-shadow: 0 2px 8px rgba(15, 108, 189, 0.15);
-        }
-        .btn-microsoft:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        .btn-microsoft .ms-logo {
-            display: inline-block;
-            width: 18px; height: 18px;
-            background: linear-gradient(135deg, #f25022 0%, #f25022 50%, #00a4ef 50%, #00a4ef 100%);
-            background:
-              linear-gradient(to right, #f25022 50%, #7fba00 50%) top / 100% 50% no-repeat,
-              linear-gradient(to right, #00a4ef 50%, #ffb900 50%) bottom / 100% 50% no-repeat;
-        }
-
         /* ─── Bullet list (permissions Microsoft) ─── */
         .bullets {
             background: #f7f9fc;
@@ -315,94 +285,35 @@
 <div class="container">
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
-    <!-- ÉTAPE 1 — Bienvenue + Connexion Microsoft -->
+    <!-- ÉTAPE 1 — Connexion Microsoft (via navigateur externe) -->
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <div class="step active" id="step-1">
-        <div id="step-1-intro">
-            <div class="step-icon">👋</div>
-            <h2 class="step-title">Bienvenue dans BoosterMail</h2>
-            <p class="step-subtitle">
-                Répondez à vos mails 5× plus vite.<br>
-                BoosterMail apprend votre style et prépare vos réponses à votre place
-                — vous n'avez plus qu'à valider et envoyer.
-            </p>
+        <div class="step-icon">🔐</div>
+        <h2 class="step-title">Connexion Microsoft</h2>
+        <p class="step-subtitle">
+            Pour accéder à votre boîte Outlook, connectez-vous<br>
+            une fois depuis votre navigateur.
+        </p>
 
-            <div class="consent-box">
-                <label class="consent-row">
-                    <input type="checkbox" id="consent-ai" onchange="updateMicrosoftButton()">
-                    <span>
-                        J'autorise BoosterMail à analyser mes mails par IA (Anthropic)
-                        pour générer des réponses adaptées à mon style.
-                    </span>
-                </label>
-                <div class="consent-links">
-                    <a href="#" onclick="showLegal('rgpd'); return false;">Détails RGPD</a>
-                    &nbsp;·&nbsp;
-                    <a href="#" onclick="showLegal('privacy'); return false;">Politique de confidentialité</a>
-                </div>
-                <label class="consent-row" style="margin-top:10px; padding-top:10px; border-top:1px solid #e0e7f0;">
-                    <input type="checkbox" id="consent-cgu" onchange="updateMicrosoftButton()">
-                    <span>
-                        J'accepte les <a href="#" onclick="showLegal('cgu'); return false;" style="color:#0F6CBD;">Conditions Générales d'Utilisation</a>.
-                    </span>
-                </label>
-            </div>
-
-            <button class="btn-microsoft" id="btn-microsoft" onclick="startMicrosoftAuth()" disabled>
-                <span class="ms-logo"></span>
-                Se connecter avec Microsoft
-            </button>
-
-            <div class="info-secure">
-                🔒 BoosterMail ne stocke jamais votre mot de passe.
-                Microsoft gère seul l'authentification.
-            </div>
+        <div class="info-tip">
+            <strong>Comment se connecter :</strong><br><br>
+            <strong>1.</strong> Ouvrez cette adresse dans votre navigateur (Chrome, Edge…) :<br>
+            <code style="display:block; margin:8px 0; padding:8px 10px; background:#fffde7; border-radius:4px; font-size:12px; word-break:break-all; color:#5a4a1a;">https://api.boostermail.ai/auth/login</code>
+            <strong>2.</strong> Connectez-vous avec votre compte Microsoft Outlook<br><br>
+            <strong>3.</strong> Revenez ici et cliquez sur le bouton ci-dessous
         </div>
 
-        <!-- État : connexion en cours -->
-        <div id="step-1-connecting" style="display:none; text-align: center; padding: 20px 0;">
-            <div class="spinner" style="margin: 0 auto 20px;"></div>
-            <h2 class="step-title">Connexion en cours…</h2>
-            <p class="step-subtitle">
-                Une fenêtre Microsoft s'est ouverte.<br>
-                Suivez les étapes dans cette fenêtre.
-            </p>
-            <div class="info-tip">
-                ℹ️ La fenêtre Microsoft est introuvable ?<br>
-                → Cherchez-la dans votre barre des tâches Windows
-            </div>
-            <button class="btn btn-secondary" onclick="cancelMicrosoftAuth()">
-                Annuler
+        <div id="step-1-check-result" style="display:none;" class="error-banner"></div>
+
+        <div class="btn-row center">
+            <button class="btn btn-primary" id="btn-check-auth" onclick="checkAuthAndProceed()">
+                ✓ Je suis connecté, continuer →
             </button>
         </div>
 
-        <!-- État : succès -->
-        <div id="step-1-success" style="display:none; text-align: center;">
-            <div class="success-icon">✅</div>
-            <h2 class="step-title">Connexion réussie !</h2>
-            <p class="step-subtitle">
-                Vous êtes connecté en tant que :<br>
-                <strong id="connected-email">…</strong>
-            </p>
-            <ul class="bullets">
-                <li>Lecture des mails</li>
-                <li>Brouillons et envoi</li>
-                <li>Signature</li>
-            </ul>
-            <button class="btn btn-primary" onclick="goToStep(2)">
-                Continuer →
-            </button>
-        </div>
-
-        <!-- État : échec -->
-        <div id="step-1-error" style="display:none;">
-            <div class="step-icon">⚠️</div>
-            <h2 class="step-title" id="error-title">Connexion échouée</h2>
-            <p class="step-subtitle" id="error-message">…</p>
-            <div class="btn-row center">
-                <button class="btn btn-secondary" onclick="resetStep1()">← Recommencer</button>
-                <button class="btn btn-primary" onclick="startMicrosoftAuth()">Réessayer</button>
-            </div>
+        <div class="info-secure">
+            🔒 BoosterMail ne stocke jamais votre mot de passe.
+            Microsoft gère seul l'authentification.
         </div>
     </div>
 
@@ -666,117 +577,37 @@
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // ÉTAPE 1 — CONNEXION MICROSOFT
+    // ÉTAPE 1 — VÉRIFICATION CONNEXION MICROSOFT
+    // L'auth se fait dans le navigateur externe via /auth/login.
+    // Le dialog vérifie juste si le token MSAL est présent en DB.
     // ═══════════════════════════════════════════════════════════════
 
-    function updateMicrosoftButton() {
-        // Bouton actif seulement si les 2 cases (RGPD IA + CGU) sont cochées
-        var consentAi = document.getElementById('consent-ai').checked;
-        var consentCgu = document.getElementById('consent-cgu').checked;
-        document.getElementById('btn-microsoft').disabled = !(consentAi && consentCgu);
-    }
+    function checkAuthAndProceed() {
+        var btn = document.getElementById('btn-check-auth');
+        var resultEl = document.getElementById('step-1-check-result');
+        btn.disabled = true;
+        btn.textContent = '⏳ Vérification…';
+        resultEl.style.display = 'none';
 
-    var _authPollInterval = null;
-    var _authPopupRef = null;
-
-    function startMicrosoftAuth() {
-        // Sauvegarde des consentements (RGPD IA + CGU) cochés à l'étape 1.
-        // Cas où ils étaient à l'étape 4 avant la simplification 02/05/2026.
-        try {
-            saveSetting('cgu_accepted', '1');
-            saveSetting('rgpd_ai_consent', '1');
-        } catch(e) {}
-
-        // Bascule vers l'état "connexion en cours"
-        document.getElementById('step-1-intro').style.display = 'none';
-        document.getElementById('step-1-error').style.display = 'none';
-        document.getElementById('step-1-connecting').style.display = 'block';
-
-        // Ouvre l'OAuth dans une popup
-        try {
-            _authPopupRef = window.open('/auth/login', 'bm-auth',
-                'width=520,height=640,scrollbars=yes,resizable=yes');
-        } catch(e) {
-            showAuthError('popup_blocked');
-            return;
-        }
-
-        // Poll toutes les 1.5s pour détecter la fin de l'auth
-        if (_authPollInterval) clearInterval(_authPollInterval);
-        _authPollInterval = setInterval(function() {
-            fetch('/api/status')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (data.authenticated && data.mode === 'standard') {
-                        // Connexion réussie
-                        clearInterval(_authPollInterval);
-                        _authPollInterval = null;
-                        var emailEl = document.getElementById('connected-email');
-                        if (emailEl) emailEl.textContent = data.email || '(votre boîte Outlook)';
-                        document.getElementById('step-1-connecting').style.display = 'none';
-                        document.getElementById('step-1-success').style.display = 'block';
-                        // Sauvegarder le step actuel
-                        saveSetupStep(2);
-                        try { if (_authPopupRef) _authPopupRef.close(); } catch(e) {}
-                    }
-                })
-                .catch(function() {});
-        }, 1500);
-
-        // Timeout 5 min : si pas authentifié, on stoppe le poll
-        setTimeout(function() {
-            if (_authPollInterval) {
-                clearInterval(_authPollInterval);
-                _authPollInterval = null;
-                if (document.getElementById('step-1-connecting').style.display !== 'none') {
-                    showAuthError('timeout');
+        fetch('/api/status')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.authenticated) {
+                    saveSetupStep(2);
+                    goToStep(2);
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = '✓ Je suis connecté, continuer →';
+                    resultEl.style.display = 'block';
+                    resultEl.textContent = 'Connexion non détectée. Assurez-vous d\'avoir terminé la connexion dans votre navigateur, puis réessayez.';
                 }
-            }
-        }, 5 * 60 * 1000);
-    }
-
-    function cancelMicrosoftAuth() {
-        if (_authPollInterval) {
-            clearInterval(_authPollInterval);
-            _authPollInterval = null;
-        }
-        try { if (_authPopupRef) _authPopupRef.close(); } catch(e) {}
-        resetStep1();
-    }
-
-    function resetStep1() {
-        document.getElementById('step-1-intro').style.display = 'block';
-        document.getElementById('step-1-connecting').style.display = 'none';
-        document.getElementById('step-1-success').style.display = 'none';
-        document.getElementById('step-1-error').style.display = 'none';
-    }
-
-    function showAuthError(code) {
-        document.getElementById('step-1-connecting').style.display = 'none';
-        document.getElementById('step-1-intro').style.display = 'none';
-        document.getElementById('step-1-error').style.display = 'block';
-        var titles = {
-            'popup_blocked': 'Popup bloquée par votre navigateur',
-            'cancelled': 'Connexion annulée',
-            'wrong_account': 'Mauvais compte sélectionné',
-            'permissions_refused': 'Autorisations refusées',
-            'no_outlook': 'Compte sans Outlook',
-            'network': 'Problème de connexion',
-            'timeout': 'Délai dépassé',
-            'unknown': 'Erreur inconnue',
-        };
-        var messages = {
-            'popup_blocked': 'Autorisez les popups depuis ce site puis réessayez.',
-            'cancelled': 'Vous avez fermé la fenêtre Microsoft. On peut réessayer quand vous voulez.',
-            'wrong_account': 'Le compte choisi n\'est pas celui d\'Outlook. Réessayez en choisissant le bon compte.',
-            'permissions_refused': 'BoosterMail a besoin de toutes les autorisations. Si vous avez décoché l\'une d\'entre elles, il faut les accepter.',
-            'no_outlook': 'Ce compte Microsoft n\'a pas de boîte Outlook. BoosterMail nécessite un compte Microsoft 365 ou Outlook.com.',
-            'network': 'Microsoft ne répond pas. Vérifiez votre connexion internet et réessayez.',
-            'timeout': 'Vous avez mis trop de temps. Pas grave, on recommence.',
-            'unknown': 'Quelque chose s\'est mal passé. Réessayez.',
-        };
-        document.getElementById('error-title').textContent = titles[code] || titles['unknown'];
-        document.getElementById('error-message').textContent = messages[code] || messages['unknown'];
+            })
+            .catch(function() {
+                btn.disabled = false;
+                btn.textContent = '✓ Je suis connecté, continuer →';
+                resultEl.style.display = 'block';
+                resultEl.textContent = 'Erreur de connexion au serveur. Réessayez.';
+            });
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1105,18 +936,23 @@
     // ═══════════════════════════════════════════════════════════════
 
     document.addEventListener('DOMContentLoaded', function() {
-        // Si l'user est déjà connecté Microsoft, sauter l'étape 1
+        var params = new URLSearchParams(window.location.search);
+
+        // Retour depuis /auth/login dans le navigateur externe → token déjà en DB
+        if (params.get('auth_success') === '1') {
+            saveSetupStep(2);
+            goToStep(2);
+            return;
+        }
+
+        // Vérifier si déjà authentifié (token MSAL en DB)
         fetch('/api/status')
             .then(function(r) { return r.json(); })
             .then(function(data) {
-                if (data.authenticated && data.mode === 'standard') {
-                    // On charge l'email connecté pour info
-                    var emailEl = document.getElementById('connected-email');
-                    if (emailEl && data.email) emailEl.textContent = data.email;
-                    // On reprend là où on en était
-                    var step = parseInt(data.setup_step || '1', 10);
-                    if (step >= 2) goToStep(step);
+                if (data.authenticated) {
+                    goToStep(2);
                 }
+                // Sinon : rester sur étape 1, l'user voit l'instruction navigateur
             })
             .catch(function() {});
     });

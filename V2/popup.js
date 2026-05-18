@@ -459,7 +459,7 @@ function _openDialogOfficeJs(mode) {
     var fromEmail = item.from ? item.from.emailAddress : '';
     var fromName = item.from ? item.from.displayName : '';
     var messageId = item.internetMessageId || '';
-    var hasAttachments = (item.attachments && item.attachments.length > 0) ? '1' : '0';
+    var hasAttachments = (item.attachments || []).some(function(a) { return a && !a.isInline; }) ? '1' : '0';
     var to = (item.to && item.to.length > 0) ? item.to.map(function (r) { return r.emailAddress; }).join(',') : '';
     var cc = (item.cc && item.cc.length > 0) ? item.cc.map(function (r) { return r.emailAddress; }).join(',') : '';
 

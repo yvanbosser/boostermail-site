@@ -206,7 +206,7 @@ function _openDialog(mode) {
     var fromEmail = item.from ? item.from.emailAddress : '';
     var fromName = item.from ? item.from.displayName : '';
     var internetMessageId = item.internetMessageId || '';
-    var hasAttachments = (item.attachments && item.attachments.length > 0) ? '1' : '0';
+    var hasAttachments = (item.attachments || []).some(function(a) { return a && !a.isInline; }) ? '1' : '0';
 
     var to = '';
     if (item.to && item.to.length > 0) {
