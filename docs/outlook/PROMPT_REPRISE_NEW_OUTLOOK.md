@@ -117,14 +117,13 @@ Aucun chantier en cours. Selon ce que Yvan souhaite attaquer :
    - Audit boîte mail (feature MVP cadrée 12/05, à attaquer quand prêt)
 4. Si Yvan signale un bug sur le flux Répondre / Classer / Échéances :
    - Architecture actuelle documentée dans docs/architecture/REFONTE_N1_N11_JOURNAL.md
-   - Caches/locks/threads dans audit/INVENTAIRE_V2.md
    - Test attendu côté Yvan : champ « Classement suggéré » cliquable → popup top 3 (#1 principale + #2/#3 boulettes ●) + arbo + barre recherche live. Cuisine garantit l'enveloppe complète (greeting + body + closing + signature) avant stockage cache, salle livre tel quel.
 
-5. Sujets ouverts business (côté Yvan, pas de code Claude) :
-   - Mailbox `dpo@boostermail.ai` à créer/rediriger
-   - Compléter les `[À COMPLÉTER]` dans legal/ (SIREN, RCS, etc.)
-   - Récupérer DPA Anthropic
-   - Marque INPI BoosterMail (~250 €)
+Sujets ouverts business (côté Yvan, pas de code Claude) :
+- Mailbox `dpo@boostermail.ai` à créer/rediriger
+- Compléter les `[À COMPLÉTER]` dans legal/ (SIREN, RCS, etc.)
+- Récupérer DPA Anthropic
+- Marque INPI BoosterMail (~250 €)
 
 AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 
@@ -133,7 +132,7 @@ AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 3. docs/sessions/OUTLOOK_BILAN_SESSION_20260516_to_20260518_V12_SALLE_audit_profond_docs.md ⭐ — bilan complet dernière session
 4. docs/architecture/REFONTE_N1_N11_JOURNAL.md ⭐ — source de vérité architecture (refonte N1-N11 + V12 SALLE Phase A/B/C/C-bis + Leçon 10)
 5. audit/INVARIANTS.md — invariants I-* projet (catégorie 13 = I-SESS, catégorie 12 = I-REPLY, I-CONTACT-PROFILE, I-UNIFIED-LOCK-PER-MID, etc.)
-6. audit/INVENTAIRE_V2.md — inventaire caches/threads/routes V2 (mis à jour post-N1-N11)
+6. audit/INVENTAIRE_V2.md — inventaire V2 (dernière maj 22/04 — partiellement obsolète post-N1-N11 + V12 SALLE ; pour l'état actuel des caches/threads/routes voir REFONTE_N1_N11_JOURNAL.md §5 + section ARCHIVES du SOMMAIRE_DETAILLE.md)
 7. audit/PLAYBOOK.md — Workflow 4 (diagnostic bug), Workflow 7 (kit fin de session), Workflow 8 (kit ouverture), Workflow 9 (UX/design alignment)
 8. audit/ANOMALIES_RECURRENTES.md — patterns récurrents (#1-#25)
 9. docs/saas/ONBOARDING_SESSION_SAAS.md — référence infra OVH partagée
