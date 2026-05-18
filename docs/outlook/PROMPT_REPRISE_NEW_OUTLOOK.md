@@ -32,176 +32,168 @@ JAMAIS de push direct sur `dev` ou `master`. Voir `docs/CONVENTIONS_GIT_BRANCHES
 Avant tout commit :
   git branch --show-current      # doit retourner `feat/yvan/frontend`
   # Si pas le cas :
-  git fetch product
-  git checkout feat/yvan/frontend  # ou : git checkout -b feat/yvan/frontend product/dev
+  git checkout feat/yvan/frontend   # ou : git checkout -b feat/yvan/frontend origin/feat/yvan/frontend
 
 ⚠️ AVANT TOUT : vérifie que ta session tourne bien dans un worktree qui peut accéder au repo C:\EasyMail\.
 
 Test rapide :
-  git -C C:/EasyMail branch --show-current   # doit retourner `master`
-  git -C C:/EasyMail log --oneline -5        # le top doit afficher les commits 02/05 fin de soirée (audit + Tier DB + top 3 + recherche live)
+  git -C C:/EasyMail branch --show-current   # doit retourner `feat/yvan/frontend`
+  git -C C:/EasyMail log --oneline -5        # le top doit afficher les commits 15-18/05 (V12 SALLE + audit profond + kit fin de session)
 
 Si ton worktree est différent (auto-créé style `claude/happy-XXXX`), exécute en début de session :
-  git fetch && git merge master --no-edit
-puis :
-  git log --oneline -5    # le top commit master doit être un commit de la session 02/05 soirée (audit + recherche live), cf bilan soirée pour le détail dynamique
+  git -C C:/EasyMail fetch origin
+  # puis aligne ton worktree sur feat/yvan/frontend
 
 ---
 
 Tu reprends le développement sur BoosterMail dans la session « New Outlook via OVH ».
 
 CONTEXTE — Pivot stratégique 27/04 PM (toujours en vigueur)
-- OVH = **source de vérité unique** (cf CLAUDE.md règle #7)
+- OVH = source de vérité unique (cf CLAUDE.md règle #7)
 - Toutes les modifs (UX/UI/data) déployées sur OVH dans la foulée — plus de WIP local persistant
 - Yvan utilise BoosterMail au quotidien depuis https://api.boostermail.ai/
+- VPS OVH actuel : 152.228.209.252 (migration 04/05 post-incident SSH, ancien 51.178.162.208 filet de sécurité)
+- Clé SSH : ~/.ssh/id_rsa_ovh
 
-ÉTAT DE FIN DE LA DERNIÈRE SESSION (15-18/05/2026 — V12 SALLE Phase A/B/C/C-bis + audit profond + grosse MAJ docs)
+PACTE FONDATEUR (sessions intensives 15-16/05)
+« Supprimer les patchs sur patchs par un code parfaitement propre, robuste, pertinent, rapide, efficace. Service 3 étoiles Michelin × rapidité fast food. »
 
-- **Bilan complet** : [`docs/sessions/OUTLOOK_BILAN_SESSION_20260516_to_20260518_V12_SALLE_audit_profond_docs.md`](../sessions/OUTLOOK_BILAN_SESSION_20260516_to_20260518_V12_SALLE_audit_profond_docs.md)
-- **Journal détaillé** : [`docs/architecture/REFONTE_N1_N11_JOURNAL.md`](../architecture/REFONTE_N1_N11_JOURNAL.md) §7 « La SALLE — Phase A/B/C/C-bis » + §9 Leçon 10 « Le commentaire qui ment »
-- Top commit `feat/yvan/frontend` : voir `git log --oneline -1` (formulation dynamique pour respecter I-SESS-03).
-- **9 commits poussés** sur `origin/feat/yvan/frontend` (Phase A → Phase B.1 → Phase B.2 → Phase B.3 → Phase C → Phase C bis → audits → grosse MAJ docs).
+4 défenses méthodologiques à appliquer systématiquement :
+1. Démolisseur pré-impl (sub-agent autonome qui démolit le plan v1 — révèle 2-3 erreurs factuelles + 1-2 bugs prod en moyenne)
+2. Plan v2 après retours Yvan (ajustement après cadrage produit)
+3. Regard frais pré-commit (relecture indépendante du diff avant push)
+4. Audit rétrospectif post-commit (détection des dettes restantes)
 
-### Session précédente (pour historique) : 08/05/2026 — audit remediation exécution complète
+Plus la 5e défense ad-hoc : audit final non programmé déclenché par question Yvan « Y a-t-il des points en cours ? » (cf Leçon 10).
 
-- Bilan : [`docs/sessions/OUTLOOK_BILAN_SESSION_20260508_audit_remediation.md`](../sessions/OUTLOOK_BILAN_SESSION_20260508_audit_remediation.md)
-- Hub synthèse audit : [`audit/rapports/2026-05-08_audit_remediation_DONE.md`](../../audit/rapports/2026-05-08_audit_remediation_DONE.md)
-- Merge final : `Merge audit remediation 08/05/2026 (sub-branche → frontend)`. Sub-branche `feat/yvan/audit-remediation-08-05` conservée historiquement pour rollback fin (hors des 20 derniers commits).
+LEÇON CLÉ DE LA DERNIÈRE SESSION — Leçon 10 « Le commentaire qui ment »
+Tout commentaire qui nomme une fonction interne (« via _foo() », « appelée par _bar ») doit déclencher un Grep immédiat de vérification. Si la fonction n'existe pas → soit implémenter immédiatement, soit supprimer la promesse du commentaire et documenter honnêtement le compromis. Anti-pattern « documentation aspirationnelle » : pire qu'un bug visible parce qu'aucun test ne crashe.
 
-**Plan exécuté en 7 phases (15 fixes plan + 16 corrections via 3 audits successifs)** sur sub-branche dédiée mergée `--no-ff` :
+ÉTAT DE FIN DE LA DERNIÈRE SESSION (15-18/05/2026)
 
-- **Phase 1 — Bloquants SaaS** : PII redaction (SIRET/IBAN/NIR/tel FR+UE/email tiers/adresse) sur Blocs A/B/C avec **hash domaine SHA-256 anti-ré-identification** + brief sanitization 3 couches (strip + isolation `<user_brief>` + repositionnement avant blocs) + cascade Sonnet voit résumé Haiku au lieu du contenu brut PJ + SECURITY_GUARD étendu (D2/E/PJ binaires) + RAPPEL FINAL en queue + upload limit 50 MB/fichier + 25 MB/mail
-- **Phase 2 — Quality** : dedup A vs Mail reçu, gradient confidence 4 niveaux (full/medium/light/none), D2 250→500 chars + dates relatives
-- **Phase 3 — Token optim** : compactage Bloc A `08/05 Marie >`, skip C si sujet stopword, skip D2 si profil confiant + récent + corrections déjà intégrées
-- **Phase 4 — Bonus qualité** : Bloc B équilibré 5+5, mode étranger (skip C si vrai inconnu), decay confiance intelligent (anti-gaming via body ≥ 20 chars), détection contradictions inter-blocs au build-time
-- **Phase 5 — Validation** : test runner permanent [`audit/tests/validation_scenarios.py`](../../audit/tests/validation_scenarios.py) **8/8 OK** (S5-S12)
-- **Phase 6 — Observabilité** : 22 logs structurés ([`docs/saas/OBSERVABILITY_AUDIT_REMEDIATION_20260508.md`](../saas/OBSERVABILITY_AUDIT_REMEDIATION_20260508.md)), seuils alertes documentés
-- **Phase 7 — Documentation** : 3 nouveaux invariants `I-PII-01` / `I-PROMPT-01` / `I-PROMPT-02` + Pattern `#25` Contradictions inter-blocs
+Session intensive 3 jours « V12 SALLE Phase A/B/C/C-bis + audit profond + grosse MAJ docs ».
 
-**3 audits successifs sous angles différents (initial + complémentaire + angle 3)** : 32 anomalies trouvées au cumul, 16 corrigées (les actionnables), 16 skippées (conformes plan / risque accepté / cosmétique). **0 anomalie critique non corrigée**. Anomalies notables corrigées :
-- **P3-Data-A1 (CRITIQUE)** : `confidence` non-float crashait `int(raw_conf * 100)` → fix `try float() + bornage [0,1]`
-- **P6-Leak-A1 (Moyen-Critique)** : subject piégé loggé en clair → fuite RGPD si attaquant met PII dans subject. Fix : redact via `_redact_pii_in_text` avant log
-- **P1-GDPR-A1 (Moyen)** : domaine email exposé permettait ré-identification SaaS → nouveau helper `_hash_email_anonymous` (domaine SHA-256 8 chars, format `man***@d:XXXXXXXX` — 8 hex)
+- Bilan complet : docs/sessions/OUTLOOK_BILAN_SESSION_20260516_to_20260518_V12_SALLE_audit_profond_docs.md
+- Journal détaillé : docs/architecture/REFONTE_N1_N11_JOURNAL.md §7 « La SALLE — Phase A/B/C/C-bis » + §9 Leçon 10
+- Top commit feat/yvan/frontend : voir `git log --oneline -1` (formulation dynamique pour respecter I-SESS-03)
+- 9 commits poussés sur origin/feat/yvan/frontend (Phase A → Phase B.1 → Phase B.2 → Phase B.3 → Phase C → Phase C bis → audits → grosse MAJ docs)
+- Tests : 180/180 verts
 
-**Économies tokens mesurées** : ~−200 à −500 tokens / draft moyen (cible plan -30% atteignable en prod sur cas typiques).
+Livré dans la session :
+- V12 sortants Phase 1 : création échéances depuis compose (Cas A/B/C, popup auto-rempli)
+- V12 entrants Phase 2.1/2.2 : abandon Option A VIP, pivot DB-driven, cascade matching IA Tier 1/2/3 + 3 défenses prompt injection
+- V12 SALLE Phase A : helper unifié `_classify_to_folder` Classer rapide (item PLUS_TARD_VF #28 résolu)
+- V12 SALLE Phase B.1 : lock per-(user_id, mid) résout Obs-F6 TOCTOU
+- V12 SALLE Phase B.2 : `$expand=attachments` Graph root cause no_pj
+- V12 SALLE Phase B.3 : fusion route bundle `api_mail_preview` en wrapper léger (-120 LoC)
+- V12 SALLE Phase C : vision 3 étoiles Michelin « cuisine garantit, salle livre » — helper unique `_ensure_reply_envelope_html` (-200 LoC patches + -90 LoC code mort)
+- V12 SALLE Phase C bis : invalidation cache brouillons sur change fiche contact (helper + wrapper, 8 sites migrés)
+- Audit profond 4 axes : verdict 3 étoiles Michelin × fast-food CONFIRMÉ. 6+ faux positifs sub-agents écartés via filtre critique.
+- Grosse MAJ docs : 26 bandeaux ARCHIVE en batch + section « 📦 ARCHIVES » exhaustive dans SOMMAIRE_DETAILLE.md
 
-**Smoke test** : 33 PASS / 12 FAIL / 6 SKIP (3 nouveaux PASS pour I-PII-01/I-PROMPT-01/I-PROMPT-02 ; FAIL = mode SaaS pur, V2 local arrêté = attendu).
+7 nouveaux invariants livrés :
+- I-CLASSIFY-A : helper unifié `_classify_to_folder` pour les 2 routes Classer
+- I-UNFLATTEN-SUGGESTIONS : helper unique de désérialisation top 3 (7 sites factorisés)
+- I-UNIFIED-LOCK-PER-MID : lock par-(user_id, mid) pour `_prewarm_unified_for_mail`
+- I-GRAPH-EXPAND-ATTACHMENTS : `$expand=attachments` obligatoire dans méthodes Graph qui peuplent `email_cache`
+- I-MAIL-PREVIEW-DELEGATES : route bundle `/api/mail_preview/<mid>` délègue aux 3 portes spécialisées
+- I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN : enveloppe complète garantie en cuisine, salle triviale
+- I-CONTACT-PROFILE-INVALIDATES-REPLY-CACHE : invalidation cache brouillons sur change fiche contact
 
-**Reste à valider en prod OVH** :
-- 4 scénarios cache (HIT/MISS/PARTIEL/ÉCARTÉ) avec Outlook live
-- `audit/tests/saas_smoke.sh` sur `api.boostermail.ai`
-- 7-15 jours d'observation logs structurés pour calibrer les seuils alertes
+Aucun bloquant identifié. Code SAIN.
 
 🎯 PROCHAINE SESSION
 
-1. **Démarrage rapide** :
-   - Vérifier OVH : `curl -sk https://api.boostermail.ai/api/warmup_status` (HTTP 200 attendu)
-   - Vérifier service : `ssh ubuntu@51.178.162.208 "sudo systemctl is-active boostermail"`
+Aucun chantier en cours. Selon ce que Yvan souhaite attaquer :
 
-2. **Validation prod du merge audit remediation 08/05** (priorité haute) :
-   - Pull `feat/yvan/frontend` sur OVH puis `systemctl restart boostermail`
-   - Tester les 4 scénarios cache (HIT/MISS/PARTIEL/ÉCARTÉ) sur Outlook live
-   - Lancer `audit/tests/saas_smoke.sh`
-   - Surveiller les logs structurés via `journalctl -u boostermail | grep -E '\[prompt-conflict\]|\[brief-sanitize\]|\[security-block\]|\[upload-block\]|\[pii-redacted\]|\[prompt-size\]'`
-   - Comparer le coût Anthropic réel vs baseline (cible -25% selon plan)
-   - **Critère de stop alertes** : aucun warning critique remonté sur 24h
-   - Si tout OK après 7-15 jours : la sub-branche `feat/yvan/audit-remediation-08-05` peut être supprimée (rollback safe entre-temps via `git revert -m 1 <merge-commit>`)
+1. Si Yvan a testé en condition réelle et signale un bug : Workflow 4 du kit (diagnostic bug ciblé). Procédure rollback rapide : docs/saas/ROLLBACK_PROCEDURE.md
+2. Si Yvan veut avancer sur la roadmap business :
+   - Tests E2E automatisés sur les 5 flux critiques (~1 journée)
+   - Phase 4 paiement Stripe + RGPD (préparation Beta payante) — ~1-2 semaines
+   - AppSource soumission (en parallèle des tests) — 4-8 semaines de validation Microsoft
+3. Si Yvan veut continuer le polish technique :
+   - Items PLUS_TARD_VF résiduels (cf docs/PLUS_TARD_VF.md en-tête mis à jour 16/05) : #25 Michael multi-tenant tables PK, #26 multilingue, #27-34 (items N7-bis à N9 contextuels)
+   - Découpage `app_plugin.py` 16k lignes en modules thématiques (#11 PLUS_TARD_VF, ~1j)
+   - Audit boîte mail (feature MVP cadrée 12/05, à attaquer quand prêt)
+4. Si Yvan signale un bug sur le flux Répondre / Classer / Échéances :
+   - Architecture actuelle documentée dans docs/architecture/REFONTE_N1_N11_JOURNAL.md
+   - Caches/locks/threads dans audit/INVENTAIRE_V2.md
+   - Test attendu côté Yvan : champ « Classement suggéré » cliquable → popup top 3 (#1 principale + #2/#3 boulettes ●) + arbo + barre recherche live. Cuisine garantit l'enveloppe complète (greeting + body + closing + signature) avant stockage cache, salle livre tel quel.
 
-3. **Si Yvan signale un bug sur le flux classement (mail/PJ)** :
-   - Test attendu côté lui : champ « Classement suggéré » cliquable → popup ouverte avec **top 3** (#1 principale + #2/#3 boulettes ● avec `reason` lisible « thread déjà classé », « classement habituel pour ce contact », etc.) + arbo déroulée sur le chemin de la suggestion + barre de recherche live (highlight bleu sur match) + saisie manuelle pour créer un nouveau dossier
-   - Test 100 SCI homonymes : vérifier que Tier DB tranche correctement vers la bonne SCI (pas le premier "Administratif" venu)
-   - Test mail noreply : doit être skip silencieusement (source `none_auto_email`)
-   - Diagnostic via `journalctl -u boostermail` filtré sur `[unified]` + logs OVH
-   - Logs attendus : `[unified] OK <imid> — fm=thread/rule/keywords/domain/cross_contact/unified, fpj=..., ech=...`
-   - Si user signale "j'ai pas le top 3 sur un mail" → vérifier que ce n'est pas un mail déjà en cache DB avant le fix (re-classification nécessaire pour avoir `_suggestions[]`)
-
-3. **Sujets ouverts business** (côté Yvan, pas de code Claude) :
+5. Sujets ouverts business (côté Yvan, pas de code Claude) :
    - Mailbox `dpo@boostermail.ai` à créer/rediriger
-   - Compléter les `[À COMPLÉTER]` dans `legal/` (SIREN, RCS, etc.)
+   - Compléter les `[À COMPLÉTER]` dans legal/ (SIREN, RCS, etc.)
    - Récupérer DPA Anthropic
    - Marque INPI BoosterMail (~250 €)
 
-4. **Tech debt différé** (priorité quand Yvan le décide) :
-   - Découpage `app_plugin.py` 11700 lignes en modules (#11 PLUS_TARD_VF, ~1 j)
-   - STAND-BY S8/S12 (gain marginal)
-   - Cleanup branches/backups après quelques jours de stabilité
-
 AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 
-1. **`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** ⭐ — référence vivante (workflow OVH-first, scope, interdits, profil Yvan, procédure purge cache WebView2)
-2. **`docs/PLUS_TARD_VF.md`** ⭐ — référentiel UNIQUE des sujets « plus tard » avec en-tête mis à jour 02/05 fin de journée
-3. **`docs/sessions/OUTLOOK_BILAN_SESSION_20260508_audit_remediation.md`** ⭐ — bilan session 08/05 PM tardif (exécution plan audit remediation 7 phases + 3 audits). Bilan PM précédent : `OUTLOOK_BILAN_SESSION_20260508_audit_complet.md` (audit arbre + plan source). Bilans antérieurs : `OUTLOOK_BILAN_SESSION_20260506_to_20260507_compose_classement.md` (compose classement + git OVH + branches contributeurs), `OUTLOOK_BILAN_SESSION_20260505_echeances.md` (échéances V2 SaaS), `OUTLOOK_BILAN_SESSION_20260503.md` (audit boucle learning + fix -98% appels API).
-4. **`docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md`** — source de vérité unique du classement (mail + PJ + joindre fichier)
-5. **`docs/saas/ONBOARDING_SESSION_SAAS.md`** — référence infra OVH partagée
-6. **`audit/INVARIANTS.md`** + **`audit/ANOMALIES_RECURRENTES.md`** — invariants + Patterns
-7. **`audit/PLAYBOOK.md`** — Workflow 9 (UX/design alignment) à appliquer après chaque décision UX d'Yvan
+1. docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md ⭐ — référence vivante (workflow OVH-first, scope, interdits, profil Yvan, procédure purge cache WebView2)
+2. docs/PLUS_TARD_VF.md ⭐ — référentiel UNIQUE des sujets « plus tard » avec en-tête mis à jour 16/05 (récap V12 + SALLE Phase A/B/C/C-bis + audit profond + 7 nouveaux invariants + Leçon 10)
+3. docs/sessions/OUTLOOK_BILAN_SESSION_20260516_to_20260518_V12_SALLE_audit_profond_docs.md ⭐ — bilan complet dernière session
+4. docs/architecture/REFONTE_N1_N11_JOURNAL.md ⭐ — source de vérité architecture (refonte N1-N11 + V12 SALLE Phase A/B/C/C-bis + Leçon 10)
+5. audit/INVARIANTS.md — invariants I-* projet (catégorie 13 = I-SESS, catégorie 12 = I-REPLY, I-CONTACT-PROFILE, I-UNIFIED-LOCK-PER-MID, etc.)
+6. audit/INVENTAIRE_V2.md — inventaire caches/threads/routes V2 (mis à jour post-N1-N11)
+7. audit/PLAYBOOK.md — Workflow 4 (diagnostic bug), Workflow 7 (kit fin de session), Workflow 8 (kit ouverture), Workflow 9 (UX/design alignment)
+8. audit/ANOMALIES_RECURRENTES.md — patterns récurrents (#1-#25)
+9. docs/saas/ONBOARDING_SESSION_SAAS.md — référence infra OVH partagée
 
 Puis valide en exécutant ces 2 tests :
-- `ssh -o BatchMode=yes -o ConnectTimeout=5 ubuntu@51.178.162.208 "echo OK_SSH_KEY_WORKS"`
+- `ssh -o BatchMode=yes -o ConnectTimeout=5 ubuntu@152.228.209.252 "echo OK_SSH_KEY_WORKS"`
 - `curl -sk https://api.boostermail.ai/api/warmup_status`
 
 Si l'un échoue, arrête et alerte-moi avant toute autre action.
 
 OBJECTIF DE LA SESSION
-Continuer à faire en sorte que BoosterMail fonctionne nickel pour Yvan dans son New Outlook desktop. Polish UX/UI/data continu basé sur ses retours d'usage quotidien. Chaque fix validé est déployé sur OVH dans la foulée.
+Continuer à faire en sorte que BoosterMail fonctionne nickel pour Yvan dans son New Outlook desktop. Polish UX/UI/data continu basé sur ses retours d'usage quotidien. Chaque fix validé est déployé sur OVH dans la foulée. Pacte « pas de patches sur patches » à respecter systématiquement.
 
 WORKFLOW (cf section C de l'onboarding)
-1. Édition de code en local
-2. Commit git master
-3. Déploiement systématique sur OVH (procédure section D)
+1. Édition de code en local sur feat/yvan/frontend
+2. Commit + push sur origin/feat/yvan/frontend
+3. Déploiement systématique sur OVH (procédure section D de l'onboarding)
 4. Yvan teste sur SON New Outlook (qui charge depuis api.boostermail.ai)
 5. Si OK → fix suivant ; si KO → diagnostic via logs OVH (autonomie totale, cf consigne I.2)
 
-À chaque modif JS/HTML/manifest : bumper `_ADDIN_VERSION` dans `V2/autorunshared.js` ligne ~38 ET le `?v=` dans `V2/autorun.html` + `V2/dialog.html` (cf Pattern #18 / I-CACHE-02).
+À chaque modif JS/HTML/manifest : bumper `_ADDIN_VERSION` dans `V2/autorunshared.js` ET le `?v=` dans `V2/autorun.html` + `V2/dialog.html` (cf Pattern #18 / I-CACHE-02).
 
 CONTRAINTES SPÉCIFIQUES (rappel)
-- **Hors scope** : proto port 5050 (LECTURE SEULE), infra serveur (nginx/systemd/Sentry), code Azure/OAuth core, page install statique, DB schema (sauf coordination si Étape 7 multi-tenant attaquée)
-- **`config.json` jamais commité**, chmod 600 sur OVH
-- **DB locale supprimée du workflow Yvan** : toute modif data se fait directement sur la DB OVH
+- Hors scope : proto port 5050 (LECTURE SEULE, beta-testeurs Compta Santé historiques), infra serveur (nginx/systemd/Sentry), code Azure/OAuth core, page install statique
+- DB schema : coordination requise si chantier multi-tenant attaqué (cf branche feat/michael/multi-user)
+- `config.json` jamais commité, chmod 600 sur OVH
+- DB locale supprimée du workflow Yvan : toute modif data se fait sur la DB OVH directement
+- Branche feat/yvan/frontend OBLIGATOIRE pour tous les commits Yvan
 
 3 CONSIGNES YVAN À RESPECTER (cf section I de l'onboarding)
-1. **Autonomie maximale** : Yvan reste devant pour valider au cas où, mais Claude travaille seul. Quand tu hésites entre options, prends **la plus solide ET la plus propre**. Validation explicite seulement pour actions critiques/irréversibles.
-2. **Mode "Nocode"** : si Yvan écrit `nocode` / `Nocode` / `No Code` / `Nocodes`, on bascule en réflexion pure (pas de modif de fichiers). Reste actif jusqu'à validation explicite.
-3. **Logs autonomes** : tu as accès direct aux logs serveur OVH (journalctl, nginx, addin_debug.log). Tu cherches toi-même, ne fais pas perdre de temps à Yvan en lui demandant des copier-coller.
+1. Autonomie maximale : Yvan reste devant pour valider au cas où, mais Claude travaille seul. Quand tu hésites entre options, prends la plus solide ET la plus propre. Validation explicite seulement pour actions critiques/irréversibles.
+2. Mode "Nocode" : si Yvan écrit `nocode` / `Nocode` / `No Code` / `Nocodes`, on bascule en réflexion pure (pas de modif de fichiers). Reste actif jusqu'à validation explicite.
+3. Logs autonomes : tu as accès direct aux logs serveur OVH (journalctl, nginx, addin_debug.log). Tu cherches toi-même, ne fais pas perdre de temps à Yvan en lui demandant des copier-coller.
 
 Conventions complémentaires :
 - Backup AVANT chaque modif serveur : `cp file file.bak.$(date +%Y%m%d_%H%M%S)`
 - Commits granulaires (préférer 5 commits thématiques à 1 méga commit fourre-tout)
 - Ton collaboratif (« on » plutôt que « tu/vous »)
-- **Procédure purge cache WebView2** documentée dans onboarding section C.3 si user signale qu'un fix JS n'apparaît pas
-
-DÉMARRAGE TYPIQUE
-**Code dans état impeccable au sortir du 30/04** (audit ULTRA + STAND-BY traités). Plan :
-
-1. **Si Yvan a testé en condition réelle et signale un bug** : Workflow 4 du kit (diagnostic bug ciblé). Procédure rollback rapide disponible : `docs/saas/ROLLBACK_PROCEDURE.md`.
-2. **Si Yvan veut avancer sur la roadmap business** :
-   - **Tests end-to-end automatisés** sur les 5 flux critiques (recommandé pour combler le trou de couverture du smoke_test) — ~1 journée
-   - **Phase 4 paiement Stripe + RGPD** (préparation Beta payante) — ~1-2 semaines
-   - **AppSource soumission** (en parallèle des tests) — 4-8 semaines de validation Microsoft
-3. **Si Yvan veut continuer le polish technique** :
-   - **STAND-BY restants 4/12** : S10 (webhook thread pool si volume > 100 notifs/min), S12 (cache LRU si délais sur vieux mails)
-   - **Découpage `app_plugin.py`** en modules thématiques (`flows/`, `caches/`, `bg/`) pour maintenabilité long terme
-   - **Détection forward dans summary/draft** (sujet #6 PLUS_TARD_VF, cas Vincent Hubert)
-4. **Si chantier multi-tenant SaaS** (Phase 2 SaaS) attaqué : audit cross-user déjà livré, 22 caches déjà isolés via UserScopedDict (Étape 7 terminée 29/04 PM)
+- Procédure purge cache WebView2 documentée dans onboarding section C.3 si user signale qu'un fix JS n'apparaît pas
+- Toute promesse de comportement dans un commentaire DOIT être vérifiée par grep (Leçon 10 « Le commentaire qui ment »)
 
 À L'OUVERTURE DE LA SESSION (avant tout autre action)
-Suivre **Workflow 8 — Kit ouverture de session** (cf `audit/PLAYBOOK.md`) :
-1. Vérifier worktree + git fetch/merge si besoin
-2. Lire les 5 docs listés ci-dessus (onboarding + PLUS_TARD_VF + bilan + saas + invariants/anomalies)
-3. Tester SSH OVH + warmup_status
-4. Si l'un échoue, alerter avant toute action
+Suivre Workflow 8 — Kit ouverture de session (cf audit/PLAYBOOK.md) :
+1. Vérifier worktree + git fetch si besoin
+2. Vérifier branche active = feat/yvan/frontend
+3. Lire les docs listés ci-dessus dans l'ordre
+4. Tester SSH OVH + warmup_status
+5. Si l'un échoue, alerter avant toute action
 
-À LA FIN DE LA SESSION (déclencheur Yvan : « kit fin de session »)
-Suivre **Workflow 7 — Kit fin de session** (cf `audit/PLAYBOOK.md`) qui orchestre :
-- Créer `docs/sessions/OUTLOOK_BILAN_SESSION_AAAAMMJJ[_descriptif].md` (cf convention nommage section F.2 de l'onboarding)
-- MAJ `docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md` section L (liste bilans) + date d'en-tête
-- MAJ `docs/PLUS_TARD_VF.md` (sujets clos déplacés en « ✅ DÉJÀ FAIT » avec hash commit, nouveaux sujets ajoutés)
-- MAJ `docs/SOMMAIRE_DETAILLE.md` (entrée bilan)
-- MAJ `audit/INVARIANTS.md` ou `audit/ANOMALIES_RECURRENTES.md` si nouveaux invariants/patterns identifiés (règle M1 CLAUDE.md)
-- MAJ `docs/specs_proto/HISTORIQUE_DECISIONS.md` si nouvelle décision stratégique (règle M1)
-- **MAJ `docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md`** (ce fichier) avec l'état de fin
-- Lancer `bash audit/tests/cloture_check.sh` jusqu'à exit 0 (vérifie I-SESS-01 à I-SESS-04 : git clean + refs obsolètes + hash top commit + cohérence chiffres)
-- Commit final master + sync worktree → master via fast-forward
+À LA FIN DE LA SESSION (déclencheur Yvan : « kit fin de session » ou « lance le kit fin de session »)
+Suivre Workflow 7 — Kit fin de session (cf audit/PLAYBOOK.md) qui orchestre :
+- Créer docs/sessions/OUTLOOK_BILAN_SESSION_AAAAMMJJ[_descriptif].md (cf convention nommage section F.2 de l'onboarding)
+- MAJ docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md section L (liste bilans) + date d'en-tête
+- MAJ docs/PLUS_TARD_VF.md (sujets clos en « ✅ DÉJÀ FAIT » avec hash commit, nouveaux sujets ajoutés)
+- MAJ docs/SOMMAIRE_DETAILLE.md (entrée bilan + section ARCHIVES si nouveaux docs archivés)
+- MAJ audit/INVARIANTS.md ou audit/ANOMALIES_RECURRENTES.md si nouveaux invariants/patterns
+- MAJ docs/specs_proto/HISTORIQUE_DECISIONS.md si nouvelle décision stratégique
+- MAJ docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md (ce fichier) avec l'état de fin
+- Lancer `bash audit/tests/cloture_check.sh` jusqu'à exit 0 (vérifie I-SESS-01 à I-SESS-06)
+- Commit final + push sur origin/feat/yvan/frontend
 ```
 
 ---
@@ -216,6 +208,7 @@ Suivre **Workflow 7 — Kit fin de session** (cf `audit/PLAYBOOK.md`) qui orches
    - Sujets ouverts à reporter
 3. **MAJ tableau des docs à lire** si la structure change
 4. **MAJ propositions de démarrage** selon le PLUS_TARD_VF actuel
-5. **Vérifier les hashs commits référencés** restent cohérents
+5. **Vérifier que les hashs commits référencés** restent dans les 20 derniers (cloture_check I-SESS-03)
+6. **Lancer `cloture_check.sh`** jusqu'à exit 0
 
 **Règle d'or** : ce fichier doit toujours être copiable-collable tel quel sans avoir besoin de modifs ad-hoc avant chaque session. Tout ce qui est variable (état dernière session, propositions) est dans le bloc lui-même.
