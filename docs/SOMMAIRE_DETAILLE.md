@@ -201,6 +201,9 @@ docs/
 | **Installation côté utilisateur** | `docs/installation/SPEC_ONBOARDING_COMPLET.md` |
 | **Sujets « à faire plus tard » (référentiel unique)** | `docs/PLUS_TARD_VF.md` ⭐ |
 | **Plan migration SaaS** | `docs/plans/PLAN_SAAS.md` |
+| **État d'un flux / avancement Outlook** (historique 18/04) | `docs/v2_specs/PLAN_FINALISATION_OUTLOOK.md` (avancement par plateforme, tableau de bord — pré-refonte N1-N11) |
+| **Écart proto vs V2** (historique 18/04) | `docs/analyses_proto_v2/V2_vs_PROTO_GAPS.md` (snapshot pré-refonte N1-N11) |
+| **Plan de portage proto → V2** (historique, jamais exécuté) | `docs/analyses_proto_v2/PLAN_PORTAGE_PROTO_V2.md` ⚠️ (plan remplacé par la refonte N1-N11 effective — voir `V12_SALLE.md` + `REFONTE_N1_N11_JOURNAL.md`) |
 
 ---
 
@@ -690,3 +693,4 @@ Si vous voulez réduire l'encombrement de `C:\EasyMail\` :
 *— Section « C. Specs proto » restructurée : 6 docs CURRENT actifs + 18 archives marquées ⚠️ ARCHIVE avec pointeur vers remplaçant.*
 *— Table « Si la question porte sur… » remise à jour pour pointer vers les docs CURRENT (`V12_SALLE.md` ⭐⭐, `REFONTE_N1_N11_JOURNAL.md` ⭐, etc.) au lieu des proto archivés.*
 *— Section B-bis Architecture enrichie avec V12_SALLE.md (source unique cuisine/salle) et REFONTE_N1_N11_JOURNAL.md (journal global).*
+*— 3 entrées historiques restaurées dans la table « Je cherche quoi » avec mention explicite « (historique) » pour découvrabilité : `PLAN_FINALISATION_OUTLOOK`, `V2_vs_PROTO_GAPS`, `PLAN_PORTAGE_PROTO_V2` (zéro perte d'info, tout doc reste accessible depuis la table principale).*
