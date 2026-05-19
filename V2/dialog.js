@@ -1948,6 +1948,11 @@ function _setEcheanceCardClickable(clickable) {
 
 var _cfMessageId = '';
 var _cfHasAttachments = false;
+// 19/05/2026 — origine d'ouverture de #classifyView. 'ribbon' = bouton Outlook
+// « Classer rapide » (dialog Office dédiée, fermeture = window.close).
+// 'postsend' = workflow post-envoi du dialog réponse (overlay sur ce dialog,
+// fermeture = cacher overlay + _finalClose au lieu de fermer la dialog Office).
+var _classifyOpenedFrom = 'ribbon';
 var _cfMailFolders = [];
 var _cfMailSuggestion = null;
 var _cfMailSelectedId = '';
@@ -2015,6 +2020,16 @@ function _classifyInit() {
 }
 
 function _classifyClose() {
+    // Mode 'postsend' (19/05/2026) : la vue est un overlay sur le dialog
+    // réponse, pas une dialog Office dédiée → on cache l'overlay et on rend
+    // la main au workflow post-envoi (_finalClose ferme la dialog parent).
+    if (_classifyOpenedFrom === 'postsend') {
+        if (_cfMailUndoTimer) { clearInterval(_cfMailUndoTimer); _cfMailUndoTimer = null; }
+        var cv = document.getElementById('classifyView');
+        if (cv) cv.style.display = 'none';
+        _finalClose();
+        return;
+    }
     try { Office.context.ui.messageParent(JSON.stringify({action:'classify_close'})); } catch (e) {}
     try { window.close(); } catch (e) {}
 }
@@ -2368,12 +2383,22 @@ function _classifyOnPjSearchInput(e) {
 }
 
 function _classifyDoPj() {
-    // Phase 1 MVP : ouvre le dossier Windows dans Explorer via Companion local.
-    // L'extraction automatique des PJ est documentée pour V2 (cf PLUS_TARD_VF #15).
     var btn = document.getElementById('cfPjBtn');
     btn.disabled = true;
     var path = _cfPjSelectedPath || _cfPjManualPath || '';
-    if (!path) { alert('Aucun dossier sélectionné'); btn.disabled = false; return; }
+    if (!path) { alert('Aucun dossier selectionne'); btn.disabled = false; return; }
+
+    // En postsend (19/05/2026) : classement réel via /api/classify_pj pour
+    // CHAQUE PJ (transfert auto Companion N1 / OneDrive N2 / téléchargement N3
+    // selon le niveau choisi par le backend). Reprise de la logique doClassPJ
+    // legacy (popupClassPJ remplacée par la vue split).
+    if (_classifyOpenedFrom === 'postsend') {
+        _classifyDoPjPostSend(path);
+        return;
+    }
+
+    // Ribbon (Phase 1 MVP) : ouvre le dossier Windows dans Explorer via
+    // Companion local. L'extraction automatique des PJ est documentée pour V2.
     _fetchWithBearer(_backendUrl + '/api/open_windows_folder?path=' + encodeURIComponent(path))
         .then(function() { _classifyShowPjConfirm(path); })
         .catch(function() {
@@ -2382,13 +2407,54 @@ function _classifyDoPj() {
         });
 }
 
+function _classifyDoPjPostSend(pjDestFolder) {
+    var btn = document.getElementById('cfPjBtn');
+    btn.textContent = 'Classement...';
+    var attachments = (_postSendPJData && _postSendPJData.attachments) || [];
+    if (attachments.length === 0) {
+        // Garde-fou : si on n'a pas les attachments en mémoire, on ne peut pas
+        // classer côté Companion. On informe l'user et on referme la colonne.
+        _classifyShowPjConfirm(pjDestFolder);
+        return;
+    }
+    var promises = attachments.map(function(att) {
+        return _fetchWithBearer(_backendUrl + '/api/classify_pj', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message_id: _cfMessageId,
+                attachment_id: att.id,
+                dest_folder: pjDestFolder,
+                filename: att.name,
+                contact_email: _fromEmail,
+                level: 0,
+            }),
+        }).then(function(r) { return r.json(); });
+    });
+    Promise.allSettled(promises).then(function(results) {
+        var failed = results.filter(function(r) { return r.status === 'rejected'; }).length;
+        var level3 = results.filter(function(r) {
+            return r.status === 'fulfilled' && r.value && r.value.level === 3;
+        }).length;
+        if (failed > 0 || level3 > 0) {
+            console.log('[dialog] ' + (failed + level3) + ' PJ(s) non classees automatiquement');
+        }
+        _classifyShowPjConfirm(pjDestFolder);
+    });
+}
+
 function _classifyShowPjConfirm(path) {
     var undoEl = document.getElementById('cfPjUndo');
     var btnEl = document.getElementById('cfPjBtn');
     btnEl.style.display = 'none';
     undoEl.style.display = 'flex';
-    undoEl.innerHTML = '<span>✓ Dossier ouvert dans Explorer : <strong>' + _escapeHtml(path) + '</strong> — glissez vos PJ dedans</span>'
-                     + '<button onclick="_classifyResetPj()">OK</button>';
+    // Postsend (19/05) : classement automatique des PJ déjà effectué via
+    // /api/classify_pj — message adapté. Ribbon : on a juste ouvert Explorer,
+    // l'user fait le drag-drop lui-même.
+    var msg = (_classifyOpenedFrom === 'postsend')
+        ? '&#x2713; PJ classees dans <strong>' + _escapeHtml(path) + '</strong>'
+        : '&#x2713; Dossier ouvert dans Explorer : <strong>' + _escapeHtml(path) + '</strong> &mdash; glissez vos PJ dedans';
+    undoEl.innerHTML = '<span>' + msg + '</span><button onclick="_classifyResetPj()">OK</button>';
 }
 
 function _classifyResetPj() {
@@ -4295,29 +4361,177 @@ function dismissEcheance() {
 // --- Étape 2 : Classement Mail (Mode Standard uniquement) ---
 
 function _startClassMail() {
+    // Fusion mail+PJ post-envoi (19/05/2026, vision Yvan) — au lieu d'enchaîner
+    // popup mail seule puis popup PJ seule (2 popups successives), on affiche
+    // la vue split #classifyView (la même qu'au bouton ribbon « Classer rapide »)
+    // en overlay. Le pré-envoi (clic cards CLASSEMENT SUGGERE / CLASSEMENT PJ
+    // SUGGERE) reste sur _showClassMailPopup / _showClassPJPopup mode 'pre' →
+    // ces deux popups mono-sujet sont conservées telles quelles.
     if (!_isStandardMode) { _startClassPJ(); return; }
+    _startClassUnifiedPostSend();
+}
 
-    _fetchWithBearer(_backendUrl + '/api/classification/post_send/' + encodeURIComponent(_messageId))
-        .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+// ============================================================================
+// FUSION POPUP CLASSEMENT MAIL + PJ POST-ENVOI (19/05/2026)
+// ----------------------------------------------------------------------------
+// Ouvre #classifyView (vue split déjà testée par le bouton ribbon « Classer
+// rapide ») en overlay au-dessus du dialog de réponse. Réutilise au max les
+// helpers existants du mode classify (_classifyRenderMail, _classifyRenderPj,
+// _classifyDoMail, _findFolderMatch, _buildOutlookFolderTreeHtml, etc.). La
+// seule différence : fetch via les routes /api/*/post_send/ (alimentées par le
+// BG prewarm post-envoi) au lieu de /api/classement_*/ (alimentées par le BG
+// prewarm de la liste — pas garanti d'avoir tourné après envoi). _classifyClose
+// et _classifyDoPj routent sur _classifyOpenedFrom pour adapter leur comportement.
+// ============================================================================
+
+function _startClassUnifiedPostSend() {
+    if (!_messageId) { _finalClose(); return; }
+    _classifyOpenedFrom = 'postsend';
+
+    // En-tête (mêmes variables que mode classify ribbon, déjà valorisées par
+    // les URL params au boot du dialog réponse).
+    var fromDisplay = _fromName || _fromEmail || '(expediteur inconnu)';
+    var fromEl = document.getElementById('cfFrom');
+    var subjEl = document.getElementById('cfSubject');
+    if (fromEl) fromEl.textContent = fromDisplay;
+    if (subjEl) subjEl.textContent = _subject || '(sans objet)';
+
+    _cfMessageId = _messageId;
+    _cfHasAttachments = !!_hasAttachments;
+
+    // Visibilité colonnes : mail toujours, PJ seulement si présentes
+    var colMail = document.getElementById('cfColMail');
+    var colPj = document.getElementById('cfColPj');
+    if (colMail) colMail.style.display = '';
+    if (colPj) colPj.style.display = _cfHasAttachments ? '' : 'none';
+
+    // Reset état (au cas où la popup unifiée serait rouverte dans la même session)
+    _cfMailSelectedId = '';
+    _cfMailManualPath = '';
+    _cfMailSuggestion = null;
+    _cfMailFolders = [];
+    _cfPjSelectedPath = '';
+    _cfPjManualPath = '';
+    _cfPjSuggestion = null;
+    _cfPjFolders = [];
+
+    // Loader initial dans les deux colonnes
+    var mailSugEl = document.getElementById('cfMailSuggestion');
+    var pjSugEl = document.getElementById('cfPjSuggestion');
+    var mailAltsEl = document.getElementById('cfMailAlternatives');
+    var pjAltsEl = document.getElementById('cfPjAlternatives');
+    var mailTreeEl = document.getElementById('cfMailTree');
+    var pjTreeEl = document.getElementById('cfPjTree');
+    var mailBtnEl = document.getElementById('cfMailBtn');
+    var pjBtnEl = document.getElementById('cfPjBtn');
+    var mailUndoEl = document.getElementById('cfMailUndo');
+    var pjUndoEl = document.getElementById('cfPjUndo');
+    if (mailSugEl) mailSugEl.innerHTML = '<div style="font-style:italic;color:#888;">Analyse en cours&hellip;</div>';
+    if (pjSugEl) pjSugEl.innerHTML = '<div style="font-style:italic;color:#888;">Analyse en cours&hellip;</div>';
+    if (mailAltsEl) mailAltsEl.innerHTML = '';
+    if (pjAltsEl) pjAltsEl.innerHTML = '';
+    if (mailTreeEl) mailTreeEl.innerHTML = '';
+    if (pjTreeEl) pjTreeEl.innerHTML = '';
+    if (mailBtnEl) { mailBtnEl.disabled = true; mailBtnEl.style.display = ''; mailBtnEl.textContent = 'Classer le mail'; }
+    if (pjBtnEl) { pjBtnEl.disabled = true; pjBtnEl.style.display = ''; pjBtnEl.textContent = 'Classer les PJ'; }
+    if (mailUndoEl) { mailUndoEl.style.display = 'none'; mailUndoEl.innerHTML = ''; }
+    if (pjUndoEl) { pjUndoEl.style.display = 'none'; pjUndoEl.innerHTML = ''; }
+
+    var cv = document.getElementById('classifyView');
+    if (cv) cv.style.display = 'flex';
+
+    // Bind écouteurs de recherche — idempotent (flag _cfBound pour éviter le
+    // double-bind si une session précédente avait ouvert le mode ribbon).
+    var sm = document.getElementById('cfMailSearch');
+    if (sm) { sm.value = ''; if (!sm._cfBound) { sm.addEventListener('input', _classifyOnMailSearchInput); sm._cfBound = true; } }
+    var sp = document.getElementById('cfPjSearch');
+    if (sp) { sp.value = ''; if (!sp._cfBound) { sp.addEventListener('input', _classifyOnPjSearchInput); sp._cfBound = true; } }
+
+    // Fetch en parallèle des suggestions post-send (routes alimentées par le
+    // BG _prewarm_classement_for_mail + _prewarm_pj_classement_for_mail).
+    _classifyFetchMailDataPostSend();
+    if (_cfHasAttachments) _classifyFetchPjDataPostSend();
+}
+
+function _classifyFetchMailDataPostSend() {
+    // L'arbre Outlook est récupéré via /api/folders (statique pendant la session).
+    _fetchWithBearer(_backendUrl + '/api/folders')
+        .then(function(r) { return r.json(); })
+        .catch(function() { return {folders: []}; })
+        .then(function(resp) {
+            _cfMailFolders = (resp && resp.folders) || [];
+            _classifyPollMailSuggestionPostSend(0);
+        });
+}
+
+function _classifyPollMailSuggestionPostSend(attempt) {
+    _fetchWithBearer(_backendUrl + '/api/classification/post_send/' + encodeURIComponent(_cfMessageId))
+        .then(function(r) { return r.json(); })
+        .catch(function() { return null; })
         .then(function(data) {
-            if (data.status === 'scanning') {
-                // Poll 1 fois de plus
-                setTimeout(function() {
-                    _fetchWithBearer(_backendUrl + '/api/classification/post_send/' + encodeURIComponent(_messageId))
-                        .then(function(r) { return r.json(); })
-                        .then(function(data2) {
-                            if (data2.status === 'done' && data2.suggestion) {
-                                _showClassMailPopup(data2.suggestion, data2.suggestion.folders || []);
-                            } else { _startClassPJ(); }
-                        }).catch(function() { _startClassPJ(); });
-                }, 1500);
-            } else if (data.status === 'done' && data.suggestion) {
-                _showClassMailPopup(data.suggestion, data.suggestion.folders || []);
-            } else {
-                _startClassPJ();
+            if (data && data.status === 'scanning' && attempt < 8) {
+                // BG pas terminé : retry toutes les 1.5s (max 12s total)
+                setTimeout(function() { _classifyPollMailSuggestionPostSend(attempt + 1); }, 1500);
+                return;
             }
-        })
-        .catch(function() { _startClassPJ(); });
+            if (data && data.status === 'done' && data.suggestion) {
+                var sug = data.suggestion;
+                // Si la route post-send renvoie ses propres folders (cas BG
+                // legacy), on les utilise en priorité sur /api/folders.
+                if (sug.folders && sug.folders.length) _cfMailFolders = sug.folders;
+                _cfMailSuggestion = {
+                    suggestion: (sug.suggestions && sug.suggestions[0]) ? sug.suggestions[0] : (sug.suggestion || null),
+                    suggestions: sug.suggestions || (sug.suggestion ? [sug.suggestion] : []),
+                    source: sug.source || '',
+                };
+            } else {
+                _cfMailSuggestion = {};
+            }
+            _classifyRenderMail();
+        });
+}
+
+function _classifyFetchPjDataPostSend() {
+    _fetchWithBearer(_backendUrl + '/api/windows_folders')
+        .then(function(r) { return r.json(); })
+        .catch(function() { return {folders: []}; })
+        .then(function(resp) {
+            _cfPjFolders = (resp && resp.folders) || [];
+            _classifyPollPjSuggestionPostSend(0);
+        });
+}
+
+function _classifyPollPjSuggestionPostSend(attempt) {
+    _fetchTimeout(_backendUrl + '/api/pj_classification/post_send/' + encodeURIComponent(_cfMessageId), null, 10000)
+        .then(function(r) { return r.json(); })
+        .catch(function() { return null; })
+        .then(function(data) {
+            if (data && data.status === 'scanning' && attempt < 8) {
+                setTimeout(function() { _classifyPollPjSuggestionPostSend(attempt + 1); }, 1500);
+                return;
+            }
+            if (data && data.status === 'done' && data.pj_suggestions
+                && data.pj_suggestions.attachments && data.pj_suggestions.attachments.length > 0) {
+                var pj = data.pj_suggestions;
+                if (pj.folders && pj.folders.length) _cfPjFolders = pj.folders;
+                _cfPjSuggestion = {
+                    suggestion: (pj.suggestions && pj.suggestions[0]) ? pj.suggestions[0] : (pj.suggestion || null),
+                    suggestions: pj.suggestions || (pj.suggestion ? [pj.suggestion] : []),
+                    source: pj.source || '',
+                };
+                // Mémorise pour _classifyDoPj postsend (besoin de attachments[].id)
+                _postSendPJData = pj;
+            } else {
+                // Pas de PJ classable du tout (backend renvoie rien) → on cache
+                // la colonne, l'utilisateur ne voit que le mail à classer.
+                var colPj = document.getElementById('cfColPj');
+                if (colPj) colPj.style.display = 'none';
+                _cfHasAttachments = false;
+                _cfPjSuggestion = {};
+                return;
+            }
+            _classifyRenderPj();
+        });
 }
 
 function _showClassMailPopup(suggestion, folders, mode) {
