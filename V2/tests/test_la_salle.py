@@ -3,7 +3,7 @@
 Source de vérité :
   - `docs/architecture/REFONTE_N1_N11_JOURNAL.md` §7 « La SALLE — Phase A »
   - `docs/PLUS_TARD_VF.md` item #28 (bug latent purge_email_cache_for ✅ FAIT)
-  - `audit/INVARIANTS.md` I-CLASSIFY-A + I-UNFLATTEN-SUGGESTIONS
+  - `docs/architecture/V12/V12_INVARIANTS.md` I-CLASSIFY-A + I-UNFLATTEN-SUGGESTIONS
 
 Méthodologie pacte 4 défenses :
   - Démolisseur pré-impl V12 Phase A : 3 P0 corrigés (signature helper, move

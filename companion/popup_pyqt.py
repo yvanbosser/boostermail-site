@@ -29,7 +29,7 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
                               QWidget, QStackedWidget, QLabel, QProgressBar,
                               QPushButton, QGraphicsOpacityEffect, QSizePolicy,
-                              QFileDialog)
+                              QFileDialog, QMessageBox, QInputDialog)
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -113,6 +113,42 @@ def _is_onboarding_done(timeout=2.0):
 # PAGE PERSONNALISEE — accepte le certificat auto-signe localhost (P10)
 # =============================================================================
 
+class _JsDialogPage(QWebEnginePage):
+    """Base class qui rétablit confirm()/alert()/prompt() JS via QMessageBox.
+
+    Sans ces overrides, QWebEnginePage retourne `false` (ou la chaîne vide)
+    silencieusement sans afficher la moindre boîte de dialogue native, et
+    aucun handler `recalibrateAll()` / `recalibrateSingle()` / ... ne peut
+    démarrer parce que tous gardent un `if (!confirm(...)) return;` en tête.
+    Sans cette base class, tout bouton qui passe par `confirm()` est mort.
+    """
+    def _parent_window(self):
+        try:
+            v = self.view()
+            return v.window() if v else None
+        except Exception:
+            return None
+
+    def javaScriptConfirm(self, securityOrigin, msg):
+        reply = QMessageBox.question(
+            self._parent_window(),
+            "BoosterMail",
+            msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def javaScriptAlert(self, securityOrigin, msg):
+        QMessageBox.information(self._parent_window(), "BoosterMail", msg)
+
+    def javaScriptPrompt(self, securityOrigin, msg, defaultValue):
+        text, ok = QInputDialog.getText(
+            self._parent_window(), "BoosterMail", msg, text=defaultValue or ""
+        )
+        return ok, text
+
+
 class _BlackholePage(QWebEnginePage):
     """Page QWebEngine qui refuse TOUTE navigation.
 
@@ -124,7 +160,7 @@ class _BlackholePage(QWebEnginePage):
         return False
 
 
-class _ChildPopupPage(QWebEnginePage):
+class _ChildPopupPage(_JsDialogPage):
     """Page pour les window.open() depuis le dialog (Profil/Contacts/Echeances).
 
     Fix 23/04 (Front 2) : avant, createWindow retournait _BlackholePage qui
@@ -200,7 +236,7 @@ class _ChildPopupPage(QWebEnginePage):
         return False
 
 
-class LocalhostPage(QWebEnginePage):
+class LocalhostPage(_JsDialogPage):
     easymail_action = None
 
     def __init__(self, *args, **kwargs):

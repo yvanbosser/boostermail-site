@@ -471,7 +471,7 @@ _speculative_lock = threading.Lock()
 
 _pj_text_cache = {}       # email_id -> {'status': 'running'|'done'|'error', 'results': [{index, name, text}], 'ts': float}
 _MAX_PJ_TEXT_CACHE = 20
-_MAX_PRE_OCR_PDFS = 3     # Max PDF pré-extraits par mail (limite coût API OCR)
+_MAX_PRE_OCR_PDFS = 5     # Max PDF pré-extraits par mail (limite coût API OCR)
 
 _MAX_EMAIL_CACHE = 50  # Limite taille des caches session
 _MAX_HTML_CACHE = 50

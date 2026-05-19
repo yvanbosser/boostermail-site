@@ -24,3 +24,4 @@ PyQt6-WebEngine
 PyPDF2
 python-docx
 openpyxl
+PyMuPDF              # OCR Claude Vision sur PDF scannes (fitz)

@@ -2,7 +2,7 @@
 
 Source de vérité :
   - `docs/architecture/REFONTE_N1_N11_JOURNAL.md` §6 bis « Préparation N12 »
-  - `audit/INVARIANTS.md` Obs-F8 + Obs-F10
+  - `docs/architecture/V12/V12_INVARIANTS.md` Obs-F8 + Obs-F10
   - `docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md` §2 (scope) + §5 (UI)
 
 Objet : tests unitaires PURS sur la fonction de normalisation qui ferme le

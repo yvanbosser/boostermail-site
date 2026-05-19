@@ -229,7 +229,7 @@ def test_phase21_no_scan_echeance_marker_in_unified():
     src = inspect.getsource(ap._prewarm_unified_for_mail)
     ok = log_test("marker `_scan_echeance_active` ABSENT (Option A archivée)",
                   '_scan_echeance_active' not in src,
-                  "marker Option A réintroduit — voir INVARIANTS.md archivé"
+                  "marker Option A réintroduit — voir V12_INVARIANTS.md archivé"
                   if '_scan_echeance_active' in src else "")
     ok &= log_test("`_classify_mail_branch(mail_data)` orphelin SUPPRIMÉ "
                    "(plus de calcul branche pour décider scan_echeance)",

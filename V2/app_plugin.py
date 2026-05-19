@@ -1063,7 +1063,7 @@ def _mark_warmup_done(value: bool = True) -> None:
 # Règle stricte : un mail = UN seul numéro = internet_message_id (RFC 2822, format
 # `<...@domain>`). Pas de fallback. Si absent → mail "anonyme" (très rare, mail
 # malformé) → BG le saute, streaming à la commande.
-# Référence : audit/INVARIANTS.md I-DATA-11.
+# Référence : docs/architecture/V12/V12_INVARIANTS.md I-DATA-11.
 
 # Refonte N1 (11/05/2026) : ancien `_canonical_mid` SUPPRIMÉ.
 # Tous les call sites pointent maintenant directement vers
@@ -2712,7 +2712,7 @@ _mail_preview_lock = threading.Lock()
 # Avant ce lock, 2 threads concurrents sur le même `mid` pouvaient passer le
 # check `get_all_dishes_for_mail(mid)` (l. ~4126 dans `_prewarm_unified_for_
 # mail`) simultanément et appeler le commis Haiku 2 fois (Obs-F6 documentée
-# dans `audit/INVARIANTS.md`). Coût : 2× appel IA, last-write-wins en DB,
+# dans `docs/architecture/V12/V12_INVARIANTS.md`). Coût : 2× appel IA, last-write-wins en DB,
 # frigos cohérents en fin mais gaspillage Haiku × 2.
 #
 # Conséquence pour Phase B.3 (fusion route bundle) : si on transforme la route
@@ -4399,7 +4399,7 @@ def _prewarm_unified_for_mail(mid, mail_data, momentum_snapshot=None):
     2, et le 2e thread aurait DB hit complet → early return de toutes
     façons). Le test peut donc être resserré à `call_count == 1`.
     """
-    # Lock par-(user_id, mid) — résolution Obs-F6 (cf docstring + INVARIANTS.md).
+    # Lock par-(user_id, mid) — résolution Obs-F6 (cf docstring + V12_INVARIANTS.md).
     _lock = _get_unified_lock(mid)
     if not _lock.acquire(blocking=False):
         logger.debug(f"[unified] skip {mid[:30]} — lock détenu par un autre thread")
@@ -4836,7 +4836,7 @@ def _reply_cache_cohesion_refresh():
     autres frigos (`_prefetch_cache`, `_mail_preview_cache`, slots DB) ne
     sont PAS rafraîchis ici — ils sont purgés via webhook Graph `deleted`
     + cascade `purge_old_emails` 730j + leur TTL propre (72h RAM).
-    Documenté dans I-FRIGO-N7-01 (audit/INVARIANTS.md) et flaggé en
+    Documenté dans I-FRIGO-N7-01 (docs/architecture/V12/V12_INVARIANTS.md) et flaggé en
     PLUS_TARD_VF #29 pour traitement futur (étendre la cohésion aux 4
     autres frigos = surcoût négligeable + plus de robustesse anti-zombies).
     """
@@ -11190,7 +11190,7 @@ else:
     _pj_text_cache = {}
 _pj_text_cache_lock = threading.Lock()   # Audit : protège _pj_text_cache (race condition BG vs main)
 _PDF_EXTS = {'.pdf'}
-_MAX_PRE_OCR_PDFS = 3      # Max 3 PDF pré-extraits par mail (limite coût + temps)
+_MAX_PRE_OCR_PDFS = 5      # Max 5 PDF pré-extraits par mail (limite coût + temps)
 _MAX_PJ_TEXT_CACHE = 30    # Limite taille cache
 
 
@@ -11201,7 +11201,7 @@ def _start_pj_pre_extract_v2(message_id, attachments=None):
     Stocke le texte extrait dans _pj_text_cache pour qu'il soit disponible
     quand l'utilisateur clique Générer (zéro attente supplémentaire).
 
-    Max 3 PDF par mail. Skip si déjà en cache.
+    Max 5 PDF par mail (cf. _MAX_PRE_OCR_PDFS). Skip si déjà en cache.
     """
     if not message_id:
         return
@@ -11297,9 +11297,43 @@ def _start_pj_pre_extract_v2(message_id, attachments=None):
                                 text = '\n'.join(pages)[:10000]
                         except Exception:
                             pass
-                        # Fallback OCR Claude si < 50 chars (PDF scanné)
+                        # Fallback OCR Claude Vision si < 50 chars (PDF scanné).
+                        # Portage du proto outlook_com.py:_ocr_pdf — 1 seul appel
+                        # multi-pages via PyMuPDF (fitz) + provider.ocr_pdf_multi.
+                        # Limite 10 pages (spec V2 SPEC_OCR_LIMITE.md).
                         if len(text.strip()) < 50:
-                            logger.info(f"[pj_pre_v2] PDF scanné {name}, fallback OCR désactivé en V2 (TODO)")
+                            try:
+                                import fitz  # PyMuPDF
+                                import base64 as _b64
+                                ai_for_ocr = get_ai()
+                                if not ai_for_ocr:
+                                    logger.info(f"[pj_pre_v2] OCR skip {name} : AI provider indisponible")
+                                else:
+                                    doc = fitz.open(tmp_path)
+                                    total_pages = len(doc)
+                                    num_pages = min(total_pages, 10)
+                                    pages_b64 = []
+                                    for _pg in range(num_pages):
+                                        _pix = doc[_pg].get_pixmap(dpi=150)
+                                        pages_b64.append(_b64.b64encode(_pix.tobytes("png")).decode('utf-8'))
+                                    doc.close()
+                                    try:
+                                        ocr_text = ai_for_ocr.ocr_pdf_multi(pages_b64)
+                                    except NotImplementedError:
+                                        ocr_text = ''
+                                        logger.info(f"[pj_pre_v2] OCR non supporté par provider pour {name}")
+                                    if ocr_text:
+                                        if num_pages < total_pages:
+                                            ocr_text = (f"[NOTE : Ce PDF contient {total_pages} pages. "
+                                                        f"Seules les {num_pages} premières ont été analysées.]\n\n"
+                                                        + ocr_text)
+                                        text = ocr_text[:10000]
+                                        logger.info(f"[pj_pre_v2] OCR réussi {name} : {len(text)} chars, "
+                                                    f"{num_pages}/{total_pages} pages")
+                            except ImportError:
+                                logger.warning(f"[pj_pre_v2] PyMuPDF (fitz) non installé, OCR impossible pour {name}")
+                            except Exception as _ocr_err:
+                                logger.warning(f"[pj_pre_v2] Échec OCR {name} : {_ocr_err}")
                         if text.strip():
                             with _pj_text_cache_lock:
                                 entry['results'].append({'index': idx, 'name': name, 'text': text.strip()})
@@ -12789,6 +12823,29 @@ def generate_reply():
     from_name = data.get('from_name', '')
     pj_context = data.get('pj_context', '')[:5000]  # Cap 5K chars
 
+    # Fallback cache PJ pré-extrait (décision Yvan 19/05/2026) :
+    # Si pj_context vide (user a cliqué "Ignorer" dans la pop-up PJ, ou toutes
+    # les extractions au clic ont échoué), réutiliser le travail BG déjà fait
+    # par _start_pj_pre_extract_v2 plutôt que de jeter le contexte.
+    # Note : le chemin "cache préemptif HIT" (ligne ~12713) a déjà return plus
+    # haut — donc ici on est forcément en MISS, c'est le bon endroit.
+    if not pj_context.strip() and message_id:
+        try:
+            with _pj_text_cache_lock:
+                _cache_entry = _pj_text_cache.get(message_id)
+            if _cache_entry and _cache_entry.get('status') == 'done':
+                _cached_results = _cache_entry.get('results', [])
+                if _cached_results:
+                    pj_context = '\n\n'.join(
+                        f"--- {r.get('name', 'PJ')} ---\n{r.get('text', '')}"
+                        for r in _cached_results
+                    )[:5000]
+                    logger.info(f"[generate_reply] Fallback cache PJ pour "
+                                f"{message_id[:20]} : {len(_cached_results)} PJ "
+                                f"réutilisées ({len(pj_context)} chars)")
+        except Exception as _pj_cache_err:
+            logger.debug(f"[generate_reply] Lookup cache PJ échoué : {_pj_cache_err}")
+
     ai = get_ai()
     if not ai:
         return jsonify({"error": "AI Provider non configuré"}), 503
@@ -14126,7 +14183,7 @@ def _should_scan_echeance(mode: str, mail_data: dict) -> bool:
     """Décide si le commis Haiku doit scanner l'échéance pour ce mail.
 
     Résout l'asymétrie « patches dispersés » dénoncée par Obs-F10
-    (cf audit/INVARIANTS.md lignes 1121-1127). Avant V12 Phase 2.1, la
+    (cf docs/architecture/V12/V12_INVARIANTS.md lignes 1121-1127). Avant V12 Phase 2.1, la
     décision était inline aux 2 call sites avec 2 mécanismes différents :
     - compose-sortants : aucun kwarg passé (default True hérité)
     - entrants : `scan_echeance = (branch == 'vip')` marker Option A 14/05
@@ -14945,6 +15002,770 @@ def _should_reanalyze_profile(contact_email, existing_profile, mail_count):
     if existing_profile.get('manually_edited'):
         return False
     return _should_analyze_contact(mail_count, existing_profile.get('sample_count'))
+
+
+# =============================================================================
+# ONBOARDING — Portage proto → V2 (étapes UI + analyse contacts)
+# Spec : docs/installation/onboarding - étapes + analyse des contact.md
+# Décisions validées 19/05/2026 (D1-D6 dans la spec §8).
+# =============================================================================
+
+# État partagé multi-tenant (sub-cache par user_id). Stocke l'avancement de
+# l'onboarding pour permettre au frontend de poll /api/style_status.
+# Clés : {analyzing, step, chunks, cancel, total_contacts, done_contacts}.
+if _UserScopedDict is not None:
+    _onboarding_state = _UserScopedDict('onboarding_state')
+else:
+    _onboarding_state = {
+        "analyzing": False, "step": "idle", "chunks": 0, "cancel": False,
+        "total_contacts": 0, "done_contacts": 0,
+    }
+_onboarding_lock = threading.Lock()
+
+
+def _onboarding_set_step(text):
+    """Met à jour le texte d'étape lu par /api/style_status (poll frontend)."""
+    _onboarding_state['step'] = text
+    logger.info(f"[onboarding] {text}")
+
+
+def _onboarding_cancelled():
+    """True si l'user a cliqué Stop pendant l'analyse (flag posé par
+    /api/stop_style_analysis). Lu à chaque transition de phase + dans la
+    boucle Phase 4."""
+    return bool(_onboarding_state.get('cancel', False))
+
+
+def _onboarding_reset_state():
+    """Reset propre du state au démarrage d'un onboarding."""
+    _onboarding_state.update({
+        'analyzing': True, 'step': 'Démarrage…', 'chunks': 0, 'cancel': False,
+        'total_contacts': 0, 'done_contacts': 0,
+    })
+
+
+def _onboarding_finalize_state(success):
+    """Reset propre du state à la fin (succès ou erreur ou annulation)."""
+    _onboarding_state.update({
+        'analyzing': False, 'cancel': False,
+    })
+    if success and not _onboarding_cancelled():
+        _onboarding_state['step'] = 'Configuration terminée !'
+
+
+def _collect_inbox_for_onboarding(graph):
+    """Phase 1 — Lit 300 mails envoyés + 500 mails reçus via Graph API.
+
+    Retourne (sent, received). Le caller doit vérifier `len(sent) >= 10`
+    (sinon style non analysable, abandon explicite avec step UI).
+    """
+    _onboarding_set_step("Lecture de vos 300 derniers mails envoyés...")
+    sent = graph.get_sent_emails(limit=300) or []
+    logger.info(f"[onboarding] Phase 1.a : {len(sent)} mails envoyés récupérés")
+
+    if _onboarding_cancelled() or len(sent) < 10:
+        return sent, []
+
+    _onboarding_set_step(
+        f"{len(sent)} mails envoyés lus. Lecture de vos 500 derniers mails reçus..."
+    )
+    try:
+        received = graph.get_received_emails(limit=500, include_body=True) or []
+    except Exception as e:
+        logger.warning(f"[onboarding] Erreur lecture reçus : {e}")
+        received = []
+    logger.info(f"[onboarding] Phase 1.b : {len(received)} mails reçus récupérés")
+    return sent, received
+
+
+def _index_contacts_in_threads(sent, received):
+    """Phase 3 — Indexe les mails E/R dans la table threads + retourne
+    le contact_set des correspondants uniques.
+
+    Effet de bord côté DB : _db.save_to_thread() crée aussi le squelette
+    contact si absent (N10 — hook auto, idempotent). Ne saute pas les
+    contacts auto-emails ici (filtrage déferré en Phase 4).
+
+    Utilise _extract_addr() pour gérer les 3 formats Graph (str / list[dict]
+    / dict) — cf invariant I-CX-01 « to/cc Graph = list[dict], pas str ».
+    """
+    _onboarding_set_step("Indexation de vos correspondants...")
+    contact_set = set()
+
+    for m in sent:
+        to_addr = _extract_addr(m, 'to_email', 'to')
+        if not to_addr or '@' not in to_addr:
+            continue
+        contact_set.add(to_addr)
+        try:
+            _db.save_to_thread(
+                project='',
+                direction='sent',
+                subject=m.get('subject', '') or '',
+                body=(m.get('body') or m.get('body_preview') or '')[:2000],
+                correspondent=to_addr,
+            )
+        except Exception as e:
+            logger.warning(f"[onboarding] save_to_thread sent erreur {to_addr}: {e}")
+
+    for m in received:
+        from_addr = _extract_addr(m, 'from_email', 'from')
+        if not from_addr or '@' not in from_addr:
+            continue
+        contact_set.add(from_addr)
+        try:
+            _db.save_to_thread(
+                project='',
+                direction='received',
+                subject=m.get('subject', '') or '',
+                body=(m.get('body') or m.get('body_preview') or '')[:2000],
+                correspondent=from_addr,
+            )
+        except Exception as e:
+            logger.warning(f"[onboarding] save_to_thread received erreur {from_addr}: {e}")
+
+    try:
+        _db.save_setting("onboarding_mail_count", str(len(sent) + len(received)))
+    except Exception:
+        pass
+
+    logger.info(
+        f"[onboarding] Phase 3 : {len(sent)+len(received)} mails indexés, "
+        f"{len(contact_set)} correspondants uniques"
+    )
+    return contact_set
+
+
+def _analyze_contacts_batch(contact_set):
+    """Phase 4 — Analyse Claude de chaque contact (≥ _CONTACT_MIN_MAILS).
+
+    Décisions §8 de la spec :
+    - D2 : Skip si déjà profil enrichi. Le bouton « Tout recalibrer »
+      (page Contacts) reste la voie pour forcer la re-analyse complète
+      via _maybe_analyze_contact(bypass_cooldown=True).
+    - D4 : Inclut les squelettes (créés par _index_contacts_in_threads).
+    - D6 : La garde tu/vous post-IA est appliquée par _apply_register_guard
+      à l'intérieur de _maybe_analyze_contact.
+
+    Le sleep 0.3s entre chaque appel évite le burst Anthropic (rate limit)
+    et garantit la lisibilité de la barre de progression côté UI.
+    """
+    contacts_to_analyze = []
+    for email in contact_set:
+        if _is_auto_email(email):
+            continue
+        try:
+            mail_count = _db.count_mails_with_contact(email)
+        except Exception:
+            mail_count = 0
+        if mail_count >= _CONTACT_MIN_MAILS:
+            contacts_to_analyze.append(email)
+
+    total = len(contacts_to_analyze)
+    _onboarding_state['total_contacts'] = total
+    _onboarding_state['done_contacts'] = 0
+    logger.info(f"[onboarding] Phase 4 : analyse de {total} profils contacts")
+
+    if total == 0:
+        return 0
+
+    for i, email in enumerate(contacts_to_analyze):
+        if _onboarding_cancelled():
+            logger.info(f"[onboarding] Phase 4 annulée user au contact {i+1}/{total}")
+            return i
+        display = email.split('@')[0].replace('.', ' ').title()
+        _onboarding_set_step(f"Analyse du contact {display} ({i+1}/{total})...")
+        try:
+            _maybe_analyze_contact(email, bypass_cooldown=True)
+        except Exception as e:
+            logger.warning(f"[onboarding] Phase 4 erreur contact {email}: {e}")
+        _onboarding_state['done_contacts'] = i + 1
+        time.sleep(0.3)
+
+    logger.info(f"[onboarding] Phase 4 : {total} profils contacts analysés")
+    return total
+
+
+# Prompt de l'analyse style — port direct du proto app.py (validé production).
+# Génère un profil de style en 3 sections (A/B/C) + un bloc <<<SCORING>>>
+# avec 5 critères × 20 + 3 descripteurs. Cf docs/algorithme/SPEC_SCORING_REDACTIONNEL.md.
+_STYLE_ANALYSIS_PROMPT = """Analyse ces mails envoyes et extrais le profil de style redactionnel. Certains incluent le mail recu auquel il repondait (marque ">> MAIL RECU").
+
+=== ETAPE 1 — EVALUATION DU NIVEAU REDACTIONNEL ===
+
+AVANT de generer le profil, evalue le niveau redactionnel de l'utilisateur sur 5 criteres, chacun note sur 20 :
+
+1. Orthographe/grammaire (0-20) : 0-5 fautes a chaque phrase | 6-10 fautes regulieres | 11-15 fautes rares | 16-20 quasi parfait
+2. Vocabulaire (0-20) : 0-5 basique repetitif | 6-10 correct standard | 11-15 varie precis | 16-20 riche nuance
+3. Syntaxe (0-20) : 0-5 phrases simples bancales | 6-10 phrases simples correctes | 11-15 phrases structurees | 16-20 syntaxe maitrisee fluide
+4. Structure (0-20) : 0-5 bloc de texte sans structure | 6-10 paragraphes basiques | 11-15 structure claire | 16-20 structure elegante naturelle
+5. Personnalite (0-20) : 0-5 aucune personnalite | 6-10 quelques habitudes | 11-15 style identifiable | 16-20 style fort unique
+
+Evalue aussi 3 descripteurs complementaires (hors scoring) :
+- Concision : Tres concis / Concis / Moyen / Detaille / Tres detaille
+- Adaptabilite : Forte / Moderee / Faible / Non detectee (change-t-il de ton selon le destinataire ?)
+- Reactivite emotionnelle : Froid / Mesure / Expressif / Non detectee (comment reagit-il aux situations tendues ?)
+
+Retourne le resultat EXACTEMENT dans ce format, au DEBUT de ta reponse :
+
+<<<SCORING>>>
+orthographe=XX
+vocabulaire=XX
+syntaxe=XX
+structure=XX
+personnalite=XX
+total=XX
+concision=VALEUR
+adaptabilite=VALEUR
+reactivite=VALEUR
+niveau=NX
+<<<END_SCORING>>>
+
+Calcul du niveau : N1=0-10, N2=11-20, N3=21-30, N4=31-40, N5=41-50, N6=51-60, N7=61-70, N8=71-80, N9=81-90, N10=91-100.
+
+=== ETAPE 2 — PROFIL DE STYLE ADAPTE AU NIVEAU ===
+
+Maintenant, genere le profil de style en 3 SECTIONS selon le niveau determine ci-dessus.
+
+REGLES PAR NIVEAU (APPLIQUE STRICTEMENT) :
+- N1-N3 (score 0-30) : les paires en section A sont REFORMULEES (corriger les fautes, ameliorer la structure, conserver le ton et le registre). La section B est MINIMALE (ton, registre, ouverture/cloture, 5-7 lignes). La section C contient 5 mails REFORMULES (ameliores).
+- N4-N5 (score 31-50) : les paires en section A sont un MIX (garder les bonnes formulations telles quelles, reformuler le reste). La section B cite 2-5 formulations correctes. La section C est un mix (certains verbatim, certains ameliores).
+- N6-N7 (score 51-70) : les paires en section A sont QUASI VERBATIM (corrections mineures seulement : fautes d'orthographe, ponctuation). La section B est DETAILLEE avec 6-7+ formulations citees et le rythme decrit. La section C est quasi verbatim.
+- N8-N10 (score 71-100) : les paires en section A sont 100% VERBATIM (aucune modification, y compris imperfections pour N10). La section B est EXHAUSTIVE avec tics de langage. La section C est 100% verbatim.
+
+## SECTION A — PAIRES SITUATIONNELLES (15 minimum)
+
+Pour chaque type de situation rencontre dans le corpus, extrais une paire REELLE :
+- Le type de situation (confirmation, relance, demande d'info, reponse technique, negociation, instruction, social, juridique, facturation, planification, suivi, etc.)
+- Un resume du mail recu en 1 ligne (ou "Mail initie par l'utilisateur" si pas de mail recu)
+- La reponse de l'utilisateur, traitee selon le niveau determine a l'etape 1 (voir REGLES PAR NIVEAU ci-dessus)
+
+Couvre un MAXIMUM de types differents. Privilegier les situations qui reviennent souvent.
+
+PAIRE OBLIGATOIRE A INCLURE — DEMANDE DE DISPONIBILITE :
+Si le corpus contient un mail ou quelqu'un demande les disponibilites de l'utilisateur (ex: "Avez-vous des dispos ?", "Quand seriez-vous disponible ?"), inclure cette paire avec [CRENEAU] dans la reponse.
+Si aucun exemple exact n'existe, creer cette paire en s'inspirant du style observe :
+### DEMANDE DE DISPONIBILITE
+Recu : "Demande de disponibilites pour un rendez-vous"
+Utilisateur :
+```
+[ouverture habituelle],
+Je suis disponible [CRENEAU]. N'hesitez pas a me proposer ce qui vous convient.
+[cloture habituelle]
+```
+C'est CRUCIAL car l'assistant n'a pas acces a l'agenda de l'utilisateur.
+
+NEUTRALISATION — PROTEGER LA FORME, PAS LE FOND :
+Le but est de montrer le STYLE (ton, structure, ouverture, cloture, longueur) sans donnees factuelles reutilisables.
+Dans CHAQUE exemple :
+- Dates, heures, creneaux -> [DATE] ou [CRENEAU] (ex: "Lundi 16h" -> "[CRENEAU]")
+- Montants, prix, pourcentages -> [MONTANT] ou [PRIX]
+- Delais engageants ("sous 8 jours") -> [DELAI]
+- References de dossiers, contrats, factures -> [REFERENCE]
+- Clauses juridiques specifiques -> [CLAUSE]
+
+CONSERVER les traits d'humour, les remarques decalees, les parentheses amusantes, les expressions ironiques. L'humour fait partie du STYLE de l'utilisateur — ce n'est PAS une donnee factuelle a neutraliser.
+
+GARDER LA FORME DES DECISIONS ET VALIDATIONS :
+Les expressions comme "Ok devis valide GO", "Pas de probleme pour le paiement" montrent le STYLE de decision.
+Garder la structure, neutraliser l'objet : "Ok [OBJET] valide GO", "Pas de probleme pour [OBJET]"
+
+GARDER LES NOMS DE PERSONNES ET ENTREPRISES frequents (ils font partie du style).
+
+EXCLURE de tous les exemples toute signature marketing ou technique du type "Genere avec BoosterMail" ou similaire.
+
+Format :
+
+### [TYPE DE SITUATION]
+Recu : "[resume 1 ligne du mail recu]"
+Utilisateur :
+```
+[mail avec donnees factuelles neutralisees]
+```
+
+## SECTION B — REGLES DE STYLE
+
+Densite selon le niveau : N1-N3 = ton et registre uniquement (5-7 lignes). N4-N5 = + formulations citees (10-12 lignes). N6-N7 = style detaille (15-20 lignes). N8-N10 = exhaustif avec tics de langage (20+ lignes).
+
+Regles concises, chacune avec un EXEMPLE REEL entre guillemets :
+- Ouvertures utilisees (avec frequence)
+- Clotures utilisees (avec frequence)
+- Signature habituelle (SANS signature marketing/technique)
+- Registre tu/vous (quand chacun)
+- Longueur typique (% courts/moyens/longs)
+- Ton en 1 phrase
+- Formulations recurrentes (min 7 pour N6+, min 3 pour N4-N5, citations exactes)
+- Particularites (structure, niveau de detail)
+- Humour : l'utilisateur utilise-t-il de l'humour, de l'ironie, des remarques decalees, des parentheses amusantes dans ses mails ? Si oui, decrire le TYPE d'humour avec 2-3 exemples cites entre guillemets. Si non, ecrire "Pas d'humour detecte dans le corpus."
+- Concision : indiquer le niveau de concision observe (Tres concis / Concis / Moyen / Detaille / Tres detaille) avec un exemple
+- Adaptabilite : l'utilisateur change-t-il de ton/registre selon le destinataire ? (Forte / Moderee / Faible / Non detectee) avec un exemple si detectee
+- Reactivite emotionnelle : comment reagit-il aux situations tendues ? (Froid / Mesure / Expressif / Non detectee) avec un exemple si detectee
+
+NE PAS mentionner de signature marketing ("Genere avec BoosterMail" ou similaire) dans les particularites.
+
+## SECTION C — MAILS REPRESENTATIFS COMPLETS (5 mails)
+
+5 mails envoyes COMPLETS couvrant :
+1. Un mail tres court (1-3 lignes)
+2. Un mail court avec instruction
+3. Un mail de longueur moyenne
+4. Un mail formel/vouvoiement
+5. Un mail detaille/structure
+
+Pour chacun, indique : type de situation, destinataire, puis le mail traite selon le niveau (voir REGLES PAR NIVEAU) dans un bloc ```.
+Meme regle de neutralisation (dates, montants, delais, references, clauses -> placeholders).
+COHERENCE OBLIGATOIRE : le prenom dans le body du mail (ex: "Bonjour Vincent") DOIT correspondre au destinataire indique. Si le mail commence par "Bonjour Vincent", le destinataire DOIT etre vincent@... PAS melissa@... C'est une erreur grave — verifier CHAQUE mail avant de l'inclure.
+EXCLURE toute signature marketing/technique.
+
+IMPORTANT :
+- Pour N8-N10 : copier-coller EXACT sauf les donnees factuelles neutralisees. JAMAIS de paraphrase.
+- Pour N1-N7 : appliquer le traitement par niveau (reformulation pour les bas niveaux, quasi-verbatim pour N6-N7).
+- Les exemples montrent le STYLE (ton, structure, longueur). Un ghostwriter doit reproduire ce style avec des donnees reelles.
+- Base-toi UNIQUEMENT sur les mails fournis.
+- Les jugements de valeur forts ("inadmissible", "inacceptable", "je suis extremement mecontent") sont des exemples de TON, pas des phrases a copier telles quelles dans d'autres contextes."""
+
+
+_STYLE_SAMPLE_TARGET = 80  # nb mails échantillonnés pour l'analyse style
+_STYLE_MAX_PER_CONTACT = 3  # diversifie l'échantillon (proto validé)
+_STYLE_CORPUS_MAX_CHARS = 150000  # ~37K tokens, marge sous max_tokens du modèle
+_STYLE_BODY_TRUNCATE = 1000  # chars/mail pour le corpus (proto validé)
+_STYLE_RETRY_MAX = 3
+
+
+def _set_score_fallback():
+    """Fallback de scoring si parsing impossible : 70/N7 (plancher qualité).
+
+    Cf SPEC_SCORING_REDACTIONNEL.md §1 : 70 est le plancher qualité de sortie
+    pour tous les utilisateurs. Si on ne peut pas évaluer, on tape ce plancher.
+    """
+    _db.save_setting('writing_score', '70')
+    _db.save_setting('writing_level', 'N7')
+    _db.save_setting('writing_concision', 'Non detectee')
+    _db.save_setting('writing_adaptability', 'Non detectee')
+    _db.save_setting('writing_reactivity', 'Non detectee')
+
+
+def _extract_addr(mail, key_email, key_dict):
+    """Extrait une adresse email à partir d'un mail au format Graph.
+
+    Graph V2 retourne les adresses dans plusieurs formats selon l'endpoint :
+    str directe, list[dict], ou dict {email|address, name}. Cf invariant
+    I-CX-01 (to/cc Graph = list[dict], pas str).
+    """
+    val = mail.get(key_email) or mail.get(key_dict)
+    if isinstance(val, str):
+        return val.strip().lower()
+    if isinstance(val, list) and val:
+        first = val[0]
+        if isinstance(first, dict):
+            return (first.get('email') or first.get('address') or '').strip().lower()
+        if isinstance(first, str):
+            return first.strip().lower()
+    if isinstance(val, dict):
+        return (val.get('email') or val.get('address') or '').strip().lower()
+    return ''
+
+
+def _norm_subject(s):
+    """Normalise un sujet pour le matching pair reçu→réponse.
+
+    Retire les préfixes Re:/Fw:/Fwd:/Tr: + trim + lower.
+    """
+    return re.sub(r'^(Re|Fw|Fwd|Tr)\s*:\s*', '', s or '', flags=re.IGNORECASE).strip().lower()
+
+
+def _analyze_style_phase2(sent, received):
+    """Phase 2 — Analyse style rédactionnel + scoring /100 + sections A/B/C.
+
+    Port direct du proto _analyze_style_initial_inner (app.py:5012-5324).
+    Adapté V2 : utilise get_ai() + _db.save_setting (scoped user) + format
+    Graph variable + multi-tenant via UserScopedDict.
+
+    Étapes :
+    1. Index reçus par (sujet normalisé, sender) pour matcher avec sent
+    2. Échantillonnage 80 mails (max 3 par correspondant) — diversifie corpus
+    3. Construction corpus enrichi (paires reçu→réponse quand dispo)
+    4. Appel Claude (CLAUDE_MODEL_ANALYSIS) streaming + retry × 3 (chunks
+       comptés pour barre UI via _onboarding_state['chunks'])
+    5. Parsing <<<SCORING>>> avec validation total = somme et fallback 70/N7
+    6. Sauvegarde profil :
+       - FICHIER `EASYMAIL_DIR/style_profile.txt` (compat avec code V2 existant
+         qui le lit dans claude_ai.py et plusieurs sites)
+       - DB setting `style_profile` (futur multi-tenant strict)
+       - 10 settings DB (writing_score, writing_level, writing_score_ortho/vocab/
+         syntax/structure/personality, writing_concision/adaptability/reactivity)
+    7. Reload AI runtime (`ai.reload_style`) pour que les futurs prompts
+       chargent le nouveau profil
+
+    Retourne True si profil sauvegardé, False sinon.
+    """
+    ai = get_ai()
+    if not ai or not getattr(ai, 'client', None):
+        logger.error("[onboarding] Phase 2 : IA indisponible")
+        return False
+
+    if len(sent) < 10:
+        _onboarding_set_step("Pas assez de mails envoyés pour analyser le style")
+        logger.warning(f"[onboarding] Phase 2 : seulement {len(sent)} envoyés, abandon")
+        return False
+
+    _onboarding_set_step(
+        f"{len(sent)} envoyés + {len(received)} reçus lus. "
+        f"Analyse de votre style rédactionnel..."
+    )
+
+    # --- Step 1 : Index reçus par (sujet normalisé, sender) ---
+    received_by_key = {}
+    for m in received:
+        from_addr = _extract_addr(m, 'from_email', 'from')
+        if not from_addr:
+            continue
+        key = (_norm_subject(m.get('subject', '')), from_addr)
+        if key[0] and key not in received_by_key:
+            received_by_key[key] = m
+
+    # --- Step 2 : Échantillonnage 80 mails diversifié (max 3 par correspondant) ---
+    from collections import defaultdict
+    contact_count = defaultdict(int)
+    sampled = []
+    for m in sent:
+        to_addr = _extract_addr(m, 'to_email', 'to')
+        if contact_count[to_addr] < _STYLE_MAX_PER_CONTACT:
+            sampled.append(m)
+            contact_count[to_addr] += 1
+        if len(sampled) >= _STYLE_SAMPLE_TARGET:
+            break
+    if len(sampled) < _STYLE_SAMPLE_TARGET:
+        seen_ids = {id(m) for m in sampled}
+        for m in sent:
+            if id(m) not in seen_ids:
+                sampled.append(m)
+                if len(sampled) >= _STYLE_SAMPLE_TARGET:
+                    break
+    unique_contacts = len([c for c in contact_count if contact_count[c] > 0])
+    logger.info(
+        f"[onboarding] Phase 2 sampling : {len(sampled)} mails / "
+        f"{unique_contacts} correspondants uniques"
+    )
+
+    # --- Step 3 : Construction corpus enrichi avec paires ---
+    corpus_lines = []
+    pair_count = 0
+    for i, m in enumerate(sampled, 1):
+        to_addr = _extract_addr(m, 'to_email', 'to')
+        body = (m.get('body') or m.get('body_preview') or '')[:_STYLE_BODY_TRUNCATE]
+        corpus_lines.append(f"--- Mail envoye {i} ---")
+        corpus_lines.append(f"A: {to_addr}")
+        corpus_lines.append(f"Objet: {m.get('subject', '')}")
+        corpus_lines.append(f"Date: {m.get('date', '')}")
+        corpus_lines.append(body)
+
+        key = (_norm_subject(m.get('subject', '')), to_addr)
+        if key in received_by_key:
+            rm = received_by_key[key]
+            # from_name : peut être dans rm['from']['name'] (Graph dict) ou rm['from_name']
+            from_name = rm.get('from_name', '') or ''
+            if not from_name and isinstance(rm.get('from'), dict):
+                from_name = rm['from'].get('name', '') or rm['from'].get('email', '')
+            corpus_lines.append("  >> MAIL RECU auquel l'utilisateur repondait :")
+            corpus_lines.append(f"  >> De: {from_name}")
+            corpus_lines.append(
+                f"  >> {(rm.get('body') or rm.get('body_preview') or '')[:500]}"
+            )
+            pair_count += 1
+        corpus_lines.append("")
+
+    corpus = "\n".join(corpus_lines)
+    if len(corpus) > _STYLE_CORPUS_MAX_CHARS:
+        corpus = corpus[:_STYLE_CORPUS_MAX_CHARS]
+        logger.info(f"[onboarding] Phase 2 : corpus tronqué à {_STYLE_CORPUS_MAX_CHARS} chars")
+
+    full_prompt = (
+        f"{_STYLE_ANALYSIS_PROMPT}\n\n"
+        f"# CORPUS DE {len(sampled)} MAILS ENVOYES "
+        f"({pair_count} avec mail recu associe, {unique_contacts} correspondants) :\n\n"
+        f"{corpus}"
+    )
+    logger.info(
+        f"[onboarding] Phase 2 : prompt {len(full_prompt)} chars "
+        f"(~{len(full_prompt)//4} tokens)"
+    )
+
+    system_msg = (
+        "Tu es un module interne de BoosterMail, un assistant email professionnel. "
+        "L'utilisateur t'a donne acces a SES propres mails pour que tu apprennes son style "
+        "redactionnel. Ton role est d'analyser ces mails et d'en extraire un profil de style. "
+        "Les noms, emails et contenus presents sont ceux de l'utilisateur et de ses correspondants "
+        "habituels. Analyse le corpus fourni et genere le profil demande."
+    )
+
+    # --- Step 4 : Streaming Claude avec retry x3 ---
+    profile_text = ""
+    last_err = None
+    for attempt in range(_STYLE_RETRY_MAX):
+        try:
+            if _onboarding_cancelled():
+                return False
+            if attempt > 0:
+                _onboarding_set_step(
+                    f"Analyse de votre style... (tentative {attempt+1}/{_STYLE_RETRY_MAX})"
+                )
+            chunks = []
+            _onboarding_state['chunks'] = 0
+            with ai.client.messages.stream(
+                model=CLAUDE_MODEL_ANALYSIS,
+                max_tokens=6500,
+                system=system_msg,
+                messages=[{"role": "user", "content": full_prompt}],
+            ) as stream:
+                for text in stream.text_stream:
+                    if _onboarding_cancelled():
+                        logger.info("[onboarding] Phase 2 streaming interrompu user")
+                        return False
+                    chunks.append(text)
+                    _onboarding_state['chunks'] = len(chunks)
+            profile_text = "".join(chunks).strip()
+            logger.info(
+                f"[onboarding] Phase 2 streaming OK : "
+                f"{len(profile_text)} chars, {len(chunks)} chunks"
+            )
+            break
+        except Exception as e:
+            last_err = e
+            logger.warning(
+                f"[onboarding] Phase 2 tentative {attempt+1}/{_STYLE_RETRY_MAX} "
+                f"erreur : {e}"
+            )
+            if attempt == _STYLE_RETRY_MAX - 1:
+                logger.error(f"[onboarding] Phase 2 : abandon après {_STYLE_RETRY_MAX} tentatives")
+                _set_score_fallback()
+                return False
+            time.sleep(5 * (attempt + 1))
+
+    if not profile_text:
+        _set_score_fallback()
+        return False
+
+    # --- Step 5 : Parsing <<<SCORING>>> + sauvegarde 10 settings DB ---
+    score_match = re.search(r'<<<SCORING>>>(.*?)<<<END_SCORING>>>', profile_text, re.DOTALL)
+    if score_match:
+        score_block = score_match.group(1).strip()
+        score_data = {}
+        for line in score_block.split('\n'):
+            line = line.strip()
+            if '=' in line:
+                k, v = line.split('=', 1)
+                score_data[k.strip()] = v.strip()
+        try:
+            ortho = int(score_data.get('orthographe', '14'))
+            vocab = int(score_data.get('vocabulaire', '14'))
+            syntax = int(score_data.get('syntaxe', '14'))
+            structure = int(score_data.get('structure', '14'))
+            personality = int(score_data.get('personnalite', '14'))
+            total = int(score_data.get('total', '0'))
+            calculated = ortho + vocab + syntax + structure + personality
+            if total != calculated:
+                logger.info(
+                    f"[onboarding] Phase 2 score total incohérent ({total} vs "
+                    f"{calculated}), recalcul"
+                )
+                total = calculated
+            level_num = 1 if total == 0 else min(10, max(1, (total - 1) // 10 + 1))
+            level = f"N{level_num}"
+
+            _db.save_setting('writing_score', str(total))
+            _db.save_setting('writing_score_ortho', str(ortho))
+            _db.save_setting('writing_score_vocab', str(vocab))
+            _db.save_setting('writing_score_syntax', str(syntax))
+            _db.save_setting('writing_score_structure', str(structure))
+            _db.save_setting('writing_score_personality', str(personality))
+            _db.save_setting('writing_level', level)
+            _db.save_setting('writing_concision', score_data.get('concision', 'Non detectee'))
+            _db.save_setting('writing_adaptability', score_data.get('adaptabilite', 'Non detectee'))
+            _db.save_setting('writing_reactivity', score_data.get('reactivite', 'Non detectee'))
+
+            logger.info(
+                f"[onboarding] Phase 2 score : {total}/100 ({level}) — "
+                f"Ortho={ortho} Vocab={vocab} Syntaxe={syntax} "
+                f"Structure={structure} Personnalite={personality}"
+            )
+        except (ValueError, TypeError) as e:
+            logger.warning(f"[onboarding] Phase 2 parsing score erreur : {e} — fallback 70/N7")
+            _set_score_fallback()
+
+        # Strip le bloc scoring du profil avant écriture
+        profile_text = (profile_text[:score_match.start()] + profile_text[score_match.end():]).strip()
+    else:
+        logger.warning("[onboarding] Phase 2 : <<<SCORING>>> introuvable — fallback 70/N7")
+        _set_score_fallback()
+
+    # --- Step 6 : Sauvegarde profil — FICHIER + DB ---
+    if len(profile_text) < 100:
+        logger.warning(
+            f"[onboarding] Phase 2 : profil trop court ({len(profile_text)} chars) — "
+            f"abandon sauvegarde"
+        )
+        return False
+
+    style_path = os.path.join(EASYMAIL_DIR, "style_profile.txt")
+    saved_file = False
+    try:
+        with open(style_path, "w", encoding="utf-8") as f:
+            f.write(profile_text)
+        saved_file = True
+        logger.info(f"[onboarding] Phase 2 : style_profile.txt sauvé ({len(profile_text)} chars)")
+    except Exception as e:
+        logger.warning(f"[onboarding] Phase 2 : écriture fichier échouée : {e}")
+
+    try:
+        _db.save_setting('style_profile', profile_text)
+        logger.info(f"[onboarding] Phase 2 : style_profile DB setting sauvé")
+    except Exception as e:
+        logger.warning(f"[onboarding] Phase 2 : écriture DB setting échouée : {e}")
+        if not saved_file:
+            return False  # ni fichier ni DB → vraie erreur
+
+    # --- Step 7 : Reload AI runtime ---
+    try:
+        ai.reload_style(writing_level=_db.get_setting('writing_level'))
+    except Exception as e:
+        logger.warning(f"[onboarding] Phase 2 : ai.reload_style échouée : {e}")
+
+    return True
+
+
+def _run_onboarding_full(user_name='', graph=None, *, purge_first=False):
+    """Orchestrateur onboarding complet — enchaîne Phases 1 → 2 → 3 → 4.
+
+    Appelé par :
+    - /api/start_onboarding (onboarding initial nouveau user)
+    - /api/reanalyze_style (bouton « Recalibrer BoosterMail » page Profil),
+      avec purge_first=True pour effacer learning data avant relance.
+
+    IMPORTANT : `graph` doit être capturé côté ROUTE HANDLER (Flask request
+    context) AVANT le _spawn_bg() et passé en closure. get_graph() résout
+    le token OAuth via session/cookies — indisponibles depuis un thread BG.
+    Si graph=None à l'entrée, l'orchestrateur signale l'erreur et s'arrête.
+
+    Garanties :
+    - State multi-tenant via _onboarding_state (UserScopedDict scoped user_id)
+    - Cancellation propre (_onboarding_cancelled() check à chaque transition)
+    - Tolérance Phase 2 : si échec, on continue Phase 3+4 (indexation + contacts)
+      → l'user a au moins ses profils contacts à jour même si style raté
+    - Préservation score (Point A proto) : si purge_first=True ET un score
+      existant en DB, on le restaure après Phase 2 — l'historique des
+      corrections user est plus fiable que la réévaluation brute
+
+    Args:
+        user_name : nom utilisateur (sauvé en DB + injecté dans claude_ai)
+        graph : GraphClient instancié côté route handler (closure)
+        purge_first : True pour Recalibrer manuel (purge_learning_data avant)
+    """
+    try:
+        if user_name:
+            try:
+                _db.save_setting('user_name', user_name)
+                _ai = get_ai()
+                if _ai and hasattr(_ai, 'update_user_name'):
+                    _ai.update_user_name(user_name)
+            except Exception as _e:
+                logger.warning(f"[onboarding] save user_name erreur : {_e}")
+
+        # Préservation score AVANT purge (Point A proto — l'user a corrigé,
+        # son score actuel reflète sa pratique réelle, pas la 1ère éval brute)
+        preserved = None
+        if purge_first:
+            _existing_score = _db.get_setting('writing_score')
+            if _existing_score is not None:
+                preserved = {
+                    'writing_score': _existing_score,
+                    'writing_level': _db.get_setting('writing_level') or 'N7',
+                    'writing_score_ortho': _db.get_setting('writing_score_ortho') or '14',
+                    'writing_score_vocab': _db.get_setting('writing_score_vocab') or '14',
+                    'writing_score_syntax': _db.get_setting('writing_score_syntax') or '14',
+                    'writing_score_structure': _db.get_setting('writing_score_structure') or '14',
+                    'writing_score_personality': _db.get_setting('writing_score_personality') or '14',
+                    'writing_concision': _db.get_setting('writing_concision') or 'Non detectee',
+                    'writing_adaptability': _db.get_setting('writing_adaptability') or 'Non detectee',
+                    'writing_reactivity': _db.get_setting('writing_reactivity') or 'Non detectee',
+                }
+                logger.info(
+                    f"[onboarding] Préservation score {preserved['writing_score']}/100 "
+                    f"({preserved['writing_level']}) avant purge"
+                )
+
+            _onboarding_set_step("Purge des données d'apprentissage…")
+            try:
+                _db.purge_learning_data()
+                _style_path = os.path.join(EASYMAIL_DIR, 'style_profile.txt')
+                if os.path.exists(_style_path):
+                    try:
+                        os.remove(_style_path)
+                    except Exception as _e:
+                        logger.warning(f"[onboarding] suppression style_profile.txt erreur : {_e}")
+                logger.info("[onboarding] purge_learning_data() terminée")
+            except Exception as _e:
+                logger.error(f"[onboarding] Purge erreur : {_e}")
+
+        # Phase 1 — Lecture mails via Graph
+        if _onboarding_cancelled():
+            return
+        if graph is None:
+            _onboarding_set_step("Erreur : connexion Graph API indisponible")
+            logger.error("[onboarding] graph=None passé à l'orchestrateur (caller doit le capturer côté route handler)")
+            return
+        sent, received = _collect_inbox_for_onboarding(graph)
+        if _onboarding_cancelled():
+            return
+        if len(sent) < 10:
+            _onboarding_set_step("Pas assez de mails envoyés pour analyser le style")
+            return
+
+        # Phase 2 — Analyse style + scoring
+        ok_phase2 = _analyze_style_phase2(sent, received)
+        if not ok_phase2:
+            logger.warning("[onboarding] Phase 2 échouée — on continue Phase 3+4")
+        if _onboarding_cancelled():
+            return
+
+        # Phase 3 — Indexation correspondants
+        contact_set = _index_contacts_in_threads(sent, received)
+        if _onboarding_cancelled():
+            return
+
+        # Phase 4 — Analyse profils contacts
+        _analyze_contacts_batch(contact_set)
+        if _onboarding_cancelled():
+            return
+
+        # Restauration du score préservé (recalibrage manuel uniquement)
+        if preserved:
+            try:
+                for _k, _v in preserved.items():
+                    _db.save_setting(_k, _v)
+                _ai = get_ai()
+                if _ai and hasattr(_ai, 'reload_style'):
+                    _ai.reload_style(writing_level=preserved['writing_level'])
+                logger.info(
+                    f"[onboarding] Score restauré : {preserved['writing_score']}/100 "
+                    f"({preserved['writing_level']})"
+                )
+            except Exception as _e:
+                logger.warning(f"[onboarding] Restauration score erreur : {_e}")
+
+        # Marqueurs DB de fin
+        try:
+            _db.save_setting('onboarding_done', 'true')
+            _db.save_setting('setup_step', 'done')
+        except Exception:
+            pass
+
+        _onboarding_finalize_state(success=True)
+        logger.info("[onboarding] Onboarding complet terminé")
+    except Exception as e:
+        logger.error(f"[onboarding] Erreur fatale orchestrateur : {e}", exc_info=True)
+        _onboarding_set_step(f"Erreur : {str(e)[:100]}")
+        _onboarding_finalize_state(success=False)
 
 
 def _apply_register_guard(profile, sent_mails):
@@ -15797,36 +16618,109 @@ def api_assist():
         return jsonify({'error': str(e)[:200]}), 500
 
 
-# --- Stubs des 6 routes API manquantes (porting depuis proto) ----------------
+# --- Onboarding complet (Phase 1+2+3+4) — port proto vers V2 multi-tenant --
+# Cf docs/installation/onboarding - étapes + analyse des contact.md
+# Orchestrateur : _run_onboarding_full() ; état : _onboarding_state (UserScopedDict)
 
 @app.route('/api/style_status')
 def api_style_status():
-    """Stub V2 — port du proto app.py:3539. Style toujours prêt en SaaS
-    (style_profile.txt déjà présent ou onboarding désactivé en SaaS pur)."""
+    """État temps réel de l'onboarding pour le polling frontend (toutes les 2s).
+
+    Champs :
+    - ready      : True si style_profile présent ET pas d'analyse en cours
+    - analyzing  : True pendant Phases 1→4
+    - has_style  : True si style_profile.txt OU DB setting `style_profile` présent
+    - needs_setup: True si pas de style ET pas d'analyse en cours
+    - step       : texte d'étape affiché dans l'UI (cf _onboarding_set_step)
+    - chunks     : compteur de chunks Claude (anime barre 50-85% pendant Phase 2)
+    - total/done_contacts : progression Phase 4 (anime barre 92-99%)
+    - detected_name : prénom user (pré-affichage écran de bienvenue)
+    """
     style_path = os.path.join(EASYMAIL_DIR, 'style_profile.txt')
-    has_style = os.path.exists(style_path)
+    has_style_file = os.path.exists(style_path)
+    has_style_db = bool(_db.get_setting('style_profile'))
+    has_style = has_style_file or has_style_db
+    analyzing = bool(_onboarding_state.get('analyzing', False))
     return jsonify({
-        'ready': has_style,
-        'analyzing': False,
+        'ready': has_style and not analyzing,
+        'analyzing': analyzing,
         'has_style': has_style,
-        'needs_setup': not has_style,
-        'step': 'done' if has_style else 'idle',
-        'chunks': 0,
+        'needs_setup': not has_style and not analyzing,
+        'step': _onboarding_state.get('step', 'done' if has_style else 'idle'),
+        'chunks': int(_onboarding_state.get('chunks', 0) or 0),
+        'total_contacts': int(_onboarding_state.get('total_contacts', 0) or 0),
+        'done_contacts': int(_onboarding_state.get('done_contacts', 0) or 0),
         'detected_name': _get_user_name('').split(' ')[0],
     })
 
 
+@app.route('/api/start_onboarding', methods=['POST'])
+def api_start_onboarding():
+    """Démarre l'onboarding complet (Phase 1→2→3→4) dans un thread BG.
+
+    Body JSON optionnel : { user_name: "..." }
+    Réponses :
+      200 {status: "started"}    — onboarding démarré
+      409 {status: "already_running"} — déjà en cours pour cet user (D5)
+      503 {status: "no_graph"}   — Graph API indisponible (pas d'OAuth)
+    """
+    data = request.get_json(silent=True) or {}
+    user_name = (data.get('user_name') or '').strip()
+
+    # IMPORTANT : get_graph() doit être appelé ICI (Flask request context),
+    # pas dans le thread BG (la session OAuth n'y est plus accessible).
+    # Le graph est passé en closure à _run_onboarding_full.
+    _graph = get_graph()
+    if not _graph:
+        return jsonify({'status': 'no_graph'}), 503
+
+    with _onboarding_lock:
+        if _onboarding_state.get('analyzing'):
+            return jsonify({'status': 'already_running'}), 409
+        _onboarding_reset_state()
+
+    _spawn_bg(_run_onboarding_full, args=(user_name, _graph),
+              kwargs={'purge_first': False}, name='onboarding-initial')
+    return jsonify({'status': 'started'})
+
+
 @app.route('/api/reanalyze_style', methods=['POST'])
 def api_reanalyze_style():
-    """Stub V2 — port du proto app.py:4365. Re-analyse style désactivée
-    en SaaS (l'utilisateur ne fournit pas un volume contrôlable de mails)."""
-    return jsonify({'status': 'unavailable', 'reason': 'Réanalyse désactivée en SaaS — utilisez Recalibrer les contacts'})
+    """Bouton « Recalibrer BoosterMail » (page Profil).
+
+    Relance l'onboarding complet AVEC purge_learning_data() préalable, puis
+    restaure le score préservé (Point A — l'historique des corrections est
+    plus fiable que la réévaluation brute sur le nouveau corpus).
+
+    Réponses identiques à /api/start_onboarding (200/409/503).
+    """
+    # Voir commentaire dans api_start_onboarding sur le get_graph() en
+    # request context.
+    _graph = get_graph()
+    if not _graph:
+        return jsonify({'status': 'no_graph'}), 503
+
+    with _onboarding_lock:
+        if _onboarding_state.get('analyzing'):
+            return jsonify({'status': 'already_running'}), 409
+        _onboarding_reset_state()
+
+    user_name = _db.get_setting('user_name') or ''
+    _spawn_bg(_run_onboarding_full, args=(user_name, _graph),
+              kwargs={'purge_first': True}, name='onboarding-recalibrate')
+    return jsonify({'status': 'started'})
 
 
 @app.route('/api/stop_style_analysis', methods=['POST'])
 def api_stop_style_analysis():
-    """Stub V2 — port du proto app.py:4405."""
-    return jsonify({'status': 'ok'})
+    """Pose le flag de cancellation. L'orchestrateur s'arrête à la prochaine
+    transition de phase / itération Phase 4 et appelle _onboarding_finalize_state.
+    """
+    if not _onboarding_state.get('analyzing'):
+        return jsonify({'status': 'idle'})
+    _onboarding_state['cancel'] = True
+    logger.info("[onboarding] Annulation demandée par user")
+    return jsonify({'status': 'cancelling'})
 
 
 @app.route('/api/add_contact_keyword', methods=['POST'])

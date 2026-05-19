@@ -551,7 +551,7 @@ def test_C2_vip_contact_manually_edited():
 
 
 # C3 (Option A scan échéance VIP) supprimé en V12 Phase 2.1 — l'invariant
-# I-BRANCHES-N11-OPTION-A est archivé (cf audit/INVARIANTS.md). Les
+# I-BRANCHES-N11-OPTION-A est archivé (cf docs/architecture/V12/V12_INVARIANTS.md). Les
 # entrants VIP ne déclenchent plus de scan échéance ; la régression
 # statique inverse est dans test_n11_branches.py
 # (test_phase21_no_scan_echeance_marker_in_unified).
@@ -1214,7 +1214,7 @@ def test_F7_body_boundary_exact():
 
 # F8 (échéance format pourri entrants VIP) supprimé en V12 Phase 2.1 —
 # test était tautologique (mockait un cas que la vraie chaîne ne pouvait
-# pas produire, cf Obs-F8 INVARIANTS.md:1110). Désormais le scan échéance
+# pas produire, cf Obs-F8 V12_INVARIANTS.md:1110). Désormais le scan échéance
 # est désactivé côté entrants (helper `_should_scan_echeance('incoming')`
 # retourne False), donc le mock builder n'est plus appelé pour cette voie.
 # Le format pourri dict-vs-string est couvert par les tests F10 sortants

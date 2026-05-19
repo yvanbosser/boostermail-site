@@ -3623,7 +3623,7 @@ Contenu :
                        X »). Format ligne E à 3 segments. Si False (défaut,
                        entrants VIP N11 Option A), comportement strict
                        inchangé : seuls les marqueurs temporels explicites
-                       avec date future remontent. Voir Obs-F10 / INVARIANTS.md
+                       avec date future remontent. Voir Obs-F10 / V12_INVARIANTS.md
                        + docs/architecture/REFONTE_N1_N11_JOURNAL.md §6 bis.
 
         Yield des tuples :
@@ -3695,7 +3695,7 @@ Contenu :
         # Section E (échéance) conditionnelle — économie tokens quand le caller
         # ne consomme pas le résultat (cas entrants, scope V1 sortants only).
         #
-        # ⚠ Obs-F10 (cf audit/INVARIANTS.md lignes 1121-1127) : cette section
+        # ⚠ Obs-F10 (cf docs/architecture/V12/V12_INVARIANTS.md lignes 1121-1127) : cette section
         # est partagée entre compose-sortants (signal_without_date=True,
         # philosophie permissive Cas A/B/C) et entrants VIP (signal_without_date
         # =False, philosophie stricte « date FUTURE uniquement »). Tout

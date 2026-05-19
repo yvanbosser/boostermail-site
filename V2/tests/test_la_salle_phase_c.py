@@ -2,7 +2,7 @@
 
 Source de vérité :
   - `docs/architecture/REFONTE_N1_N11_JOURNAL.md` §8 « La SALLE — Phase C »
-  - `audit/INVARIANTS.md` I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN
+  - `docs/architecture/V12/V12_INVARIANTS.md` I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN
 
 Philosophie 3 étoiles Michelin (rappel Yvan) :
 > « Un plat qui sort de cuisine est parfait. Le serveur livre, point.

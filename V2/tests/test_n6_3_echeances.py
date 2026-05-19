@@ -1,7 +1,7 @@
 """Tests Niveau 6.3 — Refonte échéances (scope Python).
 
 Source de vérité : `docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md` (05/05/2026).
-Refonte N6.3 — 3 axes (cf I-PROMPT-N63-01 dans INVARIANTS.md) :
+Refonte N6.3 — 3 axes (cf I-PROMPT-N63-01 dans V12_INVARIANTS.md) :
   - **Code mort supprimé** : route `POST /api/echeances/pre_scan` + cache
     `_echeance_pre_scan_cache` + lock + helper `_has_echeance_pattern` + 3 regex
     `_ECHEANCE_*_PATTERNS` (cache orphelin jamais relu, le post-send re-scanne).

@@ -1,5 +1,5 @@
 # ==============================================================================
-# smoke_test.ps1 - Verifie TOUS les invariants de INVARIANTS.md
+# smoke_test.ps1 - Verifie TOUS les invariants de V12_INVARIANTS.md
 # ==============================================================================
 # Usage   : powershell -ExecutionPolicy Bypass -File audit\tests\smoke_test.ps1
 # Retour  : exit code 0 si 0 anomalie, N si N anomalies

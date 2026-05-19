@@ -3,7 +3,7 @@
 Source de vérité :
   - `docs/architecture/REFONTE_N1_N11_JOURNAL.md` §6 quater « V12 Phase 2.2 »
   - `docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md` §2 (matching entrants DB-driven)
-  - `audit/INVARIANTS.md` (Obs-F10 résolue Phase 2.1 + paradigme DB-driven Phase 2.2)
+  - `docs/architecture/V12/V12_INVARIANTS.md` (Obs-F10 résolue Phase 2.1 + paradigme DB-driven Phase 2.2)
 
 Objet : tests unitaires sur la fonction unifiée `match_echeance_for_mail`
 qui remplace l'ancienne logique inline de `_auto_cancel_echeances_on_reply`.

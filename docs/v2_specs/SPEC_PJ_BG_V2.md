@@ -30,7 +30,7 @@ V2 a pour ambition de mettre en BG le **maximum de travail** sur les mails entra
 ### Limites BG actuelles
 - **Formats** : PDF only (`_PDF_EXTS`). docx/xlsx/images = à étendre (P3)
 - **Pages PDF** : max 10 par PDF (cf. `SPEC_OCR_LIMITE.md`)
-- **PDF par mail** : max 3 (`_MAX_PRE_OCR_PDFS`)
+- **PDF par mail** : max 5 (`_MAX_PRE_OCR_PDFS`)
 - **Cache RAM** : 30 mails (`_MAX_PJ_TEXT_CACHE`)
 
 ---

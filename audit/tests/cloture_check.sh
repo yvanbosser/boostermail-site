@@ -4,7 +4,7 @@
 # Usage : bash audit/tests/cloture_check.sh
 # Exit  : 0 si tous les invariants OK, 1+ si anomalies détectées
 #
-# Invariants testés (cf audit/INVARIANTS.md catégorie 13) :
+# Invariants testés (cf docs/architecture/V12/V12_INVARIANTS.md catégorie 13) :
 #   I-SESS-01 : git status --short retourne vide
 #   I-SESS-02 : aucune ref obsolète dans docs vivants (PLUS_TARD.md sans VF, etc.)
 #   I-SESS-03 : top commit hash dans PROMPT_REPRISE coherent avec git log

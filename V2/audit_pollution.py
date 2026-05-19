@@ -24,7 +24,7 @@ Usage
     # Dry-run : montre ce qui serait fait sans toucher la DB
     python audit_pollution.py --db boostermail.db --reaudit --dry-run
 
-Invariant : I-CONTACT-01 (cf audit/INVARIANTS.md).
+Invariant : I-CONTACT-01 (cf docs/architecture/V12/V12_INVARIANTS.md).
 """
 import argparse
 import os
