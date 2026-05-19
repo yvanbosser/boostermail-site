@@ -180,19 +180,24 @@ docs/
 
 | Si la question porte sur… | Je vais voir… |
 |---|---|
-| **Architecture globale, où est quoi** | `docs/STRUCTURE_PROJET.md` |
+| **Architecture globale, où est quoi** | `docs/STRUCTURE_PROJET.md` (mis à jour 16/05) |
+| **Refonte SALLE V12 (Phase A/B/C/C-bis, cuisine 3⭐ × fast-food)** ⭐ | **`docs/architecture/V12_SALLE.md`** (source unique consolidée 18/05) |
+| **Architecture V2 actuelle (post-refonte N1-N11)** ⭐ | `docs/architecture/REFONTE_N1_N11_JOURNAL.md` |
 | **Arbre décisionnel BoosterMail (flux mail entrant → frigos)** ⭐ | `docs/specs_proto/SPEC_ARBRE_DECISIONNEL.md` + visuel `docs/architecture/BoosterMail_Arbre_Decisionnel.pptx` |
 | **Règles de projet, contraintes** | `CLAUDE.md` (racine) |
-| **Ce qu'il faut faire cette session** | `docs/PLUS_TARD_VF.md` (TL;DR en haut) ⭐ |
+| **Invariants techniques (I-*)** ⭐ | `audit/INVARIANTS.md` (catégorie 12 = invariants V12 SALLE) |
+| **Ce qu'il faut faire cette session** | `docs/PLUS_TARD_VF.md` (en-tête mis à jour 16/05) ⭐ |
 | **Pourquoi tel choix a été fait** | `docs/specs_proto/HISTORIQUE_DECISIONS.md` |
-| **État d'un flux / avancement** | `docs/v2_specs/PLAN_FINALISATION_OUTLOOK.md` |
-| **Le moteur IA, système prompt** | `docs/specs_proto/SPEC_SYSTEM_PROMPT.md` |
-| **Fonctionnalité du proto (27 modules)** | `docs/specs_proto/SPEC_FONCTIONNALITES_PROTO.md` |
-| **Routes API du backend** | `docs/specs_proto/SPEC_ROUTES_API.md` |
-| **Tables SQLite** | `docs/specs_proto/SPEC_TABLES_DB.md` |
+| **Le moteur IA — prompt, blocs, sécurité PII** | `docs/sessions/OUTLOOK_BILAN_SESSION_20260508_audit_remediation.md` (Phase 1 SaaS audit ; `SPEC_SYSTEM_PROMPT.md` désormais archivé ⚠️) |
+| **Classement mail+PJ** ⭐ | `docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md` (consolidé 02/05) |
+| **Échéances V12 (sortants + entrants DB-driven)** ⭐ | `docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md` (V12) |
+| **Audit boîte mail (feature MVP)** | `docs/specs_proto/SPEC_AUDIT_BOITE_MAIL.md` |
+| **Routes V2 / caches / threads** | `docs/architecture/V12_SALLE.md` §6 (cartographie) + `audit/INVENTAIRE_V2.md` (22/04 partiellement obsolète post-N1-N11) |
+| **Tables SQLite (schéma actuel)** | `V2/database.py` (proto `SPEC_TABLES_DB.md` archivé ⚠️) |
 | **Scoring rédactionnel N1-N10** | `docs/algorithme/SPEC_SCORING_REDACTIONNEL.md` |
-| **Écart proto vs V2** | `docs/analyses_proto_v2/V2_vs_PROTO_GAPS.md` |
-| **Plan de portage proto → V2** | `docs/analyses_proto_v2/PLAN_PORTAGE_PROTO_V2.md` |
+| **Onboarding session SaaS (OVH)** | `docs/saas/ONBOARDING_SESSION_SAAS.md` ⭐ |
+| **Onboarding session New Outlook** | `docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md` ⭐ |
+| **Prompt reprise prochaine session** | `docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md` (actualisé 18/05) ⭐ |
 | **Installation côté utilisateur** | `docs/installation/SPEC_ONBOARDING_COMPLET.md` |
 | **Sujets « à faire plus tard » (référentiel unique)** | `docs/PLUS_TARD_VF.md` ⭐ |
 | **Plan migration SaaS** | `docs/plans/PLAN_SAAS.md` |
@@ -220,10 +225,12 @@ docs/
 | **`PLUS_TARD_VF.md`** ⭐ | **Référentiel UNIQUE des sujets « plus tard » BoosterMail (consolidation des 3 anciens fichiers, marquage des items obsolètes)** | `plus tard`, `backlog`, `dette` |
 | `PLUS_TARD.md` | ⚠️ **Archivé** — remplacé par `PLUS_TARD_VF.md` le 27/04/2026 PM | `archive` |
 
-#### B-bis. Architecture visuelle (`docs/architecture/` — depuis 08/05/2026)
+#### B-bis. Architecture (`docs/architecture/` — depuis 08/05/2026)
 
 | Fichier | Rôle | Clés de recherche |
 |---|---|---|
+| **`V12_SALLE.md`** ⭐⭐ | **Source de vérité unique V12 SALLE Phase A/B/C/C-bis** (créé 18/05). 12 sections : vision Yvan + pacte 3⭐ Michelin / Phase A Classer / Phase B.1/B.2/B.3 Frigos preview / Phase C Répondre « cuisine garantit, salle livre » / Phase C bis invalidation cache contact / audit profond 4 axes (6+ faux positifs filtrés) / verdict 3 promesses ✅ / Leçon 10 « commentaire qui ment » / 7 invariants livrés / tests & commits (45 tests V12 SALLE) / reste à faire / pointeurs externes. **Doc à consulter en priorité pour comprendre la cuisine/salle actuelle.** | `salle`, `cuisine`, `michelin`, `phase a b c`, `helper`, `envelope` |
+| **`REFONTE_N1_N11_JOURNAL.md`** ⭐ | **Journal global de la refonte architecturale V2** (11-14/05) : 11 niveaux N1-N11 + 6 -bis correctifs + Option A + batterie d'intégration E2E 48 scénarios. §6 bis-quater : V12 sortants/entrants. §7 : V12 SALLE (résumé chronologique + pointeur vers V12_SALLE.md). §8 : statistiques. §9 : 10 leçons consolidées (Leçon 10 « Le commentaire qui ment »). | `refonte`, `niveaux N1-N11`, `journal`, `historique`, `leçons` |
 | **`BoosterMail_Arbre_Decisionnel.pptx`** ⭐ | **PowerPoint 9 slides** documentant visuellement le flux de traitement d'un mail post-O5 : 2 filtres → 3 branches (Écarté/Partiel/VIP) → 5 frigos → 7 tiers classement (mail + PJ) → contacts (création + purge) → comportement à l'usage. Référence visuelle pour onboarding, présentation produit, doc business. Source de vérité textuelle = [`docs/specs_proto/SPEC_ARBRE_DECISIONNEL.md`](specs_proto/SPEC_ARBRE_DECISIONNEL.md). | `arbre`, `flux`, `cuisine`, `frigos`, `branches` |
 | `BoosterMail_Arbre_Decisionnel_v2.pptx` | Variante avec slide 6 corrigée (règle 3 mail : suppression « nom PJ » qui n'était pas implémenté côté code) | `archive` |
 
@@ -231,37 +238,46 @@ docs/
 
 ### C. Specs moteur IA & proto (`docs/specs_proto/` — 24 fichiers)
 
-**Architecture et fonctionnalités du moteur (proto = référence).**
+**État au 16/05/2026** : 6 docs CURRENT actifs (⭐), 18 docs ARCHIVÉS avec bandeau ⚠️ (pré-refonte N1-N11). Pour l'architecture actuelle, consulter `docs/architecture/V12_SALLE.md` + `REFONTE_N1_N11_JOURNAL.md`.
 
-| Fichier | Sujet | Clés |
-|---|---|---|
-| **`SPEC_ARBRE_DECISIONNEL.md`** ⭐ | **Source de vérité unique de l'arbre décisionnel BoosterMail post-O5** (consolidée 08/05). 2 filtres (écarter / VIP-vs-PARTIEL), 3 branches (Écarté/Partiel/VIP), 5 frigos avec règles de nettoyage, 7 tiers classement mail + 7 tiers classement PJ (avec 2 différences), gestion contacts (création progressive + purge 24 mois), 7 optimisations O1-O7. Référence visuelle = [`docs/architecture/BoosterMail_Arbre_Decisionnel.pptx`](../architecture/). | `arbre`, `flux`, `filtres`, `branches`, `frigos`, `O1-O7` |
-| `SPEC_FONCTIONNALITES_PROTO.md` | **27 modules** du proto détaillés | `fonctionnalités`, `modules`, `proto` |
-| `SPEC_SYSTEM_PROMPT.md` | Prompt WOW, 3 phases (COMPRENDRE → RÉDIGER → VÉRIFIER), blocs D/B/A/C/D2/E | `prompt`, `claude`, `génération` |
-| `SPEC_ROUTES_API.md` | 50+ routes proto, 38+9 routes V2, 4 routes Companion | `routes`, `API`, `endpoints` |
-| `SPEC_TABLES_DB.md` | 9 tables SQLite (threads, contacts, metrics, echeances…) | `DB`, `SQL`, `tables` |
-| `SPEC_PHASE2_RESUME.md` | Résumé Phase 2 complet (15 étapes, 38 routes, 80 anomalies) | `phase2`, `résumé` |
-| `SPEC_OUTLOOK_COM.md` | GetTable, com_run(), AdvancedSearch, PropertyAccessor, Content-ID | `COM`, `Outlook`, `pywin32` |
+| Fichier | Sujet | Statut | Clés |
+|---|---|---|---|
+| **`SPEC_CLASSEMENT_BOOSTERMAIL.md`** ⭐ | Classement mail+PJ — source unique consolidée 02/05 (fusion de 3 anciens docs) | CURRENT | `classement`, `tri`, `mail`, `PJ` |
+| **`SPEC_ECHEANCES_BOOSTERMAIL.md`** ⭐ | Échéances V12 — sortants Phase 1 + entrants Phase 2.1/2.2 DB-driven | CURRENT | `échéances`, `V12`, `cascade` |
+| **`SPEC_ARBRE_DECISIONNEL.md`** ⭐ | Arbre décisionnel post-O5 — consolidée 08/05. 2 filtres / 3 branches / 5 frigos / 7 tiers classement / 7 optimisations O1-O7 | CURRENT | `arbre`, `flux`, `filtres`, `branches` |
+| **`SPEC_AUDIT_BOITE_MAIL.md`** ⭐ | Feature audit boîte mail MVP — 6 catégories bruit, scope cadré 12/05 | CURRENT | `audit`, `boîte mail`, `nettoyage` |
+| **`SPEC_CONTACTS_BOOSTERMAIL.md`** ⭐ | Gestion contacts — création progressive + purge 24 mois | CURRENT | `contacts`, `profil` |
+| **`HISTORIQUE_DECISIONS.md`** ⭐ | Timeline générale des décisions stratégiques | CURRENT | `historique`, `décisions` |
+| `SPEC_FONCTIONNALITES_PROTO.md` | 27 modules du proto V1 | ⚠️ ARCHIVE | `proto`, `modules` |
+| `SPEC_SYSTEM_PROMPT.md` | Prompt WOW proto V1 (remplacé par audit remediation 08/05) | ⚠️ ARCHIVE | `proto`, `prompt` |
+| `SPEC_ROUTES_API.md` | 50+ routes proto V1 (V2 actuelle a ~90 routes — voir V12_SALLE.md) | ⚠️ ARCHIVE | `proto`, `routes` |
+| `SPEC_TABLES_DB.md` | 9 tables SQLite proto V1 (V2 actuelle = V2/database.py) | ⚠️ ARCHIVE | `proto`, `DB` |
+| `SPEC_PHASE2_RESUME.md` | Résumé Phase 2 historique 07/04 | ⚠️ ARCHIVE | `phase2`, `historique` |
+| `SPEC_OUTLOOK_COM.md` | GetTable, COM Outlook (rejeté en V2 SaaS — Graph uniquement) | ⚠️ ARCHIVE | `proto`, `COM` |
 | `SPEC_CACHE_DOSSIERS.md` | Cache DB des dossiers Outlook (396 dossiers, rescan 60min) | `cache`, `dossiers`, `folder_cache` |
-| **`SPEC_CLASSEMENT_BOOSTERMAIL.md`** ⭐ | **Source de vérité unique du classement** (mail + PJ + joindre fichier) — consolidation 02/05 des 3 docs SPEC_CLASSIFICATION_* (12/04, archivés). Pipeline 7 tiers, gardes communes centralisées, 3 niveaux PJ SaaS (Companion / OneDrive / téléchargement guidé), écart proto/SaaS explicité. | `classement`, `classification`, `tri`, `dossiers`, `PJ` |
-| ~~`SPEC_CLASSIFICATION_MAIL.md`~~ | ⚠️ **Archivé 02/05** — remplacé par `SPEC_CLASSEMENT_BOOSTERMAIL.md` | `archive` |
-| ~~`SPEC_CLASSIFICATION_ENRICHIE.md`~~ | ⚠️ **Archivé 02/05** — remplacé par `SPEC_CLASSEMENT_BOOSTERMAIL.md` | `archive` |
-| ~~`SPEC_CLASSIFICATION_PJ.md`~~ | ⚠️ **Archivé 02/05** — remplacé par `SPEC_CLASSEMENT_BOOSTERMAIL.md` | `archive` |
-| `SPEC_CONTACTS_ADAPTATIF.md` | Profils contacts auto-apprentissage, re-analyse tous les 3 mails | `contacts`, `profils`, `adaptatif` |
-| `SPEC_D2_FUSION_RECALIBRAGE.md` | Fusion D2 pour le recalibrage | `D2`, `recalibrage`, `fusion` |
-| `SPEC_DOUBLON_CLASSEMENT.md` | Gestion doublons classement | `doublons`, `classement` |
-| **`SPEC_ECHEANCES_BOOSTERMAIL.md`** ⭐ | **Source de vérité unique des échéances** (consolidée 05/05). Pipeline détection (pré-filtre regex + scan IA Sonnet 4.6 + dédup), schéma DB, UI overlay 3 onglets, 12 routes API V2, auto-annulation heuristique, gaps restants (2 stubs + scheduler J-1 ouvré). Remplace `SPEC_ECHEANCES_OPTIMISATION.md`. | `échéances`, `relance`, `deadline`, `rappel`, `blocF` |
-| ~~`SPEC_ECHEANCES_OPTIMISATION.md`~~ | ⚠️ **Archivé 05/05** — remplacé par `SPEC_ECHEANCES_BOOSTERMAIL.md` | `archive` |
-| `SPEC_IMAGES_INLINE.md` | Content-ID inline vs PJ, PropertyAccessor PR_ATTACH_DATA_BIN | `images`, `inline`, `CID` |
-| `SPEC_OCR_LIMITE.md` | Limite OCR (PDF, Word, Excel) | `OCR`, `extraction`, `PJ` |
-| `SPEC_PREINJECTION.md` | Pré-injection contexte, prefetch | `préinjection`, `prefetch` |
-| `SPEC_PRIORITES_15_16_17.md` | Priorités 15-17 du prompt WOW | `priorités`, `hiérarchie` |
-| `SPEC_PRIORITES_18_22.md` | Priorités 18-22 du prompt WOW | `priorités`, `hiérarchie` |
-| `SPEC_RECALIBRAGE_ADAPTATIF.md` | Recalibrage tous les 10/20/50 envois, score plancher 70 | `recalibrage`, `scoring` |
-| `SPEC_RESCAN_CONDITIONNEL.md` | Rescan conditionnel Windows Search | `rescan`, `index`, `windows` |
-| `SPEC_SMART_SPECULATIF.md` | 6 filtres Smart Speculative, skip génération inutile | `spéculatif`, `filtres`, `cache` |
-| `SPEC_TEMPLATES.md` | 45 templates fixes + templates appris | `templates`, `réponses`, `fixes` |
-| `HISTORIQUE_DECISIONS.md` | ~90 décisions validées 15/03 → 06/04/2026 | `historique`, `décisions`, `timeline` |
+~~`SPEC_CLASSIFICATION_MAIL.md`~~, ~~`SPEC_CLASSIFICATION_ENRICHIE.md`~~, ~~`SPEC_CLASSIFICATION_PJ.md`~~ ⚠️ **ARCHIVÉS 02/05** — fusionnés dans `SPEC_CLASSEMENT_BOOSTERMAIL.md` ci-dessus.
+
+~~`SPEC_ECHEANCES_OPTIMISATION.md`~~ ⚠️ **ARCHIVÉ 05/05** — remplacé par `SPEC_ECHEANCES_BOOSTERMAIL.md` (V12 entrants + sortants DB-driven).
+
+Autres specs proto **ARCHIVÉS 16/05/2026** (bandeau ⚠️ « DOCUMENT HISTORIQUE / ARCHIVE — pré-refonte N1-N11 ») :
+
+| Fichier archivé | Sujet historique | Remplaçant CURRENT |
+|---|---|---|
+| `SPEC_CONTACTS_ADAPTATIF.md` ⚠️ | Profils contacts auto-apprentissage proto | `SPEC_CONTACTS_BOOSTERMAIL.md` (fusion 16/05) |
+| `SPEC_D2_FUSION_RECALIBRAGE.md` ⚠️ | Fusion D2 recalibrage proto | `SPEC_CLASSEMENT_BOOSTERMAIL.md` |
+| `SPEC_DOUBLON_CLASSEMENT.md` ⚠️ | Doublons classement proto | `SPEC_CLASSEMENT_BOOSTERMAIL.md` |
+| `SPEC_IMAGES_INLINE.md` ⚠️ | Content-ID inline proto | `PLUS_TARD_VF.md` (différé) |
+| `SPEC_OCR_LIMITE.md` ⚠️ | OCR limite proto | `PLUS_TARD_VF.md` (OCR différé) |
+| `SPEC_PREINJECTION.md` ⚠️ | Pré-injection contexte proto | `REFONTE_N1_N11_JOURNAL.md` (N6.2 prompt Sonnet) |
+| `SPEC_PRIORITES_15_16_17.md` ⚠️ | Priorités 15-17 proto | `PLUS_TARD_VF.md` |
+| `SPEC_PRIORITES_18_22.md` ⚠️ | Priorités 18-22 proto | `PLUS_TARD_VF.md` |
+| `SPEC_RECALIBRAGE_ADAPTATIF.md` ⚠️ | Recalibrage proto | `REFONTE_N1_N11_JOURNAL.md` (N10 contacts) |
+| `SPEC_RESCAN_CONDITIONNEL.md` ⚠️ | Rescan Windows proto | `REFONTE_N1_N11_JOURNAL.md` |
+| `SPEC_SMART_SPECULATIF.md` ⚠️ | 6 filtres Smart Speculative proto | `REFONTE_N1_N11_JOURNAL.md` (N4/N5 filtres) + `V12_SALLE.md` (spéculation actuelle) |
+| `SPEC_TEMPLATES.md` ⚠️ | 45 templates fixes proto | Désactivés 11/05 « Claude partout » — voir `REFONTE_N1_N11_JOURNAL.md` |
+| `SPEC_WARMUP.md` ⚠️ | Warmup proto | `REFONTE_N1_N11_JOURNAL.md` (remplacé par `_run_preemptive_bg`) |
+
+**Total** : 18 docs ARCHIVES dans `docs/specs_proto/` portent un bandeau ⚠️ standardisé en en-tête.
 
 ---
 
@@ -667,7 +683,10 @@ Si vous voulez réduire l'encombrement de `C:\EasyMail\` :
 
 ---
 
-*Dernière mise à jour : 16/05/2026 — Grosse MAJ post sessions 11-16/05 :*
+*Dernière mise à jour : 18/05/2026 — Sessions 11-18/05 :*
 *— Refonte N1-N11 (11 niveaux + 6 -bis correctifs) + V12 (Phase 1 sortants + Phase 2.1/2.2 entrants) + V12 SALLE (Phase A/B/C/C-bis) + audit profond (4 sub-agents).*
 *— 26 docs archivés en batch avec bandeau ⚠️ standardisé.*
 *— Section « 📦 ARCHIVES — Inventaire des éléments historiques du repo » ajoutée (couvre TOUT `C:\EasyMail\` au-delà de `docs/`).*
+*— Section « C. Specs proto » restructurée : 6 docs CURRENT actifs + 18 archives marquées ⚠️ ARCHIVE avec pointeur vers remplaçant.*
+*— Table « Si la question porte sur… » remise à jour pour pointer vers les docs CURRENT (`V12_SALLE.md` ⭐⭐, `REFONTE_N1_N11_JOURNAL.md` ⭐, etc.) au lieu des proto archivés.*
+*— Section B-bis Architecture enrichie avec V12_SALLE.md (source unique cuisine/salle) et REFONTE_N1_N11_JOURNAL.md (journal global).*
