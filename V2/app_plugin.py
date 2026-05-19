@@ -9170,6 +9170,37 @@ def api_folders():
         return jsonify({"error": _safe_err(e), "folders": []}), 500
 
 
+@app.route('/api/folders/rescan', methods=['POST'])
+def api_folders_rescan():
+    """Force un re-scan immédiat de l'arborescence Outlook (Graph API).
+
+    Utilisé depuis la page Profil quand l'user a fait du ménage dans sa
+    boîte mail (créé/supprimé/renommé des dossiers) et veut que BoosterMail
+    reflète l'état actuel sans attendre l'expiration du TTL 5 min du cache.
+
+    Invalide le cache user-scoped puis recharge live via _get_outlook_folders_cached
+    (qui re-crawl Graph sous son propre lock).
+    """
+    graph = get_graph()
+    if not graph:
+        return jsonify({"ok": False, "error": "Mode Standard requis"}), 403
+    # Invalidation cache user-scoped (sous lock pour cohérence avec lecteurs)
+    with _outlook_folders_lock:
+        if _get_user_cache is not None and _get_current_user_id is not None:
+            user_id = _get_current_user_id() or 'default'
+            cache = _get_user_cache('outlook_folders', user_id)
+            cache.pop('list', None)
+            cache.pop('ts', None)
+    try:
+        folders = _get_outlook_folders_cached() or []
+        return jsonify({"ok": True, "count": len(folders)})
+    except GraphAuthError:
+        return jsonify({"ok": False, "error": "Token expiré", "auth_required": True}), 401
+    except Exception as e:
+        logger.error(f"Erreur api_folders_rescan: {e}")
+        return jsonify({"ok": False, "error": _safe_err(e)}), 500
+
+
 # =============================================================================
 # ROUTES API — CLASSEMENT MAIL (Mode Standard)
 # =============================================================================
