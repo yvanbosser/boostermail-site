@@ -2578,7 +2578,7 @@ function _applyMailPreview(preview) {
                 pjEl.textContent = 'Analyse en cours…';
                 _setClassementPJFieldClickable(false);
             } else if (pjData && pjData.source === 'no_pj') {
-                pjEl.textContent = 'Néant';  // Fix Néant (25/04) — "Pas de PJ" → "Néant" (demande user)
+                pjEl.textContent = 'Aucune pièce jointe';  // 19/05 — wording explicite (vs "Néant" ambigu) quand le mail n'a aucune PJ
                 _classementPJCacheData = null;
                 _setClassementPJFieldClickable(false);
             } else if (pjData && pjData.suggestion) {
@@ -2754,7 +2754,7 @@ function _applySinglePlate(plateName, res) {
             pjEl.textContent = 'Analyse en cours…';
             _setClassementPJFieldClickable(false);
         } else if (res.data && res.data.source === 'no_pj') {
-            pjEl.textContent = 'Néant';
+            pjEl.textContent = 'Aucune pièce jointe';  // 19/05 — wording explicite quand le mail n'a aucune PJ
             _classementPJCacheData = null;
             _setClassementPJFieldClickable(false);
         } else if (res.data && res.data.suggestion) {
@@ -3762,7 +3762,7 @@ function _onGenerationDone(streamedText) {
                             };
                         }
                     } else {
-                        pjEl.textContent = (_attachedFiles && _attachedFiles.length > 0) ? 'Néant' : 'Aucune PJ';
+                        pjEl.textContent = (_attachedFiles && _attachedFiles.length > 0) ? 'Néant' : 'Aucune pièce jointe';
                         _classementPJCacheData = null;
                     }
                     if (typeof _setClassementPJFieldClickable === 'function') {
