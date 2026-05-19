@@ -803,9 +803,36 @@ Test dédié : `tests/test_n13_match_echeance.py::test_prompt_injection_whitelis
 
 ---
 
-## 7. La SALLE — Phase A (Classer rapide) livrée (15/05/2026 PM tardif)
+## 7. La SALLE — V12 Phase A/B/C/C-bis (15-18/05/2026)
 
-### Contexte
+> 📘 **Doc CURRENT consolidé** : [`docs/architecture/V12_SALLE.md`](V12_SALLE.md) ⭐
+>
+> Pour la version détaillée (récit complet, démolisseurs, livraisons, métriques, audit profond, Leçon 10), consulter **V12_SALLE.md**. Le résumé ci-dessous garde la cohérence chronologique du journal N1-N11 mais n'est plus la source de vérité.
+
+### Résumé chronologique
+
+| Phase | Date | Commit | Quoi |
+|---|---|---|---|
+| A — Classer rapide | 15/05 PM | `4c93537` | Helper unifié `_classify_to_folder` + 4 fixes prod + finition cuisine (helper `_unflatten_suggestions` factorisant 7 sites). Item PLUS_TARD_VF #28 résolu. **17 tests La SALLE verts.** |
+| B.1 — Lock per-mid | 15/05 PM | `f6024b0` | Lock par-(user_id, mid) sur `_prewarm_unified_for_mail` — résolution Obs-F6 TOCTOU. Test resserré `≤ 2` → `== 1` strict. Multi-tenant safe via clé `user_id::mid`, LRU 500. |
+| B.2 — Root cause no_pj | 15/05 | `eb80ee8` | `$expand=attachments` ajouté à `outlook_graph.get_received_emails`. **Patch « cache no_pj invalide » supprimé** (27 LoC). Pacte « pas de patches sur patches » respecté. |
+| B.3 — Fusion route bundle | 15/05 | `5763048` | `api_mail_preview` refondue en wrapper léger (~15 LoC) sur `_fetch_single_preview_plate` × 3 (avant : 135 LoC dupliquées). **-120 LoC.** Sécurité validée par I-UNIFIED-LOCK-PER-MID. |
+| C — Répondre | 15/05 soir | `871056b` | Vision Yvan 3 étoiles Michelin : « cuisine garantit, salle livre ». Helper unique `_ensure_reply_envelope_html` en cuisine avant stockage cache. 3 sites salle deviennent triviaux. **-200 LoC patches + -90 LoC code mort.** |
+| C bis — Invalidation cache contact | 16/05 | `ab045d8` | `_invalidate_reply_cache_for_contact` + wrapper `_save_contact_profile_with_invalidation`, 8 sites migrés. Tient la promesse mensongère du commentaire ajouté Phase C → Leçon 10. **7 TDD + 1 régression statique.** |
+| Audit profond | 16/05 | `dd407c7` | 4 sub-agents en parallèle (~120 findings combinés). **Filtre critique : 6+ faux positifs écartés.** Verdict 3 étoiles Michelin × fast-food **CONFIRMÉ** sur cuisine / salle / communication. 1 patch trivial : `_variation_styles` module-level. |
+
+**Tests cumulés : 180/180 verts**. 7 nouveaux invariants : `I-CLASSIFY-A`, `I-UNFLATTEN-SUGGESTIONS`, `I-UNIFIED-LOCK-PER-MID`, `I-GRAPH-EXPAND-ATTACHMENTS`, `I-MAIL-PREVIEW-DELEGATES`, `I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN`, `I-CONTACT-PROFILE-INVALIDATES-REPLY-CACHE`.
+
+**Leçon 10 émergée** : « Le commentaire qui ment » — tout commentaire qui nomme une fonction interne doit déclencher un grep de vérification. Cf §9 Leçon 10 + V12_SALLE.md §8.
+
+### Texte original conservé pour archive (suite — §7 v1)
+
+> Le contenu détaillé d'origine de §7 (Phase A en intégralité, Phase B.1/B.2/B.3, Phase C, Phase C bis) a été **consolidé dans V12_SALLE.md** le 18/05/2026 pour éviter la fragmentation. Texte conservé en bas du présent §7 pour traçabilité historique.
+
+<details>
+<summary>📜 Texte original §7 (avant consolidation 18/05) — cliquer pour déplier</summary>
+
+#### Contexte (v1)
 
 La cuisine (N1-N11 + V12 Phase 1/2.1/2.2) étant terminée, Yvan a explicité la nouvelle mission : appliquer la même rigueur au pacte fondateur pour **La SALLE** (3 actions user — Classer rapide / Voir résumé + échéance / Répondre). Cible : « service 3 étoiles Michelin × rapidité fast food ». Ordre validé : A (Classer) → B (Voir résumé) → C (Répondre).
 
@@ -1005,6 +1032,8 @@ Nouvel invariant `I-CONTACT-PROFILE-INVALIDATES-REPLY-CACHE` ([audit/INVARIANTS.
 **Comment détecter ce pattern à l'avenir** : tout commentaire qui nomme une fonction (« via `_invalidate_X` ») doit déclencher un `Grep` pour vérifier que la fonction EXISTE. Si elle n'existe pas, soit on implémente immédiatement, soit on supprime la promesse du commentaire et on documente honnêtement le compromis.
 
 **Régression statique recommandée pour le futur** : à chaque PR qui touche un commentaire mentionnant une fonction interne, un linter pourrait grep le module pour vérifier que cette fonction existe. Pas implémenté ici (hors scope), mais à garder en tête.
+
+</details>
 
 ---
 

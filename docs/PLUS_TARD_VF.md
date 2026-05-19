@@ -21,7 +21,7 @@
 >
 > Nouvelles leçons consolidées : §9 Leçon 10 « Le commentaire qui ment » (anti-pattern documentation aspirationnelle).
 >
-> Voir `docs/architecture/REFONTE_N1_N11_JOURNAL.md` §7 « La SALLE — Phase A/B/C/C-bis » pour le récit détaillé.
+> Voir `docs/architecture/V12_SALLE.md` ⭐ pour la doc consolidée V12 SALLE (source de vérité unique). Le journal `REFONTE_N1_N11_JOURNAL.md` §7 garde le résumé chronologique mais pointe vers V12_SALLE.md.
 >
 > ---
 >

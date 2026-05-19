@@ -1,7 +1,10 @@
 # SOMMAIRE DÉTAILLÉ — Documentation BoosterMail (ex EasyMail)
 
-> **Dernière mise à jour** : 16/05/2026 — sessions intensives 11-16/05 livrées sur `feat/yvan/frontend` :
-> - **Refonte N1-N11** (11-14/05) : 11 niveaux architecturaux + 6 -bis correctifs + Option A + batterie E2E 48 scénarios. Voir [`docs/architecture/REFONTE_N1_N11_JOURNAL.md`](architecture/REFONTE_N1_N11_JOURNAL.md).
+> 📘 **Pour la doc V12 SALLE complète, un doc CURRENT consolidé existe** : [`docs/architecture/V12_SALLE.md`](architecture/V12_SALLE.md) ⭐ — source de vérité unique pour la refonte cuisine/salle 3 étoiles Michelin × fast-food.
+
+> **Dernière mise à jour** : 18/05/2026 — sessions intensives 11-18/05 livrées sur `feat/yvan/frontend` :
+> - **Doc CURRENT consolidé V12 SALLE** : [`docs/architecture/V12_SALLE.md`](architecture/V12_SALLE.md) ⭐ — toute la doc Phase A/B/C/C-bis + audit profond + Leçon 10 regroupée (source de vérité unique pour cette refonte).
+> - **Refonte N1-N11** (11-14/05) : 11 niveaux architecturaux + 6 -bis correctifs + Option A + batterie E2E 48 scénarios. Voir [`docs/architecture/REFONTE_N1_N11_JOURNAL.md`](architecture/REFONTE_N1_N11_JOURNAL.md) (le §7 pointe désormais vers V12_SALLE.md).
 > - **V12 Phase 1** (15/05 matin) : création échéances depuis compose sortants (commit `76ce8cd`).
 > - **V12 Phase 2.1** (15/05 PM) : abandon Option A VIP entrants, pivot DB-driven (commit `0a8a957`).
 > - **V12 Phase 2.2** (15/05 PM) : cascade matching IA entrants Tier 1/2/3 + 3 défenses prompt injection (commit `d5ec3d6`).
