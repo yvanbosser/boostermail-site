@@ -158,7 +158,7 @@ Dans un langage simple, **moins technique** (le user n'est pas dev) :
 
 - Commit **unique** (pas accumulation)
 - Message qui explique le **POURQUOI**, pas le **QUOI**
-- Update `audit/INVARIANTS.md` avec nouveaux invariants
+- Update `docs/architecture/V12/V12_INVARIANTS.md` avec nouveaux invariants
 - Update `docs/PLUS_TARD_VF.md` si dette explicite reportée
 - Push + merge `feat/yvan/frontend`
 - **Bilan honnête /10** sans complaisance
@@ -229,7 +229,7 @@ Par défaut, **moins technique** :
 
 ## 7. Invariants accumulés (référence)
 
-Pour chaque niveau passé, un invariant testable a été ajouté dans `audit/INVARIANTS.md` :
+Pour chaque niveau passé, un invariant testable a été ajouté dans `docs/architecture/V12/V12_INVARIANTS.md` :
 
 - **I-CANON-01** (N1+N2) : clé canonique IMID dans tous les caches
 - **I-NOREPLY-01** (N1) : 1 seule liste no-reply (`_AUTO_EMAIL_PATTERNS`)

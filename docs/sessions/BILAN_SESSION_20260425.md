@@ -152,7 +152,7 @@ Plus aucun "MISS reason='inconnu'" attendu pour un contact connu avec un mail r�
 
 ---
 
-## Patterns ajoutés à `audit/INVARIANTS.md`
+## Patterns ajoutés à `docs/architecture/V12/V12_INVARIANTS.md`
 
 - **P11** — `_should_speculate` doit faire un isinstance check sur `to`/`cc` avant `.lower()` (Graph les retourne en list[dict])
 - **P12** — Auto-clear pause après 60s d'inactivité (sinon BG figé)

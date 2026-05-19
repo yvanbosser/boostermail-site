@@ -1226,6 +1226,24 @@ Sans cette invalidation, `analyze_contact_profile` enrichit la fiche (tutoiement
 - **Pourquoi** : tient la promesse du commentaire `_start_speculative:8035` (« le cache est invalidé via `_invalidate_reply_cache_for_contact` ») qui était mensongère avant Phase C bis (fonction n'existait pas, 9 sites appelaient `_db.save_contact_profile` direct).
 - **Action si violé** : un développeur a (a) appelé `_db.save_contact_profile` direct (R5 fail), (b) supprimé l'appel `_invalidate_reply_cache_for_contact` du wrapper (= cache plus invalidé, brouillons obsolètes silencieux), (c) cassé la préservation `user_modified` (= perte travail user), (d) déscopé le multi-tenant (= invalidation cross-user). Restaurer le pattern « wrapper unique + invalidation ciblée + préservation user_modified ».
 
+### I-BRANCHES-N11-01 : Dispatcher unique 3 branches — aucun bypass autorisé (refonte N11 14/05/2026)
+
+Un seul aiguillage `_classify_mail_branch(mail_data)` (app_plugin.py) appelé partout pour décider de la branche `discarded` / `partial` / `vip`. Aucun call site ne doit appeler directement `_is_discarded` ou `_filter_2_is_vip` hors du dispatcher lui-même.
+
+- **Preuve comportementale** : `tests/test_n11_branches.py` (5 tests dispatcher + 2 contrat-API + 1 absence-symbole) — vérifie que les 4 sites historiques (`_should_speculate`, `_run_prefetch`, `_continuous_speculation_loop`, `/api/instant_reply`, etc.) passent désormais par `_classify_mail_branch`.
+- **Régression statique** : `tests/test_n11_branches.py::test_regression_no_bypass_dispatcher` — grep `_filter_2_is_vip(` ET `_is_discarded(` dans app_plugin.py → ≤ 2 occurrences chacun (def + 1 appel dans le dispatcher). Tout futur bypass casse la suite.
+- **Pourquoi** : avant N11, 8 call sites dispersés (5 directs + 3 wrappers) recalculaient ou contournaient le filtre 2. Source de bugs subtils (ex. réveil PARTIAL→VIP silencieux). Le dispatcher unique élimine la classe entière de bugs.
+- **Action si violé** : restaurer l'appel unique `branch = _classify_mail_branch(mail_data)['branch']` au call site fautif. Si un nouveau cas exige un test partiel, étendre le dispatcher (pas dupliquer).
+
+### I-BRANCHES-N11-02 : Pas de réveil silencieux PARTIAL→VIP (renforcé par construction N11)
+
+Une fois un mail aiguillé en PARTIAL au premier passage, il **ne doit jamais être reclassifié en VIP** au prochain passage de `_run_prefetch`. Cohérent avec la décision N5 (« le statut au moment du 1er traitement fait foi »).
+
+- **Preuve comportementale** : `tests/test_integration_N0_N11.py::test_D2_no_promotion_partial_to_vip` — scénario : un mail PARTIAL au boot, le profil contact passe à `sample_count=1` (enrichi) entre 2 passages, on vérifie qu'aucune nouvelle cuisson VIP n'est déclenchée.
+- **Renforcement par construction N11** : `_run_prefetch` ne calcule désormais le branchement **qu'une seule fois** en haut, propagé via `_branch_info`. Plus aucune voie ne permet de recalculer le filtre 2 dans la même requête.
+- **Pourquoi** : avant N11, `_run_prefetch` faisait 3 calculs successifs du filtre (lignes 6237 / 6250 / 6289) — un mail pouvait se voir promu PARTIAL→VIP au 2e calcul si la fiche s'enrichissait entre temps. Double cuisson Haiku/Sonnet, coût ×2.
+- **Action si violé** : restaurer le 1-seul-calcul en haut de `_run_prefetch` + propager via une variable locale `_branch_info`. Tout `else` unreachable après le branchement haut doit être supprimé (le branchement garantit que `branch=='vip'` aux call sites downstream).
+
 ### ~~I-BRANCHES-N11-OPTION-A~~ : `scan_echeance` activé uniquement en VIP entrants — **ARCHIVÉ 15/05/2026**
 
 > ⚠ **ARCHIVÉ 15/05/2026 — révision Yvan V12 Phase 2.1** : « ce qui compte n'est pas le statut VIP/PARTIAL, c'est qu'une échéance soit en cours vis-à-vis de l'adresse mail ». Les entrants ne déclenchent plus de scan échéance détection ; le scan matching IA viendra en Phase 2.2 (conditionné à l'existence d'une échéance active sur `from_email` en DB, pas au statut contact).

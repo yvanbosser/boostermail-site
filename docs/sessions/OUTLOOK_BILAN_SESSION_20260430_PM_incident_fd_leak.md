@@ -121,7 +121,7 @@ Backup créé : `boostermail.service.bak.20260430_103502`.
 | Fichier | Modification |
 |---|---|
 | `audit/ANOMALIES_RECURRENTES.md` | + Pattern #21 (leak FD `threading.local()` + remède db-gc) + MAJ date d'en-tête |
-| `audit/INVARIANTS.md` | + I-DB-06 (conn SQLite bornées par GC zombie) + MAJ date d'en-tête |
+| `docs/architecture/V12/V12_INVARIANTS.md` | + I-DB-06 (conn SQLite bornées par GC zombie) + MAJ date d'en-tête |
 | `docs/saas/ROLLBACK_PROCEDURE.md` | + Cas 0 (diagnostic d'urgence FD/leak) + Cas 4 (palliatif systemd + revert b2d2f73 + validation) |
 | `docs/PLUS_TARD_VF.md` | + bloc « ✅ FIXÉ 30/04/2026 PM — Incident FD leak prod » dans le TL;DR |
 | `docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md` | MAJ état de fin de session |
@@ -181,7 +181,7 @@ Backup créé : `boostermail.service.bak.20260430_103502`.
 
 - Commit fix : `b2d2f73`
 - Pattern #21 : `audit/ANOMALIES_RECURRENTES.md` ligne ~810
-- I-DB-06 : `audit/INVARIANTS.md` ligne ~120
+- I-DB-06 : `docs/architecture/V12/V12_INVARIANTS.md` ligne ~120
 - Rollback Cas 4 : `docs/saas/ROLLBACK_PROCEDURE.md`
 - Bilan matin (audit ULTRA pré-incident) : `docs/sessions/OUTLOOK_BILAN_SESSION_20260430.md`
 

@@ -297,7 +297,7 @@ Si un contact purgé ré-échange après plus de 24 mois :
 
 ---
 
-## 9. Invariants (audit/INVARIANTS.md)
+## 9. Invariants (docs/architecture/V12/V12_INVARIANTS.md)
 
 | Code | Sujet |
 |---|---|

@@ -74,7 +74,7 @@ Critère de fin (subjectif, c'est Yvan qui décide) : « j'utilise BoosterMail t
 
 ✅ **Travaux annexes autorisés** :
 - Audits / rapports markdown dans `audit/rapports/`
-- MAJ des INVARIANTS et PATTERNS (`audit/INVARIANTS.md`, `audit/ANOMALIES_RECURRENTES.md`)
+- MAJ des INVARIANTS et PATTERNS (`docs/architecture/V12/V12_INVARIANTS.md`, `audit/ANOMALIES_RECURRENTES.md`)
 - Améliorations doc dans `docs/v2_specs/`, `docs/specs_proto/`, `audit/`
 - Fixes du companion local PyQt (`companion/companion.py`) **mais** uniquement si nécessaire pour Yvan en local — n'a plus aucun effet sur OVH
 
@@ -242,7 +242,7 @@ Toujours faire un backup ad-hoc avant : `ssh ubuntu@51.178.162.208 "sudo /opt/bo
 
 ### F.1 Sources de référence
 
-- **`audit/INVARIANTS.md`** (~ 19k) : invariants techniques (I-CODE-05 multi-tenant, I-DATA-* clés canoniques, I-CX-* coherence cross-user, etc.)
+- **`docs/architecture/V12/V12_INVARIANTS.md`** (~ 19k) : invariants techniques (I-CODE-05 multi-tenant, I-DATA-* clés canoniques, I-CX-* coherence cross-user, etc.)
 - **`audit/ANOMALIES_RECURRENTES.md`** (~ 27k) : Patterns identifiés (#14 mismatch clé cache, #15 submission sans IMID, #16 doublons IMID, #17 race globals timer, etc.)
 - **`audit/PLAYBOOK.md`** : procédures d'audit
 - **`audit/rapports/`** : rapports d'audits datés
@@ -262,7 +262,7 @@ Format type :
 
 ### F.3 Patterns à respecter
 
-Quand on identifie un nouveau type de bug récurrent → **l'ajouter dans `audit/ANOMALIES_RECURRENTES.md`** avec un Pattern# unique. Quand on consolide une règle structurelle → **l'ajouter dans `audit/INVARIANTS.md`** avec un I-CODE-XX / I-DATA-XX.
+Quand on identifie un nouveau type de bug récurrent → **l'ajouter dans `audit/ANOMALIES_RECURRENTES.md`** avec un Pattern# unique. Quand on consolide une règle structurelle → **l'ajouter dans `docs/architecture/V12/V12_INVARIANTS.md`** avec un I-CODE-XX / I-DATA-XX.
 
 ---
 

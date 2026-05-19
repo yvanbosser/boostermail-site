@@ -17,7 +17,7 @@ Plan d'intervention en 7 phases livré + 3 audits successifs sous angles différ
 | [`tests/validation_scenarios.py`](tests/validation_scenarios.py) | Test runner permanent (8 scénarios automatisables) |
 | [`../docs/saas/OBSERVABILITY_AUDIT_REMEDIATION_20260508.md`](../docs/saas/OBSERVABILITY_AUDIT_REMEDIATION_20260508.md) | 22 logs structurés + alertes OVH |
 
-**Invariants ajoutés** : `I-PII-01`, `I-PROMPT-01`, `I-PROMPT-02` (cf [`INVARIANTS.md`](INVARIANTS.md) Catégorie 8).
+**Invariants ajoutés** : `I-PII-01`, `I-PROMPT-01`, `I-PROMPT-02` (cf [`V12_INVARIANTS.md`](V12_INVARIANTS.md) Catégorie 8).
 **Pattern ajouté** : `#25` Contradictions inter-blocs (cf [`ANOMALIES_RECURRENTES.md`](ANOMALIES_RECURRENTES.md)).
 
 ---
@@ -26,7 +26,7 @@ Plan d'intervention en 7 phases livré + 3 audits successifs sous angles différ
 
 Les audits précédents ont raté des anomalies critiques (IPv6 bind, cert obsolète, race conditions) parce qu'ils étaient **thématiques et subjectifs**. Ce kit les rend **systématiques et mesurables** :
 
-- `INVARIANTS.md` : les règles ABSOLUES — si elles sont violées, c'est une anomalie, pas négociable.
+- `V12_INVARIANTS.md` : les règles ABSOLUES — si elles sont violées, c'est une anomalie, pas négociable.
 - `tests/smoke_test.ps1` : vérifie les invariants mécaniquement en ~30 secondes.
 - `checklists/` : balayage exhaustif par classes de bugs, flux, angles, **état des données**.
 - `ANOMALIES_RECURRENTES.md` : mémoire des bugs déjà vus — évite la redécouverte.
@@ -36,7 +36,7 @@ Les audits précédents ont raté des anomalies critiques (IPv6 bind, cert obsol
 Les audits "code" sont insuffisants. On a vécu **2 mois + 5 jours** de bugs UX invisibles (modèle Claude EOL silencieux, DB V2 jamais migrée depuis proto) que les audits code n'ont pas détectés : **les endpoints répondaient 200 mais servaient du vide**.
 
 Le kit intègre désormais :
-- **Catégorie 11 `I-DATA-01..10`** dans `INVARIANTS.md`
+- **Catégorie 11 `I-DATA-01..10`** dans `V12_INVARIANTS.md`
 - **Checklist `checklists/etat_donnees.md`** dédiée
 - **Tests smoke automatisés** (comptages rows, ping modèles Claude, fichiers cache)
 - **Pattern #13** dans `ANOMALIES_RECURRENTES.md`
@@ -69,7 +69,7 @@ Quand l'user demande un audit :
 
 ### 1. Audit complet
 ```
-1. Lire INVARIANTS.md
+1. Lire V12_INVARIANTS.md
 2. Lancer tests/smoke_test.ps1 → baseline objective
 3. Parcourir toutes les checklists :
    - classes_bugs.md
@@ -83,7 +83,7 @@ Quand l'user demande un audit :
 
 ### 2. Audit thématique (sécurité, perf, UX, etc.)
 ```
-1. Lire INVARIANTS.md (section concernée)
+1. Lire V12_INVARIANTS.md (section concernée)
 2. Lancer tests/smoke_test.ps1
 3. Parcourir UNIQUEMENT les checklists de la thématique
 4. Rapport + mise à jour ANOMALIES_RECURRENTES
@@ -102,7 +102,7 @@ Quand l'user demande un audit :
 
 **Anomalie** = une des 3 conditions suivantes :
 
-1. Violation d'un invariant listé dans `INVARIANTS.md`
+1. Violation d'un invariant listé dans `V12_INVARIANTS.md`
 2. Échec d'un item de `tests/smoke_test.ps1`
 3. Bug causant un dysfonctionnement observable (crash, HTTP ≥ 500, latence > seuil documenté, résultat factuellement faux, état incohérent détectable)
 
@@ -144,7 +144,7 @@ Cette définition **existe pour que la boucle audit→fix→audit termine en tem
 audit/
 ├── README.md                     ← ce fichier
 ├── PLAYBOOK.md                   ← workflows détaillés
-├── INVARIANTS.md                 ← règles absolues testables
+├── V12_INVARIANTS.md                 ← règles absolues testables
 ├── INVENTAIRE_V2.md             ← map du territoire
 ├── ANOMALIES_RECURRENTES.md     ← historique + patterns
 ├── checklists/

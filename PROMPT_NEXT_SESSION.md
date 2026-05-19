@@ -21,7 +21,7 @@ V2 N'A PAS encore été redémarré pour activer ces changements.
 AVANT TOUT : lis dans cet ordre :
 1. NOUVELLE_SESSION_V3.md (guide de démarrage à jour)
 2. docs/sessions/BILAN_SESSION_20260425.md (bilan complet d'hier)
-3. audit/INVARIANTS.md (invariants techniques P1-P14)
+3. docs/architecture/V12/V12_INVARIANTS.md (invariants techniques P1-P14)
 4. audit/PLAYBOOK.md (kit audit — réflexe pour tout diagnostic)
 
 Puis on enchaîne :
@@ -47,7 +47,7 @@ positif. Pas de phase suivante avant validation.
 RAPPEL DES RÈGLES :
 - "nocode" = on ne code pas, on se pose, on réfléchit, on creuse
   (lecture/audit/analyse seulement, pas d'Edit/Write sur le code)
-- Kit audit (audit/PLAYBOOK.md + audit/INVARIANTS.md +
+- Kit audit (audit/PLAYBOOK.md + docs/architecture/V12/V12_INVARIANTS.md +
   audit/ANOMALIES_RECURRENTES.md) consulté en RÉFLEXE quand un bug
   est non-trivial, AVANT de toucher le code
 - Worktree de travail : claude/unruffled-pascal-ba42f3
@@ -73,7 +73,7 @@ si V2 a été redémarré.
 5. Si MISS persiste → analyse en mode nocode (kit audit)
 
 **Documents à consulter en cas de souci** :
-- `audit/INVARIANTS.md` — invariant I-DATA-11 (clé canonique IMID)
+- `docs/architecture/V12/V12_INVARIANTS.md` — invariant I-DATA-11 (clé canonique IMID)
 - `audit/ANOMALIES_RECURRENTES.md` — Pattern #14 (clés cache mixtes)
 - `audit/rapports/2026-04-23_audit_coherence_cles_cache.md` — précédent passage sur le sujet
 
@@ -137,14 +137,14 @@ Candidats P0 restants :
 1. **`NOUVELLE_SESSION_V3.md`** — guide de démarrage à jour
 2. **`docs/sessions/BILAN_SESSION_20260425.md`** — bilan détaillé d'hier
 3. **`CLAUDE.md`** — règles absolues (section 25/04 ajoutée)
-4. **`audit/INVARIANTS.md`** — invariants techniques P1-P14
+4. **`docs/architecture/V12/V12_INVARIANTS.md`** — invariants techniques P1-P14
 
 ### Selon le sujet investigué
 
 | Si le sujet est… | Lire en priorité |
 |---|---|
-| Étiquetage cache / lookup MISS | `audit/INVARIANTS.md` (I-DATA-11), `audit/rapports/2026-04-23_audit_coherence_cles_cache.md` |
-| Smart Speculative filtres | `audit/INVARIANTS.md` (P11 list vs str), `V2/app_plugin.py:_should_speculate` |
+| Étiquetage cache / lookup MISS | `docs/architecture/V12/V12_INVARIANTS.md` (I-DATA-11), `audit/rapports/2026-04-23_audit_coherence_cles_cache.md` |
+| Smart Speculative filtres | `docs/architecture/V12/V12_INVARIANTS.md` (P11 list vs str), `V2/app_plugin.py:_should_speculate` |
 | Drafts BG / `_reply_cache` | `audit/ANOMALIES_RECURRENTES.md` (Pattern #14), `V2/app_plugin.py:_start_speculative` |
 | Templates / réponses rapides | `docs/specs_proto/SPEC_FONCTIONNALITES_PROTO.md`, `V2/templates_mail.py` |
 | Contexte A/B/C | `docs/specs_proto/SPEC_FONCTIONNALITES_PROTO.md` (section 7), `V2/app_plugin.py:_run_prefetch` |

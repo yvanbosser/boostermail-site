@@ -55,7 +55,7 @@ Approche minimale (3 fichiers étendus + 1 script créé) :
 
 1. **`audit/PLAYBOOK.md`** : Workflow 7 (clôture) + Workflow 8 (ouverture), engagement Claude opposable, étapes strictes, anomalies récurrentes à éviter (incluant le paradoxe d'auto-référence des chiffres de commits constaté en fin de journée).
 
-2. **`audit/INVARIANTS.md`** : Catégorie 13 « État de session / cohérence documentaire » avec **I-SESS-01 à I-SESS-04** :
+2. **`docs/architecture/V12/V12_INVARIANTS.md`** : Catégorie 13 « État de session / cohérence documentaire » avec **I-SESS-01 à I-SESS-04** :
    - I-SESS-01 : `git status --short` vide en clôture
    - I-SESS-02 : aucune ref obsolète vers `PLUS_TARD.md` (sans `_VF`) ou `TODO_SESSION_SUIVANTE.md` qualifiée « état courant » dans docs vivants
    - I-SESS-03 : top commit hash dans PROMPT_REPRISE matche `git log --oneline -1`
@@ -83,7 +83,7 @@ Approche minimale (3 fichiers étendus + 1 script créé) :
 2. Cache busting URL versionnée `?v=vN-...` dans `autorun.html` et `dialog.html`
 3. Procédure de purge `EBWebView` documentée dans `ONBOARDING_NEW_OUTLOOK_VIA_OVH.md` section C.3
 
-**Documentation** : Pattern #18 dans `audit/ANOMALIES_RECURRENTES.md` + invariants I-CACHE-01/02/03 dans `audit/INVARIANTS.md`.
+**Documentation** : Pattern #18 dans `audit/ANOMALIES_RECURRENTES.md` + invariants I-CACHE-01/02/03 dans `docs/architecture/V12/V12_INVARIANTS.md`.
 
 ### D2 — Hosting Coaxis incompatible avec New Outlook desktop SaaS
 La mailbox `yvan.bosser@groupe-bosser.fr` est hébergée chez Coaxis (Compta Santé, setup hybride Azure AD auth + Exchange ailleurs). New Outlook desktop refusait de se connecter (`MailboxInfoStaleException`) et Graph API du tenant transitoire ne voit pas ces mails (404 sur `/api/email_body`).
@@ -185,7 +185,7 @@ Sur les 7 méthodes Claude qui consomment du contenu mail, `_build_prompt` (cœu
 - 📄 `audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md`
 - 📄 `audit/rapports/2026-04-27_audits_1_9_10_synthese.md`
 - 📝 MAJ `audit/ANOMALIES_RECURRENTES.md` (Pattern #18 + Pattern #15 sites)
-- 📝 MAJ `audit/INVARIANTS.md` (I-SEC-06 + I-CACHE-01/02/03)
+- 📝 MAJ `docs/architecture/V12/V12_INVARIANTS.md` (I-SEC-06 + I-CACHE-01/02/03)
 - 📝 MAJ `docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`
 - 📝 MAJ `docs/specs_proto/HISTORIQUE_DECISIONS.md`
 - 📝 MAJ `docs/SOMMAIRE_DETAILLE.md`

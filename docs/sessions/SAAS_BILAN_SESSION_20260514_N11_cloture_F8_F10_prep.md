@@ -50,7 +50,7 @@
 
 - ✅ **Documentation consolidée** (commits `549facb` + `27fd74b`)
   - `REFONTE_N1_N11_JOURNAL.md` : section Option A + Validation finale + 3 observations honnêtes + §6 bis Préparation N12
-  - `audit/INVARIANTS.md` : I-BRANCHES-N11-OPTION-A + section « Observations honnêtes post-batterie »
+  - `docs/architecture/V12/V12_INVARIANTS.md` : I-BRANCHES-N11-OPTION-A + section « Observations honnêtes post-batterie »
 
 - ✅ **Prompt prochaine session** (commit `a306128`) : `docs/sessions/PROMPT_NEXT_SESSION_N12_F8_F10.md` self-contained
 

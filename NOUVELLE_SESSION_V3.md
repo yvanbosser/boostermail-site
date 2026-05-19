@@ -82,7 +82,7 @@ Investigation sans urgence (le garde-fou Phase 1.5 protège déjà contre récid
 | 1 | `CLAUDE.md` | Règles absolues, architecture, règles de maintenance M1-M4 |
 | 2 | `docs/SOMMAIRE_DETAILLE.md` | **Index maître** de toute la doc — point d'entrée obligatoire |
 | 3 | `docs/sessions/BILAN_SESSION_20260425.md` | **Bilan de la dernière session (25/04)** — Phase 1+2+3 + garde-fou drafts |
-| 4 | `audit/INVARIANTS.md` | Invariants techniques à respecter (P1-P14) |
+| 4 | `docs/architecture/V12/V12_INVARIANTS.md` | Invariants techniques à respecter (P1-P14) |
 | 5 | `audit/ANOMALIES_RECURRENTES.md` | Patterns de bugs récurrents (#16b list vs str, etc.) |
 | 6 | `audit/PLAYBOOK.md` | **Kit audit V2** — méthode + checklists (à utiliser pour tout diagnostic complexe) |
 
@@ -100,7 +100,7 @@ Quand un comportement est inattendu (MISS systématique, draft introuvable, éca
 
 | Fichier | Quand |
 |---|---|
-| `audit/INVARIANTS.md` | « Cette règle technique est-elle respectée ici ? » (ex: I-DATA-11 = clé canonique IMID) |
+| `docs/architecture/V12/V12_INVARIANTS.md` | « Cette règle technique est-elle respectée ici ? » (ex: I-DATA-11 = clé canonique IMID) |
 | `audit/ANOMALIES_RECURRENTES.md` | « Ce pattern de bug a-t-il déjà été vu ? » (Pattern #16b list vs str, etc.) |
 | `audit/PLAYBOOK.md` | Méthode d'audit pas-à-pas |
 | `audit/checklists/*.md` | Checklists par axe : flux end-to-end, classes de bugs, état des données, spécificités Windows |
@@ -154,7 +154,7 @@ Si deux documents se contredisent sur un sujet, retenir le **PLUS RÉCENT** et *
 **Ordre de priorité complémentaire** (si les dates sont équivalentes) :
 1. `CLAUDE.md`
 2. `NOUVELLE_SESSION_V3.md` (ce document)
-3. `audit/INVARIANTS.md` (pour les questions techniques)
+3. `docs/architecture/V12/V12_INVARIANTS.md` (pour les questions techniques)
 4. `docs/sessions/` les plus récents
 5. `docs/specs_proto/HISTORIQUE_DECISIONS.md`
 6. Les autres specs thématiques
@@ -181,7 +181,7 @@ Pour savoir quel doc lire selon le sujet, **consulter d'abord `docs/SOMMAIRE_DET
 | Graph API (Microsoft) | `docs/v2_specs/SPEC_PHASE2_GRAPH.md` |
 | Auth Microsoft (OAuth2) | `docs/v2_specs/SPEC_PHASE2_AUTH.md` |
 | Companion COM | `docs/v2_specs/SPEC_PHASE2_COMPANION.md` |
-| Invariants techniques | `audit/INVARIANTS.md` |
+| Invariants techniques | `docs/architecture/V12/V12_INVARIANTS.md` |
 | Patterns de bugs récurrents | `audit/ANOMALIES_RECURRENTES.md` |
 
 ---

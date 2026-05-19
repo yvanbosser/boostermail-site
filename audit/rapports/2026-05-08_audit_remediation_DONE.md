@@ -84,7 +84,7 @@
 
 | Item | Statut |
 |---|---|
-| `audit/INVARIANTS.md` : I-PII-01, I-PROMPT-01, I-PROMPT-02 | ✅ |
+| `docs/architecture/V12/V12_INVARIANTS.md` : I-PII-01, I-PROMPT-01, I-PROMPT-02 | ✅ |
 | `audit/ANOMALIES_RECURRENTES.md` : Pattern #25 | ✅ |
 | Ce rapport `_DONE.md` | ✅ |
 | `PLUS_TARD_VF` mise à jour | ✅ entry #17 ajoutée |

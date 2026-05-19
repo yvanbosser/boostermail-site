@@ -30,7 +30,7 @@ L'audit précédent (`2026-04-29_kit_audit_multi_tenant_post_migration.md`) avai
 - `audit/tests/saas_smoke.sh` (NEW)
 - `audit/rapports/2026-04-29_audit_pattern17_backend_python.md` (NEW)
 - `audit/rapports/2026-04-29_audit_except_pass_classification.md` (NEW)
-- `audit/INVARIANTS.md` (date + I-AUTH-JWT-01 ajouté)
+- `docs/architecture/V12/V12_INVARIANTS.md` (date + I-AUTH-JWT-01 ajouté)
 - `docs/PLUS_TARD_VF.md` (date)
 - `docs/specs_proto/HISTORIQUE_DECISIONS.md` (date + nouvelle entrée 29/04 fin de journée)
 
@@ -117,7 +117,7 @@ curl -sX POST 'https://api.boostermail.ai/api/webhooks/graph?validationToken=TES
 - **I-EVENT-01** / **I-EVENT-02** : OnMessageCompose handler n'est pas modifié par les commits du jour ✓
 
 ### Nouvel invariant ajouté — I-AUTH-JWT-01
-✓ Documenté dans `audit/INVARIANTS.md` (lignes 491-518) :
+✓ Documenté dans `docs/architecture/V12/V12_INVARIANTS.md` (lignes 491-518) :
 - Algorithme HS256
 - TTL 15 min
 - Issuer `"boostermail"`
@@ -198,14 +198,14 @@ Test 20 du module `user_scoped_cache.py` : 2 users séparés → 2 sub-caches in
 ### Audit initial — 4 anomalies documentaires détectées
 | # | Anomalie | Statut |
 |---|---|---|
-| A1 | `audit/INVARIANTS.md` daté `29/04 PM tardif` (obsolète pour fin de journée) | ✅ FIXÉ — date à `29/04 fin de journée` + résumé enrichi |
+| A1 | `docs/architecture/V12/V12_INVARIANTS.md` daté `29/04 PM tardif` (obsolète pour fin de journée) | ✅ FIXÉ — date à `29/04 fin de journée` + résumé enrichi |
 | A2 | `docs/PLUS_TARD_VF.md` daté `29/04 PM tardif` (obsolète) | ✅ FIXÉ — date à `29/04 fin de journée` + résumé enrichi |
 | A3 | `docs/specs_proto/HISTORIQUE_DECISIONS.md` daté `fin de journée` mais sans entrée pour les 7 commits supplémentaires | ✅ FIXÉ — entrée 29/04 fin de journée suite auto-pilote ajoutée (couvre Auth JWT + saas_smoke + 2 audits + 5 fixes logger.debug) |
 | A4 | Nouveau module `V2/auth_jwt.py` sans invariant correspondant dans INVARIANTS.md | ✅ FIXÉ — `I-AUTH-JWT-01` ajouté |
 
 ### Vérification post-fix
 ```bash
-grep "Dernière mise à jour" audit/INVARIANTS.md docs/PLUS_TARD_VF.md docs/specs_proto/HISTORIQUE_DECISIONS.md
+grep "Dernière mise à jour" docs/architecture/V12/V12_INVARIANTS.md docs/PLUS_TARD_VF.md docs/specs_proto/HISTORIQUE_DECISIONS.md
 ```
 Toutes alignées sur **29/04/2026 fin de journée**. ✓
 

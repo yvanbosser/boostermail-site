@@ -135,7 +135,7 @@ Backups OVH avant chaque modif : `<file>.bak.YYYYMMDD_HHMMSS` (rollback Niveau 2
 
 ### Hygiène technique
 
-6. **Convention `print()` → `logger`** : ajouter à `audit/INVARIANTS.md` un nouvel invariant testable (`grep print V2/*.py = 0`).
+6. **Convention `print()` → `logger`** : ajouter à `docs/architecture/V12/V12_INVARIANTS.md` un nouvel invariant testable (`grep print V2/*.py = 0`).
 7. **Convention models centralisés** : nouvel invariant `grep "claude-sonnet-4\|claude-haiku-4" V2/*.py` doit retourner uniquement les constantes module-level dans claude_ai.py.
 
 ---

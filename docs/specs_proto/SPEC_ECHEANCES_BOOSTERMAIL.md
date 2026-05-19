@@ -56,7 +56,7 @@ Frontière sémantique tranchée 15/05 : POPPER pour engagement / demande / urge
     - **Tier 3** : fallback heuristique anti-SPOF si Haiku timeout/down/null
   - Intégration `_prewarm_unified_for_mail` étape 10 : matching lancé côté entrants quand échéance active. Double-check scope (statut='active' + correspondant correct) AVANT `update_echeance(_, 'pending_confirmation')`.
   - Refonte `_auto_cancel_echeances_on_reply` en wrapper sur la cascade (40 lignes, plus de duplication algo)
-  - **3 défenses prompt injection** intégrées au sub-commis (cf invariant I-ECHEANCE-DB-DRIVEN dans `audit/INVARIANTS.md`) : délimiteurs XML `<MAIL_HEADERS>` + `<MAIL_BODY>` couvrant subject + from_name + body, whitelist en sortie (id ∈ active_echeances), double-check scope user
+  - **3 défenses prompt injection** intégrées au sub-commis (cf invariant I-ECHEANCE-DB-DRIVEN dans `docs/architecture/V12/V12_INVARIANTS.md`) : délimiteurs XML `<MAIL_HEADERS>` + `<MAIL_BODY>` couvrant subject + from_name + body, whitelist en sortie (id ∈ active_echeances), double-check scope user
   - Frontend : statu quo gap 4 (cards page Échéances + badge overlay) — pas de popup in-context Phase 2.2 (reportable Phase 2.3 si remontée user)
 
 ### Out-of-scope

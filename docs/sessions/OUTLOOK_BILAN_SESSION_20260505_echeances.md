@@ -30,7 +30,7 @@ Découverte centrale : la feature est **implémentée à ~90 % en V2** — toute
 
 Au démarrage, j'ai exploré `C:\Users\yvanb\OneDrive\Desktop\EasyMail\` parce que ma mémoire pointait vers des chemins relatifs ambigus. Or **le projet a migré hors OneDrive vers `C:\EasyMail\` le 12/04/2026** (documenté `SOMMAIRE_DETAILLE.md:48`). Le dossier OneDrive est un **vestige obsolète + souvent cloud-only illisible**.
 
-→ **Garde-fou installé** : I-SESS-05 dans `audit/INVARIANTS.md`, vérifié mécaniquement par `cloture_check.sh`. Toute session future qui écrirait `OneDrive\Desktop\EasyMail` dans un doc vivant sera bloquée à la clôture.
+→ **Garde-fou installé** : I-SESS-05 dans `docs/architecture/V12/V12_INVARIANTS.md`, vérifié mécaniquement par `cloture_check.sh`. Toute session future qui écrirait `OneDrive\Desktop\EasyMail` dans un doc vivant sera bloquée à la clôture.
 
 → **Mémoire ajoutée** : `project_racine_repo.md` (priorité 1 dans MEMORY.md).
 
@@ -93,7 +93,7 @@ L'écran échéances vit dans **`V2/templates/echeances.html`** servi via `/plug
 | **Doc archivé** | `docs/specs_proto/SPEC_ECHEANCES_OPTIMISATION.md` (bandeau ARCHIVE) |
 | **Code modifié** | `V2/app_plugin.py` (2 routes `/relance` + `/mail` portées du proto) |
 | **Code modifié** | `V2/templates/echeances.html` (`relancer` + `voirMail` refactorées) |
-| **Audit étendu** | `audit/INVARIANTS.md` (I-SESS-05) + `audit/tests/cloture_check.sh` + `audit/PLAYBOOK.md` Workflow 8 + `audit/checklists/ui_design_specs.md` |
+| **Audit étendu** | `docs/architecture/V12/V12_INVARIANTS.md` (I-SESS-05) + `audit/tests/cloture_check.sh` + `audit/PLAYBOOK.md` Workflow 8 + `audit/checklists/ui_design_specs.md` |
 | **Mémoire user** | `project_racine_repo.md` (racine `C:\EasyMail\`) + `feature_echeances_scope.md` (sortantes uniquement) |
 
 ---

@@ -341,7 +341,7 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 2. 5 docstrings stales corrigées (références à `_prewarm_classement_for_mail` supprimée)
 3. Variable morte `strategy` supprimée
 4. Tests honnêtes : 16→15 tests (1 doublon supprimé + 2 fusionnés + 1 séparé en 2). Étiquetage clarifié : **invariants comportementaux** vs **régressions statiques**.
-5. INVARIANTS.md reformulation honnête I-CLASS-N8-01/04/05.
+5. V12_INVARIANTS.md reformulation honnête I-CLASS-N8-01/04/05.
 
 **Tests** : `test_n8_classement.py` — **15/15 verts**.
 
@@ -561,14 +561,14 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 - `_MOMENTUM_TTL_SECONDS = 7200` (N8)
 - `_RECIPROCAL_STOP_WORDS` (N9-bis) — étend `_GENERIC_FOLDER_NAMES` pour R1 réciproque
 
-### Invariants INVARIANTS.md livrés N1-N9
+### Invariants V12_INVARIANTS.md livrés N1-N9
 
 | Code | Niveau | Sujet |
 |---|---|---|
 | I-CANON-01 | N1/N2 | Canonicalisation IMID systématique |
 | I-NOREPLY-01 | N1 | Liste no-reply unifiée |
-| I-FILTER1-* | N4 | 5 règles atomiques Filtre 1 |
-| I-FILTER2-* | N5 | VIP vs PARTIEL |
+| I-FILTRE-01 | N4 | 5 règles atomiques Filtre 1 |
+| I-FILTRE-2-01 | N5 | VIP vs PARTIEL |
 | I-PROMPT-N62-01 | N6.2 | Prompt Sonnet structuré |
 | I-ECHEANCE-N63-01 | N6.3 | Échéances sortantes only |
 | I-ECHEANCE-N63bis-01 | N6.3-bis | Patches résiduels résolus |
@@ -716,7 +716,7 @@ Tests : `tests/test_n12_normalize_echeance.py` (16 cas unitaires purs) + `tests/
 **Tests** : suppression `test_C3_vip_scan_echeance_active` + `test_F8_echeance_format_pourri` (orphelins/tautologiques) + `test_option_a_scan_echeance_conditional`. Ajout de 3 nouveaux dans `tests/test_n11_branches.py` (régression statique inverse + contrat helper + paramètre `echeances` conservé pour Phase 2.2). **82/82 verts au total.**
 
 **Documentation** :
-- `audit/INVARIANTS.md` : I-BRANCHES-N11-OPTION-A archivé avec note du revirement 24h. Obs-F8 et Obs-F10 marqués RÉSOLUS.
+- `docs/architecture/V12/V12_INVARIANTS.md` : I-BRANCHES-N11-OPTION-A archivé avec note du revirement 24h. Obs-F8 et Obs-F10 marqués RÉSOLUS.
 - Mémoire utilisateur `feature_echeances_scope.md` à mettre à jour (séparer **création** sortants vs **matching** entrants Phase 2.2).
 
 ### Coût méthodologique du revirement 24h
@@ -805,7 +805,7 @@ Test dédié : `tests/test_n13_match_echeance.py::test_prompt_injection_whitelis
 
 ## 7. La SALLE — V12 Phase A/B/C/C-bis (15-18/05/2026)
 
-> 📘 **Doc CURRENT consolidé** : [`docs/architecture/V12_SALLE.md`](V12_SALLE.md) ⭐
+> 📘 **Doc CURRENT consolidé** : [`docs/architecture/V12/V12_SALLE.md`](V12_SALLE.md) ⭐
 >
 > Pour la version détaillée (récit complet, démolisseurs, livraisons, métriques, audit profond, Leçon 10), consulter **V12_SALLE.md**. Le résumé ci-dessous garde la cohérence chronologique du journal N1-N11 mais n'est plus la source de vérité.
 
@@ -968,7 +968,7 @@ Cette question a pivoté le plan v2 (« simplifier la salle ») en plan v3 (« d
 - `template.miss.* → instant_reply.miss.*`
 - L'agrégation dashboard `/api/admin/templates_stats` lit les deux préfixes (anciennes données historiques préservées via normalisation en ligne).
 
-**Nouvel invariant `I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN`** ([audit/INVARIANTS.md](../../audit/INVARIANTS.md)) — 4 régressions statiques verrouillent :
+**Nouvel invariant `I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN`** ([docs/architecture/V12/V12_INVARIANTS.md](../../docs/architecture/V12/V12_INVARIANTS.md)) — 4 régressions statiques verrouillent :
 - R-C1 : existence du helper module-level.
 - R-C2 : `/api/instant_reply` preemptive sans `_normalize_reply_greeting_closing` ni `_body_has_greeting` (la salle ne contrôle plus).
 - R-C3 : `/api/match_template` dead code supprimé (grep `DESACTIVE 11/05/2026` → 0).
@@ -1017,7 +1017,7 @@ La fonction `_invalidate_reply_cache_for_contact` **n'existait pas**. 9 sites ap
 - T7 : idempotent (2 appels = 1 résultat).
 - R5 : grep `_db.save_contact_profile(` hors wrapper → 0 résultat.
 
-Nouvel invariant `I-CONTACT-PROFILE-INVALIDATES-REPLY-CACHE` ([audit/INVARIANTS.md](../../audit/INVARIANTS.md)).
+Nouvel invariant `I-CONTACT-PROFILE-INVALIDATES-REPLY-CACHE` ([docs/architecture/V12/V12_INVARIANTS.md](../../docs/architecture/V12/V12_INVARIANTS.md)).
 
 **Tests : 180/180 verts** (24/24 Phase C complets, 156 autres suites).
 

@@ -368,7 +368,7 @@ Incohérence entre le niveau de log utilisé (INFO) et le niveau minimum affich�
 L'audit valide la **cohérence du code** (les fonctions sont là, les routes répondent) mais **ne vérifie jamais l'état des données** que le code doit servir. Un cache vide ou un modèle Claude retiré sont des **défauts de données**, pas des bugs de code.
 
 **Fix canonique** :
-- **Invariants I-DATA-01 à I-DATA-10** dans `INVARIANTS.md` (nouvelle catégorie 11)
+- **Invariants I-DATA-01 à I-DATA-10** dans `V12_INVARIANTS.md` (nouvelle catégorie 11)
 - **Checklist dédiée** : `audit/checklists/etat_donnees.md`
 - **Tests smoke automatisés** : ajout des checks `Invoke-SqliteCount` dans `smoke_test.ps1` (catégorie 11)
 - Avant TOUT audit code : d'abord lancer le "3 commandes" de `etat_donnees.md §8` (comptage rows, modèles Claude OK, fichiers cache présents)
@@ -405,7 +405,7 @@ Deux formats d'ID possibles pour le même objet métier (mail, ticket, user). Pr
 2. Toute écriture de cache doit passer par une fonction de normalisation : `m.get('internet_message_id') or m.get('message_id') or m.get('id', '')`
 3. Auditer systématiquement TOUS les sites d'écriture (`grep "'message_id': .*\.get\('id'"` et équivalents)
 4. Accepter un fallback documenté (Entry ID pour drafts locaux sans RFC ID)
-5. Écrire un invariant testable : cf. `I-DATA-11` dans `INVARIANTS.md`
+5. Écrire un invariant testable : cf. `I-DATA-11` dans `V12_INVARIANTS.md`
 
 **Test de non-régression** :
 - `I-DATA-11` : échantillon de clés cache doivent matcher `^<.+@.+>$`
@@ -788,7 +788,7 @@ Microsoft impose des restrictions strictes aux event-based runtimes pour préser
 **Stratégie validée chez nous** (29/04/2026) : Option A2 = bandeau passif `InformationalMessage` sans bouton actionable. v20 sur OVH. Pas de gain de clic, juste plus de visibilité produit. Le user clique le bouton ruban BoosterMail comme avant.
 
 **Test de non-régression** :
-- I-EVENT-01 : `displayDialogAsync` interdite dans event-based handlers (cf `audit/INVARIANTS.md`)
+- I-EVENT-01 : `displayDialogAsync` interdite dans event-based handlers (cf `docs/architecture/V12/V12_INVARIANTS.md`)
 - I-EVENT-02 : `actionType` cadenassé sur `ShowTaskPane` (idem)
 
 **Signaux d'alerte** :
@@ -844,7 +844,7 @@ def _conn(self):
 4. Gestion du cas TID réutilisé : à chaque `_conn()`, l'ancienne entrée éventuelle pour le TID courant est fermée avant remplacement
 
 **Test de non-régression** :
-- I-DB-06 (cf `audit/INVARIANTS.md`) : `len(_db._all_conns) <= len(threading.enumerate()) + 1` après 60s, ou `[db-gc] closed N` visible dans les logs périodiquement
+- I-DB-06 (cf `docs/architecture/V12/V12_INVARIANTS.md`) : `len(_db._all_conns) <= len(threading.enumerate()) + 1` après 60s, ou `[db-gc] closed N` visible dans les logs périodiquement
 - Test fonctionnel reproduit dans le commit : 10 threads transitoires créent 11 conn, GC ferme 10 zombies après thread.join()
 
 **Signaux d'alerte** :
@@ -890,7 +890,7 @@ def _conn(self):
 - `close()` devient no-op (commenté pour expliquer pourquoi)
 
 **Test de non-régression** :
-- I-RES-05 (cf `audit/INVARIANTS.md`) : toutes les Sessions HTTP partagées sont fermées au shutdown
+- I-RES-05 (cf `docs/architecture/V12/V12_INVARIANTS.md`) : toutes les Sessions HTTP partagées sont fermées au shutdown
 - Test fonctionnel : 100 instances même token → 1 Session unique (`set(id(g._session) for g in graphs))` doit valoir 1)
 
 **Signaux d'alerte** :
@@ -956,7 +956,7 @@ Application :
 - Route `/api/debug_addin_log` → applique `_redact_pii_for_log()` avant écriture
 
 **Test de non-régression** :
-- I-SEC-07 (cf `audit/INVARIANTS.md`) : 0 email en clair dans les nouveaux logs (grep `@.*\\.[a-z]{2,}` doit matcher 0 ligne hors valeurs hashées `***@`)
+- I-SEC-07 (cf `docs/architecture/V12/V12_INVARIANTS.md`) : 0 email en clair dans les nouveaux logs (grep `@.*\\.[a-z]{2,}` doit matcher 0 ligne hors valeurs hashées `***@`)
 
 **Signaux d'alerte** :
 - `grep -E '@(gmail|orange|outlook|free|wanadoo)' /opt/boostermail/addin_debug.log | wc -l` > 0 sur les nouvelles entrées

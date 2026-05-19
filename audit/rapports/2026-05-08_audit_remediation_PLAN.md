@@ -336,7 +336,7 @@ Cette session du 08/05/2026 a produit :
 
 ### 7.1 Audit kit
 - Nouveau rapport : `audit/rapports/2026-05-08_audit_remediation_DONE.md`
-- Mettre à jour `audit/INVARIANTS.md` :
+- Mettre à jour `docs/architecture/V12/V12_INVARIANTS.md` :
   - **I-PII-01** : « tous body_snippet en blocs A/B/C doivent passer par `_redact_pii_in_text` avant injection prompt »
   - **I-PROMPT-01** : « le prompt doit comporter SECURITY_GUARD en tête ET en fin »
   - **I-PROMPT-02** : « le BRIEF doit être positionné avant les blocs contexte (lutte contre recency bias) »

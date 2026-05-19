@@ -363,7 +363,7 @@ Cohérent avec les estimations du planning SaaS Étape 7 (~1.5 j de l'audit cros
 - `audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md` — inventaire 22 caches mono-user (15 migrés depuis).
 - `docs/saas/AUDIT_OUTLOOK_TO_SAAS_20260427.md` — transmission session Outlook → session SaaS (3 bloquants documentés).
 - `docs/saas/ONBOARDING_SESSION_SAAS.md` Étape 7 — `~1.5 j` planifié initialement (sous-évalué : ne couvrait que les caches RAM).
-- `audit/INVARIANTS.md` Catégorie 11 (I-DATA-11 à I-CX-02) — invariants cohérence DB/cache.
+- `docs/architecture/V12/V12_INVARIANTS.md` Catégorie 11 (I-DATA-11 à I-CX-02) — invariants cohérence DB/cache.
 
 ### 6.3 État runtime mesuré (DB locale dev)
 

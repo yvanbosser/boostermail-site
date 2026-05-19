@@ -347,7 +347,7 @@ C'est un anti-pattern subtil : **« documentation aspirationnelle »** — décr
 
 ## 9. 7 invariants livrés
 
-Tous codifiés dans [`audit/INVARIANTS.md`](../../audit/INVARIANTS.md) Catégorie 12 — Cuisine/Salle V12.
+Tous codifiés dans [`docs/architecture/V12/V12_INVARIANTS.md`](../../docs/architecture/V12/V12_INVARIANTS.md) Catégorie 12 — Cuisine/Salle V12.
 
 | Invariant | Phase | Description |
 |---|---|---|
@@ -414,7 +414,7 @@ Démolisseur Phase B P2-B2 a signalé l'anti-pattern « 6 sous-fonctions à 1 ap
 
 | Doc | Rôle |
 |---|---|
-| [`audit/INVARIANTS.md`](../../audit/INVARIANTS.md) | Définition technique testable des 7 invariants livrés (catégorie 12) |
+| [`docs/architecture/V12/V12_INVARIANTS.md`](../../docs/architecture/V12/V12_INVARIANTS.md) | Définition technique testable des 7 invariants livrés (catégorie 12) |
 | [`docs/architecture/REFONTE_N1_N11_JOURNAL.md`](REFONTE_N1_N11_JOURNAL.md) | Journal global N1-N11 + V12 (§7 pointe vers ce doc) |
 | [`docs/sessions/OUTLOOK_BILAN_SESSION_20260516_to_20260518_V12_SALLE_audit_profond_docs.md`](../sessions/OUTLOOK_BILAN_SESSION_20260516_to_20260518_V12_SALLE_audit_profond_docs.md) | Bilan session 15-18/05 (récap chronologique des 3 jours) |
 | [`docs/PLUS_TARD_VF.md`](../PLUS_TARD_VF.md) | Backlog consolidé — en-tête mis à jour 16/05 |

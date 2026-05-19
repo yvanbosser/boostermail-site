@@ -23,7 +23,7 @@ Livré : `audit/rapports/2026-04-29_audit_approche_OnMessageCompose_InsightMessa
 | **B1** | `displayDialogAsync` listée dans **Unsupported APIs** des event-based handlers Outlook (depuis 2023, jamais corrigée — issue OfficeDev/office-js#3085) | Plan original « le handler appelle directement displayDialogAsync » irréalisable |
 | **B2** | Pour `notificationMessages` actionable button : `actionType` ne peut **QUE** valoir `ShowTaskPane` (cf `MailboxEnums.ActionType`, un seul field dans tout l'enum) | « Bouton du bandeau ouvre la popup BoosterMail » irréalisable sans taskpane (interdit par Yvan) |
 
-Ces limitations méritent leur place dans `audit/INVARIANTS.md` (cf §5 ci-dessous, propositions à valider).
+Ces limitations méritent leur place dans `docs/architecture/V12/V12_INVARIANTS.md` (cf §5 ci-dessous, propositions à valider).
 
 ### 1.3 Phase 1 déployée — bandeau passif fonctionnel
 
@@ -88,7 +88,7 @@ UI toggle dans la popup BoosterMail : **non implémentée**. Sera dans une sessi
 
 ---
 
-## 3. Invariants candidats à ajouter dans `audit/INVARIANTS.md`
+## 3. Invariants candidats à ajouter dans `docs/architecture/V12/V12_INVARIANTS.md`
 
 ### I-EVENT-01 — `displayDialogAsync` interdite dans event-based handlers
 

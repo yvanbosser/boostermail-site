@@ -32,7 +32,7 @@ DOCUMENTS À LIRE EN PRIORITÉ
 ============================
 1. `docs/architecture/REFONTE_N1_N11_JOURNAL.md` §6 bis « Préparation N12 »
    → contient le plan préliminaire validé en fin de session précédente.
-2. `audit/INVARIANTS.md` → sections « Obs-F6/F8/F10 » + I-BRANCHES-N11-OPTION-A
+2. `docs/architecture/V12/V12_INVARIANTS.md` → sections « Obs-F6/F8/F10 » + I-BRANCHES-N11-OPTION-A
 3. `docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md` (consolidée 14/05)
 4. `V2/tests/test_integration_N0_N11.py` → comprendre les tests existants
    (notamment F10 actuel tautologique à réécrire)
@@ -136,7 +136,7 @@ Tests   : 48/48 intégration E2E verts (test_integration_N0_N11.py)
 ## Fichiers clés à consulter dans l'ordre
 
 1. `docs/architecture/REFONTE_N1_N11_JOURNAL.md` §6 bis « Préparation N12 »
-2. `audit/INVARIANTS.md` § Obs-F6/F8/F10 + I-BRANCHES-N11-OPTION-A
+2. `docs/architecture/V12/V12_INVARIANTS.md` § Obs-F6/F8/F10 + I-BRANCHES-N11-OPTION-A
 3. `docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md` (consolidée 14/05)
 4. `V2/app_plugin.py:14006` (route `api_post_generation_analyze`)
 5. `V2/tests/test_integration_N0_N11.py` (F8/F10 actuels à réécrire)

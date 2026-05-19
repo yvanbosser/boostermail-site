@@ -264,5 +264,5 @@ Toutes les 45s :
 
 1. `smoke_test.ps1` → état baseline objectif
 2. Ce fichier (INVENTAIRE) → "qu'est-ce que je dois couvrir ?"
-3. `INVARIANTS.md` → "quelles sont les règles non-négociables ?"
+3. `V12_INVARIANTS.md` → "quelles sont les règles non-négociables ?"
 4. `ANOMALIES_RECURRENTES.md` → "quels patterns déjà vus pour chercher en priorité ?"

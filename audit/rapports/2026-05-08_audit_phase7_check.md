@@ -9,9 +9,9 @@
 
 | Item | Test | Résultat |
 |---|---|---|
-| `audit/INVARIANTS.md` contient I-PII-01 | `grep -c "I-PII-01" audit/INVARIANTS.md` | ✅ 1 |
-| `audit/INVARIANTS.md` contient I-PROMPT-01 | grep | ✅ 1 |
-| `audit/INVARIANTS.md` contient I-PROMPT-02 | grep | ✅ 1 |
+| `docs/architecture/V12/V12_INVARIANTS.md` contient I-PII-01 | `grep -c "I-PII-01" docs/architecture/V12/V12_INVARIANTS.md` | ✅ 1 |
+| `docs/architecture/V12/V12_INVARIANTS.md` contient I-PROMPT-01 | grep | ✅ 1 |
+| `docs/architecture/V12/V12_INVARIANTS.md` contient I-PROMPT-02 | grep | ✅ 1 |
 | `audit/ANOMALIES_RECURRENTES.md` contient Pattern #25 | grep | ✅ 1 |
 | `audit/rapports/2026-05-08_audit_remediation_DONE.md` créé | exist | ✅ |
 | `docs/PLUS_TARD_VF.md` contient entry #17 (dashboard différé) | grep | ✅ 1 |

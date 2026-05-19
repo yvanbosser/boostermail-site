@@ -9,7 +9,7 @@
 > - Analyse du style rédactionnel + scoring → [`docs/algorithme/SPEC_SCORING_REDACTIONNEL.md`](../algorithme/SPEC_SCORING_REDACTIONNEL.md)
 > - Parcours UI haut-niveau → [`docs/installation/SPEC_ONBOARDING_COMPLET.md`](SPEC_ONBOARDING_COMPLET.md)
 > - Conventions Git/branches → [`docs/CONVENTIONS_GIT_BRANCHES.md`](../CONVENTIONS_GIT_BRANCHES.md)
-> - Invariants comportementaux → [`audit/INVARIANTS.md`](../../audit/INVARIANTS.md)
+> - Invariants comportementaux → [`docs/architecture/V12/V12_INVARIANTS.md`](../../docs/architecture/V12/V12_INVARIANTS.md)
 
 ---
 
@@ -64,7 +64,7 @@ Cette spec décrit un **gap** entre les deux : une fonctionnalité validée fonc
 | **Cooldown** | Délai anti-spam entre 2 analyses Claude du même contact (par défaut 24h). Le flag `bypass_cooldown=True` force malgré le cooldown. |
 | **V12 SALLE** | Refonte architecturale des 15-18/05/2026 (« cuisine 3 étoiles × fast food »). 7 invariants livrés, 180 tests verts. |
 | **« Cuisine » / « Salle »** | Métaphore interne : **cuisine** = backend (logique IA, garde-fous, helpers), **salle** = routes Flask qui servent le frontend (doivent être triviales). |
-| **Invariant `I-XXX`** | Règle comportementale vérifiable par test statique, documentée dans [`audit/INVARIANTS.md`](../../audit/INVARIANTS.md). |
+| **Invariant `I-XXX`** | Règle comportementale vérifiable par test statique, documentée dans [`docs/architecture/V12/V12_INVARIANTS.md`](../../docs/architecture/V12/V12_INVARIANTS.md). |
 | **UserScopedDict** | Wrapper Python qui isole les caches RAM par `user_id` (multi-tenant). Source : `V2/user_scoped_cache.py`. |
 | **PO** | Product Owner du projet (Yvan), unique source de validation produit. |
 | **N1, N2... N11, N12** | Refontes architecturales successives (11-14/05 + 15/05). N12 = échéances. |
@@ -483,6 +483,6 @@ Lire `_apply_register_guard` dans [V2/app_plugin.py:15054](../../V2/app_plugin.p
 5. Smoke test prod sur un compte de test (PAS le compte du PO en premier)
 
 ### Étape 4 — Mise à jour doc post-livraison
-1. Ajouter le commit `I-ONBOARDING-FULL` dans [`audit/INVARIANTS.md`](../../audit/INVARIANTS.md) si pertinent
+1. Ajouter le commit `I-ONBOARDING-FULL` dans [`docs/architecture/V12/V12_INVARIANTS.md`](../../docs/architecture/V12/V12_INVARIANTS.md) si pertinent
 2. Mettre à jour le statut de cette spec : `🛠️ spec validée` → `✅ livré (commit XXXX, JJ/MM/2026)`
 3. Ajouter une entrée dans [`docs/SOMMAIRE_DETAILLE.md`](../SOMMAIRE_DETAILLE.md) section « Décisions récentes »

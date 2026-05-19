@@ -138,7 +138,7 @@ Cette question a fait pivoter le plan v2 de Phase C (« simplifier la salle ») 
 | `I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN` | Enveloppe garantie en cuisine (Phase C) |
 | `I-CONTACT-PROFILE-INVALIDATES-REPLY-CACHE` | Invalidation atomique fiche contact (Phase C bis) |
 
-Voir `audit/INVARIANTS.md` pour le détail comportemental + régressions statiques.
+Voir `docs/architecture/V12/V12_INVARIANTS.md` pour le détail comportemental + régressions statiques.
 
 ---
 
@@ -250,7 +250,7 @@ Plus la **6e défense ad-hoc** émergée en session : l'**audit final non progra
 ## Liens vivants
 
 - Journal détaillé : [`docs/architecture/REFONTE_N1_N11_JOURNAL.md`](../architecture/REFONTE_N1_N11_JOURNAL.md) §7 « La SALLE — Phase A/B/C/C-bis » + §9 Leçon 10
-- Invariants : [`audit/INVARIANTS.md`](../../audit/INVARIANTS.md)
+- Invariants : [`docs/architecture/V12/V12_INVARIANTS.md`](../../docs/architecture/V12/V12_INVARIANTS.md)
 - Tests : `V2/tests/test_la_salle.py` + `V2/tests/test_la_salle_phase_c.py` + `V2/tests/test_n12_normalize_echeance.py` + `V2/tests/test_n13_match_echeance.py` + `V2/tests/test_integration_N0_N11.py`
 - Spec échéances : [`docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md`](../specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md) (V12 Phase 2.1+2.2)
 - Sommaire général : [`docs/SOMMAIRE_DETAILLE.md`](../SOMMAIRE_DETAILLE.md) (section ARCHIVES exhaustive)

@@ -73,7 +73,7 @@ Tout commentaire qui nomme une fonction interne (« via _foo() », « appelée p
 
 Session intensive 3 jours « V12 SALLE Phase A/B/C/C-bis + audit profond + grosse MAJ docs ».
 
-- Doc CURRENT consolidé V12 SALLE : docs/architecture/V12_SALLE.md ⭐ (source de vérité unique — toute la doc V12 SALLE Phase A/B/C/C-bis + audit profond + Leçon 10 regroupée)
+- Doc CURRENT consolidé V12 SALLE : docs/architecture/V12/V12_SALLE.md ⭐ (source de vérité unique — toute la doc V12 SALLE Phase A/B/C/C-bis + audit profond + Leçon 10 regroupée)
 - Bilan session chronologique : docs/sessions/OUTLOOK_BILAN_SESSION_20260516_to_20260518_V12_SALLE_audit_profond_docs.md
 - Journal global N1-N11 + V12 : docs/architecture/REFONTE_N1_N11_JOURNAL.md §7 (résumé + pointeur vers V12_SALLE.md)
 - Top commit feat/yvan/frontend : voir `git log --oneline -1` (formulation dynamique pour respecter I-SESS-03)
@@ -131,9 +131,9 @@ AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 1. docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md ⭐ — référence vivante (workflow OVH-first, scope, interdits, profil Yvan, procédure purge cache WebView2)
 2. docs/PLUS_TARD_VF.md ⭐ — référentiel UNIQUE des sujets « plus tard » avec en-tête mis à jour 16/05 (récap V12 + SALLE Phase A/B/C/C-bis + audit profond + 7 nouveaux invariants + Leçon 10)
 3. docs/sessions/OUTLOOK_BILAN_SESSION_20260516_to_20260518_V12_SALLE_audit_profond_docs.md ⭐ — bilan complet dernière session
-4. docs/architecture/V12_SALLE.md ⭐ — doc CURRENT consolidé V12 SALLE Phase A/B/C/C-bis + audit profond + Leçon 10 (source unique)
+4. docs/architecture/V12/V12_SALLE.md ⭐ — doc CURRENT consolidé V12 SALLE Phase A/B/C/C-bis + audit profond + Leçon 10 (source unique)
 4-bis. docs/architecture/REFONTE_N1_N11_JOURNAL.md — journal global N1-N11 + V12 (pointe vers V12_SALLE.md pour §7)
-5. audit/INVARIANTS.md — invariants I-* projet (catégorie 13 = I-SESS, catégorie 12 = I-REPLY, I-CONTACT-PROFILE, I-UNIFIED-LOCK-PER-MID, etc.)
+5. docs/architecture/V12/V12_INVARIANTS.md — invariants I-* projet (catégorie 13 = I-SESS, catégorie 12 = I-REPLY, I-CONTACT-PROFILE, I-UNIFIED-LOCK-PER-MID, etc.)
 6. audit/INVENTAIRE_V2.md — inventaire V2 (dernière maj 22/04 — partiellement obsolète post-N1-N11 + V12 SALLE ; pour l'état actuel des caches/threads/routes voir REFONTE_N1_N11_JOURNAL.md §5 + section ARCHIVES du SOMMAIRE_DETAILLE.md)
 7. audit/PLAYBOOK.md — Workflow 4 (diagnostic bug), Workflow 7 (kit fin de session), Workflow 8 (kit ouverture), Workflow 9 (UX/design alignment)
 8. audit/ANOMALIES_RECURRENTES.md — patterns récurrents (#1-#25)
@@ -190,7 +190,7 @@ Suivre Workflow 7 — Kit fin de session (cf audit/PLAYBOOK.md) qui orchestre :
 - MAJ docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md section L (liste bilans) + date d'en-tête
 - MAJ docs/PLUS_TARD_VF.md (sujets clos en « ✅ DÉJÀ FAIT » avec hash commit, nouveaux sujets ajoutés)
 - MAJ docs/SOMMAIRE_DETAILLE.md (entrée bilan + section ARCHIVES si nouveaux docs archivés)
-- MAJ audit/INVARIANTS.md ou audit/ANOMALIES_RECURRENTES.md si nouveaux invariants/patterns
+- MAJ docs/architecture/V12/V12_INVARIANTS.md ou audit/ANOMALIES_RECURRENTES.md si nouveaux invariants/patterns
 - MAJ docs/specs_proto/HISTORIQUE_DECISIONS.md si nouvelle décision stratégique
 - MAJ docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md (ce fichier) avec l'état de fin
 - Lancer `bash audit/tests/cloture_check.sh` jusqu'à exit 0 (vérifie I-SESS-01 à I-SESS-06)

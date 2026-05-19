@@ -10,7 +10,7 @@
 
 ## A. Contexte
 
-Audit thématique post-livraison du sujet PLUS_TARD_VF #3 « Signature personnalisée par contact ». L'objectif : valider que l'implémentation déployée sur OVH ne contient pas d'anomalie au sens des classes de bugs documentées dans `audit/checklists/classes_bugs.md` ni de violation des invariants existants (`audit/INVARIANTS.md`) ni de récidive d'un Pattern connu (`audit/ANOMALIES_RECURRENTES.md`).
+Audit thématique post-livraison du sujet PLUS_TARD_VF #3 « Signature personnalisée par contact ». L'objectif : valider que l'implémentation déployée sur OVH ne contient pas d'anomalie au sens des classes de bugs documentées dans `audit/checklists/classes_bugs.md` ni de violation des invariants existants (`docs/architecture/V12/V12_INVARIANTS.md`) ni de récidive d'un Pattern connu (`audit/ANOMALIES_RECURRENTES.md`).
 
 ### Périmètre fonctionnel
 
@@ -205,5 +205,5 @@ Implémentation conforme aux standards existants :
 | Schema migration | `V2/database.py:340-352` |
 | Prompt enrichi | `V2/claude_ai.py:982` (champ JSON) + l. 1024-1037 (règle 6) |
 | Validation post-réception | `V2/claude_ai.py:1136-1163` |
-| INVARIANTS pertinents | `audit/INVARIANTS.md` I-SEC-06, I-DATA-05, I-DATA-12 |
+| INVARIANTS pertinents | `docs/architecture/V12/V12_INVARIANTS.md` I-SEC-06, I-DATA-05, I-DATA-12 |
 | Pattern racine | `audit/ANOMALIES_RECURRENTES.md` Pattern #9 |

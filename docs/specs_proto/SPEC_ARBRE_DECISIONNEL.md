@@ -148,12 +148,12 @@ Voir document dédié : [`SPEC_CONTACTS_BOOSTERMAIL.md`](SPEC_CONTACTS_BOOSTERMA
 **Liens** :
 - Spec détaillée : [`SPEC_ECHEANCES_BOOSTERMAIL.md`](SPEC_ECHEANCES_BOOSTERMAIL.md) §2 (révision 15/05 — abandon Option A + paradigme DB-driven)
 - Test régression : `tests/test_n11_branches.py::test_phase21_no_scan_echeance_marker_in_unified` + `::test_should_scan_echeance_helper_contract` + `::test_persist_echeances_param_kept_for_phase22`
-- Invariant archivé : `audit/INVARIANTS.md` I-BRANCHES-N11-OPTION-A (ARCHIVÉ 15/05)
+- Invariant archivé : `docs/architecture/V12/V12_INVARIANTS.md` I-BRANCHES-N11-OPTION-A (ARCHIVÉ 15/05)
 - Journal détaillé : `docs/architecture/REFONTE_N1_N11_JOURNAL.md` §6 ter
 
 ---
 
-## 7. Invariants livrés (audit/INVARIANTS.md)
+## 7. Invariants livrés (docs/architecture/V12/V12_INVARIANTS.md)
 
 | Code | Sujet | Niveau d'origine |
 |---|---|---|

@@ -55,7 +55,7 @@ Commit / date : YYYY-MM-DD
 ### Test de non-régression
 Comment vérifier que le bug ne reviendra pas :
 - [ ] Ajouter un check dans `smoke_test.ps1` (si possible mécaniquement)
-- [ ] Ajouter un invariant dans `INVARIANTS.md`
+- [ ] Ajouter un invariant dans `V12_INVARIANTS.md`
 - [ ] Ajouter le pattern dans `ANOMALIES_RECURRENTES.md`
 - [ ] Test manuel : ...
 

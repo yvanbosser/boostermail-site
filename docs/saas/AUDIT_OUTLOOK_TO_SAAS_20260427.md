@@ -307,7 +307,7 @@ Pour la migration SaaS :
 ## 10. Documents annexes à lire (chemins absolus)
 
 ### Obligatoires
-- `C:\EasyMail\audit\INVARIANTS.md` — invariant **I-CODE-05** (lignes 192-210) + Catégorie 11 (I-DATA-11 à I-CX-02)
+- `C:\EasyMail\docs\architecture\V12\V12_INVARIANTS.md` — invariant **I-CODE-05** (lignes 192-210) + Catégorie 11 (I-DATA-11 à I-CX-02)
 - `C:\EasyMail\audit\ANOMALIES_RECURRENTES.md` — Patterns **#14** (mismatch clé cache) + **#15** (submission sans IMID) + **#16** (doublons IMID `email_cache`) + **#17** (race condition globals timer)
 
 ### Très utiles

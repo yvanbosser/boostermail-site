@@ -3,7 +3,7 @@
 > **Doc CURRENT consolidé — source de vérité unique pour la refonte CUISINE V12.**
 > Sessions intensives 11/05 → 14/05/2026 (3 jours + 1 session autonomie 2h + 1 session validation).
 > Branche : `feat/yvan/frontend`. Tests : **281/281 verts** (233 unitaires + 48 intégration E2E).
-> Pendant : [`docs/architecture/V12_SALLE.md`](V12_SALLE.md).
+> Pendant : [`docs/architecture/V12/V12_SALLE.md`](V12_SALLE.md).
 
 ---
 
@@ -403,7 +403,7 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 2. 5 docstrings stales corrigées (références à `_prewarm_classement_for_mail` supprimée)
 3. Variable morte `strategy` supprimée
 4. Tests honnêtes : 16→15 tests (1 doublon supprimé + 2 fusionnés + 1 séparé en 2). Étiquetage clarifié : **invariants comportementaux** vs **régressions statiques**.
-5. INVARIANTS.md reformulation honnête I-CLASS-N8-01/04/05.
+5. V12_INVARIANTS.md reformulation honnête I-CLASS-N8-01/04/05.
 
 **Incident historique git** : pendant l'impl N8-bis, le push initial avait été bloqué par GitHub Secret Scanning — 4 secrets détectés (1 GitHub PAT + 2 Anthropic + 1 OpenAI) dans des commits anciens du proto. Yvan a tranché option B (purge historique). `git filter-repo --replace-text` avec 4 patterns regex, push réussi.
 
@@ -552,7 +552,7 @@ Phase M — AUDIT RÉTROSPECTIF post-commit   ← 4e défense (produit le -bis)
 
 **À retenir** : la mémoire utilisateur `feature_echeances_scope.md` (datée du 05/05 « sortants uniquement ») reste **techniquement obsolète** côté code. Yvan doit la mettre à jour manuellement (la mémoire est sa propriété, je ne l'écris pas).
 
-> ⚠ **Note V12 post-CUISINE** : Option A a été **abandonnée le 15/05** (24 h après activation) — revirement Yvan « ce qui compte n'est pas le statut VIP/PARTIAL, c'est qu'une échéance soit en cours vis-à-vis de l'adresse mail ». Le nouveau paradigme DB-driven est implémenté en V12 Phase 2.1/2.2 (cf [`V12_SALLE.md`](V12_SALLE.md) et `REFONTE_N1_N11_JOURNAL.md` §6 ter/quater). I-BRANCHES-N11-OPTION-A est ARCHIVÉ dans INVARIANTS.md. **Durée de vie de l'invariant : 24 h. 0 fiche échéance créée en production pendant cette fenêtre (audit DB confirmé).**
+> ⚠ **Note V12 post-CUISINE** : Option A a été **abandonnée le 15/05** (24 h après activation) — revirement Yvan « ce qui compte n'est pas le statut VIP/PARTIAL, c'est qu'une échéance soit en cours vis-à-vis de l'adresse mail ». Le nouveau paradigme DB-driven est implémenté en V12 Phase 2.1/2.2 (cf [`V12_SALLE.md`](V12_SALLE.md) et `REFONTE_N1_N11_JOURNAL.md` §6 ter/quater). I-BRANCHES-N11-OPTION-A est ARCHIVÉ dans V12_INVARIANTS.md. **Durée de vie de l'invariant : 24 h. 0 fiche échéance créée en production pendant cette fenêtre (audit DB confirmé).**
 
 ---
 
@@ -740,7 +740,7 @@ La batterie d'intégration N0-N11 (48 scénarios) a fait remonter **2 lacunes m�
 
 ## 11. Invariants cuisine livrés
 
-Tous codifiés dans [`audit/INVARIANTS.md`](../../audit/INVARIANTS.md) (Catégories 11, 17).
+Tous codifiés dans [`docs/architecture/V12/V12_INVARIANTS.md`](../../docs/architecture/V12/V12_INVARIANTS.md) (Catégories 11, 17).
 
 | Code | Niveau | Sujet |
 |---|---|---|
@@ -829,7 +829,7 @@ Tous codifiés dans [`audit/INVARIANTS.md`](../../audit/INVARIANTS.md) (Catégor
 | 29 | Batterie 38 | `9171736` | `test_integration_N0_N11.py` familles A/B/C/D/E (38 scénarios) |
 | 30 | Extension F | `cbde1d0` | Famille F (10 scénarios cuisine avancée F1-F10) |
 | 31 | Doc journal | `549facb` | Journal `REFONTE_N1_N11_JOURNAL.md` + Option A + Validation finale |
-| 32 | Doc INVARIANTS | `27fd74b` | `audit/INVARIANTS.md` Option A + Obs-F6/F8/F10 |
+| 32 | Doc INVARIANTS | `27fd74b` | `docs/architecture/V12/V12_INVARIANTS.md` Option A + Obs-F6/F8/F10 |
 | 33 | Doc prompt N12 | `a306128` | `docs/sessions/PROMPT_NEXT_SESSION_N12_F8_F10.md` self-contained |
 
 ---
@@ -839,8 +839,8 @@ Tous codifiés dans [`audit/INVARIANTS.md`](../../audit/INVARIANTS.md) (Catégor
 | Doc | Rôle |
 |---|---|
 | [`docs/architecture/REFONTE_N1_N11_JOURNAL.md`](REFONTE_N1_N11_JOURNAL.md) | Journal détaillé N1-N11 + Option A + §6 bis Préparation N12 + §6 ter/quater V12 sortants/entrants |
-| [`docs/architecture/V12_SALLE.md`](V12_SALLE.md) | Doc consolidé pendant — Phases A/B/C/C-bis Refonte SALLE (15-18/05) |
-| [`audit/INVARIANTS.md`](../../audit/INVARIANTS.md) | Définition technique testable des invariants (catégories 11 + 17) |
+| [`docs/architecture/V12/V12_SALLE.md`](V12_SALLE.md) | Doc consolidé pendant — Phases A/B/C/C-bis Refonte SALLE (15-18/05) |
+| [`docs/architecture/V12/V12_INVARIANTS.md`](../../docs/architecture/V12/V12_INVARIANTS.md) | Définition technique testable des invariants (catégories 11 + 17) |
 | [`docs/specs_proto/SPEC_ARBRE_DECISIONNEL.md`](../specs_proto/SPEC_ARBRE_DECISIONNEL.md) | Spec consolidée arbre décisionnel (5 niveaux + dispatcher 3 branches) — annexée §14.1 |
 | [`docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md`](../specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md) | Spec échéances (sortants V1 + matching DB-driven V12 Phase 2.2) — annexée §14.2 |
 | [`docs/specs_proto/SPEC_CONTACTS_BOOSTERMAIL.md`](../specs_proto/SPEC_CONTACTS_BOOSTERMAIL.md) | Spec contacts (création progressive + purge auto 24 mois + schedule adaptatif) — annexée §14.3 |
@@ -1011,19 +1011,19 @@ Voir document dédié : [`SPEC_CONTACTS_BOOSTERMAIL.md`](SPEC_CONTACTS_BOOSTERMA
 **Liens** :
 - Spec détaillée : [`SPEC_ECHEANCES_BOOSTERMAIL.md`](SPEC_ECHEANCES_BOOSTERMAIL.md) §2 (révision 15/05 — abandon Option A + paradigme DB-driven)
 - Test régression : `tests/test_n11_branches.py::test_phase21_no_scan_echeance_marker_in_unified` + `::test_should_scan_echeance_helper_contract` + `::test_persist_echeances_param_kept_for_phase22`
-- Invariant archivé : `audit/INVARIANTS.md` I-BRANCHES-N11-OPTION-A (ARCHIVÉ 15/05)
+- Invariant archivé : `docs/architecture/V12/V12_INVARIANTS.md` I-BRANCHES-N11-OPTION-A (ARCHIVÉ 15/05)
 - Journal détaillé : `docs/architecture/REFONTE_N1_N11_JOURNAL.md` §6 ter
 
 ---
 
-## 7. Invariants livrés (audit/INVARIANTS.md)
+## 7. Invariants livrés (docs/architecture/V12/V12_INVARIANTS.md)
 
 | Code | Sujet | Niveau d'origine |
 |---|---|---|
 | I-CANON-01 | Canonicalisation IMID systématique | N1 / N2 |
 | I-NOREPLY-01 | Liste no-reply unifiée `_AUTO_EMAIL_PATTERNS` | N1 |
-| I-FILTER1-* | 5 règles atomiques Filtre 1 | N4 |
-| I-FILTER2-* | VIP vs PARTIEL fail-open | N5 |
+| I-FILTRE-01 | 5 règles atomiques Filtre 1 | N4 |
+| I-FILTRE-2-01 | VIP vs PARTIEL fail-open | N5 |
 | I-PROMPT-N62-01 | Prompt Sonnet structuré 8 blocs | N6.2 |
 | I-ECHEANCE-N63-01 | Échéances sortantes only | N6.3 |
 | I-ECHEANCE-N63bis-01 | 11 patches résiduels résolus | N6.3-bis |
@@ -1138,7 +1138,7 @@ Frontière sémantique tranchée 15/05 : POPPER pour engagement / demande / urge
     - **Tier 3** : fallback heuristique anti-SPOF si Haiku timeout/down/null
   - Intégration `_prewarm_unified_for_mail` étape 10 : matching lancé côté entrants quand échéance active. Double-check scope (statut='active' + correspondant correct) AVANT `update_echeance(_, 'pending_confirmation')`.
   - Refonte `_auto_cancel_echeances_on_reply` en wrapper sur la cascade (40 lignes, plus de duplication algo)
-  - **3 défenses prompt injection** intégrées au sub-commis (cf invariant I-ECHEANCE-DB-DRIVEN dans `audit/INVARIANTS.md`) : délimiteurs XML `<MAIL_HEADERS>` + `<MAIL_BODY>` couvrant subject + from_name + body, whitelist en sortie (id ∈ active_echeances), double-check scope user
+  - **3 défenses prompt injection** intégrées au sub-commis (cf invariant I-ECHEANCE-DB-DRIVEN dans `docs/architecture/V12/V12_INVARIANTS.md`) : délimiteurs XML `<MAIL_HEADERS>` + `<MAIL_BODY>` couvrant subject + from_name + body, whitelist en sortie (id ∈ active_echeances), double-check scope user
   - Frontend : statu quo gap 4 (cards page Échéances + badge overlay) — pas de popup in-context Phase 2.2 (reportable Phase 2.3 si remontée user)
 
 ### Out-of-scope
@@ -1561,7 +1561,7 @@ Le helper IA produit (claude_ai.py:2887) :
 
 `_check_analysis_cooldown(contact_email, bypass_cooldown=False)` (app_plugin.py:14556) : protège contre les boucles d'analyses échouées en série. Cas observé : `yvan@gmail.com` en boucle 1080 appels Sonnet/jour (audit 03/05 fix RC2). Si l'analyse Claude renvoie `None` ou plante silencieusement, on retente dans 24h, pas dans 80s (cadence BG).
 
-Le `bypass_cooldown=True` est utilisé par les routes user explicites (`/api/recalibrate`, `/api/analyze_contact`, post-send learning) pour forcer une analyse immédiate.
+Le `bypass_cooldown=True` est utilisé par les routes user explicites (`/api/recalibrate_contacts`, `/api/analyze_contact`, post-send learning) pour forcer une analyse immédiate.
 
 ---
 
@@ -1729,8 +1729,7 @@ Si un contact purgé ré-échange après plus de 24 mois :
 | `/api/contact_profile/<email>` | GET | Détail profil |
 | `/api/update_contact` | POST | Édition manuelle → `manually_edited=1` |
 | `/api/analyze_contact` | POST | Force analyse async (bypass cooldown) |
-| `/api/reanalyze_all_contacts` | POST | Batch async throttlé 0.5s (**inclut squelettes** pour amorcer enrichissement) |
-| `/api/recalibrate_contacts` | POST | Recalibrage signature batch |
+| `/api/recalibrate_contacts` | POST | Batch async re-analyse contacts (**inclut squelettes** pour amorcer enrichissement) |
 | `/api/recalibrate_contacts/status` | GET | Suivi progression batch |
 | `/api/new_profile_toast` | GET | Toast frontend après nouveau profil |
 | `/api/add_contact_keyword` | POST | Ajoute keyword dans `profile_json.recurring_topics` |
@@ -1740,7 +1739,7 @@ Si un contact purgé ré-échange après plus de 24 mois :
 
 ---
 
-## 9. Invariants (audit/INVARIANTS.md)
+## 9. Invariants (docs/architecture/V12/V12_INVARIANTS.md)
 
 | Code | Sujet |
 |---|---|

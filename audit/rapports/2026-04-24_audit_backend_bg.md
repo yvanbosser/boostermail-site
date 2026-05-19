@@ -277,7 +277,7 @@ Pour Dufau : 27 mails reçus/envoyés, `sent_mails`=12 → conditions 1+2+3 OK. 
 ## 10. Suivi / méta
 
 - `audit/ANOMALIES_RECURRENTES.md` : ajouter Pattern #15 "apprentissage contact uniquement sur flux sortant, invisible sur correspondants actifs entrants".
-- `audit/INVARIANTS.md` : envisager I-DATA-12 "tout correspondant avec ≥3 threads doit avoir un profil après 24h d'uptime".
+- `docs/architecture/V12/V12_INVARIANTS.md` : envisager I-DATA-12 "tout correspondant avec ≥3 threads doit avoir un profil après 24h d'uptime".
 - Smoke test : ajouter test `drafts_v2.json %canonical ≥ 90%` (actuel 62%).
 
 **Fin du rapport** — pour action user : prioriser P0-1 (Dufau) et P0-2 (purge legacy) immédiatement.

@@ -1,9 +1,9 @@
 # SOMMAIRE DÉTAILLÉ — Documentation BoosterMail (ex EasyMail)
 
-> 📘 **Pour la doc V12 SALLE complète, un doc CURRENT consolidé existe** : [`docs/architecture/V12_SALLE.md`](architecture/V12_SALLE.md) ⭐ — source de vérité unique pour la refonte cuisine/salle 3 étoiles Michelin × fast-food.
+> 📘 **Pour la doc V12 SALLE complète, un doc CURRENT consolidé existe** : [`docs/architecture/V12/V12_SALLE.md`](architecture/V12/V12_SALLE.md) ⭐ — source de vérité unique pour la refonte cuisine/salle 3 étoiles Michelin × fast-food.
 
 > **Dernière mise à jour** : 18/05/2026 — sessions intensives 11-18/05 livrées sur `feat/yvan/frontend` :
-> - **Doc CURRENT consolidé V12 SALLE** : [`docs/architecture/V12_SALLE.md`](architecture/V12_SALLE.md) ⭐ — toute la doc Phase A/B/C/C-bis + audit profond + Leçon 10 regroupée (source de vérité unique pour cette refonte).
+> - **Doc CURRENT consolidé V12 SALLE** : [`docs/architecture/V12/V12_SALLE.md`](architecture/V12/V12_SALLE.md) ⭐ — toute la doc Phase A/B/C/C-bis + audit profond + Leçon 10 regroupée (source de vérité unique pour cette refonte).
 > - **Refonte N1-N11** (11-14/05) : 11 niveaux architecturaux + 6 -bis correctifs + Option A + batterie E2E 48 scénarios. Voir [`docs/architecture/REFONTE_N1_N11_JOURNAL.md`](architecture/REFONTE_N1_N11_JOURNAL.md) (le §7 pointe désormais vers V12_SALLE.md).
 > - **V12 Phase 1** (15/05 matin) : création échéances depuis compose sortants (commit `76ce8cd`).
 > - **V12 Phase 2.1** (15/05 PM) : abandon Option A VIP entrants, pivot DB-driven (commit `0a8a957`).
@@ -65,7 +65,7 @@ En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux
 
 - `CLAUDE.md` (source de vérité actuelle)
 - `NOUVELLE_SESSION_V3.md` → section « DÉCISIONS STRATÉGIQUES » (V3 succède à V2 depuis 25/04)
-- `audit/INVARIANTS.md` (pour les questions techniques — invariants P1-P14, I-CACHE-01/02/03, I-SEC-06)
+- `docs/architecture/V12/V12_INVARIANTS.md` (pour les questions techniques — invariants P1-P14, I-CACHE-01/02/03, I-SEC-06)
 - **`docs/PLUS_TARD_VF.md`** ⭐ (référentiel UNIQUE des sujets « plus tard » — TL;DR en haut)
 - **`docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md`** ⭐ (prompt de reprise pour nouvelle session « New Outlook via OVH »)
 - `docs/sessions/` les plus récents (bilans datés)
@@ -181,18 +181,18 @@ docs/
 | Si la question porte sur… | Je vais voir… |
 |---|---|
 | **Architecture globale, où est quoi** | `docs/STRUCTURE_PROJET.md` (mis à jour 16/05) |
-| **Refonte SALLE V12 (Phase A/B/C/C-bis, cuisine 3⭐ × fast-food)** ⭐ | **`docs/architecture/V12_SALLE.md`** (source unique consolidée 18/05) |
+| **Refonte SALLE V12 (Phase A/B/C/C-bis, cuisine 3⭐ × fast-food)** ⭐ | **`docs/architecture/V12/V12_SALLE.md`** (source unique consolidée 18/05) |
 | **Architecture V2 actuelle (post-refonte N1-N11)** ⭐ | `docs/architecture/REFONTE_N1_N11_JOURNAL.md` |
 | **Arbre décisionnel BoosterMail (flux mail entrant → frigos)** ⭐ | `docs/specs_proto/SPEC_ARBRE_DECISIONNEL.md` + visuel `docs/architecture/BoosterMail_Arbre_Decisionnel.pptx` |
 | **Règles de projet, contraintes** | `CLAUDE.md` (racine) |
-| **Invariants techniques (I-*)** ⭐ | `audit/INVARIANTS.md` (catégorie 12 = invariants V12 SALLE) |
+| **Invariants techniques (I-*)** ⭐ | `docs/architecture/V12/V12_INVARIANTS.md` (catégorie 12 = invariants V12 SALLE) |
 | **Ce qu'il faut faire cette session** | `docs/PLUS_TARD_VF.md` (en-tête mis à jour 16/05) ⭐ |
 | **Pourquoi tel choix a été fait** | `docs/specs_proto/HISTORIQUE_DECISIONS.md` |
 | **Le moteur IA — prompt, blocs, sécurité PII** | `docs/sessions/OUTLOOK_BILAN_SESSION_20260508_audit_remediation.md` (Phase 1 SaaS audit ; `SPEC_SYSTEM_PROMPT.md` désormais archivé ⚠️) |
 | **Classement mail+PJ** ⭐ | `docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md` (consolidé 02/05) |
 | **Échéances V12 (sortants + entrants DB-driven)** ⭐ | `docs/specs_proto/SPEC_ECHEANCES_BOOSTERMAIL.md` (V12) |
 | **Audit boîte mail (feature MVP)** | `docs/specs_proto/SPEC_AUDIT_BOITE_MAIL.md` |
-| **Routes V2 / caches / threads** | `docs/architecture/V12_SALLE.md` §6 (cartographie) + `audit/INVENTAIRE_V2.md` (22/04 partiellement obsolète post-N1-N11) |
+| **Routes V2 / caches / threads** | `docs/architecture/V12/V12_SALLE.md` §6 (cartographie) + `audit/INVENTAIRE_V2.md` (22/04 partiellement obsolète post-N1-N11) |
 | **Tables SQLite (schéma actuel)** | `V2/database.py` (proto `SPEC_TABLES_DB.md` archivé ⚠️) |
 | **Scoring rédactionnel N1-N10** | `docs/algorithme/SPEC_SCORING_REDACTIONNEL.md` |
 | **Onboarding session SaaS (OVH)** | `docs/saas/ONBOARDING_SESSION_SAAS.md` ⭐ |
@@ -241,7 +241,7 @@ docs/
 
 ### C. Specs moteur IA & proto (`docs/specs_proto/` — 24 fichiers)
 
-**État au 16/05/2026** : 6 docs CURRENT actifs (⭐), 18 docs ARCHIVÉS avec bandeau ⚠️ (pré-refonte N1-N11). Pour l'architecture actuelle, consulter `docs/architecture/V12_SALLE.md` + `REFONTE_N1_N11_JOURNAL.md`.
+**État au 16/05/2026** : 6 docs CURRENT actifs (⭐), 18 docs ARCHIVÉS avec bandeau ⚠️ (pré-refonte N1-N11). Pour l'architecture actuelle, consulter `docs/architecture/V12/V12_SALLE.md` + `REFONTE_N1_N11_JOURNAL.md`.
 
 | Fichier | Sujet | Statut | Clés |
 |---|---|---|---|
@@ -641,7 +641,7 @@ Si vous voulez réduire l'encombrement de `C:\EasyMail\` :
 │    JOURNAL.md (refonte + V12 SALLE)  │
 │                                      │
 │ Invariants techniques                │
-│  → audit/INVARIANTS.md (I-*)         │
+│  → docs/architecture/V12/V12_INVARIANTS.md (I-*)         │
 │                                      │
 │ Inventaire caches/threads/routes     │
 │  → audit/INVENTAIRE_V2.md            │

@@ -438,7 +438,7 @@ Classement (impact × fréquence) / coût. Les P4.N représentent la suite aprè
 - [x] `audit/checklists/classes_bugs.md` parcouru EN ENTIER (20 classes)
 - [x] `audit/checklists/specificites_windows.md` parcouru EN ENTIER (14 pièges)
 - [x] `audit/ANOMALIES_RECURRENTES.md` consulté — Patterns #1, #2, #6, #11, #13, #14 référencés ; aucune nouvelle récidive
-- [x] `audit/INVARIANTS.md` parcouru — I-DATA-11, I-DATA-13 confirmés mécaniquement
+- [x] `docs/architecture/V12/V12_INVARIANTS.md` parcouru — I-DATA-11, I-DATA-13 confirmés mécaniquement
 - [x] Audits 1/2/3 du 24/04 consommés — cohérence croisée vérifiée
 - [x] DB inspectée : 3 tables Phase 1+2 (10 + 10 + 10 rows, clés 100% canoniques)
 - [x] Fichiers persistants inspectés : `drafts_v2.json` + `prefetch_cache_v2.json` MISSING (V2 arrêté — note A2)

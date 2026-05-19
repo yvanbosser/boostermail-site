@@ -21,7 +21,7 @@
 >
 > Nouvelles leçons consolidées : §9 Leçon 10 « Le commentaire qui ment » (anti-pattern documentation aspirationnelle).
 >
-> Voir `docs/architecture/V12_SALLE.md` ⭐ pour la doc consolidée V12 SALLE (source de vérité unique). Le journal `REFONTE_N1_N11_JOURNAL.md` §7 garde le résumé chronologique mais pointe vers V12_SALLE.md.
+> Voir `docs/architecture/V12/V12_SALLE.md` ⭐ pour la doc consolidée V12 SALLE (source de vérité unique). Le journal `REFONTE_N1_N11_JOURNAL.md` §7 garde le résumé chronologique mais pointe vers V12_SALLE.md.
 >
 > ---
 >
@@ -153,7 +153,7 @@
 > - **Fix infra** : `LimitNOFILE=65535` (vs défaut 1024) dans `/etc/systemd/system/boostermail.service` côté OVH — palliatif qui donne 64× de marge.
 > - **Fix root** (commit `b2d2f73`) : `Database._all_conns` passé de `list[conn]` à `dict[tid, conn]` + thread BG `db-gc` (60s) qui ferme les conn dont le TID n'est plus vivant. Pattern persistent runtime préservé pour les threads vivants.
 > - **Validation** : T+3min après deploy → 44 FDs stables (vs 614 mesurés sans fix). GC tourne, log `[db-gc] closed N zombie connection(s)` toutes les minutes.
-> - **Doc** : Pattern #21 (`audit/ANOMALIES_RECURRENTES.md`), I-DB-06 (`audit/INVARIANTS.md`), Cas 0+4 (`docs/saas/ROLLBACK_PROCEDURE.md`).
+> - **Doc** : Pattern #21 (`audit/ANOMALIES_RECURRENTES.md`), I-DB-06 (`docs/architecture/V12/V12_INVARIANTS.md`), Cas 0+4 (`docs/saas/ROLLBACK_PROCEDURE.md`).
 
 ---
 
@@ -171,7 +171,7 @@ Si tu reviens sur ce doc au début d'une nouvelle session, voici **uniquement ce
 14. **⚠️ PARTIELLEMENT IMPLÉMENTÉ — Bandeau passif au clic Répondre (auto-ouverture popup IMPOSSIBLE)** — déployé v20 sur OVH le 29/04 matin. 3 limitations Microsoft cumulées (`displayDialogAsync` bloqué + `actionType` cadenassé sur ShowTaskPane + cold start runtime event-based 5-15s). Bandeau « 🚀 BoosterMail : votre réponse est prête — cliquez sur l'icône BoosterMail » au compose. Pas de gain de clic vs bouton ruban, juste plus de visibilité. Détail section 14 ci-dessous + invariants I-EVENT-01/02 + Pattern #20.
 
 ### ✅ SaaS multi-tenant Étape 7 — TERMINÉ 29/04 PM tardif (22/22 caches migrés, 100%)
-7. **✅✅ Chantier migration multi-tenant 100% TERMINÉ le 29/04 PM tardif**. Helper `V2/user_scoped_cache.py` (UserScopedDict + iter_user_caches + purge_user_caches) + `V2/user_context.py` (get_current_user_id avec bridge DB + @require_user) + 11 commits atomiques. Cleanup BG périodique purge users inactifs > 30j en place. Validation prod OVH sans perte. **Reste sessions futures (~1h)** : décorateur `@require_user` à appliquer aux routes sensibles (~20 routes, code prêt mais nécessite 2e compte Microsoft pour tester sans casser Yvan) + tests bout-en-bout simultanés. Cf `audit/INVARIANTS.md` invariant I-MT-01 et `audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md`.
+7. **✅✅ Chantier migration multi-tenant 100% TERMINÉ le 29/04 PM tardif**. Helper `V2/user_scoped_cache.py` (UserScopedDict + iter_user_caches + purge_user_caches) + `V2/user_context.py` (get_current_user_id avec bridge DB + @require_user) + 11 commits atomiques. Cleanup BG périodique purge users inactifs > 30j en place. Validation prod OVH sans perte. **Reste sessions futures (~1h)** : décorateur `@require_user` à appliquer aux routes sensibles (~20 routes, code prêt mais nécessite 2e compte Microsoft pour tester sans casser Yvan) + tests bout-en-bout simultanés. Cf `docs/architecture/V12/V12_INVARIANTS.md` invariant I-MT-01 et `audit/rapports/2026-04-27_audit_cross_user_saas_readiness.md`.
 
 ### ✅ Avant Étape 8 Beta gratuite — welcome wizard LIVRÉ 29/04 PM tardif
 > **Stratégie consolidée** : page **Welcome wizard 3 étapes guidées** déployée sur `https://install.boostermail.ai/welcome.html` (commit `672ef12`). Couvre les 3 sujets #11+#12+#13 en une seule UX cohérente.
@@ -751,7 +751,7 @@ Quand on attaquera (en même temps que #11 et #12) :
 > 2. Pour `notificationMessages` actionable button : `actionType` ne peut **QUE** valoir `ShowTaskPane` (Office.MailboxEnums.ActionType n'a qu'un seul field, vérifié sur Mailbox 1.10 → 1.15)
 > 3. **Cold start runtime event-based** : 5-15 secondes sur le 1er trigger d'une session Outlook (instantané ensuite). Inhérent à l'architecture Microsoft, pas de moyen de pré-chauffer.
 >
-> Combiné à l'interdiction taskpane (`feedback_taskpane_interdit.md`), **aucune voie technique ne permet l'auto-ouverture popup à 0 clic**. Voir Pattern #20 dans `audit/ANOMALIES_RECURRENTES.md` + invariants `I-EVENT-01` + `I-EVENT-02` dans `audit/INVARIANTS.md`.
+> Combiné à l'interdiction taskpane (`feedback_taskpane_interdit.md`), **aucune voie technique ne permet l'auto-ouverture popup à 0 clic**. Voir Pattern #20 dans `audit/ANOMALIES_RECURRENTES.md` + invariants `I-EVENT-01` + `I-EVENT-02` dans `docs/architecture/V12/V12_INVARIANTS.md`.
 >
 > **Code Phase 2 toggle settings** (v21) écarté. La whitelist Flask et le handler avec safety timeout sont documentés dans `audit/rapports/2026-04-29_bilan_intermediaire_oncompose_banner.md` au cas où on voudrait les ressortir plus tard (effort ~1h pour réintégrer).
 >
@@ -895,7 +895,7 @@ Quand on attaquera demain :
 4. Adapter la logique d'ouverture pour passer les bonnes données au dialog (subject, from, body, mode)
 5. Implémenter le toggle settings.auto_open_on_reply
 6. Tester sur les 4 modes en réel sur Yvan
-7. Documenter dans audit/INVARIANTS.md (nouveau invariant I-FLUX-* ?) et ANOMALIES_RECURRENTES.md si nouveau pattern
+7. Documenter dans docs/architecture/V12/V12_INVARIANTS.md (nouveau invariant I-FLUX-* ?) et ANOMALIES_RECURRENTES.md si nouveau pattern
 
 ---
 
@@ -1152,7 +1152,7 @@ partageront un mail (newsletter commune, mailing-list, alias générique).
 
 **Priorité** : 🟡 moyenne — pas critique tant que la beta est mono-user (Yvan), devient critique avant scaling SaaS au-delà de ~100 users.
 
-**Invariant en place** : `I-THREADS-N7-01` ajouté dans INVARIANTS.md — la table `threads` n'est purgée par AUCUN event mail (replied/classified/archived/deleted) ni par TTL. Cohérence préservée par N7.
+**Invariant en place** : `I-THREADS-N7-01` ajouté dans V12_INVARIANTS.md — la table `threads` n'est purgée par AUCUN event mail (replied/classified/archived/deleted) ni par TTL. Cohérence préservée par N7.
 
 ---
 

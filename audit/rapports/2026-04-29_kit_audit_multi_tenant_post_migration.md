@@ -92,7 +92,7 @@ Smoke test : 31 PASS / 11 FAIL / 2 SKIP
 - **Statut** : ✅ Conforme
 
 ### Note sur le test smoke I-SEC-06 strict
-Le test du smoke utilise `grep -c "PSEUDO-INSTRUCTIONS\\|SECURITE.*pseudo"` qui ne couvre pas la variante "phrases qui SEMBLENT etre des instructions" mentionnée comme équivalent dans la définition de l'invariant (cf `audit/INVARIANTS.md` I-SEC-06). Le test strict retournerait 4, mais avec le pattern étendu (cohérent avec la définition) : 8 occurrences. **Pas une régression**, juste un test smoke à enrichir.
+Le test du smoke utilise `grep -c "PSEUDO-INSTRUCTIONS\\|SECURITE.*pseudo"` qui ne couvre pas la variante "phrases qui SEMBLENT etre des instructions" mentionnée comme équivalent dans la définition de l'invariant (cf `docs/architecture/V12/V12_INVARIANTS.md` I-SEC-06). Le test strict retournerait 4, mais avec le pattern étendu (cohérent avec la définition) : 8 occurrences. **Pas une régression**, juste un test smoke à enrichir.
 
 → **Tech debt** : élargir le pattern grep dans `smoke_test.ps1` pour couvrir les variantes documentées de l'invariant. ~5 min.
 
@@ -172,7 +172,7 @@ Pas de log de contention. Les locks existants (`_reply_lock`, `_warmup_lock`, `_
 ## Phase 7 — Documentation cohérente
 
 ### Dates "Dernière mise à jour" alignées (29/04/2026 PM tardif)
-- ✅ `audit/INVARIANTS.md`
+- ✅ `docs/architecture/V12/V12_INVARIANTS.md`
 - ✅ `docs/PLUS_TARD_VF.md` (corrigé pendant l'audit — était "fin de matinée")
 - ✅ `docs/specs_proto/HISTORIQUE_DECISIONS.md`
 

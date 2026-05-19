@@ -274,7 +274,7 @@ pour traitement futur.**
 | `companion/companion.py:32` | Bug encoding — ajout reconfigure UTF-8 avant basicConfig |
 | `boostermail_service.py:584` | Bug logs concurrents — log path par backend |
 | `config.json` | Bug E — clé Anthropic mise à jour |
-| `audit/INVARIANTS.md` | Ajout I-CODE-05 |
+| `docs/architecture/V12/V12_INVARIANTS.md` | Ajout I-CODE-05 |
 | `audit/ANOMALIES_RECURRENTES.md` | Ajout Pattern #15, Pattern #16 |
 | `docs/sessions/BILAN_SESSION_20260426.md` | Ce bilan |
 

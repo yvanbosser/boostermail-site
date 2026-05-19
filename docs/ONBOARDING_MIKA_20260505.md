@@ -72,7 +72,7 @@ Anomalies récurrentes, patterns de bugs, invariants à respecter.
 | Doc | Chemin | Durée | ⭐ | Contenu |
 |---|---|---|---|---|
 | **Kit d'audit** | [`audit/README.md`](../audit/README.md) | 5 min | ⭐⭐⭐ LECTURE | Pourquoi le kit existe. Cadre systématique pour tous les audits. |
-| **Invariants absolus** | [`audit/INVARIANTS.md`](../audit/INVARIANTS.md) | 10 min | ⭐⭐ RÉFERENCE | Les règles qu'on NE DOIT PAS violer (I-001 à I-DATA-10). Si tu les casses, c'est une anomalie. |
+| **Invariants absolus** | [`docs/architecture/V12/V12_INVARIANTS.md`](architecture/V12/V12_INVARIANTS.md) | 10 min | ⭐⭐ RÉFERENCE | Les règles qu'on NE DOIT PAS violer (I-001 à I-DATA-10). Si tu les casses, c'est une anomalie. |
 | **Anomalies récurrentes** | [`audit/ANOMALIES_RECURRENTES.md`](../audit/ANOMALIES_RECURRENTES.md) | 10 min | ⭐ RÉFERENCE | 24 patterns de bugs vus + solutions. Avant de faire du refactoring, lis ça. |
 | **Playbook audit** | [`audit/PLAYBOOK.md`](../audit/PLAYBOOK.md) | 5 min | ⭐ POUR INFOS | Comment mener un audit systématiquement. |
 
@@ -103,7 +103,7 @@ Si tu as 5 min avant de coder, voici le minimum :
 2. **Backend V2** : `V2/app_plugin.py` (Flask port 3443 HTTPS). 51 routes, 16 threads. Autonome depuis 18/04.
 3. **Production** : VPS OVH `api.boostermail.ai` (51.178.162.208). Déploiement git + systemd + nginx. DB SQLite migrée.
 4. **Secrets** : Clés API Anthropic, OpenAI, Microsoft Graph. Dans `V2/config.json` (jamais commiter). SSH key OVH.
-5. **Tests** : Smoke tests (`audit/tests/smoke_test.ps1`). Avant chaque commit, valider `audit/INVARIANTS.md`.
+5. **Tests** : Smoke tests (`audit/tests/smoke_test.ps1`). Avant chaque commit, valider `docs/architecture/V12/V12_INVARIANTS.md`.
 
 **Règles d'or** :
 - Proto (`app.py`) = LECTURE SEULE. Beta-testeurs dedans.

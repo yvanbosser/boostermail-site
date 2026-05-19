@@ -72,7 +72,7 @@ Documentation déployée (commits `bd0ae27` + `5b96460`) :
 - Template bilan : [`docs/sessions/TEMPLATE_BILAN_SESSION.md`](TEMPLATE_BILAN_SESSION.md)
 - Workflow 7 + 8 du `audit/PLAYBOOK.md` mis à jour (vérif branche au démarrage + push sur branche contributeur)
 - **Nouveau test mécanique I-SESS-06** dans `audit/tests/cloture_check.sh` : exit 1 si branche active = dev/master/main
-- I-SESS-06 documenté dans `audit/INVARIANTS.md` catégorie 13
+- I-SESS-06 documenté dans `docs/architecture/V12/V12_INVARIANTS.md` catégorie 13
 
 ---
 
@@ -149,4 +149,4 @@ bd0ae27 docs(git): regle absolue branches par contributeur
 - `docs/sessions/TEMPLATE_BILAN_SESSION.md` (nouveau template avec rappel)
 - `audit/PLAYBOOK.md` (Workflow 7 + 8 mis à jour)
 - `audit/tests/cloture_check.sh` (nouveau test I-SESS-06)
-- `audit/INVARIANTS.md` (entrée I-SESS-06)
+- `docs/architecture/V12/V12_INVARIANTS.md` (entrée I-SESS-06)

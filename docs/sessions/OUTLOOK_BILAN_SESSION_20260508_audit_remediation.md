@@ -58,7 +58,7 @@ Sub-branche dédiée `feat/yvan/audit-remediation-08-05` créée pour commits gr
 - Dashboard différé en `PLUS_TARD_VF #17`
 
 **Phase 7 — Documentation** (`c354dcf`)
-- 3 nouveaux invariants `audit/INVARIANTS.md` : `I-PII-01`, `I-PROMPT-01`, `I-PROMPT-02`
+- 3 nouveaux invariants `docs/architecture/V12/V12_INVARIANTS.md` : `I-PII-01`, `I-PROMPT-01`, `I-PROMPT-02`
 - Pattern `#25` dans `audit/ANOMALIES_RECURRENTES.md` : « Contradictions inter-blocs dans le prompt Claude »
 - Rapport hub `audit/rapports/2026-05-08_audit_remediation_DONE.md`
 - 3 checks ajoutés au `smoke_test.ps1` (path résolu via `$PSScriptRoot` pour worktree + main repo)

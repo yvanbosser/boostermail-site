@@ -25,7 +25,7 @@ C:\EasyMail\
 │   └── tests/                      ← 180+ tests verts
 │
 ├── audit/                          ← Méthodologie + invariants + rapports
-│   ├── INVARIANTS.md               ← Règles projet I-* (source de vérité technique)
+│   ├── V12_INVARIANTS.md               ← Règles projet I-* (source de vérité technique)
 │   ├── INVENTAIRE_V2.md            ← Inventaire V2 (caches, threads, routes)
 │   ├── PLAYBOOK.md                 ← Méthodologie audit 4 angles
 │   ├── ANOMALIES_RECURRENTES.md    ← Patterns récurrents

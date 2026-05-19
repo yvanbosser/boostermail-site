@@ -336,7 +336,7 @@ if not kw_match and _body_kw:
 ## Méthodologie & couverture
 
 - **Angles couverts** : 3 (Code level-by-level, Données/caches, Failure modes)
-- **Fichiers lus** : `app_plugin.py` (sites critiques 574-7510, 12700-13200, 4540-4600, 5740-5910, 5910-6260, 2870-3310), `database.py:1800-1955`, `claude_ai.py:1787-1810`, `audit/INVARIANTS.md`, `audit/README.md`, `audit/checklists/flux_end_to_end.md`, `audit/ANOMALIES_RECURRENTES.md` (lignes 1-120), `docs/specs_proto/SPEC_WARMUP.md`
+- **Fichiers lus** : `app_plugin.py` (sites critiques 574-7510, 12700-13200, 4540-4600, 5740-5910, 5910-6260, 2870-3310), `database.py:1800-1955`, `claude_ai.py:1787-1810`, `docs/architecture/V12/V12_INVARIANTS.md`, `audit/README.md`, `audit/checklists/flux_end_to_end.md`, `audit/ANOMALIES_RECURRENTES.md` (lignes 1-120), `docs/specs_proto/SPEC_WARMUP.md`
 - **Agents parallèles utilisés** : 3 (Filtre 1, Cleanup, Mode PARTIEL)
 - **Patterns référencés** : Pattern #2 (patch-on-patch), Pattern #3 (exception swallowing)
 - **Invariants vérifiés** : I-DATA-11 (clés canoniques) ✅, I-MT-01 (UserScopedDict) ✅, I-CODE-EMAIL-NORM-01 ✅

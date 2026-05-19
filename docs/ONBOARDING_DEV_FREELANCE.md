@@ -174,7 +174,7 @@ C'est techniquement bloqué (protected branch). Si jamais tu y arrives, c'est qu
 
 ### 4.2 Avant de toucher au code V2
 
-5. **[`audit/INVARIANTS.md`](../audit/INVARIANTS.md)** — Règles techniques opposables (code multi-tenant, clés canoniques, sécurité, etc.)
+5. **[`docs/architecture/V12/V12_INVARIANTS.md`](architecture/V12/V12_INVARIANTS.md)** — Règles techniques opposables (code multi-tenant, clés canoniques, sécurité, etc.)
 6. **[`audit/ANOMALIES_RECURRENTES.md`](../audit/ANOMALIES_RECURRENTES.md)** — Patterns de bugs identifiés sur le projet (pour ne pas les reproduire)
 7. **[`audit/PLAYBOOK.md`](../audit/PLAYBOOK.md)** — Procédures (Workflow 4 diagnostic bug, Workflow 7 fin de session, etc.)
 
@@ -311,7 +311,7 @@ Avant de commencer à coder, **lis d'abord** :
 
 - L'Annexe Mission complète
 - Les sections de `CLAUDE.md` qui concernent ta mission
-- Les invariants `audit/INVARIANTS.md` qui touchent ton scope (notamment `I-CODE-05` multi-tenant si ta mission concerne ce sujet)
+- Les invariants `docs/architecture/V12/V12_INVARIANTS.md` qui touchent ton scope (notamment `I-CODE-05` multi-tenant si ta mission concerne ce sujet)
 - Les patterns `audit/ANOMALIES_RECURRENTES.md` à éviter
 
 Pose tes **questions tôt et fréquemment** — la pire erreur est de coder une semaine sur une mauvaise compréhension du scope.

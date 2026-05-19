@@ -120,7 +120,7 @@ Identifier toutes les anomalies détectables dans le périmètre V2 + companion 
    - Appliquer fix
    - Relancer smoke_test.ps1
    - Ajouter pattern à ANOMALIES_RECURRENTES si nouveau
-   - Ajouter invariant à INVARIANTS.md + check dans smoke_test si applicable
+   - Ajouter invariant à V12_INVARIANTS.md + check dans smoke_test si applicable
 
 ### Durée : 15-30 min selon complexité
 
@@ -265,7 +265,7 @@ Garantir une clôture de session 100% propre — aucune information perdue, aucu
    - **`docs/PLUS_TARD_VF.md`** : sujets résolus → DÉJÀ FAIT, nouveaux → catégorie, caducs → ABANDONNÉ + MAJ date d'en-tête
    - **`docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md`** : MAJ date d'en-tête + section L (liste bilans)
    - **`docs/specs_proto/HISTORIQUE_DECISIONS.md`** : nouvelle entrée SI décision structurelle (sinon skip)
-   - **`audit/INVARIANTS.md`** : nouveaux invariants SI détectés (sinon skip)
+   - **`docs/architecture/V12/V12_INVARIANTS.md`** : nouveaux invariants SI détectés (sinon skip)
    - **`audit/ANOMALIES_RECURRENTES.md`** : nouveaux Patterns SI détectés (sinon skip)
    - **`docs/SOMMAIRE_DETAILLE.md`** : entrée bilan + statuts à jour
 
@@ -332,7 +332,7 @@ Yvan copie-colle `docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md` dans la nouvelle s
 0. **Vérification racine (5 sec, OBLIGATOIRE — ajout 05/05/2026)**
    - Confirmer que toute exploration projet vise `C:\EasyMail\` — JAMAIS `C:\Users\yvanb\OneDrive\Desktop\EasyMail\` (vestige pré-12/04, contenu périmé + souvent cloud-only illisible).
    - Si un `pwd` ou un Glob retourne un chemin OneDrive lié au projet → arrêter et alerter Yvan.
-   - Couvert par `I-SESS-05` dans `audit/INVARIANTS.md` (vérification mécanique en fin de session via `cloture_check.sh`).
+   - Couvert par `I-SESS-05` dans `docs/architecture/V12/V12_INVARIANTS.md` (vérification mécanique en fin de session via `cloture_check.sh`).
 
 1. **Vérification branche + worktree (30 sec, MAJ 07/05/2026)**
    - `git -C C:/EasyMail branch --show-current` → doit retourner **`feat/yvan/frontend`** (Yvan) ou **`feat/michael/multi-user`** (Michael). PAS `dev`, PAS `master`.
@@ -349,7 +349,7 @@ Yvan copie-colle `docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md` dans la nouvelle s
    - `docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md` (référence vivante)
    - `docs/PLUS_TARD_VF.md` (TL;DR en haut)
    - Dernier `docs/sessions/OUTLOOK_BILAN_SESSION_*.md` (contexte session précédente)
-   - `audit/INVARIANTS.md` (consultation rapide — surtout I-SESS-* + I-CACHE-* + I-SEC-* récents)
+   - `docs/architecture/V12/V12_INVARIANTS.md` (consultation rapide — surtout I-SESS-* + I-CACHE-* + I-SEC-* récents)
    - `audit/ANOMALIES_RECURRENTES.md` (Patterns récents, surtout #18 cache WebView2)
 
 4. **Synthèse rapide à Yvan (1 min)**

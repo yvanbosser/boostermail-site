@@ -65,7 +65,7 @@ f86c89c docs(rgpd): drafts politique + mentions + registre + sous-traitants + au
 
 **Kit audit Phase 2** :
 - Pattern #22 ajouté (`audit/ANOMALIES_RECURRENTES.md`)
-- I-RES-05 ajouté (`audit/INVARIANTS.md`)
+- I-RES-05 ajouté (`docs/architecture/V12/V12_INVARIANTS.md`)
 - Validation prod : service active post-restart, FDs sain (~50), pas d'erreur Flask
 - Bug pré-existant détecté en kit audit : Graph 400 sur `$search="subject:..."` quand sujet contient caractères spéciaux (`&`, `#`). Ajouté à PLUS_TARD_VF (medium, non bloquant).
 
