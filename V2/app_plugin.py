@@ -64,6 +64,16 @@ except Exception:
 
 app = Flask(__name__)
 
+# 20/05/2026 — Auto-reload des templates Jinja2 (profile.html, contacts.html,
+# echeances.html, onboarding.html…) à chaque request. Sans ça, Flask cache les
+# templates compilés en mémoire au premier rendu et n'observe plus les
+# modifications du disque (debug=False, comportement Werkzeug standard).
+# Conséquence en dev : Ctrl+F5 dans Chrome continuait à servir l'ancien
+# template tant qu'on ne redémarrait pas le backend. Activer cette option
+# rétablit le workflow « modif fichier -> Ctrl+F5 -> visible ».
+# Coût : Jinja2 stat() le fichier à chaque request — négligeable.
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+
 # Fix 27/04 PM (Workflow 4 audit kit, sujet #9 du plan) — Quota tracker
 # import + Flask error handler global pour QuotaExceeded.
 # Pour les routes JSON synchrones : retour HTTP 429 propre + JSON clair.
