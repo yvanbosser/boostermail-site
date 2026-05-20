@@ -8,6 +8,7 @@
 > - [docs/PLUS_TARD_VF.md](../PLUS_TARD_VF.md) — bloc 12/05/2026 (décisions tranchées de la session)
 > - [docs/specs_proto/SPEC_ARBRE_DECISIONNEL.md](SPEC_ARBRE_DECISIONNEL.md) — moteur `_is_discarded` à enrichir
 > - [docs/specs_proto/SPEC_CLASSEMENT_BOOSTERMAIL.md](SPEC_CLASSEMENT_BOOSTERMAIL.md) — feature classement existante
+> - [docs/architecture/V12/v12 _ spec - mission audit complet.md](../architecture/V12/v12%20_%20spec%20-%20mission%20audit%20complet.md) — **chantier différé** (proposition d'arborescence personnalisée + classement bulk), cadrage démarré 20/05/2026, déplacé dans le dossier V12
 
 ---
 
