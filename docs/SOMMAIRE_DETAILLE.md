@@ -70,7 +70,7 @@
 En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux docs ont la même date ou pas de date) :
 
 - `CLAUDE.md` (source de vérité actuelle)
-- `NOUVELLE_SESSION_V3.md` → section « DÉCISIONS STRATÉGIQUES » (V3 succède à V2 depuis 25/04)
+- `NOUVELLE_SESSION_V4.md` → section « DÉCISIONS STRATÉGIQUES » (V4 succède à V3 depuis 21/05 — refonte complète post-cadrage 20/05)
 - `docs/architecture/V12/V12_INVARIANTS.md` (pour les questions techniques — invariants P1-P14, I-CACHE-01/02/03, I-SEC-06)
 - **`docs/PLUS_TARD_VF.md`** ⭐ (référentiel UNIQUE des sujets « plus tard » — TL;DR en haut)
 - **`docs/outlook/PROMPT_REPRISE_NEW_OUTLOOK.md`** ⭐ (prompt de reprise pour nouvelle session « New Outlook via OVH »)
@@ -109,7 +109,8 @@ En plus de la règle d'or, privilégier par ordre décroissant (utile quand deux
 - Smart Speculative « 6 filtres » de la spec → **CORRIGÉ** : 5 à porter + 1 à créer en V2 (filtre open_count absent du proto) (18/04)
 - Popup « à chaque démarrage Outlook » → **AFFINÉE** : matrice 4 modes user × cache, toujours affichée mais contenu adapté (18/04)
 - Installation locale (start.bat + ZIP) → **PIVOT SaaS** : V2 hébergé sur VPS OVH Gravelines (`api.boostermail.ai`), accessible depuis Outlook Web sans installation. Architecture décentralisée remplacée par SaaS centralisée. Voir `docs/plans/PLAN_SAAS.md` (25/04)
-- `NOUVELLE_SESSION_V2.md` → **REMPLACÉ** par `NOUVELLE_SESSION_V3.md` (25/04, ajoute règle nocode élargie + consultation kit audit en réflexe + sections Phase 1+2+3)
+- `NOUVELLE_SESSION_V2.md` → **REMPLACÉ** par `NOUVELLE_SESSION_V3.md` (25/04), lui-même **REMPLACÉ** par `NOUVELLE_SESSION_V4.md` (21/05 — refonte complète post-cadrage 20/05)
+- `NOUVELLE_SESSION_V3.md` → **REMPLACÉ** par `NOUVELLE_SESSION_V4.md` (21/05/2026) — bandeau ARCHIVÉ en tête
 - **Phase 1 SaaS terminée** (26/04) : VPS OVH `51.178.162.208` actif, SSL Let's Encrypt sur `api.boostermail.ai`, sécurité serveur (UFW + fail2ban + SSH key-only), Sentry monitoring (free tier EU, RGPD-safe), API keys régénérées (Anthropic + OpenAI). Voir `docs/sessions/SAAS_BILAN_SESSION_20260426.md` + `docs/saas/ONBOARDING_SESSION_SAAS.md` (référence vivante)
 - **Outlook Web différé en Phase 6 post-beta** (26/04) : code 12011 `displayDialogAsync` résolu via `displayInIframe: true` mais le contenu du dialog ne se charge pas dans l'iframe (erreur JS cross-origin masquée). Les beta-testeurs utiliseront New Outlook ou Outlook Classic
 - **Rebrand user-visible EasyMail → BoosterMail** (26/04) : 26 strings UI (manifest + HTML + JS). Le back garde `easymail` (IDs internes, URIs `easymail://`, logger Python) — pas visible utilisateur
@@ -133,7 +134,8 @@ Ces docs portent un bandeau **⚠️ DOCUMENT HISTORIQUE / ARCHIVE — pré-refo
 | `docs/specs_proto/` | `SPEC_CACHE_DOSSIERS`, `SPEC_D2_FUSION_RECALIBRAGE`, `SPEC_DOUBLON_CLASSEMENT`, `SPEC_FONCTIONNALITES_PROTO`, `SPEC_IMAGES_INLINE`, `SPEC_OCR_LIMITE`, `SPEC_OUTLOOK_COM`, `SPEC_PHASE2_RESUME`, `SPEC_PREINJECTION`, `SPEC_PRIORITES_15_16_17`, `SPEC_PRIORITES_18_22`, `SPEC_RECALIBRAGE_ADAPTATIF`, `SPEC_RESCAN_CONDITIONNEL`, `SPEC_ROUTES_API`, `SPEC_SYSTEM_PROMPT`, `SPEC_TABLES_DB`, `SPEC_TEMPLATES`, `SPEC_WARMUP` (18 docs) | Patterns du proto historique, remplacés par la refonte N1-N11 + V12 |
 | `docs/analyses_proto_v2/` | `V2_MASTER_SPEC`, `PROTO_MASTER_SPEC`, `ANALYSE_PROTO_VS_V2`, `PLAN_PORTAGE_PROTO_V2`, `V2_FIX_PLAN`, `V2_OPTIMISATION_STRATEGIE` (6 docs) | Plans de portage proto→V2 jamais exécutés. La refonte N1-N11 a pris une approche complètement différente |
 | `docs/` | `PLUS_TARD.md` | Remplacé par `PLUS_TARD_VF.md` (consolidé 08/05) |
-| racine | `NOUVELLE_SESSION_V2.md` | Remplacé par `NOUVELLE_SESSION_V3.md` (25/04) |
+| racine | `NOUVELLE_SESSION_V2.md` | Remplacé par `NOUVELLE_SESSION_V4.md` (21/05) — passé par V3 |
+| `NOUVELLE_SESSION_V3.md` | Remplacé par `NOUVELLE_SESSION_V4.md` (21/05) |
 
 **Déjà archivés précédemment** (bandeau différent) :
 
@@ -223,7 +225,7 @@ docs/
 | Fichier | Rôle | À ouvrir quand |
 |---|---|---|
 | `CLAUDE.md` | Règles absolues, architecture, conventions, historique résumé | **Début de chaque session** |
-| `NOUVELLE_SESSION_V2.md` | Guide de démarrage Claude (niveaux 1-4, méthode de travail) | **Début de chaque session** |
+| `NOUVELLE_SESSION_V4.md` | Guide de démarrage Claude (à jour 21/05/2026 — version actuelle, refonte complète post-cadrage 20/05) | **Début de chaque session** |
 
 ---
 
@@ -639,7 +641,7 @@ Si vous voulez réduire l'encombrement de `C:\EasyMail\` :
 │ Démarrage de session                 │
 └──────────────┬───────────────────────┘
                ▼
-   Lire : CLAUDE.md + NOUVELLE_SESSION_V3.md
+   Lire : CLAUDE.md + NOUVELLE_SESSION_V4.md
                │
                ▼
    Lire : docs/SOMMAIRE_DETAILLE.md  ← CE FICHIER
@@ -697,7 +699,7 @@ Si vous voulez réduire l'encombrement de `C:\EasyMail\` :
 1. **Mettre à jour ce sommaire** à chaque ajout/déplacement de doc.
 2. **Ne pas dupliquer le contenu** — le sommaire pointe, il ne résume pas tout.
 3. **Un doc = un emplacement** — si ambigu, mettre dans la catégorie la plus forte et créer un renvoi.
-4. **Garder CLAUDE.md et NOUVELLE_SESSION_V3.md à la racine** — ce sont les points d'entrée obligatoires. `NOUVELLE_SESSION_V2.md` est archivé (bandeau ⚠️ depuis 16/05).
+4. **Garder CLAUDE.md et NOUVELLE_SESSION_V4.md à la racine** — ce sont les points d'entrée obligatoires. `NOUVELLE_SESSION_V2.md` et `NOUVELLE_SESSION_V3.md` sont archivés (bandeaux ⚠️ en tête).
 
 ---
 
