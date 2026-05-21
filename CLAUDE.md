@@ -43,6 +43,16 @@ DB V2 : V2/database.py + V2/boostermail.db (séparée, migrée depuis proto le 1
 
 `MAX_TOKENS` : R=600, S=1000, H=1500. Temperatures : generation 0.3, contacts 0.2, classement 0.1.
 
+**Refonte R/S/H 21/05/2026 PM** (cadrage produit `docs/architecture/V12/v12 - nouveau mail.md` §6) :
+- R/S/H **supprime en reception** (chips invisibles, pas de remplacement)
+- R/S/H **conserve en compose uniquement** (mode `new` du dialog) — caps tokens maintenus
+- **Nouveau champ `default_importance`** sur `contact_profiles` (`R | S | H | null`) — moyenne ponderee des 10 derniers envois, recalcul tous les 5 envois
+- **Pre-selection chip** a la selection du destinataire (pilote en multi-destinataires)
+- **S par defaut** : nouveau contact, pas de majorite claire
+- **Pas d'escalade auto** mots sensibles vers H (l'user override par clic)
+- Override n'affecte pas `default_importance` stocke
+- Evolution **Opus pour H** reste valide (active uniquement en compose desormais)
+
 ---
 
 ## Scoring redactionnel (invisible)
