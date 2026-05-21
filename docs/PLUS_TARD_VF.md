@@ -1,5 +1,21 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
+> **🆕 21/05/2026 (session cadrage classement PJ V12)** :
+>
+> Nouveau chantier dédié cadré, à destination de Mika : [`docs/architecture/V12/v12 _ classement PJ.md`](architecture/V12/v12%20_%20classement%20PJ.md) (~850 lignes, commit `ca81286` sur `feat/yvan/frontend`).
+>
+> Pendant PJ du classement mail cadré le 20/05. 3 livrables techniques : (L1) champ `attachment_folder_history` 21e attribut `contact_profiles`, (L2) popup `smart_paperclip` rallumée à 4 zones (V12 + 4 boulettes historique + recherche + arbo synchronisée), (L3) symétrie complète moteur V12 PJ.
+>
+> **Items résorbés** (statut basculé en 🟢 PLANIFIÉ, voir bandeau dans chaque section) :
+> - **#32 Top 3 IA pour PJ** — symétrie résolue (cf §6.5 spec PJ V12)
+> - **#34 Tiers 2/3a/3b PJ filesystem** — activés dans le scope MVP du chantier (cf §6 spec PJ V12)
+>
+> Décision Yvan : *« le classement des pièces jointes est une composante très importante et nous sommes très attendus sur ce point »*. Mika sur `feat/michael/multi-user`. Estimation 13-18 jours.
+>
+> Moteur V12 INTOUCHÉ — alimentation tables d'entrée uniquement.
+>
+> ---
+>
 > **🆕 16/05/2026 (sessions 15-16/05 — V12 sortants + entrants + SALLE Phase A/B/C/C-bis + audit profond)** :
 >
 > 3 jours de refonte intensive. Tous les items réglés sont marqués ✅ FAIT dans la liste ci-dessous. Synthèse :
@@ -1030,6 +1046,8 @@ partageront un mail (newsletter commune, mailing-list, alias générique).
 
 ### 34. Tier 5/6/7/8 PJ (folder_name filesystem + cross-contact PJ + momentum PJ) — N9 14/05/2026
 
+> 🟢 **PLANIFIÉ (21/05/2026)** — résorbé dans le chantier **classement PJ V12** cadré le 21/05/2026 ([`docs/architecture/V12/v12 _ classement PJ.md`](architecture/V12/v12%20_%20classement%20PJ.md), commit `ca81286`). Décision Yvan : *« le classement des pièces jointes est une composante très importante et nous sommes très attendus sur ce point »*. Tier 2 PJ (nom dossier filesystem) + Tier 3a PJ (règle domaine) + Tier 3b PJ (règle cross-contact) sont **dans le scope MVP** du chantier — implémentation Mika sur `feat/michael/multi-user`. Estimation 13-18 jours. Tier 7 momentum PJ reste différé (gain marginal).
+
 **Origine** : Refonte Niveau 9. La spec slide 7 prévoit 7 tiers identiques mail↔PJ, mais en SaaS débutant les 4 derniers tiers côté PJ (Tier 4 nom dossier filesystem, Tier 5 domaine PJ, Tier 6 cross-contact PJ, Tier 7 momentum PJ) apportent peu de valeur :
 - **Tier 4 nom dossier filesystem** : `_match_folder_name_in_text` attend la structure Graph (`parentFolderId`+`id` pour identifier les feuilles). Les `folders_pj` filesystem n'ont pas ces champs → helper inadapté, faudrait `_match_folder_path_in_text` séparé. Et folders_pj est souvent quasi vide en SaaS débutant.
 - **Tier 5 domaine PJ** : nécessite `get_pj_domain_folder_suggestion` (fonction DB à créer). Doublonne en pratique avec le fallback domaine déjà intégré dans `get_pj_folder_suggestion`.
@@ -1057,6 +1075,8 @@ partageront un mail (newsletter commune, mailing-list, alias générique).
 ---
 
 ### 32. Top 3 IA pour PJ — `suggest_pj_folder` ne retourne qu'1 suggestion — N8 13/05/2026
+
+> 🟢 **PLANIFIÉ (21/05/2026)** — résorbé dans le chantier **classement PJ V12** cadré le 21/05/2026 ([`docs/architecture/V12/v12 _ classement PJ.md`](architecture/V12/v12%20_%20classement%20PJ.md), commit `ca81286`). Cf §6.5 de la spec : modification du prompt JSON de `suggest_pj_folder` pour retourner un tableau top 3 + adaptation `_persist_commis_results`. Implémentation Mika sur `feat/michael/multi-user`. Estimation 13-18 jours globale (point asymétrie IA = sous-chantier Phase 2 « Moteur V12 PJ »).
 
 **Origine** : Refonte Niveau 8, cartographie. `claude_ai.py:suggest_pj_folder` retourne `{folder_path, confidence, reason, suggested_names: {old: new}}` — pas de `_suggestions: [3 items]` comme `suggest_folder` (mail). Donc le commis Haiku unifié N6.1 produit toujours 1 suggestion PJ, jamais un top 3 IA pour les PJ.
 
