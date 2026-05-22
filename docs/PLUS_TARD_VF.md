@@ -1,5 +1,28 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
+> **🆕 23/05/2026 PM (session cadrage transfert de mail V12)** :
+>
+> Nouveau chantier dédié cadré, à destination de Mika : [`docs/architecture/V12/v12_transfert de mail.md`](architecture/V12/v12_transfert%20de%20mail.md) (~700 lignes, commit `5f1dd27` sur `feat/yvan/frontend`).
+>
+> Méthodologie « flux étape par étape » Yvan : 11 étapes du flux transfert (mail ouvert → clic Transférer → état initial dialog → saisie destinataire → zone PJ permanente → brief optionnel → génération → streaming → affinage → envoi → post-envoi). **40 décisions Yvan tranchées** (5 frictions + 35 Q1-Q40). 6 livrables produits :
+>
+> - **L1 zone PJ permanente** remplace la popup interruptive `#popupFwdPj` (PJ originales cochées par défaut + PJ ajoutées via drag-drop ou bouton +, compteur cumulé 25 Mo, doublon → renommage auto)
+> - **L2 brief auto adaptatif** : si l'user ne saisit rien, IA produit une introduction synthétique adaptée à la tonalité du destinataire (« ci-dessous » pas « ci-joint », synthèse courte si mail court / détaillée si mail long, mention expéditeur original)
+> - **L3 multi-destinataires + bandeau « Destinataire de référence »** réutilisé du chantier nouveau mail 21/05 (1er saisi = pilote, texte exact validé)
+> - **L4 garde forward triple barrière** : frontend (`_applyForwardGuard`) + 3 routes backend (`/generate_reply` + `/refine_reply` + `/send_reply`) + tooltip « Veuillez d'abord saisir un destinataire »
+> - **L5 boutons refine rapides avec undo** : `[Réponse optimisée]` (grisé par défaut, devient cliquable après refine = retour version d'origine) + `[Plus court]` + `[Plus travaillé]` + `[Essayer une autre réponse]`. **Décision transverse** : mécanique généralisable à reply / reply_all
+> - **L6 threading des réponses** via `In-Reply-To` (Roland répond → BoosterMail récupère le mail original M. Dupont en contexte du fil)
+>
+> **Résorbe 6 trous structurels V2** dont le plus critique : popup PJ affichée mais **désarmée côté backend** (`_fwdSelectedIndexes` ignoré, Graph `send_forward` inclut toutes les PJ quoi qu'il coche). Gap hérité du portage proto → V2 d'avril 2026, jamais détecté car silencieux UX.
+>
+> 8 invariants `I-FORWARD-01` à `08` (nouvelle Catégorie 21 V12_INVARIANTS.md). **Estimation Mika ~8 j**.
+>
+> **Pile Mika consolidée au 23/05 PM (7 chantiers V12 cadrés)** : ~55-66 j (~12-14 semaines à plein temps).
+>
+> Bilan détaillé : [`docs/sessions/OUTLOOK_BILAN_SESSION_20260523_PM_transfert_de_mail.md`](sessions/OUTLOOK_BILAN_SESSION_20260523_PM_transfert_de_mail.md).
+>
+> ---
+>
 > **🆕 23/05/2026 (session double cadrage — sous-dossier + drag and drop)** :
 >
 > Deux nouveaux chantiers dédiés cadrés dans la même journée, à destination de Mika :
