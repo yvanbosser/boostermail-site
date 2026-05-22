@@ -1,6 +1,6 @@
 # Invariants V2 — règles absolues testables
 
-> **Dernière mise à jour** : 22/05/2026 (ajout Catégorie 18 I-VISION-01/02/03/04 — analyse images inline mails reçus, cf `v12_image intégrée au mail.md`)
+> **Dernière mise à jour** : 23/05/2026 (ajout Catégorie 19 I-CLASSED-01 à 06 — réponse depuis sous-dossier ; ajout Catégorie 20 I-DRAGDROP-01 à 09 — drag and drop PJ en composition)
 > **Principe** : chaque invariant est testable mécaniquement par `smoke_test.ps1`. Une violation = anomalie, point final.
 
 ---
@@ -1333,6 +1333,65 @@ Clé cache = `(user_id, internet_message_id, sha256(bytes[:1024]))`. Même image
 - **Test** : mock `_describe_image_vision` → `call_count == 1` après 2 appels avec même `(mid, image_hash)`
 - **Pourquoi** : l'analyse d'une image est déterministe et immuable. Appeler Vision 2× sur la même image = gaspillage de tokens sans valeur ajoutée.
 - **Multi-tenant** : `user_id` obligatoire dans la clé (isolation stricte entre users — invariant `I-MT-01`)
+
+---
+
+## Catégorie 19 — Réponse depuis sous-dossier (ajout 23/05/2026 — cf `v12_reponse a partir d'un sous dossier.md`)
+
+### I-CLASSED-01 — Génération valide quel que soit le dossier d'origine
+La génération de réponse fonctionne pour tout mail ouvert via le bouton BoosterMail, quel que soit son dossier d'origine (Inbox, sous-dossier personnel, Archive), à l'exception des cas tranchés par I-CLASSED-02 et I-CLASSED-03. Justification : workflow réel des métiers à dossiers (avocats, comptables, RH).
+
+### I-CLASSED-02 — Mails envoyés bloqués
+Si `direction == sent` (calculé via `from_email == user_email`, indépendamment du dossier), la génération est désactivée avec le message de l'option C (D3 23/05). Justification : se répondre à soi-même n'a aucun sens fonctionnel.
+
+### I-CLASSED-03 — Dossiers spéciaux bloqués
+Si `parentFolderId ∈ {drafts, deleteditems, junkemail}` (WellKnownFolderName), la génération est désactivée avec un message dédié par dossier (§3.2 du cadrage). Justification : pas de réponse à un brouillon / mail supprimé / spam.
+
+### I-CLASSED-04 — Pré-suggestion de classement = dossier d'origine
+Si le mail courant n'est ni dans l'Inbox ni dans un dossier spécial (I-CLASSED-03), la suggestion de classement post-envoi est **pré-remplie** avec le dossier d'origine du mail (confiance 100%), court-circuitant le pipeline de classement IA standard. Justification : économie 1 appel Claude + UX immédiat + cohérent avec l'intuition utilisateur.
+
+### I-CLASSED-05 — Contexte B scanne tous les dossiers
+La recherche d'historique conversation (`search_by_sender`) utilise `/me/messages?$search` qui scanne tous les dossiers, pas uniquement l'Inbox. Cette propriété est **structurelle** au backend V2 — toute modification qui restreindrait la recherche à l'Inbox serait une régression. Justification : pour un avocat, l'historique avec Maître Dupont est dans `Clients/Dupont/`, pas dans l'Inbox.
+
+### I-CLASSED-06 — `mark_treated` non appelé hors Inbox
+Le mécanisme `mark_treated` (qui retire un mail de l'inbox virtuelle après envoi de la réponse) n'est **pas** appelé si le mail traité n'est pas dans l'Inbox. Justification : un mail classé est par définition déjà traité, le flag n'a pas de sémantique.
+
+---
+
+## Catégorie 20 — Drag and drop PJ en composition (ajout 23/05/2026 — cf `v12_drag and drop.md`)
+
+### I-DRAGDROP-01 — Drag and drop fonctionne dans les 4 modes
+Le drag and drop de fichiers est disponible dans les modes `new`, `reply`, `reply_all`, `forward`. Pas de fonctionnalité dégradée selon le mode. Justification : surface unique = effort unique (dialog partagé `V2/dialog.html`).
+
+### I-DRAGDROP-02 — Lecture binaire côté JS uniquement
+Les fichiers drag-droppés sont lus côté JS via `FileReader.readAsArrayBuffer` et encodés base64 avant envoi au backend. Aucun accès disque côté backend sur ces fichiers (différent du `smartPaperclip` qui passe par le Companion local).
+
+### I-DRAGDROP-03 — Validation côté frontend ET backend
+Validation taille + type **deux fois** : côté JS au drop (UX immédiate), côté backend dans `/send_reply` (défense en profondeur). Si validation backend échoue → 400 avec message clair.
+
+### I-DRAGDROP-04 — Blacklist exécutables stricte
+Refus systématique des extensions exécutables (.exe, .scr, .bat, .com, .cmd, .vbs, .vbe, .js, .jse, .ws, .wsf, .ps1, .msi, .msp, .jar, .reg, .lnk). Liste partagée frontend / backend, source unique.
+
+### I-DRAGDROP-05 — PJ ajoutée déclenche analyse IA (Q9 + C2 23/05)
+Toute PJ ajoutée par l'utilisateur (drop ou pick) déclenche une popup d'analyse IA, dans tous les modes. Deux moments possibles :
+- Avant clic Générer → popup intégrée au flux génération existant, **groupée** (1 popup pour N PJ ajoutées, cohérent C2 23/05)
+- Après génération → popup proactive immédiate « adapter la réponse ? »
+
+### I-DRAGDROP-06 — Limite 25 Mo cumulés avec upload session
+Limite cumulée 25 Mo par mail (aligné Outlook M365). Fichiers ≤ 3 Mo embarqués base64 dans `/send_reply`, fichiers > 3 Mo via Graph upload session (`createUploadSession` + chunks 4 Mo). Si cumul > 25 Mo après ajout d'un fichier → refus du dernier avec toast explicite.
+
+### I-DRAGDROP-07 — Popup sécurité (pas un toast) pour exécutables
+Le refus d'un fichier exécutable (.exe, .scr, .bat, etc.) déclenche une popup modale d'alerte sécurité, pas un toast. L'utilisateur doit comprendre la raison et savoir qu'il peut passer par Outlook directement.
+
+### I-DRAGDROP-08 — Image droppée = pipeline Vision (C1 23/05)
+Une image ajoutée par l'utilisateur (drop ou pick) passe par le pipeline Claude Vision (cohérent cadrage images intégrées V12), pas par une extraction OCR ou texte. La description visuelle est injectée dans le Bloc I du contexte de génération, idem images inline reçues. Justification : cohérence sémantique — une image reste une image, qu'elle vienne d'un mail reçu ou d'un drop user.
+
+### I-DRAGDROP-09 — 2 placards distincts pour PJ reçues vs PJ ajoutées (C3 23/05)
+Les PJ reçues et les PJ ajoutées par l'utilisateur sont stockées dans 2 caches séparés :
+- Documents : `_pj_text_cache` (reçues) vs `_user_pj_text_cache` (ajoutées)
+- Images : `image_vision_cache` (reçues) vs `image_vision_cache_user` (ajoutées)
+
+Pas de réutilisation croisée. Justification : séparation propre, traçabilité, pas de collision de clé, comportements indépendants si évolution future.
 
 ---
 

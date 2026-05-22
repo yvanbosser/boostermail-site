@@ -1,5 +1,21 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
+> **🆕 23/05/2026 (session double cadrage — sous-dossier + drag and drop)** :
+>
+> Deux nouveaux chantiers dédiés cadrés dans la même journée, à destination de Mika :
+>
+> 1. [`docs/architecture/V12/v12_reponse a partir d'un sous dossier.md`](architecture/V12/v12_reponse%20a%20partir%20d'un%20sous%20dossier.md) — Génération de réponse depuis un mail classé (sous-dossier Outlook). Origine : demande bêta-testeur avocat. Audit technique : backend 100% compatible (architecture IMID-first refonte N1-N11). 3 ajouts produit + 8 décisions Yvan (D1-D8) + 6 invariants `I-CLASSED-01` à `06`. **Estimation Mika ~1.5 j** (recommandation : intégrer au sprint Nouveau mail V12 pour mutualiser modif `dialog_init`).
+>
+> 2. [`docs/architecture/V12/v12_drag and drop.md`](architecture/V12/v12_drag%20and%20drop.md) — Drag and drop de pièces jointes en composition. WIP partiel déjà commencé (overlay + `_attachedFiles` + handlers). 18 décisions Yvan (Q1-Q15 + C1-C3) + 9 invariants `I-DRAGDROP-01` à `09`. Périmètre V1 élargi : 25 Mo aligné Outlook M365 (large attachments via Graph upload session) + popup sécurité dédiée + analyse IA des PJ ajoutées (documents → extraction texte, images → Vision Bloc I cohérent images V12). **Estimation Mika ~13-16.5 j**.
+>
+> **Pile Mika consolidée** au 23/05 (6 chantiers cadrés) : ~51-62 j (10-12 semaines à plein temps).
+>
+> **Incohérence à corriger** : `v12 - nouveau mail.md` §5.6 dit popup analyse immédiate après pioche, alors que C2 tranchée 23/05 dit popup groupée au clic Générer. Action en début de prochaine session : aligner le doc Nouveau mail.
+>
+> Bilan détaillé : [`docs/sessions/OUTLOOK_BILAN_SESSION_20260523_cadrages_drag_drop_et_sous_dossier.md`](sessions/OUTLOOK_BILAN_SESSION_20260523_cadrages_drag_drop_et_sous_dossier.md).
+>
+> ---
+>
 > **🆕 22/05/2026 (session cadrage images intégrées mails reçus)** :
 >
 > Nouveau chantier dédié cadré, à destination de Mika : [`docs/architecture/V12/v12_image intégrée au mail.md`](architecture/V12/v12_image%20int%C3%A9gr%C3%A9e%20au%20mail.md) (~350 lignes, commit `f0374e1` sur `feat/yvan/frontend`).

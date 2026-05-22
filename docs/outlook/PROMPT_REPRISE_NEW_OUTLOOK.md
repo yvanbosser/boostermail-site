@@ -2,7 +2,7 @@
 
 > ⚠️ **Racine de travail = `C:\EasyMail\` UNIQUEMENT.** Le dossier `C:\Users\yvanb\OneDrive\Desktop\EasyMail\` est un **vestige pré-migration 12/04/2026** (contenu périmé + fichiers cloud-only souvent illisibles). NE JAMAIS l'utiliser comme source. Vérifié par I-SESS-05 dans `audit/tests/cloture_check.sh`.
 
-> **Dernière mise à jour** : 22/05/2026 — session **« Cadrage analyse IA images intégrées dans les mails reçus »** (1 commit `f0374e1` sur `feat/yvan/frontend`). Nocode strict — nouveau doc V12 `v12_image intégrée au mail.md` + Catégorie 18 invariants `I-VISION-*`. Pile Mika : 4 chantiers cadrés (~37-45 j). BoosterMail cassé côté SaaS (travail Mika en cours). Top commit local : voir `git log --oneline -1` sur `feat/yvan/frontend` (formulation dynamique I-SESS-03). **V12 SALLE Phase A** : helper unifié `_classify_to_folder` Classer rapide + 4 fixes prod (item PLUS_TARD_VF #28 résolu). **V12 SALLE Phase B** : (B.1) lock per-(user_id, mid) résout Obs-F6 TOCTOU, (B.2) `$expand=attachments` Graph root cause no_pj, (B.3) fusion route bundle `api_mail_preview` en wrapper léger (-120 LoC). **V12 SALLE Phase C** : vision Yvan 3 étoiles Michelin « cuisine garantit, salle livre » — helper unique `_ensure_reply_envelope_html` en cuisine, 3 sites salle deviennent triviaux, -200 LoC patches + -90 LoC code mort. **V12 SALLE Phase C bis** : invalidation cache brouillons sur change fiche contact (helper + wrapper, 8 sites migrés) — tient la promesse mensongère du commentaire ajouté Phase C → Leçon 10 « Le commentaire qui ment ». **Audit profond 4 axes** : 4 sub-agents en parallèle (~120 findings), filtre critique appliqué (6+ faux positifs écartés), verdict **3 étoiles Michelin × fast-food CONFIRMÉ** sur cuisine / salle / communication. 1 patch trivial : `_variation_styles` module-level. **Grosse MAJ documentation** : 26 bandeaux ARCHIVE en batch (specs proto + analyses_proto_v2 + autres), section « 📦 ARCHIVES » exhaustive dans `SOMMAIRE_DETAILLE.md` couvrant TOUT `C:\EasyMail\` (pas juste `docs/`), `STRUCTURE_PROJET` + `PLUS_TARD_VF` + `CLAUDE` mis à jour. **7 nouveaux invariants livrés** (`I-CLASSIFY-A`, `I-UNFLATTEN-SUGGESTIONS`, `I-UNIFIED-LOCK-PER-MID`, `I-GRAPH-EXPAND-ATTACHMENTS`, `I-MAIL-PREVIEW-DELEGATES`, `I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN`, `I-CONTACT-PROFILE-INVALIDATES-REPLY-CACHE`). Tests : **180/180 verts**. Bilan complet : [`OUTLOOK_BILAN_SESSION_20260516_to_20260518_V12_SALLE_audit_profond_docs.md`](../sessions/OUTLOOK_BILAN_SESSION_20260516_to_20260518_V12_SALLE_audit_profond_docs.md). **Prochaine session** : aucun bloquant identifié, le code est sain. Items PLUS_TARD_VF résiduels au merge `feat/michael/multi-user` ou en sessions dédiées (cf §« Reste à traiter » du bilan).
+> **Dernière mise à jour** : 23/05/2026 — session **double cadrage produit (zéro code, hors WIP permanent)** sur `feat/yvan/frontend`. 2 nouveaux docs V12 : (1) `v12_reponse a partir d'un sous dossier.md` (matin) — backend déjà 100% compatible IMID-first, 3 ajouts produit, 8 décisions Yvan, 6 invariants `I-CLASSED-01` à `06`, estimation ~1.5 j Mika ; (2) `v12_drag and drop.md` (après-midi) — WIP partiel déjà commencé, 18 décisions Yvan (Q1-Q15 + C1-C3), 9 invariants `I-DRAGDROP-01` à `09`, périmètre V1 élargi (25 Mo aligné Outlook M365 via upload session + popup sécurité + analyse IA documents/images cohérent images V12), estimation ~13-16.5 j Mika. **Pile Mika consolidée** : 6 chantiers cadrés ~51-62 j (10-12 semaines à plein temps). **Incohérence détectée** à corriger en début de prochaine session : `v12 - nouveau mail.md` §5.6 dit popup analyse immédiate après pioche → contredit C2 23/05 (popup groupée au clic Générer). Top commit local : voir `git log --oneline -1` sur `feat/yvan/frontend` (formulation dynamique I-SESS-03). Bilan complet : [`OUTLOOK_BILAN_SESSION_20260523_cadrages_drag_drop_et_sous_dossier.md`](../sessions/OUTLOOK_BILAN_SESSION_20260523_cadrages_drag_drop_et_sous_dossier.md).
 >
 > **Mode d'emploi** : à chaque démarrage d'une nouvelle session Claude sur le sujet « New Outlook via OVH », **copier-coller le bloc ci-dessous en intégralité**. Il référence tous les docs nécessaires et donne le contexte de la session précédente.
 >
@@ -69,56 +69,48 @@ Plus la 5e défense ad-hoc : audit final non programmé déclenché par question
 LEÇON CLÉ DE LA DERNIÈRE SESSION — Leçon 10 « Le commentaire qui ment »
 Tout commentaire qui nomme une fonction interne (« via _foo() », « appelée par _bar ») doit déclencher un Grep immédiat de vérification. Si la fonction n'existe pas → soit implémenter immédiatement, soit supprimer la promesse du commentaire et documenter honnêtement le compromis. Anti-pattern « documentation aspirationnelle » : pire qu'un bug visible parce qu'aucun test ne crashe.
 
-ÉTAT DE FIN DE LA DERNIÈRE SESSION (15-18/05/2026)
+ÉTAT DE FIN DE LA DERNIÈRE SESSION (23/05/2026 — double cadrage produit)
 
-Session intensive 3 jours « V12 SALLE Phase A/B/C/C-bis + audit profond + grosse MAJ docs ».
+Session 100% cadrage produit (zéro code modifié, hors WIP permanent `V2/dialog.html` + `V2/dialog.js`). Deux nouveaux chantiers cadrés dans la même journée à destination de Mika.
 
-- Doc CURRENT consolidé V12 SALLE : docs/architecture/V12/V12_SALLE.md ⭐ (source de vérité unique — toute la doc V12 SALLE Phase A/B/C/C-bis + audit profond + Leçon 10 regroupée)
-- Bilan session chronologique : docs/sessions/OUTLOOK_BILAN_SESSION_20260516_to_20260518_V12_SALLE_audit_profond_docs.md
-- Journal global N1-N11 + V12 : docs/architecture/REFONTE_N1_N11_JOURNAL.md §7 (résumé + pointeur vers V12_SALLE.md)
-- Top commit feat/yvan/frontend : voir `git log --oneline -1` (formulation dynamique pour respecter I-SESS-03)
-- 9 commits poussés sur origin/feat/yvan/frontend (Phase A → Phase B.1 → Phase B.2 → Phase B.3 → Phase C → Phase C bis → audits → grosse MAJ docs)
-- Tests : 180/180 verts
+- Bilan session : docs/sessions/OUTLOOK_BILAN_SESSION_20260523_cadrages_drag_drop_et_sous_dossier.md
+- Cadrage matin : docs/architecture/V12/v12_reponse a partir d'un sous dossier.md (mail classé)
+- Cadrage après-midi : docs/architecture/V12/v12_drag and drop.md (drag and drop PJ)
+- Top commit feat/yvan/frontend : voir `git log --oneline -1` (formulation dynamique I-SESS-03)
+- Commits cette session : 1 commit clôture (docs cascade + bilan)
 
 Livré dans la session :
-- V12 sortants Phase 1 : création échéances depuis compose (Cas A/B/C, popup auto-rempli)
-- V12 entrants Phase 2.1/2.2 : abandon Option A VIP, pivot DB-driven, cascade matching IA Tier 1/2/3 + 3 défenses prompt injection
-- V12 SALLE Phase A : helper unifié `_classify_to_folder` Classer rapide (item PLUS_TARD_VF #28 résolu)
-- V12 SALLE Phase B.1 : lock per-(user_id, mid) résout Obs-F6 TOCTOU
-- V12 SALLE Phase B.2 : `$expand=attachments` Graph root cause no_pj
-- V12 SALLE Phase B.3 : fusion route bundle `api_mail_preview` en wrapper léger (-120 LoC)
-- V12 SALLE Phase C : vision 3 étoiles Michelin « cuisine garantit, salle livre » — helper unique `_ensure_reply_envelope_html` (-200 LoC patches + -90 LoC code mort)
-- V12 SALLE Phase C bis : invalidation cache brouillons sur change fiche contact (helper + wrapper, 8 sites migrés)
-- Audit profond 4 axes : verdict 3 étoiles Michelin × fast-food CONFIRMÉ. 6+ faux positifs sub-agents écartés via filtre critique.
-- Grosse MAJ docs : 26 bandeaux ARCHIVE en batch + section « 📦 ARCHIVES » exhaustive dans SOMMAIRE_DETAILLE.md
+- Cadrage « Réponse depuis sous-dossier Outlook » (matin). Origine : demande bêta-testeur avocat. Audit technique : backend déjà 100% compatible IMID-first (refonte N1-N11). 3 ajouts produit : (1) détecter `direction == sent` + désactiver, (2) bloquer dossiers spéciaux (Brouillons/Corbeille/Indésirables), (3) pré-suggestion classement = dossier d'origine (économie 1 appel Claude). 8 décisions Yvan (D1-D8). Estimation ~1.5 j Mika (recommandation : intégrer au sprint Nouveau mail V12 pour mutualiser modif `dialog_init`).
+- Cadrage « Drag and drop PJ V1 » (après-midi). WIP partiel déjà commencé (overlay + tableau `_attachedFiles` + handlers). 18 décisions Yvan (Q1-Q15 + C1-C3). Périmètre V1 élargi : 25 Mo aligné Outlook M365 (large attachments via Graph upload session, chunks 4 Mo) + popup sécurité dédiée (pas un toast) pour exécutables + analyse IA des PJ ajoutées (popup groupée au clic Générer ou popup proactive post-génération) + 2 branches d'analyse documents/images (cohérent images V12 Bloc I). Estimation ~13-16.5 j Mika.
+- Vérification de cohérence entre les 4 cadrages V12 : 3 contradictions arbitrées (C1 image → Vision, C2 popup groupée, C3 caches séparés).
 
-7 nouveaux invariants livrés :
-- I-CLASSIFY-A : helper unifié `_classify_to_folder` pour les 2 routes Classer
-- I-UNFLATTEN-SUGGESTIONS : helper unique de désérialisation top 3 (7 sites factorisés)
-- I-UNIFIED-LOCK-PER-MID : lock par-(user_id, mid) pour `_prewarm_unified_for_mail`
-- I-GRAPH-EXPAND-ATTACHMENTS : `$expand=attachments` obligatoire dans méthodes Graph qui peuplent `email_cache`
-- I-MAIL-PREVIEW-DELEGATES : route bundle `/api/mail_preview/<mid>` délègue aux 3 portes spécialisées
-- I-REPLY-ENVELOPE-GUARANTEED-IN-KITCHEN : enveloppe complète garantie en cuisine, salle triviale
-- I-CONTACT-PROFILE-INVALIDATES-REPLY-CACHE : invalidation cache brouillons sur change fiche contact
+15 nouveaux invariants livrés :
+- I-CLASSED-01 à 06 (catégorie 19) : génération valide tous dossiers, mails envoyés bloqués, dossiers spéciaux bloqués, pré-suggestion classement origine, contexte B scanne tous dossiers, mark_treated skip hors Inbox
+- I-DRAGDROP-01 à 09 (catégorie 20) : drag-drop 4 modes, lecture JS only, validation double, blacklist exécutables, PJ ajoutée déclenche analyse, limite 25 Mo upload session, popup sécurité modale, image = Vision, 2 placards distincts caches
 
-Aucun bloquant identifié. Code SAIN.
+Pile Mika consolidée au 23/05 (6 chantiers cadrés) : ~51-62 j (10-12 semaines à plein temps) — ordre recommandé : Classement PJ V12 → Images intégrées V12 → Nouveau mail V12 + Réponse sous-dossier (mutualisable) → Drag and drop PJ → Fenêtre rédaction.
+
+Aucun bloquant identifié. Code production OVH stable.
 
 🎯 PROCHAINE SESSION
 
-Aucun chantier en cours. Selon ce que Yvan souhaite attaquer :
+1. **Action obligatoire en début** : aligner `v12 - nouveau mail.md` §5.6 sur la décision C2 23/05 (popup analyse groupée au clic Générer, pas immédiate à chaque pioche). Sinon Mika aura 2 specs contradictoires.
 
-1. Si Yvan a testé en condition réelle et signale un bug : Workflow 4 du kit (diagnostic bug ciblé). Procédure rollback rapide : docs/saas/ROLLBACK_PROCEDURE.md
-2. Si Yvan veut avancer sur la roadmap business :
+2. Si Yvan veut continuer le polish UX cadrage : revoir les wordings des popups (sécurité fichier exécutable, analyse IA post-drop, messages d'erreur direction `sent` et dossiers spéciaux) — flag « wording à retravailler » noté dans les 2 nouveaux docs.
+
+3. Si Yvan veut briefer Mika : préparer un message court résumant les 6 chantiers cadrés (estimation totale, ordre recommandé, dépendances). Le doc bilan 23/05 contient déjà l'essentiel — il peut être envoyé tel quel.
+
+4. Si Yvan a testé en condition réelle et signale un bug : Workflow 4 du kit (diagnostic bug ciblé). Procédure rollback rapide : docs/saas/ROLLBACK_PROCEDURE.md
+
+5. Si Yvan veut avancer sur la roadmap business :
    - Tests E2E automatisés sur les 5 flux critiques (~1 journée)
    - Phase 4 paiement Stripe + RGPD (préparation Beta payante) — ~1-2 semaines
    - AppSource soumission (en parallèle des tests) — 4-8 semaines de validation Microsoft
-3. Si Yvan veut continuer le polish technique :
-   - Items PLUS_TARD_VF résiduels (cf docs/PLUS_TARD_VF.md en-tête mis à jour 16/05) : #25 Michael multi-tenant tables PK, #26 multilingue, #27-34 (items N7-bis à N9 contextuels)
+
+6. Si Yvan veut continuer le polish technique :
+   - Items PLUS_TARD_VF résiduels (cf docs/PLUS_TARD_VF.md en-tête mis à jour 23/05)
    - Découpage `app_plugin.py` 16k lignes en modules thématiques (#11 PLUS_TARD_VF, ~1j)
    - Audit boîte mail (feature MVP cadrée 12/05, à attaquer quand prêt)
-4. Si Yvan signale un bug sur le flux Répondre / Classer / Échéances :
-   - Architecture actuelle documentée dans docs/architecture/REFONTE_N1_N11_JOURNAL.md
-   - Test attendu côté Yvan : champ « Classement suggéré » cliquable → popup top 3 (#1 principale + #2/#3 boulettes ●) + arbo + barre recherche live. Cuisine garantit l'enveloppe complète (greeting + body + closing + signature) avant stockage cache, salle livre tel quel.
 
 Sujets ouverts business (côté Yvan, pas de code Claude) :
 - Mailbox `dpo@boostermail.ai` à créer/rediriger
@@ -129,9 +121,9 @@ Sujets ouverts business (côté Yvan, pas de code Claude) :
 AVANT TOUTE ACTION, lis ces docs dans cet ordre :
 
 1. docs/outlook/ONBOARDING_NEW_OUTLOOK_VIA_OVH.md ⭐ — référence vivante (workflow OVH-first, scope, interdits, profil Yvan, procédure purge cache WebView2)
-2. docs/PLUS_TARD_VF.md ⭐ — référentiel UNIQUE des sujets « plus tard » avec en-tête mis à jour 16/05 (récap V12 + SALLE Phase A/B/C/C-bis + audit profond + 7 nouveaux invariants + Leçon 10)
-3. docs/sessions/OUTLOOK_BILAN_SESSION_20260516_to_20260518_V12_SALLE_audit_profond_docs.md ⭐ — bilan complet dernière session
-4. docs/architecture/V12/V12_SALLE.md ⭐ — doc CURRENT consolidé V12 SALLE Phase A/B/C/C-bis + audit profond + Leçon 10 (source unique)
+2. docs/PLUS_TARD_VF.md ⭐ — référentiel UNIQUE des sujets « plus tard » avec en-tête mis à jour 23/05 (récap session double cadrage drag-drop + sous-dossier)
+3. docs/sessions/OUTLOOK_BILAN_SESSION_20260523_cadrages_drag_drop_et_sous_dossier.md ⭐ — bilan complet dernière session (23/05)
+4. docs/architecture/V12/v12_drag and drop.md + docs/architecture/V12/v12_reponse a partir d'un sous dossier.md ⭐ — 2 cadrages produits de la dernière session, à briefer Mika
 4-bis. docs/architecture/REFONTE_N1_N11_JOURNAL.md — journal global N1-N11 + V12 (pointe vers V12_SALLE.md pour §7)
 5. docs/architecture/V12/V12_INVARIANTS.md — invariants I-* projet (catégorie 13 = I-SESS, catégorie 12 = I-REPLY, I-CONTACT-PROFILE, I-UNIFIED-LOCK-PER-MID, etc.)
 6. audit/INVENTAIRE_V2.md — inventaire V2 (dernière maj 22/04 — partiellement obsolète post-N1-N11 + V12 SALLE ; pour l'état actuel des caches/threads/routes voir REFONTE_N1_N11_JOURNAL.md §5 + section ARCHIVES du SOMMAIRE_DETAILLE.md)
