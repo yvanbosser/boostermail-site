@@ -1,5 +1,15 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
+> **🆕 22/05/2026 (session cadrage images intégrées mails reçus)** :
+>
+> Nouveau chantier dédié cadré, à destination de Mika : [`docs/architecture/V12/v12_image intégrée au mail.md`](architecture/V12/v12_image%20int%C3%A9gr%C3%A9e%20au%20mail.md) (~350 lignes, commit `f0374e1` sur `feat/yvan/frontend`).
+>
+> Pivot conceptuel : le problème n'est pas l'**affichage** (résolu par le plugin Outlook natif) mais l'**analyse du contenu** pour enrichir la génération. Flux 4 étapes : Graph API → Claude Vision → `image_vision_cache` → Bloc I entre Bloc A et Bloc C. 7 décisions Yvan + 4 invariants `I-VISION-01/02/03/04`. Estimation 5-8 j Mika.
+>
+> **Note Task 3.4 "Inline Images Cache"** (plan portage jamais exécuté) : **REMPLACÉE** par ce chantier. Contexte différent — la task 3.4 ciblait l'affichage (désormais inutile en V2 plugin). Ce chantier cible l'analyse sémantique.
+>
+> ---
+>
 > **🆕 21/05/2026 (session cadrage classement PJ V12)** :
 >
 > Nouveau chantier dédié cadré, à destination de Mika : [`docs/architecture/V12/v12 _ classement PJ.md`](architecture/V12/v12%20_%20classement%20PJ.md) (~850 lignes, commit `ca81286` sur `feat/yvan/frontend`).

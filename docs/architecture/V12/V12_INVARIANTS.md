@@ -804,7 +804,7 @@ une fois par session Outlook).
 ### I-SESS-02 : Aucune référence obsolète dans les docs vivants
 Pas de mention dans les docs vivants (hors archives/bandeau) :
 - `docs/PLUS_TARD\.md` (sans `_VF`) — doit être `docs/PLUS_TARD_VF.md`
-- `docs/v2_specs/TODO_SESSION_SUIVANTE.md` qualifiée d'« état courant » — doit être marquée archivée
+- `docs/v2_specs/TODO_SESSION_SUIVANTE.md` — doc archivé, ne plus mentionner comme doc vivant
 - `BUGS_PROTO_A_CORRIGER_PLUS_TARD.md` sans bandeau « gelé »
 
 - **Test** : grep multi-pattern, retourne 0 dans docs vivants (les BILAN_SESSION_*.md anciens restent OK car figés)
