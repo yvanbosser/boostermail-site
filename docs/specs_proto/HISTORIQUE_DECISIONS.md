@@ -1,6 +1,8 @@
 # Historique des décisions validées
 
-> **Dernière mise à jour** : 21/05/2026 PM (cadrage **nouveau mail V12 + fenêtre de rédaction grande/petite** — 2 nouveaux docs `v12 - nouveau mail.md` + `v12 fenetre de rédaction _ grande - petite.md` dans `docs/architecture/V12/`. 4 livrables produits compose (flux séquentiel + popup pioche PJ + refonte R/S/H + marqueurs `[…]`) + mode agrandi UI partout (compose + reply/forward). 26 décisions Yvan tranchées au total. À destination de Mika pour implémentation.)
+> **Dernière mise à jour** : 22/05/2026 (cadrage **analyse IA images intégrées mails reçus** — nouveau doc `v12_image intégrée au mail.md` dans `docs/architecture/V12/`. Pivot conceptuel : affichage → analyse. 7 décisions Yvan (D1-D7), 7 décisions techniques (T1-T7), 4 invariants I-VISION-01/02/03/04. Flux 4 étapes : Graph API → Claude Vision → cache `image_vision_cache` → Bloc I entre Bloc A et Bloc C. Estimation Mika 5-8 j sur `feat/michael/multi-user`.)
+>
+> **Précédente** : 21/05/2026 PM (cadrage **nouveau mail V12 + fenêtre de rédaction grande/petite** — 2 nouveaux docs `v12 - nouveau mail.md` + `v12 fenetre de rédaction _ grande - petite.md` dans `docs/architecture/V12/`. 4 livrables produits compose (flux séquentiel + popup pioche PJ + refonte R/S/H + marqueurs `[…]`) + mode agrandi UI partout (compose + reply/forward). 26 décisions Yvan tranchées au total. À destination de Mika pour implémentation.)
 >
 > **Précédente** : 21/05/2026 AM (cadrage **classement PJ V12** — nouveau doc `v12 _ classement PJ.md` dans `docs/architecture/V12/`. Pendant PJ du classement mail cadré le 20/05. Résorbe PLUS_TARD_VF #32 + #34. Commit `ca81286` sur `feat/yvan/frontend`. À destination de Mika pour implémentation.)
 >

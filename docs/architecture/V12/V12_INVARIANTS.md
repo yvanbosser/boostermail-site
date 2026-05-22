@@ -1,6 +1,6 @@
 # Invariants V2 — règles absolues testables
 
-> **Dernière mise à jour** : 30/04/2026 PM (ajout I-SEC-07 PII redaction logs — Phase 4 RGPD autonomie convalescence Yvan, cf Pattern #23)
+> **Dernière mise à jour** : 22/05/2026 (ajout Catégorie 18 I-VISION-01/02/03/04 — analyse images inline mails reçus, cf `v12_image intégrée au mail.md`)
 > **Principe** : chaque invariant est testable mécaniquement par `smoke_test.ps1`. Une violation = anomalie, point final.
 
 ---
@@ -1302,6 +1302,37 @@ Le test `test_F8_echeance_format_pourri` mocke un retour `'echeance': "2026-12-0
 - **Conséquence** : tout changement futur de la politique scan échéance (ex. « ne plus scanner les mails au comptable » ou « scanner aussi les PARTIAL ») demande de toucher **2 endroits différents** avec **2 mécanismes différents**.
 - **Anti-pattern concerné** : « patches dispersés » — risque de récidive de patch sur patch.
 - **Action recommandée session N12** : factoriser la décision dans un helper unique (par exemple `_should_scan_echeance(mail_data, mode)` avec mode ∈ {'incoming', 'compose'}) et l'appeler explicitement aux 2 sites. Cohérent avec l'esprit du dispatcher unique N11.
+
+---
+
+## Catégorie 18 — Vision IA (ajout 22/05/2026 — analyse images inline mails reçus)
+
+> Référence : [`docs/architecture/V12/v12_image intégrée au mail.md`](v12_image%20int%C3%A9gr%C3%A9e%20au%20mail.md)
+
+### I-VISION-01 : Maximum 3 images analysées par mail
+
+Les 3 premières images éligibles dans l'ordre d'apparition HTML. Au-delà → ignorées.
+- **Test** : `count(images_analyzed_per_mail) ≤ 3`
+- **Pourquoi** : coût Vision (≤ $0.024/mail) + latence. Les 3 premières images sont les plus porteuses de sens dans le corps du mail.
+
+### I-VISION-02 : Filtre taille minimale ≥ 5 Ko avant appel Vision
+
+Toute image < 5 120 octets est ignorée **sans appel Vision** ni récupération des bytes.
+- **Test** : grep `_extract_inline_images_for_analysis` → seuil `5120` présent dans le filtre taille
+- **Pourquoi** : évite les appels Vision sur des espaceurs transparents, pixels de tracking, icônes 16px
+
+### I-VISION-03 : Filtre position — avant coupure signature uniquement
+
+Aucune image après la coupure signature n'est analysée (logos, photos, bannières légales des signatures).
+- **Test** : `_find_signature_split(html_with_sig_img)` → l'image après split absente du retour de `_extract_inline_images_for_analysis`
+- **Pourquoi** : les images de signature polluent le contexte de génération sans apporter d'information utile sur le contenu du mail
+
+### I-VISION-04 : Cache obligatoire — jamais de re-analyse d'une image déjà décrite
+
+Clé cache = `(user_id, internet_message_id, sha256(bytes[:1024]))`. Même image reçue 2× → résultat lu en `image_vision_cache`, 0 appel Vision.
+- **Test** : mock `_describe_image_vision` → `call_count == 1` après 2 appels avec même `(mid, image_hash)`
+- **Pourquoi** : l'analyse d'une image est déterministe et immuable. Appeler Vision 2× sur la même image = gaspillage de tokens sans valeur ajoutée.
+- **Multi-tenant** : `user_id` obligatoire dans la clé (isolation stricte entre users — invariant `I-MT-01`)
 
 ---
 
