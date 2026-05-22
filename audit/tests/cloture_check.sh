@@ -38,13 +38,19 @@ ok() {
 }
 
 # --------------------------------------------------------------------------
-# I-SESS-01 : git status --short retourne vide
+# I-SESS-01 : git status --short retourne vide (hors WIP permanents)
 # --------------------------------------------------------------------------
-print_section "I-SESS-01 — git status --short doit être vide"
+# WIP permanents connus (jamais à committer) — exclus du check :
+#   V2/dialog.html  : refonte UI en cours (WIP intentionnel Yvan)
+#   V2/dialog.js    : refonte UI en cours (WIP intentionnel Yvan)
+#   tools/*         : scripts ponctuels de session (gitignorés mais parfois trackés)
+print_section "I-SESS-01 — git status --short doit être vide (hors WIP permanents)"
 
-GIT_STATUS=$(git status --short 2>/dev/null)
+GIT_STATUS_RAW=$(git status --short 2>/dev/null)
+# Filtrer les lignes WIP permanents (dialog.html / dialog.js)
+GIT_STATUS=$(echo "$GIT_STATUS_RAW" | grep -v "V2/dialog\.html" | grep -v "V2/dialog\.js" || true)
 if [ -z "$GIT_STATUS" ]; then
-    ok "I-SESS-01 : aucune modif locale non commitée"
+    ok "I-SESS-01 : aucune modif locale non commitée (WIP dialog HTML/JS exclus)"
 else
     ko "I-SESS-01 : modifs locales non commitées détectées"
     echo "$GIT_STATUS" | sed 's/^/    /'

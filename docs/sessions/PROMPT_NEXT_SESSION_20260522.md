@@ -6,10 +6,11 @@
 
 ## 📖 Contexte à lire en premier
 
-1. [`docs/architecture/V12/v12 - nouveau mail.md`](../architecture/V12/v12%20-%20nouveau%20mail.md) — cadrage compose V12 livré (~680 lignes, 4 livrables, annexe Mika 8 phases / 14.5 j)
-2. [`docs/architecture/V12/v12 fenetre de rédaction _ grande - petite.md`](../architecture/V12/v12%20fenetre%20de%20r%C3%A9daction%20_%20grande%20-%20petite.md) — cadrage mode agrandi UI (~330 lignes, annexe Mika 5 phases / 4 j)
-3. [`docs/architecture/V12/v12 _ classement PJ.md`](../architecture/V12/v12%20_%20classement%20PJ.md) — cadrage classement PJ V12 livré 21/05 AM (popup miroir, mêmes patterns)
-4. [`NOUVELLE_SESSION_V4.md`](../../NOUVELLE_SESSION_V4.md) — guide général de démarrage de session
+1. [`docs/sessions/OUTLOOK_BILAN_SESSION_20260521_PM_nouveau_mail_fenetre_redaction.md`](OUTLOOK_BILAN_SESSION_20260521_PM_nouveau_mail_fenetre_redaction.md) — bilan complet session 21/05 PM (déclencheur, 6 itérations, 26 décisions Yvan, livrables, état pile Mika)
+2. [`docs/architecture/V12/v12 - nouveau mail.md`](../architecture/V12/v12%20-%20nouveau%20mail.md) — cadrage compose V12 livré (~680 lignes, 4 livrables, annexe Mika 8 phases / 14.5 j)
+3. [`docs/architecture/V12/v12 fenetre de rédaction _ grande - petite.md`](../architecture/V12/v12%20fenetre%20de%20r%C3%A9daction%20_%20grande%20-%20petite.md) — cadrage mode agrandi UI (~330 lignes, annexe Mika 5 phases / 4 j)
+4. [`docs/architecture/V12/v12 _ classement PJ.md`](../architecture/V12/v12%20_%20classement%20PJ.md) — cadrage classement PJ V12 livré 21/05 AM (popup miroir, mêmes patterns)
+5. [`NOUVELLE_SESSION_V4.md`](../../NOUVELLE_SESSION_V4.md) — guide général de démarrage de session
 
 ---
 
@@ -29,8 +30,8 @@
 | Élément | Valeur |
 |---|---|
 | Branche locale | `feat/yvan/frontend` |
-| Top commit | `46c1604` (docs(v12): cadrage nouveau mail + fenêtre rédaction grande/petite) |
-| Précédent | `d060a44` (docs(session): prompt de reprise session suivante (post 21/05)) |
+| Top commit | `d246e09` (docs(session): fin de session 21/05 PM — nouveau mail + fenêtre rédaction (M1+M4)) |
+| Précédent | `46c1604` (docs(v12): cadrage nouveau mail + fenêtre rédaction grande/petite) |
 | Doc à briefer Mika | **3 chantiers prêts** : classement PJ V12 + nouveau mail V12 + fenêtre rédaction grande/petite (~32-37 j Mika au total) |
 | WIP non commité (volontaire) | `V2/dialog.html`, `V2/dialog.js`, `tools/*`, `_BACKUP_AVANT_PUSH/`, logs, backups — **ne pas toucher** |
 

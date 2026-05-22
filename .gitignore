@@ -131,3 +131,29 @@ inbox_graph_*.json
 # - Config Netlify (déploiement blog Yvan, hors scope)
 netlify.toml
 
+# Logs runtime V2 (générés à chaque démarrage serveur)
+V2/v2_backend.log
+V2/v2_backend.log.prev
+V2/v2_backend.log.*
+V2/v2_companion.log
+V2/v2_companion.log.prev
+V2/v2_companion.log.*
+
+# Backups DB avec suffixe timestamp (V2/boostermail.db.bak_YYYYMMDD_*)
+V2/boostermail.db.bak_*
+
+# Backups config avec suffixe timestamp
+config.json.bak_*
+
+# Dossier backup avant push (sessions locales, ne pas committer)
+_BACKUP_AVANT_PUSH/
+
+# Captures d'écran de session (docs/SCREEN SHOT/)
+docs/SCREEN\ SHOT/
+
+# Scripts utilitaires de session (outils ponctuels Yvan, pas du code produit)
+tools/
+
+# Frontend web expérimental (hors scope plugin Outlook)
+web/
+
