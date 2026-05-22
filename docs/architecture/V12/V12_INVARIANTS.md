@@ -1,6 +1,6 @@
 # Invariants V2 — règles absolues testables
 
-> **Dernière mise à jour** : 23/05/2026 (ajout Catégorie 19 I-CLASSED-01 à 06 — réponse depuis sous-dossier ; ajout Catégorie 20 I-DRAGDROP-01 à 09 — drag and drop PJ en composition)
+> **Dernière mise à jour** : 23/05/2026 (ajout Catégorie 19 I-CLASSED-01 à 06 — réponse depuis sous-dossier ; ajout Catégorie 20 I-DRAGDROP-01 à 09 — drag and drop PJ en composition ; ajout Catégorie 21 I-FORWARD-01 à 08 — transfert de mail)
 > **Principe** : chaque invariant est testable mécaniquement par `smoke_test.ps1`. Une violation = anomalie, point final.
 
 ---
@@ -1392,6 +1392,54 @@ Les PJ reçues et les PJ ajoutées par l'utilisateur sont stockées dans 2 cache
 - Images : `image_vision_cache` (reçues) vs `image_vision_cache_user` (ajoutées)
 
 Pas de réutilisation croisée. Justification : séparation propre, traçabilité, pas de collision de clé, comportements indépendants si évolution future.
+
+---
+
+## Catégorie 21 — Transfert de mail (ajout 23/05/2026 — cf `v12_transfert de mail.md`)
+
+### I-FORWARD-01 — Garde forward triple (frontend + 3 routes backend)
+Le bouton Générer reste grisé tant que le champ À est vide en mode forward. La validation se fait à 4 endroits :
+1. Frontend : `_applyForwardGuard()` dans `dialog.js:655-676`
+2. Backend `/generate_reply` : `if reply_mode == 'forward' and not to_email` dans `app_plugin.py:12835`
+3. Backend `/refine_reply` : même check dans `app_plugin.py:13341`
+4. Backend `/send_reply` : même check dans `app_plugin.py:13711`
+
+**Ne JAMAIS supprimer une des 4 barrières**. Justification : NE JAMAIS SUPPRIMER documenté depuis le proto (cf CLAUDE.md §2 + `feedback_easymail_forward_guard.md`).
+
+### I-FORWARD-02 — Profil contact = destinataire (pas expéditeur) en mode forward
+En mode forward, le profil contact chargé et utilisé pour la cuisine est celui du **destinataire** (`to_email`), pas de l'expéditeur original (`from_email`).
+- **Test** : grep `correspondent = to_email if (mode|reply_mode) == 'forward' else from_email` doit retourner au moins 2 occurrences dans `app_plugin.py`.
+- **Pourquoi** : le brouillon généré s'adresse au destinataire, donc son profil pilote (ton, registre, formules).
+
+### I-FORWARD-03 — Pas de Bloc C en mode forward
+En mode forward, le prompt envoyé à Claude **ne contient pas** de Bloc C (`keyword_context`). Le mail original cité intégralement remplit déjà ce rôle.
+- **Test** : `_build_prompt(is_forward=True)` n'appelle pas `_build_block_C_keyword`.
+- **Pourquoi** : éviter le bruit sémantique. La citation du mail original est plus riche qu'un Bloc C reconstitué.
+
+### I-FORWARD-04 — PJ filtrées à l'envoi selon sélection user
+La liste `att_list` passée à `graph.send_forward()` reflète strictement les cases cochées par l'user dans la zone PJ permanente (PJ originales cochées + PJ ajoutées). Plus de comportement « toutes incluses quoi qu'il coche ».
+- **Test** : test E2E forward avec 2 PJ originales dont 1 décochée + 1 PJ ajoutée → mail envoyé contient 2 PJ (la cochée originale + l'ajoutée), pas 3.
+- **Pourquoi** : résorbe le gap fonctionnel V2 actuel (popup affichée, sélection user ignorée — `_fwdSelectedIndexes` enfin honoré).
+
+### I-FORWARD-05 — Zone PJ permanente, plus de popup interruptive
+En mode forward, l'UI affiche une zone PJ permanente dans le dialog (2 sous-sections : Du mail original / Ajoutées). La popup `#popupFwdPj` n'est plus déclenchée au switch mode.
+- **Test** : grep `showPopupFwdPj` ou `popupFwdPj.classList.add('visible')` → 0 occurrence actives en mode forward.
+- **Pourquoi** : pas de break du flux, l'user voit en un coup d'œil ce qui sera envoyé.
+
+### I-FORWARD-06 — Brief auto en lexique « ci-dessous »
+Quand le brief user est vide en mode forward, le brief auto généré utilise « ci-dessous » et non « ci-joint » pour désigner le mail original cité.
+- **Test** : test unitaire prompt forward sans brief → sortie ne contient pas les patterns regex `ci-joint.*mail` ou `ci-joint.*message`.
+- **Pourquoi** : « ci-joint » désigne une PJ physique, pas un mail cité en dessous. Correction lexicale validée 23/05.
+
+### I-FORWARD-07 — Mail original marqué traité après envoi forward
+Après envoi forward réussi, le mail original (source du transfert) est marqué traité en DB. Il disparaît de la liste « à traiter » de l'inbox.
+- **Test** : test E2E forward → vérifier `mark_treated` appelé + `_threads_status` du mail original = `treated`.
+- **Pourquoi** : le transfert est une forme valable de traitement (décision Q35).
+
+### I-FORWARD-08 — Threading reconnu en forward (In-Reply-To)
+Le mail envoyé via `send_forward()` doit contenir un header `In-Reply-To` ou `References` pointant vers le mail original (M. Dupont), pour qu'une réponse du destinataire (Roland) puisse être reconnue comme appartenant au même fil de discussion.
+- **Test** : test E2E forward → inspecter les headers du mail envoyé via Graph, vérifier présence `In-Reply-To` avec l'IMID du mail original.
+- **Pourquoi** : sans ce header, la réponse de Roland devient un mail entrant orphelin → perte du contexte mail original lors de la prochaine génération.
 
 ---
 
