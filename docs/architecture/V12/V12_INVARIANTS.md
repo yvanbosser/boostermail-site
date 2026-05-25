@@ -1,6 +1,6 @@
 # Invariants V2 — règles absolues testables
 
-> **Dernière mise à jour** : 25/05/2026 (ajout Catégorie 22 I-QUALITY-01 à 08 — qualité de la réponse par contact ; ajout Catégorie 19 I-CLASSED-01 à 06 — réponse depuis sous-dossier ; ajout Catégorie 20 I-DRAGDROP-01 à 09 — drag and drop PJ en composition ; ajout Catégorie 21 I-FORWARD-01 à 08 — transfert de mail)
+> **Dernière mise à jour** : 25/05/2026 (ajout Catégorie 22 I-QUALITY-01 à 10 — qualité de la réponse, complément ; ajout Catégorie 19 I-CLASSED-01 à 06 — réponse depuis sous-dossier ; ajout Catégorie 20 I-DRAGDROP-01 à 09 — drag and drop PJ en composition ; ajout Catégorie 21 I-FORWARD-01 à 08 — transfert de mail)
 > **Principe** : chaque invariant est testable mécaniquement par `smoke_test.ps1`. Une violation = anomalie, point final.
 
 ---
@@ -1443,47 +1443,57 @@ Le mail envoyé via `send_forward()` doit contenir un header `In-Reply-To` ou `R
 
 ---
 
-## Catégorie 22 — Qualité de la réponse par contact (ajout 25/05/2026 — cf `v12_qualite_reponse_par_contact.md`)
+## Catégorie 22 — Qualité de la réponse, complément (ajout 25/05/2026 — cf `v12_qualité_réponse_complément.md`)
 
-### I-QUALITY-01 — Profil contact structuré complet
-Chaque `contact_profiles` actif (sample_count ≥ 3) doit contenir les 10 attributs du Niveau 2 sous forme de champs structurés (pas de texte libre fourre-tout) : tu/vous, formule ouverture, formule clôture, ton, longueur typique, formalité, catégorie, organisation, domaine, expressions récurrentes.
-- **Test** : `SELECT * FROM contact_profiles WHERE sample_count >= 3 AND (greeting IS NULL OR closing IS NULL OR tone IS NULL OR category IS NULL OR domain IS NULL OR recurring_expressions IS NULL)` → 0 résultats.
-- **Pourquoi** : la qualité du prompt dépend de la structuration. Un texte libre noyé ne se réinjecte pas proprement.
+### I-QUALITY-01 — Score de génération calculé à chaque envoi
+À chaque envoi de réponse, `style_corrections.generation_score` doit être renseigné (valeur entière -3 à +3).
+- **Test** : `SELECT COUNT(*) FROM style_corrections WHERE generation_score IS NULL AND created_at > (now - 7 days)` → 0.
+- **Pourquoi** : mesure objective de la progression BoosterMail dans le temps + agrégation par contact / catégorie / tier.
 
-### I-QUALITY-02 — Style général utilisateur recalibré régulièrement
-Le `user_style_profile` doit être recalibré au moins une fois tous les 50 envois.
-- **Test** : `SELECT user_id FROM user_style_profile WHERE last_recalibrated_at < (now - 50 envois)` → 0 résultats.
-- **Pourquoi** : éviter la dérive (l'utilisateur évolue, son style aussi).
+### I-QUALITY-02 — Climat du fil détecté pour les fils actifs
+Pour chaque fil avec ≥ 3 mails échangés, le cache `_thread_climate_cache` doit contenir une entrée avec une valeur `nature` non-null.
+- **Test** : audit cache sur 100 fils actifs aléatoires → ≥ 95% couverts avec une valeur `nature` parmi (opérationnel / négociation / litige / suivi_dossier / administratif / commercial / information / social).
+- **Pourquoi** : sans climat du fil détecté, Claude répond avec le ton moyen du contact alors que le fil peut être en litige.
 
-### I-QUALITY-03 — Sujets en cours maintenus par contact actif
-Chaque contact actif (last_interaction_at < 60 jours, sample_count ≥ 5) doit avoir au moins un sujet identifié dans `contact_subjects`.
-- **Test** : `SELECT c.contact_id FROM contact_profiles c LEFT JOIN contact_subjects s ON c.contact_id = s.contact_id WHERE c.last_interaction_at > (now - 60 days) AND c.sample_count >= 5 AND s.subject_id IS NULL` → 0 résultats.
-- **Pourquoi** : sans sujets identifiés, le Niveau 5 ne fonctionne pas (l'historique injecté n'est pas restreint).
+### I-QUALITY-03 — Dérive détectée signalée à l'utilisateur
+Si `contact_profiles.derive_detectee_le` est non-null, l'API `/api/contact/<email>` doit retourner le flag pour permettre l'affichage UI.
+- **Test** : test unitaire route → vérifier présence du champ `derive_detectee_le` + `derive_type` dans la réponse JSON.
+- **Pourquoi** : un changement de rôle / registre / catégorie du contact doit déclencher recalibration + alerte utilisateur, pas être ignoré.
 
-### I-QUALITY-04 — Mail courant rattaché à un sujet (ou marqué clarifier)
-À chaque génération de réponse, le mail courant doit être rattaché à un sujet identifié OU marqué explicitement « sujet à clarifier » (cas fallback).
-- **Test** : log structuré côté backend, taux de rattachement sans ambiguïté ≥ 90% sur 7 jours glissants ; les 10% restants doivent être tagués `subject_clarification_needed`.
-- **Pourquoi** : éviter le mélange de sujets dans le contexte injecté.
+### I-QUALITY-04 — Pattern désavoué non injecté dans le prompt
+Si un `correction_pattern` dans `profile_json` a `statut = "désavouée"`, il ne doit pas apparaître dans le bloc D2 du prompt généré.
+- **Test** : test unitaire prompt builder avec contact ayant 1 pattern désavoué → vérifier absence verbatim dans output.
+- **Pourquoi** : un pattern hallucinés ou inadéquats doit pouvoir être retiré par l'utilisateur sans suppression destructive.
 
-### I-QUALITY-05 — Score de génération calculé à chaque envoi
-À chaque envoi de réponse, un score +3/+1/0/-2/-3 doit être calculé et stocké.
-- **Test** : `SELECT COUNT(*) FROM sent_emails WHERE generation_score IS NULL AND sent_at > (now - 7 days)` → 0.
-- **Pourquoi** : mesure objective de la progression BoosterMail dans le temps.
+### I-QUALITY-05 — Faits factuels extraits pour les fils mentionnant des montants/dates
+Si un mail contient un montant ou une date explicite, le cache `_thread_facts_cache` (ou table `mail_thread_facts`) doit avoir une entrée correspondante.
+- **Test** : audit échantillon de 50 mails avec montants explicites → ≥ 90% indexés avec type/valeur/contexte.
+- **Pourquoi** : Claude doit citer les références exactes (loyer 2 850€, RDV 30/05) plutôt que paraphraser.
 
-### I-QUALITY-06 — Leçons apprises injectées dans le prompt
-Si un contact a des `learned_lessons` non vides, elles doivent être présentes dans le prompt généré pour ce contact.
-- **Test** : test unitaire prompt builder avec contact ayant 3 leçons → vérifier présence verbatim dans output.
-- **Pourquoi** : sans capitalisation effective, l'apprentissage est inutile.
+### I-QUALITY-06 — Sujets en cours maintenus pour contacts actifs
+Chaque contact avec `last_interaction_at < 60 jours` ET `sample_count >= 5` doit avoir au moins 1 entrée dans `contact_subjects`.
+- **Test** : `SELECT c.email FROM contact_profiles c LEFT JOIN contact_subjects s ON c.email = s.contact_email WHERE c.last_interaction_at > (now - 60 days) AND c.sample_count >= 5 AND s.subject_id IS NULL` → 0.
+- **Pourquoi** : sans sujets identifiés, l'historique injecté pour un contact multi-sujets mélange les dossiers et fait halluciner Claude.
 
-### I-QUALITY-07 — Historique restreint au sujet identifié
-Quand un sujet est identifié pour le mail courant, le bloc B/C du prompt ne doit contenir que des mails du sujet (sauf few-shot ghost-writer du source 5, marqué explicitement comme « autre contact, même type »).
-- **Test** : test unitaire avec contact multi-sujets, vérifier que les mails du bloc B appartiennent tous au sujet courant (ou portent le tag « ghost-writer »).
-- **Pourquoi** : éviter de mélanger les références de 3 dossiers différents avec le même avocat.
+### I-QUALITY-07 — Cold start respecté
+Si `contact_profiles.etat_apprentissage = "cold_start"`, le bloc D du prompt généré ne doit pas contenir de `correction_patterns`.
+- **Test** : test unitaire avec contact en cold_start (sample_count < 3) → patterns absents du prompt, fallback complet sur style général utilisateur.
+- **Pourquoi** : appliquer des patterns sur 1-2 mails observés produit plus d'erreurs que de gains.
 
-### I-QUALITY-08 — Micro-analyse post-envoi systématique
-Chaque correction détectée doit déclencher une micro-analyse Claude Haiku dans la minute qui suit l'envoi.
-- **Test** : `SELECT COUNT(*) FROM corrections WHERE detected_at > (now - 1 day) AND micro_analysis IS NULL AND detected_at < (now - 5 minutes)` → 0.
-- **Pourquoi** : capter le « pourquoi » de la correction, pas seulement le « quoi », pour capitaliser des leçons exploitables.
+### I-QUALITY-08 — Style général utilisateur recalibré régulièrement
+`user_style_profile.last_recalibrated_at` doit correspondre à un envoi récent (≤ 50 envois depuis dernière recalibration).
+- **Test** : `SELECT user_id FROM user_style_profile WHERE sample_count - last_recalibration_sample_count > 50` → 0.
+- **Pourquoi** : éviter la dérive (l'utilisateur évolue, son style aussi). Recalibrage tous les 50 envois.
+
+### I-QUALITY-09 — Promesses ouvertes injectées dans le prompt
+Si `echeances` contient des entrées `type_engagement = "promesse_informelle"` non résolues pour le contact, elles doivent apparaître dans le bloc D du prompt.
+- **Test** : test unitaire avec contact ayant 2 promesses ouvertes → verbatim dans output (« vous avez promis X au contact », « le contact attend Y »).
+- **Pourquoi** : une promesse oubliée détruit la confiance. BoosterMail doit relancer ou clore les promesses, pas les ignorer.
+
+### I-QUALITY-10 — Profil bidirectionnel renseigné
+Si `sample_count >= 5`, `profile_json` doit contenir les champs `contact_tone`, `contact_typical_length`, `contact_expressions`, `contact_formality`.
+- **Test** : `SELECT email FROM contact_profiles WHERE sample_count >= 5 AND (json_extract(profile_json, '$.contact_tone') IS NULL OR json_extract(profile_json, '$.contact_typical_length') IS NULL)` → 0.
+- **Pourquoi** : comment le contact écrit influence comment l'utilisateur lui répond (si contact télégraphique → mail bref toléré).
 
 ---
 

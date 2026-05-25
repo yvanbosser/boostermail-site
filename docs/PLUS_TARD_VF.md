@@ -1,33 +1,40 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
-> **🆕 25/05/2026 (session cadrage qualité de la réponse par contact V12)** :
+> **🆕 25/05/2026 (session cadrage qualité de la réponse — complément V12)** :
 >
-> Nouveau chantier cadre cadré, à destination de Mika : [`docs/architecture/V12/v12_qualite_reponse_par_contact.md`](architecture/V12/v12_qualite_reponse_par_contact.md).
+> Nouveau doc complément cadré, à destination de Mika : [`docs/architecture/V12/v12_qualité_réponse_complément.md`](architecture/V12/v12_qualit%C3%A9_r%C3%A9ponse_compl%C3%A9ment.md).
 >
-> **Origine** : Yvan reprend ses notes pré-SaaS (rédigées en local), identifie des manquements et choisit d'orienter le travail Mika sur la **qualité de la réponse générée**, avec le contact comme clé d'entrée unique. Méthodologie « analyse de données → critères structurés → historique + contexte injecté ». Décomposition en **5 niveaux** :
+> **Origine** : Yvan reprend ses notes pré-SaaS (rédigées en local), identifie des manquements et choisit d'orienter le travail Mika sur la **qualité de la réponse générée**, avec le contact comme clé d'entrée unique. Après audit complet de l'existant (V12_CUISINE, V12_SALLE, SPEC_CONTACTS, code V2), constat clé : **80 % du périmètre est déjà cadré ou implémenté**. Doc recentré sur les **10 écarts réellement manquants** (pas un cadrage complet réinventant l'existant).
 >
-> - **N1 — Style général de l'utilisateur** : 8 critères globaux (longueur typique, ton dominant, formules ouverture/clôture top 3, signature, expressions favorites, formalité, structure préférée) + 10 dernières corrections globales. Nouvelle table `user_style_profile`. Recalibrage tous les 50 envois.
-> - **N2 — Style avec le contact + apprentissage** : 10 critères structurés (tu/vous + date bascule, ouverture/clôture habituelle par contact, ton avec lui, longueur typique avec lui, formalité, catégorie, organisation, domaine, expressions récurrentes spécifiques). 5 dernières corrections spécifiques + score moyen par contact + leçons apprises capitalisées. Extension table `contact_profiles`.
-> - **N3 — Classement Outlook** : déjà en place, exposé comme signal pour N5.
-> - **N4 — Classement PJ Windows** : cadrage 21/05 en cours (`v12 _ classement PJ.md`), pont vers Bloc K futur.
-> - **N5 — Historique intelligent + sujet en cours** : **point dur structurant**. Nouvelle table `contact_subjects` (titre, mots-clés, mails rattachés, dossier Outlook, PJ rattachées, statut active/dormant/closed). Clustering Claude Haiku périodique (démarrage + quotidien). Identification du sujet du mail courant par cascade 6 tests (référence directe / threading In-Reply-To / dossier Outlook / mots-clés communs / PJ classement / fallback Claude Haiku). Restriction de l'historique injecté au sujet identifié. Pondération multi-critère 5 axes des 6 sources (fil courant + sujet + dossier + PJ + few-shot ghost-writer + faits permanents).
+> **L'existant que le doc NE re-spécifie pas** (rappel) : table `contact_profiles` à 26 colonnes (email, display_name, organization, category, domain, register, tone, greeting, closing, typical_length, power_dynamic, language, profile_text, profile_json avec recurring_topics/specific_vocabulary/formality_level/correction_patterns/humor/humor_examples, sample_count, confidence, last_analysis, entry_ids, created_at, updated_at, manually_edited, polluted, last_audited_version, user_signature_for_contact, user_id) + classification_history (20e) + attachment_folder_history (21e) + default_importance R/S/H + blocs prompt A/B/C/D/D2/G + tiers confiance 70/50/30 + decay 5%/trimestre + schedule re-analyse fixe + anti-inversion greeting + multi-tenant + purge 24 mois + `style_corrections` + `echeances` complet + `folder_classifications` + `style_profile.txt` + `_writing_level` N1-N10 + `_pj_text_cache` + `image_vision_cache`.
 >
-> 8 invariants `I-QUALITY-01` à `08` (Catégorie 22 V12_INVARIANTS.md). Grille comparative état actuel vs cible pour Michael (statut ✅/🟡/❌/❓ par critère, avec actions à mener). Annexe Mika 3 vagues (A fondations 15-20 j + B sujets en cours 15-20 j + C injection prompt et tests 5-7 j) + estimation totale **35-47 j**.
+> **Les 10 écarts à combler** :
+> - **E1** Score génération +3/+1/0/-2/-3 (juste comptage actuel)
+> - **E2** Climat du fil en cours (nature/sensibilité/émotion/escalade) — non formalisé
+> - **E3** Détection de dérive du profil contact (registre/ton qui bascule) — absent
+> - **E4** Désaveu utilisateur des correction_patterns — pas de mécanisme
+> - **E5** Faits factuels extraits du corps des mails (pas que PJ) — absent
+> - **E6** Sujets en cours par contact — table `contact_subjects` inexistante
+> - **E7** Cold start formalisé — champ `etat_apprentissage` explicite
+> - **E8** Style général utilisateur en DB structurée (au lieu de fichier `style_profile.txt`)
+> - **E9** Promesses ouvertes séparées des échéances formelles
+> - **E10** Profil bidirectionnel (ton/expressions/longueur du contact en miroir, pas que utilisateur)
+>
+> 10 invariants `I-QUALITY-01` à `10` (Catégorie 22 V12_INVARIANTS.md). Annexe Mika 4 phases avec dépendances + estimation **26-35 j** (resserré vs cadrage initial 35-47j après suppression des 80% qui existaient déjà).
 >
 > **Résorbe** plusieurs items de cette liste :
-> - Section 1 « Ressemblance avec ton écriture » → couvert par N1 + N2 + ghost-writer source 5 du N5
-> - Section 2 « Compréhension du correspondant » → couvert par N2 (refonte champs structurés)
-> - Section 5 « Apprentissage à partir des corrections » → couvert par N2 (micro-analyse + scoring + leçons)
-> - Section 6 « Richesse du contexte injecté » → couvert par N5 (6 sources + pondération + pré-fetch)
-> - Section 10 « Règles de rédaction » → partiellement couvert par les leçons apprises capitalisées
+> - Section 1 « Ressemblance avec ton écriture » → couvert par E10 (bidirectionnel) + l'existant `style_profile.txt`
+> - Section 2 « Compréhension du correspondant » → l'existant `contact_profiles` couvre déjà 80%, E3 + E10 complètent
+> - Section 5 « Apprentissage à partir des corrections » → couvert par E1 (scoring) + E4 (désaveu) + l'existant `style_corrections`
+> - Section 6 « Richesse du contexte injecté » → couvert par E2 (climat) + E5 (faits) + E6 (sujets)
 >
 > **Ne couvre PAS** (à cadrer séparément si Yvan le souhaite) :
-> - Section 3 « Compréhension du mail en cours » (nature, sensibilité, impact)
+> - Section 3 « Compréhension du mail en cours » (nature, sensibilité, impact) → partiellement couvert par E2
 > - Section 7 « Bloc K (cerveau métier) »
 > - Section 8 « Modèle IA » (Opus pour H)
 > - Section 9 « Réglage de la réponse par l'utilisateur » (champ libre + undo)
 >
-> **Pile Mika consolidée au 25/05** : 8 chantiers V12 cadrés (transfert + classement PJ + nouveau mail + fenêtre rédaction + images + sous-dossier + drag-drop + **qualité réponse par contact**) → environ **90-113 j** (~18-23 semaines à plein temps).
+> **Pile Mika consolidée au 25/05** : 8 chantiers V12 cadrés (transfert + classement PJ + nouveau mail + fenêtre rédaction + images + sous-dossier + drag-drop + **qualité réponse complément**) → environ **80-100 j** (~16-20 semaines à plein temps).
 >
 > ---
 >
