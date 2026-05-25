@@ -1,5 +1,36 @@
 # PLUS TARD — Version Finale (VF) consolidée
 
+> **🆕 25/05/2026 (session cadrage qualité de la réponse par contact V12)** :
+>
+> Nouveau chantier cadre cadré, à destination de Mika : [`docs/architecture/V12/v12_qualite_reponse_par_contact.md`](architecture/V12/v12_qualite_reponse_par_contact.md).
+>
+> **Origine** : Yvan reprend ses notes pré-SaaS (rédigées en local), identifie des manquements et choisit d'orienter le travail Mika sur la **qualité de la réponse générée**, avec le contact comme clé d'entrée unique. Méthodologie « analyse de données → critères structurés → historique + contexte injecté ». Décomposition en **5 niveaux** :
+>
+> - **N1 — Style général de l'utilisateur** : 8 critères globaux (longueur typique, ton dominant, formules ouverture/clôture top 3, signature, expressions favorites, formalité, structure préférée) + 10 dernières corrections globales. Nouvelle table `user_style_profile`. Recalibrage tous les 50 envois.
+> - **N2 — Style avec le contact + apprentissage** : 10 critères structurés (tu/vous + date bascule, ouverture/clôture habituelle par contact, ton avec lui, longueur typique avec lui, formalité, catégorie, organisation, domaine, expressions récurrentes spécifiques). 5 dernières corrections spécifiques + score moyen par contact + leçons apprises capitalisées. Extension table `contact_profiles`.
+> - **N3 — Classement Outlook** : déjà en place, exposé comme signal pour N5.
+> - **N4 — Classement PJ Windows** : cadrage 21/05 en cours (`v12 _ classement PJ.md`), pont vers Bloc K futur.
+> - **N5 — Historique intelligent + sujet en cours** : **point dur structurant**. Nouvelle table `contact_subjects` (titre, mots-clés, mails rattachés, dossier Outlook, PJ rattachées, statut active/dormant/closed). Clustering Claude Haiku périodique (démarrage + quotidien). Identification du sujet du mail courant par cascade 6 tests (référence directe / threading In-Reply-To / dossier Outlook / mots-clés communs / PJ classement / fallback Claude Haiku). Restriction de l'historique injecté au sujet identifié. Pondération multi-critère 5 axes des 6 sources (fil courant + sujet + dossier + PJ + few-shot ghost-writer + faits permanents).
+>
+> 8 invariants `I-QUALITY-01` à `08` (Catégorie 22 V12_INVARIANTS.md). Grille comparative état actuel vs cible pour Michael (statut ✅/🟡/❌/❓ par critère, avec actions à mener). Annexe Mika 3 vagues (A fondations 15-20 j + B sujets en cours 15-20 j + C injection prompt et tests 5-7 j) + estimation totale **35-47 j**.
+>
+> **Résorbe** plusieurs items de cette liste :
+> - Section 1 « Ressemblance avec ton écriture » → couvert par N1 + N2 + ghost-writer source 5 du N5
+> - Section 2 « Compréhension du correspondant » → couvert par N2 (refonte champs structurés)
+> - Section 5 « Apprentissage à partir des corrections » → couvert par N2 (micro-analyse + scoring + leçons)
+> - Section 6 « Richesse du contexte injecté » → couvert par N5 (6 sources + pondération + pré-fetch)
+> - Section 10 « Règles de rédaction » → partiellement couvert par les leçons apprises capitalisées
+>
+> **Ne couvre PAS** (à cadrer séparément si Yvan le souhaite) :
+> - Section 3 « Compréhension du mail en cours » (nature, sensibilité, impact)
+> - Section 7 « Bloc K (cerveau métier) »
+> - Section 8 « Modèle IA » (Opus pour H)
+> - Section 9 « Réglage de la réponse par l'utilisateur » (champ libre + undo)
+>
+> **Pile Mika consolidée au 25/05** : 8 chantiers V12 cadrés (transfert + classement PJ + nouveau mail + fenêtre rédaction + images + sous-dossier + drag-drop + **qualité réponse par contact**) → environ **90-113 j** (~18-23 semaines à plein temps).
+>
+> ---
+>
 > **🆕 23/05/2026 PM (session cadrage transfert de mail V12)** :
 >
 > Nouveau chantier dédié cadré, à destination de Mika : [`docs/architecture/V12/v12_transfert de mail.md`](architecture/V12/v12_transfert%20de%20mail.md) (~700 lignes, commit `5f1dd27` sur `feat/yvan/frontend`).
